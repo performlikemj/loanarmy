@@ -1,0 +1,34 @@
+# Heroku .slugignore - files to exclude from deployment
+
+# Security sensitive files
+generate_api_key.py
+.env
+.env.local
+.env.example
+
+# Development files
+*.md
+README.md
+API_SECURITY.md
+PRODUCTION_SECURITY.md
+
+# Logs
+*.log
+logs/
+
+# Temporary files
+tmp/
+temp/
+.tmp/
+
+# Development tools
+.vscode/
+.idea/
+
+# Tests (if you add them later)
+tests/
+test_*.py
+*_test.py
+
+# Documentation
+docs/
