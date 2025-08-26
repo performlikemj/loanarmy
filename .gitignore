@@ -30,3 +30,11 @@ coverage/
 *.swp
 *.swo
 # End Generation Here
+
+loan-army-backend/loan_candidates*
+loan-army-backend/loans.csv
+loan-army-backend/mu_upload_*.json
+loan-army-backend/newsletter_*.json
+loan-army-backend/report.json
+loan-army-backend/newsletter*
+.loan/

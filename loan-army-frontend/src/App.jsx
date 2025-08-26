@@ -31,6 +31,172 @@ import './App.css'
 // API configuration
 const API_BASE_URL = '/api'
 
+// Universal Date Picker Component
+function UniversalDatePicker({ onDateChange, className = "" }) {
+  const [startDate, setStartDate] = useState('')
+  const [endDate, setEndDate] = useState('')
+  const [isCustomRange, setIsCustomRange] = useState(false)
+
+  const handlePresetChange = (preset) => {
+    const today = new Date()
+    let start, end
+
+    switch (preset) {
+      case 'today':
+        start = end = today.toISOString().split('T')[0]
+        break
+      case 'this_week':
+        const monday = new Date(today)
+        monday.setDate(today.getDate() - today.getDay() + 1)
+        start = monday.toISOString().split('T')[0]
+        end = new Date(monday.getTime() + 6 * 24 * 60 * 60 * 1000).toISOString().split('T')[0]
+        break
+      case 'this_month':
+        start = new Date(today.getFullYear(), today.getMonth(), 1).toISOString().split('T')[0]
+        end = new Date(today.getFullYear(), today.getMonth() + 1, 0).toISOString().split('T')[0]
+        break
+      case 'last_30_days':
+        start = new Date(today.getTime() - 30 * 24 * 60 * 60 * 1000).toISOString().split('T')[0]
+        end = today.toISOString().split('T')[0]
+        break
+      case 'last_90_days':
+        start = new Date(today.getTime() - 90 * 24 * 60 * 60 * 1000).toISOString().split('T')[0]
+        end = today.toISOString().split('T')[0]
+        break
+      case 'last_year':
+        start = new Date(today.getFullYear() - 1, today.getMonth(), today.getDate()).toISOString().split('T')[0]
+        end = today.toISOString().split('T')[0]
+        break
+      case 'all_time':
+        start = '2020-01-01' // Reasonable start date for football data
+        end = today.toISOString().split('T')[0]
+        break
+      case 'custom':
+        setIsCustomRange(true)
+        return
+      default:
+        return
+    }
+
+    setStartDate(start)
+    setEndDate(end)
+    setIsCustomRange(false)
+    onDateChange({ startDate: start, endDate: end, preset })
+  }
+
+  const handleCustomDateChange = () => {
+    if (startDate && endDate) {
+      onDateChange({ startDate, endDate, preset: 'custom' })
+    }
+  }
+
+  useEffect(() => {
+    // Set default to last 30 days
+    handlePresetChange('last_30_days')
+  }, [])
+
+  return (
+    <div className={`space-y-4 ${className}`}>
+      <div className="flex flex-wrap gap-2">
+        <Button 
+          variant="outline" 
+          size="sm" 
+          onClick={() => handlePresetChange('today')}
+        >
+          Today
+        </Button>
+        <Button 
+          variant="outline" 
+          size="sm" 
+          onClick={() => handlePresetChange('this_week')}
+        >
+          This Week
+        </Button>
+        <Button 
+          variant="outline" 
+          size="sm" 
+          onClick={() => handlePresetChange('this_month')}
+        >
+          This Month
+        </Button>
+        <Button 
+          variant="outline" 
+          size="sm" 
+          onClick={() => handlePresetChange('last_30_days')}
+        >
+          Last 30 Days
+        </Button>
+        <Button 
+          variant="outline" 
+          size="sm" 
+          onClick={() => handlePresetChange('last_90_days')}
+        >
+          Last 90 Days
+        </Button>
+        <Button 
+          variant="outline" 
+          size="sm" 
+          onClick={() => handlePresetChange('last_year')}
+        >
+          Last Year
+        </Button>
+        <Button 
+          variant="outline" 
+          size="sm" 
+          onClick={() => handlePresetChange('all_time')}
+        >
+          All Time
+        </Button>
+        <Button 
+          variant="outline" 
+          size="sm" 
+          onClick={() => handlePresetChange('custom')}
+        >
+          Custom Range
+        </Button>
+      </div>
+
+      {isCustomRange && (
+        <div className="flex items-center space-x-4 p-4 border rounded-lg bg-gray-50">
+          <div className="flex items-center space-x-2">
+            <Label htmlFor="start-date">Start Date:</Label>
+            <Input
+              id="start-date"
+              type="date"
+              value={startDate}
+              onChange={(e) => setStartDate(e.target.value)}
+              className="w-40"
+            />
+          </div>
+          <div className="flex items-center space-x-2">
+            <Label htmlFor="end-date">End Date:</Label>
+            <Input
+              id="end-date"
+              type="date"
+              value={endDate}
+              onChange={(e) => setEndDate(e.target.value)}
+              className="w-40"
+            />
+          </div>
+          <Button 
+            size="sm" 
+            onClick={handleCustomDateChange}
+            disabled={!startDate || !endDate}
+          >
+            Apply
+          </Button>
+        </div>
+      )}
+
+      {(startDate && endDate) && (
+        <div className="text-sm text-gray-600 bg-blue-50 p-2 rounded">
+          Showing data from <strong>{new Date(startDate).toLocaleDateString()}</strong> to <strong>{new Date(endDate).toLocaleDateString()}</strong>
+        </div>
+      )}
+    </div>
+  )
+}
+
 // API service
 class APIService {
   static async request(endpoint, options = {}) {
@@ -81,14 +247,33 @@ class APIService {
     return this.request(`/newsletters?${params}`)
   }
 
-  static async getSubscriptions(email) {
-    return this.request(`/subscriptions?email=${encodeURIComponent(email)}`)
-  }
-
   static async createSubscriptions(data) {
     return this.request('/subscriptions/bulk_create', {
       method: 'POST',
       body: JSON.stringify(data),
+    })
+  }
+
+  static async getManageState(token) {
+    return this.request(`/subscriptions/manage/${encodeURIComponent(token)}`)
+  }
+
+  static async updateManageState(token, data) {
+    return this.request(`/subscriptions/manage/${encodeURIComponent(token)}`, {
+      method: 'POST',
+      body: JSON.stringify(data),
+    })
+  }
+
+  static async tokenUnsubscribe(token) {
+    return this.request(`/subscriptions/unsubscribe/${encodeURIComponent(token)}`, {
+      method: 'POST',
+    })
+  }
+
+  static async verifyToken(token) {
+    return this.request(`/verify/${encodeURIComponent(token)}`, {
+      method: 'POST',
     })
   }
 
@@ -215,9 +400,7 @@ function HistoricalNewslettersPage() {
     return acc
   }, {})
 
-  // Get date range for 2023-2024 season (available data)
-  const minDate = '2023-08-01'
-  const maxDate = '2024-06-30'
+
 
   return (
     <div className="max-w-7xl mx-auto py-6 sm:px-6 lg:px-8">
@@ -227,7 +410,7 @@ function HistoricalNewslettersPage() {
             Historical Newsletters
           </h1>
           <p className="text-lg text-gray-600">
-            Generate newsletters for the 2023-2024 season. Select teams and a date to see loan activities for that week.
+            Generate newsletters for any date. Select teams and a date to see loan activities for that week.
           </p>
         </div>
 
@@ -249,20 +432,18 @@ function HistoricalNewslettersPage() {
               <CardHeader>
                 <CardTitle>Select Date</CardTitle>
                 <CardDescription>
-                  Choose a date from the 2023-2024 season
+                  Choose any date to generate newsletters for that week
                 </CardDescription>
               </CardHeader>
               <CardContent>
                 <input
                   type="date"
-                  min={minDate}
-                  max={maxDate}
                   value={selectedDate}
                   onChange={(e) => setSelectedDate(e.target.value)}
                   className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500"
                 />
                 <p className="text-sm text-gray-500 mt-2">
-                  Season: August 1, 2023 - June 30, 2024
+                  Select any date to generate newsletters for that week
                 </p>
               </CardContent>
             </Card>
@@ -388,10 +569,7 @@ function Navigation() {
     { path: '/', label: 'Home', icon: Home },
     { path: '/subscribe', label: 'Subscribe', icon: UserPlus },
     { path: '/teams', label: 'Browse Teams', icon: Users },
-    { path: '/historical', label: 'Historical Newsletters', icon: Calendar },
-    { path: '/newsletters', label: 'Newsletters', icon: FileText },
-    { path: '/manage', label: 'Manage', icon: Settings },
-    { path: '/stats', label: 'Statistics', icon: BarChart3 }
+    { path: '/newsletters', label: 'Newsletters', icon: FileText }
   ]
 
   return (
@@ -587,7 +765,6 @@ function SubscribePage() {
   const [teams, setTeams] = useState([])
   const [selectedTeams, setSelectedTeams] = useState([])
   const [email, setEmail] = useState('')
-  const [frequency, setFrequency] = useState('weekly')
   const [loading, setLoading] = useState(true)
   const [submitting, setSubmitting] = useState(false)
   const [message, setMessage] = useState(null)
@@ -639,8 +816,7 @@ function SubscribePage() {
     try {
       const result = await APIService.createSubscriptions({
         email,
-        team_ids: selectedTeams,
-        preferred_frequency: frequency
+        team_ids: selectedTeams
       })
       
       setMessage({ 
@@ -703,20 +879,6 @@ function SubscribePage() {
                   placeholder="your.email@example.com"
                   required
                 />
-              </div>
-              
-              <div>
-                <Label htmlFor="frequency">Newsletter Frequency</Label>
-                <Select value={frequency} onValueChange={setFrequency}>
-                  <SelectTrigger>
-                    <SelectValue />
-                  </SelectTrigger>
-                  <SelectContent>
-                    <SelectItem value="weekly">Weekly</SelectItem>
-                    <SelectItem value="monthly">Monthly</SelectItem>
-                    <SelectItem value="both">Both Weekly & Monthly</SelectItem>
-                  </SelectContent>
-                </Select>
               </div>
             </CardContent>
           </Card>
@@ -807,6 +969,12 @@ function TeamsPage() {
   const [teams, setTeams] = useState([])
   const [loading, setLoading] = useState(true)
   const [filter, setFilter] = useState('all')
+  const [expandedTeamId, setExpandedTeamId] = useState(null)
+  const [teamLoans, setTeamLoans] = useState({})
+  const [flagState, setFlagState] = useState({ open: false, team: null, loan: null, reason: '', email: '' })
+  const [submittingFlag, setSubmittingFlag] = useState(false)
+  const [teamEmail, setTeamEmail] = useState({})
+  const [subscribingTeamId, setSubscribingTeamId] = useState(null)
 
   useEffect(() => {
     const loadTeams = async () => {
@@ -839,6 +1007,69 @@ function TeamsPage() {
     loadTeams()
   }, [filter])
 
+  const toggleExpand = async (teamId) => {
+    setExpandedTeamId(prev => (prev === teamId ? null : teamId))
+    if (!teamLoans[teamId]) {
+      try {
+        const loans = await APIService.getTeamLoans(teamId)
+        setTeamLoans(prev => ({ ...prev, [teamId]: loans }))
+      } catch (e) {
+        console.error('❌ Failed to load loans for team', teamId, e)
+      }
+    }
+  }
+
+  const openFlag = (team, loan) => {
+    setFlagState({ open: true, team, loan, reason: '', email: '' })
+  }
+  const closeFlag = () => setFlagState(prev => ({ ...prev, open: false }))
+  const submitFlag = async () => {
+    if (!flagState.reason.trim()) return
+    setSubmittingFlag(true)
+    try {
+      const now = new Date()
+      const season = now.getMonth() >= 7 ? now.getFullYear() : now.getFullYear() - 1
+      await fetch('/api/loans/flags', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          player_id: flagState.loan?.player_id,
+          primary_team_api_id: flagState.team?.team_id,
+          loan_team_api_id: flagState.loan?.loan_team_api_id,
+          season,
+          reason: flagState.reason,
+          email: flagState.email || undefined,
+        })
+      })
+      alert('Thanks for the report. We will review it.')
+      closeFlag()
+    } catch (e) {
+      console.error('Flag submit failed', e)
+      alert('Failed to submit flag. Please try again later.')
+    } finally {
+      setSubmittingFlag(false)
+    }
+  }
+  const handleEmailChange = (teamId, val) => setTeamEmail(prev => ({ ...prev, [teamId]: val }))
+  const subscribeTeam = async (team) => {
+    const email = (teamEmail[team.id] || '').trim()
+    if (!email) { alert('Please enter your email'); return }
+    setSubscribingTeamId(team.id)
+    try {
+      await fetch('/api/subscriptions', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ email, team_id: team.id, preferred_frequency: 'weekly' })
+      })
+      alert('Subscribed successfully')
+    } catch (e) {
+      console.error('Subscribe failed', e)
+      alert('Subscription failed. Please try again later.')
+    } finally {
+      setSubscribingTeamId(null)
+    }
+  }
+
   // Group teams by league
   const teamsByLeague = teams.reduce((acc, team) => {
     const league = team.league_name || 'Other'
@@ -855,8 +1086,14 @@ function TeamsPage() {
             <h1 className="text-3xl font-bold text-gray-900 mb-2">
               European Teams
             </h1>
+            <div className="flex items-center space-x-2 mb-2">
+              <Badge variant="secondary" className="bg-green-100 text-green-800 border-green-300">
+                <Calendar className="h-3 w-3 mr-1" />
+                Current Season
+              </Badge>
+            </div>
             <p className="text-lg text-gray-600">
-              Browse teams from Europe's top 5 leagues
+              Browse current season teams from Europe's top 5 leagues
             </p>
           </div>
           
@@ -870,6 +1107,23 @@ function TeamsPage() {
             </SelectContent>
           </Select>
         </div>
+
+        {/* Current Season Indicator */}
+        <Card className="mb-6 bg-blue-50 border-blue-200">
+          <CardContent className="pt-6">
+            <div className="flex items-center space-x-3">
+              <Calendar className="h-5 w-5 text-blue-600" />
+              <div>
+                <h3 className="text-sm font-medium text-blue-900">
+                  Current Season Teams
+                </h3>
+                <p className="text-sm text-blue-700">
+                  Showing top-flight teams from Europe's major leagues for the current season. Team data and loan information reflects the latest available season.
+                </p>
+              </div>
+            </div>
+          </CardContent>
+        </Card>
 
         {loading ? (
           <div className="text-center py-12">
@@ -901,6 +1155,18 @@ function TeamsPage() {
                         </CardDescription>
                       </CardHeader>
                       <CardContent>
+                        <div className="flex items-center gap-2 mb-3">
+                          <input
+                            type="email"
+                            value={teamEmail[team.id] || ''}
+                            onChange={(e) => handleEmailChange(team.id, e.target.value)}
+                            placeholder="you@example.com"
+                            className="border rounded px-2 py-1 text-sm w-full"
+                          />
+                          <Button size="sm" onClick={() => subscribeTeam(team)} disabled={subscribingTeamId === team.id}>
+                            {subscribingTeamId === team.id ? 'Subscribing...' : 'Subscribe'}
+                          </Button>
+                        </div>
                         <div className="flex justify-between items-center">
                           <div className="text-sm text-gray-600">
                             <div className="flex items-center">
@@ -908,13 +1174,53 @@ function TeamsPage() {
                               {team.current_loaned_out_count} active loans
                             </div>
                           </div>
-                          <Link to={`/teams/${team.id}`}>
-                            <Button size="sm" variant="outline">
-                              View Details
-                              <ArrowRight className="h-4 w-4 ml-1" />
-                            </Button>
-                          </Link>
+                          <Button size="sm" variant="outline" onClick={() => toggleExpand(team.id)}>
+                            {expandedTeamId === team.id ? 'Hide Loans' : 'Show Loans'}
+                            <ArrowRight className="h-4 w-4 ml-1" />
+                          </Button>
                         </div>
+                        {expandedTeamId === team.id && (
+                          <div className="mt-4 space-y-2">
+                            {(teamLoans[team.id] || []).length === 0 ? (
+                              <div className="text-sm text-gray-500">No loans found.</div>
+                            ) : (
+                              (teamLoans[team.id] || []).map((loan) => (
+                                <div key={loan.id} className="border rounded p-2 text-sm">
+                                  <div className="font-medium">{loan.player_name}</div>
+                                  <div className="text-gray-600">Loan at {loan.loan_team_name}</div>
+                                  <div className="text-gray-500">Apps: {loan.appearances} • Goals: {loan.goals} • Assists: {loan.assists}</div>
+                                  <div className="mt-2">
+                                    <Button size="xs" variant="outline" onClick={() => openFlag(team, loan)}>Flag incorrect</Button>
+                                  </div>
+                                  {flagState.open && flagState.team?.id === team.id && flagState.loan?.id === loan.id && (
+                                    <div className="mt-2 border-t pt-2">
+                                      <textarea
+                                        className="w-full border rounded p-2 text-sm"
+                                        rows="3"
+                                        placeholder="Why is this incorrect?"
+                                        value={flagState.reason}
+                                        onChange={(e) => setFlagState(prev => ({ ...prev, reason: e.target.value }))}
+                                      />
+                                      <input
+                                        type="email"
+                                        className="w-full border rounded p-2 text-sm mt-2"
+                                        placeholder="Optional email"
+                                        value={flagState.email}
+                                        onChange={(e) => setFlagState(prev => ({ ...prev, email: e.target.value }))}
+                                      />
+                                      <div className="mt-2 flex gap-2">
+                                        <Button size="sm" onClick={submitFlag} disabled={submittingFlag || !flagState.reason.trim()}>
+                                          {submittingFlag ? 'Submitting...' : 'Submit flag'}
+                                        </Button>
+                                        <Button size="sm" variant="outline" onClick={closeFlag}>Cancel</Button>
+                                      </div>
+                                    </div>
+                                  )}
+                                </div>
+                              ))
+                            )}
+                          </div>
+                        )}
                       </CardContent>
                     </Card>
                   ))}
@@ -932,11 +1238,21 @@ function TeamsPage() {
 function NewslettersPage() {
   const [newsletters, setNewsletters] = useState([])
   const [loading, setLoading] = useState(true)
+  const [dateRange, setDateRange] = useState({ startDate: '', endDate: '', preset: 'all_time' })
+  const [expandedId, setExpandedId] = useState(null)
 
   useEffect(() => {
     const loadNewsletters = async () => {
       try {
-        const data = await APIService.getNewsletters({ published_only: 'true' })
+        const params = { published_only: 'true' }
+        
+        // Use date range if available, otherwise show all newsletters
+        if (dateRange.startDate && dateRange.endDate) {
+          params.week_start = dateRange.startDate
+          params.week_end = dateRange.endDate
+        }
+        
+        const data = await APIService.getNewsletters(params)
         setNewsletters(data)
       } catch (error) {
         console.error('Failed to load newsletters:', error)
@@ -946,7 +1262,9 @@ function NewslettersPage() {
     }
 
     loadNewsletters()
-  }, [])
+  }, [dateRange])
+
+
 
   return (
     <div className="max-w-4xl mx-auto py-6 sm:px-6 lg:px-8">
@@ -956,9 +1274,19 @@ function NewslettersPage() {
             Published Newsletters
           </h1>
           <p className="text-lg text-gray-600">
-            AI-generated insights about European team loan activities
+            Insights about European team loan activities
           </p>
         </div>
+
+        <Card className="mb-6">
+          <CardHeader>
+            <CardTitle>Filter by Date Range</CardTitle>
+            <CardDescription>Select a date range to view newsletters from that period</CardDescription>
+          </CardHeader>
+          <CardContent>
+            <UniversalDatePicker onDateChange={setDateRange} />
+          </CardContent>
+        </Card>
 
         {loading ? (
           <div className="text-center py-12">
@@ -985,27 +1313,330 @@ function NewslettersPage() {
                         {newsletter.team_name} • {newsletter.newsletter_type} newsletter
                       </CardDescription>
                     </div>
-                    <Badge variant="secondary">
-                      {new Date(newsletter.published_date).toLocaleDateString()}
-                    </Badge>
+                    <div className="flex items-center space-x-2">
+                      <Badge variant="secondary">
+                        {new Date(newsletter.published_date).toLocaleDateString()}
+                      </Badge>
+                      <Button size="sm" variant="outline" onClick={() => setExpandedId(expandedId === newsletter.id ? null : newsletter.id)}>
+                        {expandedId === newsletter.id ? 'Hide' : 'Read'}
+                      </Button>
+                    </div>
                   </div>
                 </CardHeader>
                 <CardContent>
-                  <div className="prose max-w-none">
-                    {newsletter.content.substring(0, 300)}...
+                  <div className="text-sm text-gray-500 mb-2">
+                    <Calendar className="h-4 w-4 inline mr-1" />
+                    {newsletter.week_start_date && newsletter.week_end_date && (
+                      `${new Date(newsletter.week_start_date).toLocaleDateString()} - ${new Date(newsletter.week_end_date).toLocaleDateString()}`
+                    )}
                   </div>
-                  <div className="mt-4 flex justify-between items-center">
-                    <div className="text-sm text-gray-500">
-                      <Calendar className="h-4 w-4 inline mr-1" />
-                      {newsletter.week_start_date && newsletter.week_end_date && (
-                        `${new Date(newsletter.week_start_date).toLocaleDateString()} - ${new Date(newsletter.week_end_date).toLocaleDateString()}`
+                  {expandedId === newsletter.id ? (
+                    <div className="max-w-none">
+                      {newsletter.rendered?.web_html ? (
+                        <div dangerouslySetInnerHTML={{ __html: newsletter.rendered.web_html }} className="prose max-w-none" />
+                      ) : (
+                        (() => {
+                          try {
+                            const obj = JSON.parse(newsletter.content)
+                            return (
+                              <div className="space-y-6">
+                                {/* Newsletter Header */}
+                                <div className="bg-gradient-to-r from-blue-50 to-gray-50 p-6 rounded-lg border-l-4 border-blue-500">
+                                  <h2 className="text-2xl font-bold text-gray-900 mb-3">{obj.title || newsletter.title}</h2>
+                                  {obj.range && (
+                                    <div className="text-sm text-gray-600 mb-3">
+                                      📅 Week: {obj.range[0]} - {obj.range[1]}
+                                    </div>
+                                  )}
+                                  {obj.summary && (
+                                    <div className="text-gray-700 leading-relaxed text-lg">
+                                      {obj.summary}
+                                    </div>
+                                  )}
+                                </div>
+
+                                {/* Key Highlights Section */}
+                                {obj.highlights && Array.isArray(obj.highlights) && obj.highlights.length > 0 && (
+                                  <div className="bg-yellow-50 p-5 rounded-lg border-l-4 border-yellow-400">
+                                    <h3 className="text-lg font-bold text-gray-900 mb-3 flex items-center">
+                                      ⭐ Key Highlights
+                                    </h3>
+                                    <ul className="space-y-2">
+                                      {obj.highlights.map((highlight, idx) => (
+                                        <li key={idx} className="flex items-start">
+                                          <span className="bg-yellow-400 text-yellow-900 rounded-full w-6 h-6 flex items-center justify-center text-xs font-bold mr-3 mt-0.5 flex-shrink-0">
+                                            {idx + 1}
+                                          </span>
+                                          <span className="text-gray-700">{highlight}</span>
+                                        </li>
+                                      ))}
+                                    </ul>
+                                  </div>
+                                )}
+
+                                {/* Performance Stats */}
+                                {obj.by_numbers && (
+                                  <div className="bg-gray-50 p-5 rounded-lg">
+                                    <h3 className="text-lg font-bold text-gray-900 mb-4 flex items-center">
+                                      📊 By The Numbers
+                                    </h3>
+                                    <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                                      {obj.by_numbers.minutes_leaders && obj.by_numbers.minutes_leaders.length > 0 && (
+                                        <div className="bg-white p-4 rounded-lg shadow-sm border">
+                                          <h4 className="font-semibold text-gray-900 mb-3 flex items-center">
+                                            ⏱️ Minutes Leaders
+                                          </h4>
+                                          <div className="space-y-2">
+                                            {obj.by_numbers.minutes_leaders.map((player, idx) => (
+                                              <div key={idx} className="flex justify-between items-center">
+                                                <span className="font-medium text-gray-700">{player.player}</span>
+                                                <span className="bg-blue-100 text-blue-800 px-2 py-1 rounded text-sm font-bold">
+                                                  {player.minutes}'
+                                                </span>
+                                              </div>
+                                            ))}
+                                          </div>
+                                        </div>
+                                      )}
+                                      
+                                      {obj.by_numbers.ga_leaders && obj.by_numbers.ga_leaders.length > 0 && (
+                                        <div className="bg-white p-4 rounded-lg shadow-sm border">
+                                          <h4 className="font-semibold text-gray-900 mb-3 flex items-center">
+                                            ⚽ Goal Contributors
+                                          </h4>
+                                          <div className="space-y-2">
+                                            {obj.by_numbers.ga_leaders.map((player, idx) => (
+                                              <div key={idx} className="flex justify-between items-center">
+                                                <span className="font-medium text-gray-700">{player.player}</span>
+                                                <div className="flex space-x-1">
+                                                  <span className="bg-green-100 text-green-800 px-2 py-1 rounded text-sm font-bold">
+                                                    {player.g}G
+                                                  </span>
+                                                  <span className="bg-purple-100 text-purple-800 px-2 py-1 rounded text-sm font-bold">
+                                                    {player.a}A
+                                                  </span>
+                                                </div>
+                                              </div>
+                                            ))}
+                                          </div>
+                                        </div>
+                                      )}
+                                    </div>
+                                  </div>
+                                )}
+
+                                {/* Detailed Sections */}
+                                {obj.sections && obj.sections.length > 0 && (
+                                  <div className="space-y-4">
+                                    <h3 className="text-lg font-bold text-gray-900 flex items-center">
+                                      📋 Detailed Report
+                                    </h3>
+                                    {obj.sections.map((sec, idx) => (
+                                      <div key={idx} className="bg-white border rounded-lg overflow-hidden shadow-sm">
+                                        {sec.title && (
+                                          <div className="bg-gray-100 px-5 py-3 border-b">
+                                            <h4 className="font-semibold text-gray-900">{sec.title}</h4>
+                                          </div>
+                                        )}
+                                        <div className="p-5">
+                                          {sec.content && (
+                                            <div className="text-gray-700 mb-4">{sec.content}</div>
+                                          )}
+                                          {sec.items && Array.isArray(sec.items) && (
+                                            <div className="space-y-4">
+                                              {sec.items.map((it, j) => (
+                                                <div key={j} className="border-l-4 border-blue-200 pl-4 py-2">
+                                                  <div className="flex flex-wrap items-center gap-2 mb-2">
+                                                    {it.player_name && (
+                                                      <span className="font-semibold text-lg text-gray-900">
+                                                        {it.player_name}
+                                                      </span>
+                                                    )}
+                                                    {it.loan_team && (
+                                                      <span className="bg-blue-100 text-blue-800 px-2 py-1 rounded text-sm font-medium">
+                                                        → {it.loan_team}
+                                                      </span>
+                                                    )}
+                                                    {it.stats && (
+                                                      <div className="flex gap-1">
+                                                        {it.stats.goals > 0 && (
+                                                          <span className="bg-green-100 text-green-800 px-2 py-1 rounded text-xs">
+                                                            {it.stats.goals}G
+                                                          </span>
+                                                        )}
+                                                        {it.stats.assists > 0 && (
+                                                          <span className="bg-purple-100 text-purple-800 px-2 py-1 rounded text-xs">
+                                                            {it.stats.assists}A
+                                                          </span>
+                                                        )}
+                                                        {it.stats.minutes > 0 && (
+                                                          <span className="bg-blue-100 text-blue-800 px-2 py-1 rounded text-xs">
+                                                            {it.stats.minutes}'
+                                                          </span>
+                                                        )}
+                                                      </div>
+                                                    )}
+                                                  </div>
+                                                  {it.week_summary && (
+                                                    <p className="text-gray-700 leading-relaxed">{it.week_summary}</p>
+                                                  )}
+                                                </div>
+                                              ))}
+                                            </div>
+                                          )}
+                                        </div>
+                                      </div>
+                                    ))}
+                                  </div>
+                                )}
+
+                                {/* Fan Pulse Section */}
+                                {obj.fan_pulse && Array.isArray(obj.fan_pulse) && obj.fan_pulse.length > 0 && (
+                                  <div className="bg-purple-50 p-5 rounded-lg border-l-4 border-purple-400">
+                                    <h3 className="text-lg font-bold text-gray-900 mb-3 flex items-center">
+                                      💬 Fan Pulse
+                                    </h3>
+                                    <div className="space-y-3">
+                                      {obj.fan_pulse.map((pulse, idx) => (
+                                        <div key={idx} className="bg-white p-3 rounded border-l-2 border-purple-200">
+                                          <p className="text-gray-700 italic">"{pulse}"</p>
+                                        </div>
+                                      ))}
+                                    </div>
+                                  </div>
+                                )}
+                              </div>
+                            )
+                          } catch {
+                            return (
+                              <div className="prose max-w-none">
+                                <div className="bg-gray-50 p-4 rounded-lg">
+                                  <h3 className="text-lg font-medium text-gray-900 mb-2">Newsletter Content</h3>
+                                  <div className="whitespace-pre-wrap text-gray-700">{newsletter.content}</div>
+                                </div>
+                              </div>
+                            )
+                          }
+                        })()
                       )}
                     </div>
-                    <Button variant="outline" size="sm">
-                      Read Full Newsletter
-                      <ArrowRight className="h-4 w-4 ml-1" />
-                    </Button>
-                  </div>
+                  ) : (
+                    <div className="prose max-w-none">
+                      {(() => {
+                        try {
+                          const obj = JSON.parse(newsletter.content)
+                          return (
+                            <div className="space-y-3">
+                              {/* Summary */}
+                              {obj.summary && (
+                                <div className="text-gray-700 leading-relaxed">
+                                  {obj.summary}
+                                </div>
+                              )}
+                              
+                              {/* Key Highlights */}
+                              {obj.highlights && Array.isArray(obj.highlights) && obj.highlights.length > 0 && (
+                                <div>
+                                  <div className="text-sm font-semibold text-gray-900 mb-2">Key Highlights:</div>
+                                  <ul className="list-disc ml-5 space-y-1">
+                                    {obj.highlights.slice(0, 3).map((highlight, idx) => (
+                                      <li key={idx} className="text-sm text-gray-700">{highlight}</li>
+                                    ))}
+                                  </ul>
+                                </div>
+                              )}
+                              
+                              {/* Top Performers */}
+                              {obj.by_numbers && (
+                                <div className="grid grid-cols-1 md:grid-cols-2 gap-4 mt-3">
+                                  {obj.by_numbers.minutes_leaders && obj.by_numbers.minutes_leaders.length > 0 && (
+                                    <div className="bg-gray-50 p-3 rounded-lg">
+                                      <div className="text-sm font-semibold text-gray-900 mb-2">Minutes Leaders:</div>
+                                      <div className="space-y-1">
+                                        {obj.by_numbers.minutes_leaders.slice(0, 2).map((player, idx) => (
+                                          <div key={idx} className="text-sm text-gray-700">
+                                            <span className="font-medium">{player.player}</span>: {player.minutes}'
+                                          </div>
+                                        ))}
+                                      </div>
+                                    </div>
+                                  )}
+                                  
+                                  {obj.by_numbers.ga_leaders && obj.by_numbers.ga_leaders.length > 0 && (
+                                    <div className="bg-gray-50 p-3 rounded-lg">
+                                      <div className="text-sm font-semibold text-gray-900 mb-2">Goal Contributors:</div>
+                                      <div className="space-y-1">
+                                        {obj.by_numbers.ga_leaders.slice(0, 2).map((player, idx) => (
+                                          <div key={idx} className="text-sm text-gray-700">
+                                            <span className="font-medium">{player.player}</span>: {player.g}G {player.a}A
+                                          </div>
+                                        ))}
+                                      </div>
+                                    </div>
+                                  )}
+                                </div>
+                              )}
+                              
+                              {/* Preview of sections */}
+                              {obj.sections && obj.sections.length > 0 && (
+                                <div className="mt-3">
+                                  <div className="text-sm font-semibold text-gray-900 mb-2">This Week's Activity:</div>
+                                  <div className="space-y-2">
+                                    {obj.sections.slice(0, 2).map((section, idx) => (
+                                      <div key={idx} className="border-l-2 border-blue-200 pl-3">
+                                        <div className="text-sm font-medium text-gray-800">{section.title}</div>
+                                        {section.items && section.items.length > 0 && (
+                                          <div className="text-sm text-gray-600 mt-1">
+                                            {section.items.length} player{section.items.length !== 1 ? 's' : ''} featured
+                                          </div>
+                                        )}
+                                      </div>
+                                    ))}
+                                  </div>
+                                </div>
+                              )}
+                              
+                              {/* Read More indicator */}
+                              <div className="mt-4 pt-3 border-t border-gray-200">
+                                <div className="text-sm text-blue-600 font-medium">
+                                  Click "Read" to see the complete newsletter
+                                </div>
+                              </div>
+                            </div>
+                          )
+                        } catch {
+                          // Fallback to showing content summary if JSON parsing fails
+                          const content = newsletter.content || newsletter.structured_content || ''
+                          if (content.length > 200) {
+                            return (
+                              <div className="space-y-3">
+                                <div className="text-gray-700 leading-relaxed">
+                                  {content.substring(0, 200)}...
+                                </div>
+                                <div className="pt-3 border-t border-gray-200">
+                                  <div className="text-sm text-blue-600 font-medium">
+                                    Click "Read" to see the complete newsletter
+                                  </div>
+                                </div>
+                              </div>
+                            )
+                          }
+                          return (
+                            <div className="space-y-3">
+                              <div className="text-gray-700 leading-relaxed">
+                                {content}
+                              </div>
+                              <div className="pt-3 border-t border-gray-200">
+                                <div className="text-sm text-blue-600 font-medium">
+                                  Click "Read" to see the complete newsletter
+                                </div>
+                              </div>
+                            </div>
+                          )
+                        }
+                      })()}
+                    </div>
+                  )}
                 </CardContent>
               </Card>
             ))}
@@ -1018,33 +1649,48 @@ function NewslettersPage() {
 
 // Manage subscriptions page
 function ManagePage() {
-  const [email, setEmail] = useState('')
-  const [subscriptions, setSubscriptions] = useState([])
-  const [loading, setLoading] = useState(false)
+  const [status, setStatus] = useState('loading') // loading | ready | error
+  const [subs, setSubs] = useState([])
   const [message, setMessage] = useState(null)
 
-  const handleSearch = async (e) => {
-    e.preventDefault()
-    
-    if (!email) {
-      setMessage({ type: 'error', text: 'Please enter your email address' })
-      return
-    }
+  const token = new URLSearchParams(window.location.search).get('token')
 
-    setLoading(true)
-    try {
-      const data = await APIService.getSubscriptions(email)
-      setSubscriptions(data)
-      
-      if (data.length === 0) {
-        setMessage({ type: 'info', text: 'No subscriptions found for this email address' })
-      } else {
-        setMessage(null)
+  useEffect(() => {
+    const load = async () => {
+      if (!token) {
+        setStatus('error')
+        setMessage({ type: 'error', text: 'Missing token' })
+        return
       }
-    } catch (error) {
-      setMessage({ type: 'error', text: 'Failed to load subscriptions' })
-    } finally {
-      setLoading(false)
+      try {
+        const data = await APIService.getManageState(token)
+        setSubs(data.subscriptions || [])
+        setStatus('ready')
+      } catch (e) {
+        setStatus('error')
+        setMessage({ type: 'error', text: 'Invalid or expired link. Request a new manage link from your email.' })
+      }
+    }
+    load()
+  }, [token])
+
+  const toggleTeam = (teamId) => {
+    setSubs((prev) => {
+      const exists = prev.some((s) => s.team_id === teamId)
+      if (exists) {
+        return prev.filter((s) => s.team_id !== teamId)
+      }
+      return [...prev, { team_id: teamId }]
+    })
+  }
+
+  const save = async () => {
+    try {
+      const teamIds = subs.map((s) => s.team_id)
+      await APIService.updateManageState(token, { team_ids: teamIds })
+      setMessage({ type: 'success', text: 'Preferences updated.' })
+    } catch (e) {
+      setMessage({ type: 'error', text: 'Failed to update preferences.' })
     }
   }
 
@@ -1052,83 +1698,122 @@ function ManagePage() {
     <div className="max-w-4xl mx-auto py-6 sm:px-6 lg:px-8">
       <div className="px-4 py-6 sm:px-0">
         <div className="text-center mb-8">
-          <h1 className="text-3xl font-bold text-gray-900 mb-4">
-            Manage Subscriptions
-          </h1>
-          <p className="text-lg text-gray-600">
-            View and manage your newsletter subscriptions
-          </p>
+          <h1 className="text-3xl font-bold text-gray-900 mb-4">Manage Subscriptions</h1>
+          <p className="text-lg text-gray-600">Use the secure link from your email to manage preferences.</p>
         </div>
 
-        <Card className="mb-8">
-          <CardHeader>
-            <CardTitle>Find Your Subscriptions</CardTitle>
-          </CardHeader>
-          <CardContent>
-            <form onSubmit={handleSearch} className="flex space-x-4">
-              <div className="flex-1">
-                <Input
-                  type="email"
-                  value={email}
-                  onChange={(e) => setEmail(e.target.value)}
-                  placeholder="Enter your email address"
-                  required
-                />
-              </div>
-              <Button type="submit" disabled={loading}>
-                {loading ? (
-                  <>
-                    <div className="animate-spin rounded-full h-4 w-4 border-b-2 border-white mr-2"></div>
-                    Searching...
-                  </>
-                ) : (
-                  'Search'
-                )}
-              </Button>
-            </form>
-          </CardContent>
-        </Card>
-
         {message && (
-          <Alert className={`mb-6 ${message.type === 'error' ? 'border-red-500' : message.type === 'info' ? 'border-blue-500' : 'border-green-500'}`}>
+          <Alert className={`mb-6 ${message.type === 'error' ? 'border-red-500' : 'border-green-500'}`}>
             <AlertCircle className="h-4 w-4" />
             <AlertDescription>{message.text}</AlertDescription>
           </Alert>
         )}
 
-        {subscriptions.length > 0 && (
-          <div className="space-y-4">
-            <h2 className="text-xl font-semibold">Your Subscriptions</h2>
-            {subscriptions.map((subscription) => (
-              <Card key={subscription.id}>
-                <CardContent className="pt-6">
-                  <div className="flex justify-between items-center">
-                    <div>
-                      <h3 className="font-semibold">{subscription.team?.name}</h3>
-                      <p className="text-sm text-gray-600">
-                        {subscription.preferred_frequency} newsletters
-                      </p>
-                      <p className="text-xs text-gray-500">
-                        Subscribed on {new Date(subscription.created_at).toLocaleDateString()}
-                      </p>
+        {status === 'loading' && (
+          <div className="text-center py-12">
+            <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-blue-600 mx-auto"></div>
+            <p className="mt-4 text-gray-600">Loading…</p>
+          </div>
+        )}
+
+        {status === 'ready' && (
+          <Card>
+            <CardHeader>
+              <CardTitle>Update Preferences</CardTitle>
+            </CardHeader>
+            <CardContent className="space-y-4">
+              <div>
+                <Label>Subscribed Teams</Label>
+                <p className="text-sm text-gray-500 mb-2">Toggle teams to stay subscribed. (Team list display simplified.)</p>
+                <div className="grid grid-cols-1 gap-2">
+                  {subs.map((s) => (
+                    <div key={s.team_id} className="flex items-center justify-between border rounded p-2">
+                      <span className="text-sm">Team #{s.team_id}</span>
+                      <Button size="sm" variant="outline" onClick={() => toggleTeam(s.team_id)}>Remove</Button>
                     </div>
-                    <div className="flex items-center space-x-2">
-                      <Badge variant={subscription.active ? "default" : "secondary"}>
-                        {subscription.active ? "Active" : "Inactive"}
-                      </Badge>
-                      {subscription.active && (
-                        <Button variant="outline" size="sm">
-                          Unsubscribe
-                        </Button>
-                      )}
-                    </div>
-                  </div>
-                </CardContent>
-              </Card>
-            ))}
+                  ))}
+                </div>
+              </div>
+
+              <div className="flex justify-end">
+                <Button onClick={save}>
+                  Save Changes
+                </Button>
+              </div>
+            </CardContent>
+          </Card>
+        )}
+
+        {status === 'error' && (
+          <div className="text-center py-12">
+            <p className="text-gray-600">Your link is invalid or expired.</p>
           </div>
         )}
       </div>
+    </div>
+  )
+}
+
+function UnsubscribePage() {
+  const [message, setMessage] = useState(null)
+  const token = new URLSearchParams(window.location.search).get('token')
+
+  useEffect(() => {
+    const run = async () => {
+      if (!token) {
+        setMessage({ type: 'error', text: 'Missing token' })
+        return
+      }
+      try {
+        await APIService.tokenUnsubscribe(token)
+        setMessage({ type: 'success', text: 'You have been unsubscribed.' })
+      } catch (e) {
+        setMessage({ type: 'error', text: 'Invalid or expired unsubscribe link.' })
+      }
+    }
+    run()
+  }, [token])
+
+  return (
+    <div className="max-w-xl mx-auto py-20 text-center">
+      {message && (
+        <Alert className={`inline-block ${message.type === 'error' ? 'border-red-500' : 'border-green-500'}`}>
+          <AlertCircle className="h-4 w-4" />
+          <AlertDescription>{message.text}</AlertDescription>
+        </Alert>
+      )}
+    </div>
+  )
+}
+
+function VerifyPage() {
+  const [message, setMessage] = useState(null)
+  const token = new URLSearchParams(window.location.search).get('token')
+
+  useEffect(() => {
+    const run = async () => {
+      if (!token) {
+        setMessage({ type: 'error', text: 'Missing token' })
+        return
+      }
+      try {
+        await APIService.verifyToken(token)
+        setMessage({ type: 'success', text: 'Email verified. Thank you!' })
+      } catch (e) {
+        setMessage({ type: 'error', text: 'Invalid or expired verification link.' })
+      }
+    }
+    run()
+  }, [token])
+
+  return (
+    <div className="max-w-xl mx-auto py-20 text-center">
+      {message && (
+        <Alert className={`inline-block ${message.type === 'error' ? 'border-red-500' : 'border-green-500'}`}>
+          <AlertCircle className="h-4 w-4" />
+          <AlertDescription>{message.text}</AlertDescription>
+        </Alert>
+      )}
     </div>
   )
 }
@@ -1276,10 +1961,11 @@ function App() {
           <Route path="/" element={<HomePage />} />
           <Route path="/subscribe" element={<SubscribePage />} />
           <Route path="/teams" element={<TeamsPage />} />
-          <Route path="/historical" element={<HistoricalNewslettersPage />} />
           <Route path="/newsletters" element={<NewslettersPage />} />
+          {/* Hidden in nav, used only via email links */}
           <Route path="/manage" element={<ManagePage />} />
-          <Route path="/stats" element={<StatsPage />} />
+          <Route path="/unsubscribe" element={<UnsubscribePage />} />
+          <Route path="/verify" element={<VerifyPage />} />
         </Routes>
         </main>
       </div>

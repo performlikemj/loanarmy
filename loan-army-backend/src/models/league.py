@@ -1,5 +1,5 @@
 from flask_sqlalchemy import SQLAlchemy
-from datetime import datetime
+from datetime import datetime, timezone, timedelta
 
 db = SQLAlchemy()
 
@@ -14,8 +14,8 @@ class League(db.Model):
     flag = db.Column(db.String(255))
     season = db.Column(db.Integer, nullable=False, default=2024)
     is_european_top_league = db.Column(db.Boolean, default=False)
-    created_at = db.Column(db.DateTime, default=datetime.utcnow)
-    updated_at = db.Column(db.DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+    created_at = db.Column(db.DateTime, default=datetime.now(timezone.utc))
+    updated_at = db.Column(db.DateTime, default=datetime.now(timezone.utc), onupdate=datetime.now(timezone.utc))
     
     # Relationships
     teams = db.relationship('Team', backref='league', lazy=True)
@@ -38,7 +38,7 @@ class Team(db.Model):
     __tablename__ = 'teams'
     
     id = db.Column(db.Integer, primary_key=True)
-    team_id = db.Column(db.Integer, unique=True, nullable=False)
+    team_id = db.Column(db.Integer, nullable=False)
     name = db.Column(db.String(100), nullable=False)
     code = db.Column(db.String(10))
     country = db.Column(db.String(50), nullable=False)
@@ -51,17 +51,21 @@ class Team(db.Model):
     venue_capacity = db.Column(db.Integer)
     is_active = db.Column(db.Boolean, default=True)
     league_id = db.Column(db.Integer, db.ForeignKey('leagues.id'), nullable=True)
-    created_at = db.Column(db.DateTime, default=datetime.utcnow)
-    updated_at = db.Column(db.DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
-    season = db.Column(db.Integer, unique=True, nullable=False)
+    created_at = db.Column(db.DateTime, default=datetime.now(timezone.utc))
+    updated_at = db.Column(db.DateTime, default=datetime.now(timezone.utc), onupdate=datetime.now(timezone.utc))
+    season = db.Column(db.Integer, nullable=False)  
     
+    __table_args__ = (
+        db.UniqueConstraint('team_id', 'season', name='uq_team_id_season'),
+    )
+      
     # Relationships
     loaned_out_players = db.relationship('LoanedPlayer', 
-                                       foreign_keys='LoanedPlayer.parent_team_id',
+                                       foreign_keys='LoanedPlayer.primary_team_id',
                                        backref='parent_team', lazy=True)
     loaned_in_players = db.relationship('LoanedPlayer',
                                       foreign_keys='LoanedPlayer.loan_team_id', 
-                                      backref='loan_team', lazy=True)
+                                      backref='borrowing_team', lazy=True)
     newsletters = db.relationship('Newsletter', backref='team', lazy=True)
     subscriptions = db.relationship('UserSubscription', backref='team', lazy=True)
     
@@ -81,62 +85,9 @@ class Team(db.Model):
             'venue_city': self.venue_city,
             'venue_capacity': self.venue_capacity,
             'is_active': self.is_active,
+            'season': self.season,
             'league_name': self.league.name if self.league else None,
             'current_loaned_out_count': len(current_loans),
-            'created_at': self.created_at.isoformat() if self.created_at else None,
-            'updated_at': self.updated_at.isoformat() if self.updated_at else None
-        }
-
-class Player(db.Model):
-    __tablename__ = 'players'
-    
-    id = db.Column(db.Integer, primary_key=True)
-    player_id = db.Column(db.Integer, unique=True, nullable=False)
-    name = db.Column(db.String(100), nullable=False)
-    firstname = db.Column(db.String(50))
-    lastname = db.Column(db.String(50))
-    age = db.Column(db.Integer)
-    birth_date = db.Column(db.Date)
-    birth_place = db.Column(db.String(100))
-    birth_country = db.Column(db.String(50))
-    nationality = db.Column(db.String(50))
-    height = db.Column(db.String(10))
-    weight = db.Column(db.String(10))
-    injured = db.Column(db.Boolean, default=False)
-    photo = db.Column(db.String(255))
-    position = db.Column(db.String(20))
-    created_at = db.Column(db.DateTime, default=datetime.utcnow)
-    updated_at = db.Column(db.DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
-    
-    # Relationships
-    loans = db.relationship('LoanedPlayer', backref='player', lazy=True)
-    
-    @property
-    def current_age(self):
-        if self.birth_date:
-            from datetime import date
-            today = date.today()
-            return today.year - self.birth_date.year - ((today.month, today.day) < (self.birth_date.month, self.birth_date.day))
-        return self.age
-    
-    def to_dict(self):
-        return {
-            'id': self.id,
-            'player_id': self.player_id,
-            'name': self.name,
-            'firstname': self.firstname,
-            'lastname': self.lastname,
-            'age': self.age,
-            'current_age': self.current_age,
-            'birth_date': self.birth_date.isoformat() if self.birth_date else None,
-            'birth_place': self.birth_place,
-            'birth_country': self.birth_country,
-            'nationality': self.nationality,
-            'height': self.height,
-            'weight': self.weight,
-            'injured': self.injured,
-            'photo': self.photo,
-            'position': self.position,
             'created_at': self.created_at.isoformat() if self.created_at else None,
             'updated_at': self.updated_at.isoformat() if self.updated_at else None
         }
@@ -145,61 +96,56 @@ class LoanedPlayer(db.Model):
     __tablename__ = 'loaned_players'
     
     id = db.Column(db.Integer, primary_key=True)
-    player_id = db.Column(db.Integer, db.ForeignKey('players.id'), nullable=False)
-    parent_team_id = db.Column(db.Integer, db.ForeignKey('teams.id'), nullable=False)
+    # Store raw API‑Football player ID directly (no Player FK table anymore)
+    player_id = db.Column(db.Integer, nullable=False)
+    player_name = db.Column(db.String(100), nullable=False)
+    age = db.Column(db.Integer)
+    nationality = db.Column(db.String(50))
+    primary_team_id = db.Column(db.Integer, db.ForeignKey('teams.id'), nullable=False)
+    primary_team_name = db.Column(db.String(100), nullable=False)
     loan_team_id = db.Column(db.Integer, db.ForeignKey('teams.id'), nullable=False)
-    loan_start_date = db.Column(db.Date, nullable=False)
-    loan_end_date = db.Column(db.Date)
-    original_end_date = db.Column(db.Date)  # Original planned end date
-    actual_end_date = db.Column(db.Date)    # Actual end date if terminated early
-    loan_fee = db.Column(db.Float)
-    buy_option_fee = db.Column(db.Float)
-    buy_option_deadline = db.Column(db.Date)
-    is_active = db.Column(db.Boolean, default=True)
-    loan_type = db.Column(db.String(50), default='Season Long')  # Season Long, Half Season, Emergency, etc.
-    loan_season = db.Column(db.String(10))  # e.g., "2024-25"
-    early_termination = db.Column(db.Boolean, default=False)
-    termination_reason = db.Column(db.String(200))  # Injury, Recall, Poor Performance, etc.
-    termination_date = db.Column(db.Date)
-    recall_option = db.Column(db.Boolean, default=True)  # Can parent club recall?
-    performance_notes = db.Column(db.Text)
-    last_performance_update = db.Column(db.DateTime)
+    loan_team_name = db.Column(db.String(100), nullable=False)
+    team_ids = db.Column(db.String(255))  # Comma-separated list of team IDs
+    window_key = db.Column(db.String(50))  # e.g., "2022-23::FULL"
+    actual_loan_status = db.Column(db.String(50))  # Active, Terminated, etc.
+    legacy_parent_team_id = db.Column(db.Integer)
+    legacy_loan_team_id = db.Column(db.Integer)
+    reviewer_notes = db.Column(db.Text)
+    is_active = db.Column(db.Boolean, default=True)  # Keep for API compatibility
     appearances = db.Column(db.Integer, default=0)
     goals = db.Column(db.Integer, default=0)
     assists = db.Column(db.Integer, default=0)
     minutes_played = db.Column(db.Integer, default=0)
-    created_at = db.Column(db.DateTime, default=datetime.utcnow)
-    updated_at = db.Column(db.DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+    yellows = db.Column(db.Integer, default=0)
+    reds = db.Column(db.Integer, default=0)
+    created_at = db.Column(db.DateTime, default=datetime.now(timezone.utc))
+    updated_at = db.Column(db.DateTime, default=datetime.now(timezone.utc), onupdate=datetime.now(timezone.utc))
     
     def to_dict(self):
         return {
             'id': self.id,
             'player_id': self.player_id,
-            'player_name': self.player.name if self.player else None,
-            'parent_team_id': self.parent_team_id,
-            'parent_team_name': self.parent_team.name if self.parent_team else None,
+            'player_name': self.player_name,
+            'age': self.age,
+            'nationality': self.nationality,
+            'primary_team_id': self.primary_team_id,
+            'primary_team_name': self.primary_team_name,
+            'primary_team_api_id': (self.parent_team.team_id if hasattr(self, 'parent_team') and self.parent_team else None),
             'loan_team_id': self.loan_team_id,
-            'loan_team_name': self.loan_team.name if self.loan_team else None,
-            'loan_start_date': self.loan_start_date.isoformat() if self.loan_start_date else None,
-            'loan_end_date': self.loan_end_date.isoformat() if self.loan_end_date else None,
-            'original_end_date': self.original_end_date.isoformat() if self.original_end_date else None,
-            'actual_end_date': self.actual_end_date.isoformat() if self.actual_end_date else None,
-            'loan_fee': self.loan_fee,
-            'buy_option_fee': self.buy_option_fee,
-            'buy_option_deadline': self.buy_option_deadline.isoformat() if self.buy_option_deadline else None,
+            'loan_team_name': self.loan_team_name,
+            'loan_team_api_id': (self.borrowing_team.team_id if hasattr(self, 'borrowing_team') and self.borrowing_team else None),
+            'team_ids': self.team_ids,
+            'window_key': self.window_key,
+            'legacy_parent_team_id': self.legacy_parent_team_id,
+            'legacy_loan_team_id': self.legacy_loan_team_id,
+            'reviewer_notes': self.reviewer_notes,
             'is_active': self.is_active,
-            'loan_type': self.loan_type,
-            'loan_season': self.loan_season,
-            'early_termination': self.early_termination,
-            'termination_reason': self.termination_reason,
-            'termination_date': self.termination_date.isoformat() if self.termination_date else None,
-            'recall_option': self.recall_option,
-            'performance_notes': self.performance_notes,
-            'last_performance_update': self.last_performance_update.isoformat() if self.last_performance_update else None,
             'appearances': self.appearances,
             'goals': self.goals,
             'assists': self.assists,
             'minutes_played': self.minutes_played,
+            'yellows': self.yellows,
+            'reds': self.reds,
             'created_at': self.created_at.isoformat() if self.created_at else None,
             'updated_at': self.updated_at.isoformat() if self.updated_at else None
         }
@@ -215,14 +161,15 @@ class Newsletter(db.Model):
     structured_content = db.Column(db.Text)  # JSON string
     week_start_date = db.Column(db.Date)
     week_end_date = db.Column(db.Date)
+    issue_date = db.Column(db.Date)  # The target date for this newsletter issue
     published = db.Column(db.Boolean, default=False)
     published_date = db.Column(db.DateTime)
     email_sent = db.Column(db.Boolean, default=False)
     email_sent_date = db.Column(db.DateTime)
     subscriber_count = db.Column(db.Integer, default=0)
-    generated_date = db.Column(db.DateTime, default=datetime.utcnow)
-    created_at = db.Column(db.DateTime, default=datetime.utcnow)
-    updated_at = db.Column(db.DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+    generated_date = db.Column(db.DateTime, default=datetime.now(timezone.utc))
+    created_at = db.Column(db.DateTime, default=datetime.now(timezone.utc))
+    updated_at = db.Column(db.DateTime, default=datetime.now(timezone.utc), onupdate=datetime.now(timezone.utc))
     
     def to_dict(self):
         return {
@@ -235,6 +182,7 @@ class Newsletter(db.Model):
             'structured_content': self.structured_content,
             'week_start_date': self.week_start_date.isoformat() if self.week_start_date else None,
             'week_end_date': self.week_end_date.isoformat() if self.week_end_date else None,
+            'issue_date': self.issue_date.isoformat() if self.issue_date else None,
             'published': self.published,
             'published_date': self.published_date.isoformat() if self.published_date else None,
             'email_sent': self.email_sent,
@@ -257,8 +205,8 @@ class UserSubscription(db.Model):
     last_email_sent = db.Column(db.DateTime)
     bounce_count = db.Column(db.Integer, default=0)
     email_bounced = db.Column(db.Boolean, default=False)
-    created_at = db.Column(db.DateTime, default=datetime.utcnow)
-    updated_at = db.Column(db.DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+    created_at = db.Column(db.DateTime, default=datetime.now(timezone.utc))
+    updated_at = db.Column(db.DateTime, default=datetime.now(timezone.utc), onupdate=datetime.now(timezone.utc))
     
     def to_dict(self):
         return {
@@ -275,4 +223,50 @@ class UserSubscription(db.Model):
             'created_at': self.created_at.isoformat() if self.created_at else None,
             'updated_at': self.updated_at.isoformat() if self.updated_at else None
         }
+
+class EmailToken(db.Model):
+    __tablename__ = 'email_tokens'
+
+    id = db.Column(db.Integer, primary_key=True)
+    token = db.Column(db.String(100), unique=True, nullable=False)
+    email = db.Column(db.String(255), nullable=False)
+    purpose = db.Column(db.String(50), nullable=False)  # 'verify', 'manage', 'unsubscribe'
+    expires_at = db.Column(db.DateTime, nullable=False)
+    used_at = db.Column(db.DateTime)
+    metadata_json = db.Column(db.Text)  # optional JSON payload
+    created_at = db.Column(db.DateTime, default=datetime.now(timezone.utc))
+
+    def is_valid(self) -> bool:
+        now = datetime.now(timezone.utc)
+        return (self.used_at is None) and (self.expires_at is None or self.expires_at > now)
+
+    def to_dict(self):
+        return {
+            'id': self.id,
+            'token': self.token,
+            'email': self.email,
+            'purpose': self.purpose,
+            'expires_at': self.expires_at.isoformat() if self.expires_at else None,
+            'used_at': self.used_at.isoformat() if self.used_at else None,
+            'metadata_json': self.metadata_json,
+            'created_at': self.created_at.isoformat() if self.created_at else None,
+        }
+
+# New: guest-submitted loan flags
+class LoanFlag(db.Model):
+    __tablename__ = 'loan_flags'
+
+    id = db.Column(db.Integer, primary_key=True)
+    player_api_id = db.Column(db.Integer, nullable=False)
+    primary_team_api_id = db.Column(db.Integer, nullable=False)
+    loan_team_api_id = db.Column(db.Integer, nullable=True)
+    season = db.Column(db.Integer, nullable=True)
+    reason = db.Column(db.Text, nullable=False)
+    email = db.Column(db.String(255))
+    ip_address = db.Column(db.String(64))
+    user_agent = db.Column(db.String(512))
+    status = db.Column(db.String(20), default='pending')  # pending|resolved
+    admin_note = db.Column(db.Text)
+    created_at = db.Column(db.DateTime, default=datetime.now(timezone.utc))
+    resolved_at = db.Column(db.DateTime)
 

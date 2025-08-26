@@ -2,21 +2,19 @@ import os
 import sys
 from urllib.parse import quote_plus
 sys.path.insert(0, os.path.dirname(os.path.dirname(__file__)))
-import dotenv
 from flask import Flask, send_from_directory, jsonify
-from src.models.league import db, League, Team, Player, LoanedPlayer, Newsletter, UserSubscription
+from src.models.league import db, League, Team, LoanedPlayer, Newsletter, UserSubscription
 from src.routes.api import api_bp
 import logging
 from flask_migrate import Migrate
-
+import dotenv
+dotenv.load_dotenv(dotenv.find_dotenv())
 # Configure logging
 logging.basicConfig(
     level=logging.INFO,
     format='%(asctime)s - %(name)s - %(levelname)s - %(message)s'
 )
 logger = logging.getLogger(__name__)
-
-dotenv.load_dotenv()
 
 logger.info("🚀 Starting Flask application...")
 
@@ -26,11 +24,29 @@ app.config['SECRET_KEY'] = os.getenv('SECRET_KEY')
 logger.info(f"📁 Static folder: {app.static_folder}")
 logger.info(f"🔑 Secret key configured: {'Yes' if app.config['SECRET_KEY'] else 'No'}")
 
+# Suppress repetitive MCP notification validation logs but keep the first one
+_seen_mcp_validation = False
+class _MCPValidationFilter(logging.Filter):
+    def filter(self, record: logging.LogRecord) -> bool:
+        global _seen_mcp_validation
+        msg = record.getMessage()
+        if "Failed to validate notification" in msg:
+            if _seen_mcp_validation:
+                return False
+            _seen_mcp_validation = True
+        return True
+
+root_logger = logging.getLogger()
+root_logger.addFilter(_MCPValidationFilter())
+for name in ("mcp", "agents.mcp", "mcp.shared.session", "mcp.client"):
+    logging.getLogger(name).setLevel(logging.WARNING)
+
 app.register_blueprint(api_bp, url_prefix='/api')
 
 # Database setup
 # Check for DATABASE_URL first (for testing with SQLite), then fall back to PostgreSQL components
-database_url = os.getenv("DATABASE_URL")
+password = quote_plus(os.getenv("DB_PASSWORD"))
+database_url = f"postgresql+psycopg://{os.getenv('DB_USER')}:{password}@{os.getenv('DB_HOST')}:{os.getenv('DB_PORT')}/{os.getenv('DB_NAME')}"
 
 if database_url:
     # Use DATABASE_URL directly (e.g., SQLite for testing)
@@ -63,7 +79,6 @@ def debug_database():
                 'leagues': League.query.count(),
                 'teams': Team.query.count(),
                 'active_teams': Team.query.filter_by(is_active=True).count(),
-                'players': Player.query.count(),
                 'loans': LoanedPlayer.query.count(),
                 'active_loans': LoanedPlayer.query.filter_by(is_active=True).count(),
                 'newsletters': Newsletter.query.count(),
@@ -97,7 +112,6 @@ if __name__ == "__main__":
     # NOT when Flask CLI imports the app.
     with app.app_context():
         logger.info("🔨 Creating database tables...")
-        db.create_all()
 
         # Optional stats
         total_leagues = League.query.count()

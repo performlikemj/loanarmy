@@ -1,0 +1,192 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>{{ title or 'Weekly Loan Update' }}</title>
+    <style>
+      :root {
+        color-scheme: light dark;
+      }
+      body {
+        margin: 0;
+        font-family: system-ui, -apple-system, Segoe UI, Roboto, Helvetica, Arial, sans-serif;
+        line-height: 1.5;
+        color: #0a0a0a;
+        background: #fafafa;
+      }
+      .container {
+        max-width: 820px;
+        margin: 0 auto;
+        padding: 24px 16px 64px;
+      }
+      header {
+        margin-bottom: 16px;
+      }
+      .title {
+        margin: 0 0 4px 0;
+        font-size: 28px;
+        letter-spacing: -0.01em;
+      }
+      .meta {
+        color: #666;
+        font-size: 14px;
+      }
+      .summary {
+        margin: 16px 0 8px;
+        font-size: 18px;
+      }
+      .highlights {
+        background: #fff;
+        border: 1px solid #eee;
+        border-radius: 10px;
+        padding: 12px 16px;
+        margin: 16px 0 24px;
+      }
+      .highlights h3 {
+        margin: 0 0 8px;
+        font-size: 16px;
+      }
+      .sections h2 {
+        margin-top: 28px;
+        margin-bottom: 12px;
+        font-size: 20px;
+      }
+      .item {
+        background: #fff;
+        border: 1px solid #eee;
+        border-radius: 10px;
+        padding: 14px 16px;
+        margin-bottom: 12px;
+      }
+      .item-header {
+        display: flex;
+        justify-content: space-between;
+        align-items: baseline;
+        gap: 8px;
+        margin-bottom: 6px;
+      }
+      .player {
+        font-weight: 600;
+      }
+      .loan-team {
+        color: #555;
+        font-size: 14px;
+      }
+      .stats {
+        font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace;
+        font-size: 13px;
+        color: #374151;
+      }
+      .notes {
+        margin: 8px 0 0;
+        padding-left: 18px;
+      }
+      .by-numbers, .fan-pulse {
+        background: #fff;
+        border: 1px solid #eee;
+        border-radius: 10px;
+        padding: 12px 16px;
+        margin: 16px 0;
+      }
+      a { color: #0f62fe; text-decoration: none; }
+      a:hover { text-decoration: underline; }
+    </style>
+  </head>
+  <body>
+    <div class="container">
+      <header>
+        <h1 class="title">{{ title }}</h1>
+        <div class="meta">
+          {% if team_name %}<span>{{ team_name }}</span>{% if range %} · {% endif %}{% endif %}
+          {% if range %}<span>{{ range[0] }} – {{ range[1] }}</span>{% endif %}
+        </div>
+      </header>
+
+      {% if summary %}
+        <p class="summary">{{ summary }}</p>
+      {% endif %}
+
+      {% if highlights %}
+      <section class="highlights">
+        <h3>Highlights</h3>
+        <ul>
+          {% for h in highlights %}
+            <li>{{ h }}</li>
+          {% endfor %}
+        </ul>
+      </section>
+      {% endif %}
+
+      <section class="sections">
+        {% for sec in sections %}
+          <h2>{{ sec.title }}</h2>
+          {% for it in (sec.items or []) %}
+            <article class="item">
+              <div class="item-header">
+                <div>
+                  <div class="player">{{ it.player_name }}</div>
+                  <div class="loan-team">{{ it.loan_team or it.loan_team_name }}</div>
+                </div>
+                {% set s = it.stats or {} %}
+                <div class="stats">{{ (s.minutes or 0)|int }}’ · {{ (s.goals or 0)|int }}G {{ (s.assists or 0)|int }}A · {{ (s.yellows or 0)|int }}Y {{ (s.reds or 0)|int }}R</div>
+              </div>
+              {% if it.week_summary %}
+                <p>{{ it.week_summary }}</p>
+              {% endif %}
+              {% if it.match_notes %}
+                <ul class="notes">
+                  {% for n in it.match_notes %}
+                    <li>{{ n }}</li>
+                  {% endfor %}
+                </ul>
+              {% endif %}
+              {% if it.links %}
+                <p>
+                  {% for url in it.links %}
+                    <a href="{{ url }}" target="_blank" rel="noopener">Link {{ loop.index }}</a>{% if not loop.last %} · {% endif %}
+                  {% endfor %}
+                </p>
+              {% endif %}
+            </article>
+          {% endfor %}
+        {% endfor %}
+      </section>
+
+      {% if by_numbers %}
+      <section class="by-numbers">
+        <h3>By the numbers</h3>
+        <div>
+          {% if by_numbers.minutes_leaders %}
+          <p><strong>Minutes leaders:</strong>
+            {% for row in by_numbers.minutes_leaders %}
+              {{ row.player }} ({{ row.minutes }}’){% if not loop.last %}, {% endif %}
+            {% endfor %}
+          </p>
+          {% endif %}
+          {% if by_numbers.ga_leaders %}
+          <p><strong>G+A leaders:</strong>
+            {% for row in by_numbers.ga_leaders %}
+              {{ row.player }} ({{ row.g }}G {{ row.a }}A){% if not loop.last %}, {% endif %}
+            {% endfor %}
+          </p>
+          {% endif %}
+        </div>
+      </section>
+      {% endif %}
+
+      {% if fan_pulse %}
+      <section class="fan-pulse">
+        <h3>Fan pulse</h3>
+        <ul>
+          {% for fp in fan_pulse %}
+            <li>“{{ fp.quote }}” — {{ fp.forum }}{% if fp.url %} (<a href="{{ fp.url }}" target="_blank">source</a>){% endif %}</li>
+          {% endfor %}
+        </ul>
+      </section>
+      {% endif %}
+    </div>
+  </body>
+  </html>
+
+

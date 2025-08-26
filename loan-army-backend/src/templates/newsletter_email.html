@@ -1,0 +1,94 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>{{ title or 'Weekly Loan Update' }}</title>
+    <style>
+      /* Email-safe, table-based minimal layout */
+      body { margin:0; padding:0; background:#f6f6f6; }
+      .wrapper { width:100%; table-layout:fixed; background:#f6f6f6; padding:20px 0; }
+      .main { background:#ffffff; margin:0 auto; width:100%; max-width:680px; border-radius:8px; border:1px solid #eaeaea; }
+      .content { padding:20px; font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif; color:#222; line-height:1.5; }
+      h1 { font-size:24px; margin:0 0 8px; }
+      .meta { color:#666; font-size:13px; margin-bottom:12px; }
+      .summary { font-size:16px; margin:12px 0; }
+      .highlights { background:#fafafa; border:1px solid #eee; border-radius:6px; padding:10px 12px; }
+      h2 { font-size:18px; margin:20px 0 8px; }
+      .item { border:1px solid #eee; border-radius:6px; padding:12px; margin-bottom:10px; }
+      .player { font-weight:600; }
+      .loan-team { color:#666; font-size:13px; }
+      .stats { font-family: monospace; font-size:12px; color:#374151; }
+      .notes { margin: 8px 0 0 18px; }
+      a { color:#0f62fe; text-decoration:none; }
+    </style>
+  </head>
+  <body>
+    <table role="presentation" class="wrapper" cellspacing="0" cellpadding="0" border="0">
+      <tr>
+        <td align="center">
+          <table role="presentation" class="main" cellspacing="0" cellpadding="0" border="0">
+            <tr>
+              <td class="content">
+                <h1>{{ title }}</h1>
+                <div class="meta">
+                  {% if team_name %}<span>{{ team_name }}</span>{% if range %} · {% endif %}{% endif %}
+                  {% if range %}<span>{{ range[0] }} – {{ range[1] }}</span>{% endif %}
+                </div>
+
+                {% if summary %}
+                  <p class="summary">{{ summary }}</p>
+                {% endif %}
+
+                {% if highlights %}
+                <div class="highlights">
+                  <strong>Highlights</strong>
+                  <ul>
+                    {% for h in highlights %}
+                      <li>{{ h }}</li>
+                    {% endfor %}
+                  </ul>
+                </div>
+                {% endif %}
+
+                {% for sec in sections %}
+                  <h2>{{ sec.title }}</h2>
+                  {% for it in (sec.items or []) %}
+                    <div class="item">
+                      <div>
+                        <div class="player">{{ it.player_name }}</div>
+                        <div class="loan-team">{{ it.loan_team or it.loan_team_name }}</div>
+                      </div>
+                      {% set s = it.stats or {} %}
+                      <div class="stats">{{ (s.minutes or 0)|int }}’ · {{ (s.goals or 0)|int }}G {{ (s.assists or 0)|int }}A · {{ (s.yellows or 0)|int }}Y {{ (s.reds or 0)|int }}R</div>
+                      {% if it.week_summary %}
+                        <p>{{ it.week_summary }}</p>
+                      {% endif %}
+                      {% if it.match_notes %}
+                        <ul class="notes">
+                          {% for n in it.match_notes %}
+                            <li>{{ n }}</li>
+                          {% endfor %}
+                        </ul>
+                      {% endif %}
+                      {% if it.links %}
+                        <p>
+                          {% for url in it.links %}
+                            <a href="{{ url }}" target="_blank" rel="noopener">Link {{ loop.index }}</a>{% if not loop.last %} · {% endif %}
+                          {% endfor %}
+                        </p>
+                      {% endif %}
+                    </div>
+                  {% endfor %}
+                {% endfor %}
+
+              </td>
+            </tr>
+          </table>
+        </td>
+      </tr>
+    </table>
+  </body>
+  </html>
+
+
