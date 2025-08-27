@@ -12,6 +12,7 @@ from src.api_football_client import APIFootballClient
 # If you have an MCP client already for Brave (Model Context Protocol), import it here.
 # This is a thin wrapper that exposes a Python function brave_search(query: str, since: str, until: str) -> List[dict]
 from src.mcp.brave import brave_search  # implement this wrapper to call your MCP tool
+from .weekly_agent import get_league_localization
 import dotenv
 dotenv.load_dotenv(dotenv.find_dotenv())
 
@@ -103,23 +104,49 @@ def fetch_weekly_report_tool(parent_team_db_id: int, season_start_year: int, sta
 def brave_context_for_team_and_loans(team_name: str, report: Dict[str, Any]) -> Dict[str, List[Dict[str, Any]]]:
     # Build a small set of targeted queries for context enrichment
     start, end = report["range"]
-    queries = set()
-    queries.add(f"{team_name} loan players {start}..{end}")
+    default_loc = get_league_localization("Premier League")
+    queries: List[tuple[str, Dict[str, str]]] = []
+    seen: set[str] = set()
+
+    def add_query(q: str, loc: Dict[str, str]):
+        if q not in seen:
+            queries.append((q, loc))
+            seen.add(q)
+
+    add_query(f"{team_name} loan players {start}..{end}", default_loc)
+
     for loanee in report.get("loanees", []):
         pname = loanee.get("player_name")
-        loan_team = loanee.get("loan_team_name")
-        if pname and loan_team:
-            queries.add(f"{pname} {loan_team} {start}..{end}")
+        loan_team_name = loanee.get("loan_team_name")
+        if pname and loan_team_name:
+            league_name = "Premier League"
+            loan_team_db_id = loanee.get("loan_team_db_id")
+            if loan_team_db_id:
+                loan_team = Team.query.get(loan_team_db_id)
+                if loan_team and getattr(loan_team, "league", None):
+                    league_name = loan_team.league.name
+            localization = get_league_localization(league_name)
+            add_query(f"{pname} {loan_team_name} {start}..{end}", localization)
             for m in loanee.get("matches", []):
                 opponent = m.get("opponent")
                 comp = m.get("competition")
                 if opponent:
-                    queries.add(f"{pname} {loan_team} vs {opponent} {comp} {start}..{end}")
+                    add_query(
+                        f"{pname} {loan_team_name} vs {opponent} {comp} {start}..{end}",
+                        localization,
+                    )
 
     results = {}
-    for q in queries:
+    for q, loc in queries:
         try:
-            hits = brave_search(query=q, since=start, until=end)  # returns list of {title, url, snippet, date, source}
+            hits = brave_search(
+                query=q,
+                since=start,
+                until=end,
+                country=loc.get("country", "GB"),
+                search_lang=loc.get("search_lang", "en"),
+                ui_lang=loc.get("ui_lang", "en-GB"),
+            )  # returns list of {title, url, snippet, date, source}
             results[q] = hits[:5]
         except Exception:
             results[q] = []
