@@ -25,7 +25,7 @@ from agents import (Agent,
                     )
 from agents.run_context import RunContextWrapper
 
-from src.models.league import db, Team, LoanedPlayer, Newsletter
+from src.models.league import db, Team, LoanedPlayer, Newsletter, LeagueLocalization
 from jinja2 import Environment, FileSystemLoader, select_autoescape
 from src.api_football_client import APIFootballClient
 import dotenv
@@ -113,19 +113,42 @@ def get_league_localization(league_name: str) -> dict:
     Get Brave Search localization parameters based on league.
     Returns country code, search language, and UI language for optimal results.
     """
+    try:
+        loc = LeagueLocalization.query.filter_by(league_name=league_name).first()
+        if loc:
+            return {'country': loc.country, 'search_lang': loc.search_lang, 'ui_lang': loc.ui_lang}
+    except Exception:
+        # If DB is unavailable or query fails, fall back to hard-coded mapping
+        pass
+
     localizations = {
         'Premier League': {'country': 'GB', 'search_lang': 'en', 'ui_lang': 'en-GB'},
         'La Liga': {'country': 'ES', 'search_lang': 'es', 'ui_lang': 'es-ES'},
+        'Segunda División': {'country': 'ES', 'search_lang': 'es', 'ui_lang': 'es-ES'},
         'Ligue 1': {'country': 'FR', 'search_lang': 'fr', 'ui_lang': 'fr-FR'},
+        'Ligue 2': {'country': 'FR', 'search_lang': 'fr', 'ui_lang': 'fr-FR'},
         'Bundesliga': {'country': 'DE', 'search_lang': 'de', 'ui_lang': 'de-DE'},
+        'Bundesliga 2': {'country': 'DE', 'search_lang': 'de', 'ui_lang': 'de-DE'},
+        '2. Bundesliga': {'country': 'DE', 'search_lang': 'de', 'ui_lang': 'de-DE'},
         'Serie A': {'country': 'IT', 'search_lang': 'it', 'ui_lang': 'it-IT'},
+        'Serie B': {'country': 'IT', 'search_lang': 'it', 'ui_lang': 'it-IT'},
         'Championship': {'country': 'GB', 'search_lang': 'en', 'ui_lang': 'en-GB'},
         'League One': {'country': 'GB', 'search_lang': 'en', 'ui_lang': 'en-GB'},
         'League Two': {'country': 'GB', 'search_lang': 'en', 'ui_lang': 'en-GB'},
-        'La Liga 2': {'country': 'ES', 'search_lang': 'es', 'ui_lang': 'es-ES'},
-        'Ligue 2': {'country': 'FR', 'search_lang': 'fr', 'ui_lang': 'fr-FR'},
-        '2. Bundesliga': {'country': 'DE', 'search_lang': 'de', 'ui_lang': 'de-DE'},
-        'Serie B': {'country': 'IT', 'search_lang': 'it', 'ui_lang': 'it-IT'},
+        'Eredivisie': {'country': 'NL', 'search_lang': 'nl', 'ui_lang': 'nl-NL'},
+        'Eerste Divisie': {'country': 'NL', 'search_lang': 'nl', 'ui_lang': 'nl-NL'},
+        'Primeira Liga': {'country': 'PT', 'search_lang': 'pt', 'ui_lang': 'pt-PT'},
+        'Liga Portugal 2': {'country': 'PT', 'search_lang': 'pt', 'ui_lang': 'pt-PT'},
+        'Scottish Premiership': {'country': 'GB', 'search_lang': 'en', 'ui_lang': 'en-GB'},
+        'Scottish Championship': {'country': 'GB', 'search_lang': 'en', 'ui_lang': 'en-GB'},
+        'MLS': {'country': 'US', 'search_lang': 'en', 'ui_lang': 'en-US'},
+        'Major League Soccer': {'country': 'US', 'search_lang': 'en', 'ui_lang': 'en-US'},
+        'Belgian Pro League': {'country': 'BE', 'search_lang': 'nl', 'ui_lang': 'nl-BE'},
+        'Jupiler Pro League': {'country': 'BE', 'search_lang': 'nl', 'ui_lang': 'nl-BE'},
+        'Belgian First Division A': {'country': 'BE', 'search_lang': 'nl', 'ui_lang': 'nl-BE'},
+        'Belgian First Division B': {'country': 'BE', 'search_lang': 'nl', 'ui_lang': 'nl-BE'},
+        'Süper Lig': {'country': 'TR', 'search_lang': 'tr', 'ui_lang': 'tr-TR'},
+        'TFF First League': {'country': 'TR', 'search_lang': 'tr', 'ui_lang': 'tr-TR'},
     }
     return localizations.get(league_name, {'country': 'GB', 'search_lang': 'en', 'ui_lang': 'en-GB'})
 
