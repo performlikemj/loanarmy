@@ -1,6 +1,14 @@
+import os
+import sys
 import pytest
+from flask import Flask
 
-from src.agents.weekly_agent import lint_and_enrich, _display_name
+os.environ.setdefault('API_USE_STUB_DATA', 'true')
+os.environ.setdefault('OPENAI_API_KEY', 'test')
+sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
+
+from src.agents.weekly_agent import lint_and_enrich, _display_name, get_league_localization
+from src.models.league import db, LeagueLocalization
 
 
 def _fake_newsletter():
@@ -40,7 +48,7 @@ def _fake_newsletter():
 
 
 def test_display_name_strips_middle_names():
-    assert _display_name("Charlie Gerard Richard Wellens") == "Charlie Wellens"
+    assert _display_name("Charlie Gerard Richard Wellens") == "C. Wellens"
 
 
 def test_lint_rewrites_unused_substitute_and_builds_highlights():
@@ -53,9 +61,40 @@ def test_lint_rewrites_unused_substitute_and_builds_highlights():
     assert any("Unused substitute" in n or "unused substitute" in n.lower() for n in wellens["match_notes"]) 
 
     # Highlights choose top performers (Fernandez should be first with 2A, 180')
-    assert news["highlights"][0].startswith("Álvaro Fernández")
+    assert news["highlights"][0].startswith("Á. Fernández")
 
     # By-numbers present and sensible
     assert news["by_numbers"]["minutes_leaders"][0]["minutes"] == 180
     ga_agg = news["by_numbers"]["ga_leaders"][0]
     assert ga_agg["g"] + ga_agg["a"] >= 2
+
+
+def test_get_league_localization_known_league():
+    loc = get_league_localization('Eredivisie')
+    assert loc == {'country': 'NL', 'search_lang': 'nl', 'ui_lang': 'nl-NL'}
+
+
+def test_get_league_localization_unknown_league():
+    loc = get_league_localization('Made Up League')
+    assert loc == {'country': 'GB', 'search_lang': 'en', 'ui_lang': 'en-GB'}
+
+
+def test_get_league_localization_from_db():
+    app = Flask(__name__)
+    app.config['SQLALCHEMY_DATABASE_URI'] = 'sqlite:///:memory:'
+    app.config['SQLALCHEMY_TRACK_MODIFICATIONS'] = False
+    db.init_app(app)
+
+    with app.app_context():
+        db.create_all()
+        db.session.add(LeagueLocalization(
+            league_name='A-League',
+            country='AU',
+            search_lang='en',
+            ui_lang='en-AU'
+        ))
+        db.session.commit()
+        loc = get_league_localization('A-League')
+        assert loc == {'country': 'AU', 'search_lang': 'en', 'ui_lang': 'en-AU'}
+        db.session.remove()
+        db.drop_all()
