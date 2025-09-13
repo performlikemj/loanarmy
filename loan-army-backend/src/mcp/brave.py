@@ -1,6 +1,8 @@
 from typing import List, Dict, Any, Tuple
 import os
 import requests
+from datetime import datetime, date, timezone
+from email.utils import parsedate_to_datetime
 
 BASE_URL = "https://api.search.brave.com/res/v1"
 WEB_ENDPOINT = f"{BASE_URL}/web/search"
@@ -17,6 +19,13 @@ _DEF_HEADERS = {
 class BraveApiError(Exception):
     pass
 
+
+# Always-on debug output during development
+def _dbg(msg: str):
+    try:
+        print(f"[BRAVE DBG] {msg}")
+    except Exception:
+        pass
 
 def _headers() -> Dict[str, str]:
     token = os.getenv("BRAVE_API_KEY", "").strip()
@@ -74,6 +83,12 @@ def _normalize_items(kind: str, data: Dict[str, Any]) -> List[Dict[str, Any]]:
 
 
 def _search_once(endpoint: str, params: Dict[str, Any]) -> Dict[str, Any]:
+    try:
+        _dbg(
+            f"HTTP GET {endpoint} q={params.get('q')!r} freshness={params.get('freshness')} count={params.get('count')}"
+        )
+    except Exception:
+        pass
     resp = requests.get(endpoint, params=params, headers=_headers(), timeout=15)
     if resp.status_code == 401:
         raise BraveApiError("Unauthorized: check BRAVE_API_KEY")
@@ -95,6 +110,7 @@ def brave_search(
     search_lang: str = "en",
     ui_lang: str = "en-GB",
     result_filter: List[str] | None = None,
+    strict_range: bool = False,
 ) -> List[Dict[str, Any]]:
     """
     Query Brave Search API for both Web and News results within a date window.
@@ -122,6 +138,7 @@ def brave_search(
     }
     if freshness:
         common["freshness"] = freshness
+    _dbg(f"search q={q!r} freshness={freshness} count={common['count']} country={country} lang={search_lang}/{ui_lang}")
 
     # Web
     web_params = dict(common)
@@ -133,6 +150,14 @@ def brave_search(
     # News
     news_json = _search_once(NEWS_ENDPOINT, dict(common))
     news_items = _normalize_items("news", news_json)
+    _dbg(f"raw_counts web={len(web_items)} news={len(news_items)}")
+    try:
+        ws = " | ".join(f"{(i.get('title') or '')[:60]} @ {(i.get('date') or '')[:16]}" for i in web_items[:2])
+        ns = " | ".join(f"{(i.get('title') or '')[:60]} @ {(i.get('date') or '')[:16]}" for i in news_items[:2])
+        _dbg(f"sample_web: {ws}")
+        _dbg(f"sample_news: {ns}")
+    except Exception:
+        pass
 
     # Merge & de-dup by URL
     seen: set[str] = set()
@@ -144,5 +169,59 @@ def brave_search(
                 continue
             seen.add(u)
             merged.append(r)
+    _dbg(f"merged_unique={len(merged)}")
+
+    if strict_range and freshness:
+        # Post-filter to ensure articles fall within [since, until]
+        def _parse_dt(s: str) -> date | None:
+            if not s or not isinstance(s, str):
+                return None
+            st = s.strip()
+            # ISO-like
+            try:
+                # Normalize 'Z' suffix
+                iso = st.replace('Z', '+00:00')
+                dt = datetime.fromisoformat(iso)
+                return (dt.astimezone(timezone.utc) if dt.tzinfo else dt.replace(tzinfo=timezone.utc)).date()
+            except Exception:
+                pass
+            # First 10 chars as YYYY-MM-DD
+            if len(st) >= 10 and st[4] == '-' and st[7] == '-':
+                try:
+                    return date.fromisoformat(st[:10])
+                except Exception:
+                    pass
+            # RFC 2822 style
+            try:
+                dt = parsedate_to_datetime(st)
+                if dt:
+                    if dt.tzinfo:
+                        dt = dt.astimezone(timezone.utc)
+                    else:
+                        dt = dt.replace(tzinfo=timezone.utc)
+                    return dt.date()
+            except Exception:
+                pass
+            return None
+
+        try:
+            s_date = date.fromisoformat(since[:10])
+            e_date = date.fromisoformat(until[:10])
+        except Exception:
+            s_date = e_date = None
+
+        if s_date and e_date:
+            filtered: List[Dict[str, Any]] = []
+            for r in merged:
+                d = _parse_dt(r.get('date') or '')
+                if d and s_date <= d <= e_date:
+                    filtered.append(r)
+            merged = filtered
+            _dbg(f"filtered_in_range={len(merged)} since={s_date} until={e_date}")
+            try:
+                fs = " | ".join(f"{(i.get('title') or '')[:60]} @ {(i.get('date') or '')[:16]}" for i in merged[:3])
+                _dbg(f"sample_filtered: {fs}")
+            except Exception:
+                pass
 
     return merged[:count]

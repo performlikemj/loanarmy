@@ -121,7 +121,7 @@
       <section class="sections">
         {% for sec in sections %}
           <h2>{{ sec.title }}</h2>
-          {% for it in (sec.items or []) %}
+          {% for it in (sec['items'] or []) %}
             <article class="item">
               <div class="item-header">
                 <div>
@@ -141,13 +141,18 @@
                   {% endfor %}
                 </ul>
               {% endif %}
-              {% if it.links %}
-                <p>
-                  {% for url in it.links %}
-                    <a href="{{ url }}" target="_blank" rel="noopener">Link {{ loop.index }}</a>{% if not loop.last %} · {% endif %}
-                  {% endfor %}
-                </p>
-              {% endif %}
+                      {% if it.links %}
+                        <p>
+                          {% for link in it.links %}
+                            {% if link is string %}
+                              <a href="{{ link }}" target="_blank" rel="noopener">Link {{ loop.index }}</a>
+                            {% elif link.url %}
+                              <a href="{{ link.url }}" target="_blank" rel="noopener">{{ link.title or ('Link ' ~ loop.index) }}</a>
+                            {% endif %}
+                            {% if not loop.last %} · {% endif %}
+                          {% endfor %}
+                        </p>
+                      {% endif %}
             </article>
           {% endfor %}
         {% endfor %}
@@ -188,5 +193,3 @@
     </div>
   </body>
   </html>
-
-

@@ -161,7 +161,9 @@ class APIFootballClient:
         self.current_season = f"{start_year}-{start_year + 1}"
         self.season_start_date = date(start_year, 8, 1)
         self.season_end_date = date(start_year + 1, 6, 30)
-        logger.info(f"Updated season to {self.current_season}")
+        logger.info(
+            f"Updated season to {self.current_season} (start={self.season_start_date}, end={self.season_end_date})"
+        )
             # Keep current default season
     
     def _team_filter(self, team_id: int) -> bool:
@@ -764,7 +766,22 @@ class APIFootballClient:
                 'from': start,
                 'to': end
             })
-            return resp.get('response', [])
+            fixtures = resp.get('response', [])
+            try:
+                logger.info(
+                    f"Fixtures fetched: team={team_id}, season={season}, range={start}..{end}, count={len(fixtures)}"
+                )
+                # Log first few fixture dates + league season to spot drift
+                for fx in fixtures[:3]:
+                    fid = (fx.get('fixture') or {}).get('id')
+                    fdt = (fx.get('fixture') or {}).get('date')
+                    lseason = (fx.get('league') or {}).get('season')
+                    logger.debug(
+                        f"  fx id={fid}, date={fdt}, league.season={lseason} (requested={season})"
+                    )
+            except Exception:
+                pass
+            return fixtures
         except Exception as e:
             logger.error(f"Error fetching fixtures for team {team_id}: {e}")
             return []
@@ -780,6 +797,12 @@ class APIFootballClient:
         """
         # 1️⃣ Try the preferred `/fixtures/players` endpoint first
         team_blocks = self.get_fixture_players(fixture_id)
+        try:
+            logger.debug(
+                f"get_player_stats_for_fixture: player={player_id}, fixture_id={fixture_id}, season={season}, team_blocks={len(team_blocks or [])}"
+            )
+        except Exception:
+            pass
         if team_blocks:
             for team_block in team_blocks:
                 for p in team_block.get('players', []):
@@ -983,7 +1006,13 @@ class APIFootballClient:
         """
         start_str, end_str = week_start.isoformat(), week_end.isoformat()
 
+        logger.info(
+            f"summarize_loanee_week: player={player_id}, loan_team={loan_team_id}, season={season}, range={start_str}..{end_str}"
+        )
         fixtures = self.get_fixtures_for_team(loan_team_id, season, start_str, end_str)
+        logger.info(
+            f"summarize_loanee_week: fixtures_count={len(fixtures)} for team={loan_team_id}"
+        )
         loan_team_name = self.get_team_name(loan_team_id, season)
 
         totals = {'games_played': 0, 'minutes': 0, 'goals': 0,
@@ -994,6 +1023,17 @@ class APIFootballClient:
             fixture_id = fx.get('fixture', {}).get('id')
             if not fixture_id:
                 continue
+            try:
+                # Inspect potential season/date drift per fixture
+                fx_date = (fx.get('fixture') or {}).get('date')
+                fx_league_season = (fx.get('league') or {}).get('season')
+                # If API returns a league season that doesn't match the requested one, warn
+                if fx_league_season is not None and fx_league_season != season:
+                    logger.warning(
+                        f"Fixture season drift: fixture_id={fixture_id}, league.season={fx_league_season}, requested={season}, date={fx_date}"
+                    )
+            except Exception:
+                pass
 
             # Player stats for this fixture
             pstats = self.get_player_stats_for_fixture(player_id, season, fixture_id)
@@ -1078,6 +1118,9 @@ class APIFootballClient:
         from src.models.league import LoanedPlayer, Team
 
         start_str, end_str = week_start.isoformat(), week_end.isoformat()
+        logger.info(
+            f"summarize_parent_loans_week: parent_api_id={parent_team_api_id}, season={season}, range={start_str}..{end_str}"
+        )
         parent_name = self.get_team_name(parent_team_api_id, season)
 
         # ------------------------------------------------------------------
@@ -1125,6 +1168,18 @@ class APIFootballClient:
                 )
                 s["player_name"] = info["player_name"]
                 s["loan_team_name"] = info["loan_team_name"]
+                try:
+                    logger.info(
+                        f"Loanee weekly summary: player={s.get('player_name')} team={s.get('loan_team_name')} matches={len(s.get('matches') or [])} totals={s.get('totals')}"
+                    )
+                    # Log first fixture date and league.season to spot season drift
+                    if s.get('matches'):
+                        m0 = s['matches'][0]
+                        logger.debug(
+                            f"  first_match: fixture_id={m0.get('fixture_id')} date={m0.get('date')} comp={m0.get('competition')}"
+                        )
+                except Exception:
+                    pass
                 summaries.append(s)
             except Exception as exc:
                 logger.warning(f"Loanee summary failed for {info}: {exc}")
@@ -1254,20 +1309,65 @@ class APIFootballClient:
             logger.error(f"Error fetching current loans for team {team_id}: {e}")
             return []
     
-    def get_player_by_id(self, player_id: int) -> Dict[str, Any]:
-        """Get player information by ID from API-Football."""
+    def get_player_by_id(self, player_id: int, season: Optional[int] = None) -> Dict[str, Any]:
+        """Get player information by ID with smart fallbacks.
+
+        Tries the current season first, then walks backwards through any
+        available seasons for this player. As a last resort, falls back to the
+        transfers endpoint (which does not require a season) to at least obtain
+        the player's name. If all API lookups fail, returns sample data.
+        """
+        target_season = season or self.current_season_start_year
         try:
-            response = self._make_request('players', {'id': player_id, 'season': self.current_season_start_year})
-            players_data = response.get('response', [])
-            
+            # 1) Try the target season directly
+            resp = self._make_request('players', {'id': player_id, 'season': target_season})
+            players_data = resp.get('response', [])
             if players_data:
-                # API-Football returns player data nested in response array
-                player_info = players_data[0]  # First result
-                return player_info
-            else:
-                # Return sample data if API call fails or no API key
-                return self._get_sample_player_data(player_id)
-                
+                return players_data[0]
+
+            # 2) Discover available seasons for this player, then try the most recent
+            seasons_resp = self._make_request('players/seasons', {'player': player_id})
+            seasons = seasons_resp.get('response', []) or []
+            # Sort seasons descending and prefer seasons <= target_season
+            seasons_sorted = sorted([int(s) for s in seasons if isinstance(s, int)], reverse=True)
+            for s in seasons_sorted:
+                if target_season is not None and s > int(target_season):
+                    continue
+                try:
+                    r = self._make_request('players', {'id': player_id, 'season': s})
+                    r_data = r.get('response', [])
+                    if r_data:
+                        logger.info(f"ℹ️ Fetched player {player_id} from fallback season {s}")
+                        return r_data[0]
+                except Exception:
+                    # Try next season
+                    continue
+
+            # 3) Last resort: use transfers endpoint to get the player's name
+            try:
+                tr = self._make_request('transfers', {'player': player_id})
+                t_resp = tr.get('response', []) or []
+                if t_resp:
+                    p = (t_resp[0] or {}).get('player', {})
+                    name = p.get('name') or 'Unknown'
+                    firstname = p.get('firstname')
+                    lastname = p.get('lastname')
+                    logger.info(f"ℹ️ Using transfers fallback name for player {player_id}: {name}")
+                    return {
+                        'player': {
+                            'id': player_id,
+                            'name': name,
+                            'firstname': firstname,
+                            'lastname': lastname,
+                            'photo': None,
+                        },
+                        'statistics': []
+                    }
+            except Exception:
+                pass
+
+            # 4) Ultimate fallback to sample
+            return self._get_sample_player_data(player_id)
         except Exception as e:
             logger.error(f"Error fetching player {player_id}: {e}")
             return self._get_sample_player_data(player_id)
@@ -2575,4 +2675,3 @@ class APIFootballClient:
                     'games': {'position': 'Unknown'}
                 }]
             }
-

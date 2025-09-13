@@ -145,6 +145,11 @@ class LoanedPlayer(db.Model):
     created_at = db.Column(db.DateTime, default=datetime.now(timezone.utc))
     updated_at = db.Column(db.DateTime, default=datetime.now(timezone.utc), onupdate=datetime.now(timezone.utc))
     
+    __table_args__ = (
+        # Ensure one row per player/parent/loan/window
+        db.UniqueConstraint('player_id', 'primary_team_id', 'loan_team_id', 'window_key', name='uq_loans_player_parent_loan_window'),
+    )
+
     def to_dict(self):
         return {
             'id': self.id,
@@ -294,3 +299,18 @@ class LoanFlag(db.Model):
     created_at = db.Column(db.DateTime, default=datetime.now(timezone.utc))
     resolved_at = db.Column(db.DateTime)
 
+
+class AdminSetting(db.Model):
+    __tablename__ = 'admin_settings'
+
+    id = db.Column(db.Integer, primary_key=True)
+    key = db.Column(db.String(100), unique=True, nullable=False)
+    value_json = db.Column(db.Text, nullable=True)
+    updated_at = db.Column(db.DateTime, default=datetime.now(timezone.utc), onupdate=datetime.now(timezone.utc))
+
+    def to_dict(self):
+        return {
+            'key': self.key,
+            'value': self.value_json,
+            'updated_at': self.updated_at.isoformat() if self.updated_at else None,
+        }

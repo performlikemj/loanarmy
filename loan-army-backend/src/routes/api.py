@@ -1,5 +1,5 @@
 from flask import Blueprint, request, jsonify, make_response, render_template, Response
-from src.models.league import db, League, Team, LoanedPlayer, Newsletter, UserSubscription, EmailToken
+from src.models.league import db, League, Team, LoanedPlayer, Newsletter, UserSubscription, EmailToken, LoanFlag, AdminSetting
 from src.api_football_client import APIFootballClient
 from datetime import datetime, date, timedelta, timezone
 import uuid
@@ -9,6 +9,7 @@ import csv
 import io
 import os
 from functools import wraps
+from sqlalchemy import or_
 import time
 from datetime import timedelta
 from typing import Any
@@ -170,6 +171,19 @@ def generate_weekly_all():
             target_dt = date.today()
         from src.jobs.run_weekly_newsletters import run_for_date
         result = run_for_date(target_dt)
+        # Append to run history for admin UI visibility
+        try:
+            ok = len([r for r in (result or []) if r.get("newsletter_id")])
+            errs = len([r for r in (result or []) if r.get("error")])
+            _append_run_history({
+                "kind": "newsletter-run",
+                "ran_for": target_dt.isoformat(),
+                "ok": ok,
+                "errors": errs,
+                "message": f"Weekly newsletters run for {target_dt.isoformat()} ({ok} ok, {errs} errors)"
+            })
+        except Exception:
+            pass
         return jsonify({"ran_for": target_dt.isoformat(), "results": result})
     except Exception as e:
         logger.exception("generate-weekly-all failed")
@@ -186,6 +200,19 @@ def generate_weekly_all_mcp():
 
         from src.jobs.run_weekly_newsletters_mcp import run_for_date
         result = run_for_date(tdate)
+        # Append to run history
+        try:
+            ok = len([r for r in (result or []) if r.get("status") == "ok"])  # mcp variant shape
+            errs = len([r for r in (result or []) if r.get("status") == "error"]) 
+            _append_run_history({
+                "kind": "newsletter-run-mcp",
+                "ran_for": tdate.isoformat(),
+                "ok": ok,
+                "errors": errs,
+                "message": f"Weekly newsletters (MCP) for {tdate.isoformat()} ({ok} ok, {errs} errors)"
+            })
+        except Exception:
+            pass
         return jsonify({"ran_for": tdate.isoformat(), "results": result})
     except Exception as e:
         logger.exception("generate-weekly-all-mcp failed")
@@ -389,15 +416,21 @@ def get_team_loans(team_id):
     except Exception as e:
         return jsonify({'error': str(e)}), 500
 
-@api_bp.route('/teams/<int:team_id>/loans/season/<season>', methods=['GET'])
-def get_team_loans_by_season(team_id, season):
-    """Get loans for a specific team in a specific season."""
+@api_bp.route('/teams/<int:team_id>/loans/season/<int:season>', methods=['GET'])
+def get_team_loans_by_season(team_id: int, season: int):
+    """Get loans for a specific team in a specific season (by window_key prefix)."""
     try:
         team = Team.query.get_or_404(team_id)
-        loans = LoanedPlayer.query.filter_by(
-            primary_team_id=team.id,
-            loan_season=season
-        ).all()
+        slug = f"{season}-{str(season + 1)[-2:]}"
+        active_only = (request.args.get('active_only', 'false').lower() in ('true', '1', 'yes', 'y'))
+        q = (
+            LoanedPlayer.query
+            .filter(LoanedPlayer.primary_team_id == team.id)
+            .filter(LoanedPlayer.window_key.like(f"{slug}%"))
+        )
+        if active_only:
+            q = q.filter(LoanedPlayer.is_active.is_(True))
+        loans = q.order_by(LoanedPlayer.updated_at.desc()).all()
         return jsonify([loan.to_dict() for loan in loans])
     except Exception as e:
         return jsonify({'error': str(e)}), 500
@@ -464,10 +497,11 @@ def get_loans():
     try:
         query = LoanedPlayer.query
         
-        # Filter by season
-        season = request.args.get('season')
-        if season:
-            query = query.filter_by(loan_season=season)
+        # Filter by season (derive from window_key prefix)
+        season_val = request.args.get('season', type=int)
+        if season_val:
+            slug = f"{season_val}-{str(season_val + 1)[-2:]}"
+            query = query.filter(LoanedPlayer.window_key.like(f"{slug}%"))
         
         # Filter by active status
         active_only = request.args.get('active_only', 'false').lower() == 'true'
@@ -484,7 +518,7 @@ def get_loans():
         if early_termination is not None:
             query = query.filter_by(early_termination=early_termination.lower() == 'true')
         
-        loans = query.order_by(LoanedPlayer.loan_start_date.desc()).all()
+        loans = query.order_by(LoanedPlayer.updated_at.desc()).all()
         return jsonify([loan.to_dict() for loan in loans])
     except Exception as e:
         return jsonify({'error': str(e)}), 500
@@ -499,11 +533,12 @@ def get_active_loans():
     except Exception as e:
         return jsonify({'error': str(e)}), 500
 
-@api_bp.route('/loans/season/<season>', methods=['GET'])
-def get_loans_by_season(season):
-    """Get all loans for a specific season."""
+@api_bp.route('/loans/season/<int:season>', methods=['GET'])
+def get_loans_by_season(season: int):
+    """Get all loans for a specific season (by window_key prefix)."""
     try:
-        loans = LoanedPlayer.query.filter_by(loan_season=season).all()
+        slug = f"{season}-{str(season + 1)[-2:]}"
+        loans = LoanedPlayer.query.filter(LoanedPlayer.window_key.like(f"{slug}%")).all()
         return jsonify([loan.to_dict() for loan in loans])
     except Exception as e:
         return jsonify({'error': str(e)}), 500
@@ -1042,93 +1077,49 @@ def generate_newsletter():
                 'newsletter': existing.to_dict()
             })
         
-        # Get loan data for the target date (season-based)
-        current_season = api_client.current_season
-        loans = LoanedPlayer.query.filter_by(
-            parent_team_id=team_id,
-            loan_season=current_season
-        ).all()
-        
-        # Calculate week start and end dates for weekly newsletters
+        # For weekly newsletters, use the OpenAI-powered generator which
+        # compiles full player + loan team weekly context before writing,
+        # then persist the newsletter with the same semantics as before.
         if newsletter_type == 'weekly':
-            # Get the Monday of the week containing target_date
-            days_since_monday = target_date.weekday()
-            week_start_date = target_date - timedelta(days=days_since_monday)
-            week_end_date = week_start_date + timedelta(days=6)
-        else:
-            week_start_date = target_date
-            week_end_date = target_date
+            from src.agents.weekly_newsletter_agent import (
+                compose_team_weekly_newsletter,
+                persist_newsletter,
+            )
+
+            composed = compose_team_weekly_newsletter(team_id, target_date)
+            # Persist using shared helper (sets generated_date/published_date)
+            row = persist_newsletter(
+                team_db_id=team_id,
+                content_json_str=composed['content_json'],
+                week_start=composed['week_start'],
+                week_end=composed['week_end'],
+                issue_date=target_date,
+                newsletter_type='weekly',
+            )
+            return jsonify({
+                'message': 'Newsletter generated successfully',
+                'newsletter': row.to_dict()
+            })
         
-        # Generate newsletter content using AI (mock implementation)
-        newsletter_content = generate_newsletter_content(team, loans, target_date, newsletter_type)
-        
-        # Create newsletter record
-        newsletter = Newsletter(
-            team_id=team_id,
-            newsletter_type=newsletter_type,
-            title=json.loads(newsletter_content)['title'],
-            content=newsletter_content,
-            issue_date=target_date,
-            week_start_date=week_start_date,
-            week_end_date=week_end_date,
-            generated_date=datetime.utcnow(),
-            published=True,
-            published_date=datetime.utcnow()
-        )
-        
-        db.session.add(newsletter)
-        db.session.commit()
-        
-        return jsonify({
-            'message': 'Newsletter generated successfully',
-            'newsletter': newsletter.to_dict()
-        })
+        # Fallback for other types (currently unsupported):
+        return jsonify({'error': f'Unsupported newsletter type: {newsletter_type}'}), 400
         
     except Exception as e:
+        # Ensure DB session is not left in a failed state for subsequent requests
+        try:
+            db.session.rollback()
+        except Exception:
+            pass
         logger.error(f"Error generating newsletter: {e}")
         return jsonify({'error': str(e)}), 500
 
-def generate_newsletter_content(team, loans, target_date, newsletter_type):
-    """Generate AI-powered newsletter content with season context."""
-    # Mock implementation - in real version, this would use OpenAI API
-    active_loans = [loan for loan in loans if loan.is_active]
-    terminated_loans = [loan for loan in loans if not loan.is_active]
-    
-    content = {
-        'title': f'{team.name} Loan Update - {target_date.strftime("%B %d, %Y")}',
-        'summary': f'Season {api_client.current_season} update on {team.name}\'s loan activities.',
-        'season': api_client.current_season,
-        'sections': []
-    }
-    
-    if active_loans:
-        content['sections'].append({
-            'title': 'Active Loans',
-            'content': f'{len(active_loans)} players currently out on loan'
-        })
-        
-        for loan in active_loans:
-            performance_summary = f"{loan.appearances} appearances"
-            if loan.goals > 0:
-                performance_summary += f", {loan.goals} goals"
-            if loan.assists > 0:
-                performance_summary += f", {loan.assists} assists"
-            
-            content['sections'].append({
-                'player_name': loan.player_name,
-                'loan_team': loan.loan_team_name,
-                'status': 'Active loan',
-                'performance': performance_summary,
-                'analysis': f'Player showing {"excellent" if loan.goals > 3 else "good" if loan.appearances > 10 else "steady"} progress at {loan.loan_team_name}.'
-            })
-    
-    if not active_loans:
-        content['sections'].append({
-            'title': 'No Current Loans',
-            'content': f'{team.name} currently has no players out on loan for the {api_client.current_season} season.'
-        })
-    
-    return json.dumps(content)
+def generate_newsletter_content(*args, **kwargs):  # pragma: no cover - legacy shim
+    """Deprecated: shim retained for backward compatibility.
+    The /newsletters/generate endpoint now uses the OpenAI-backed
+    generator for 'weekly' type. This function is unused and will
+    be removed in a future cleanup.
+    """
+    raise NotImplementedError("Legacy mock generator removed; use generate_team_weekly_newsletter")
 
 # Subscription endpoints
 @api_bp.route('/subscriptions', methods=['GET'])
@@ -1402,18 +1393,36 @@ def delete_subscription(subscription_id):
 def get_overview_stats():
     """Get overview statistics."""
     try:
-        current_season = api_client.current_season
-        
+        # current_season e.g. "2025-26"; also have start-year
+        current_season_slug = api_client.current_season
+        season_start_year = api_client.current_season_start_year
+        if not current_season_slug and season_start_year:
+            current_season_slug = f"{season_start_year}-{str(season_start_year + 1)[-2:]}"
+
+        # Distinct teams with active loans (use correct column name)
+        teams_with_active_loans = (
+            db.session.query(LoanedPlayer.primary_team_id)
+            .filter(LoanedPlayer.is_active.is_(True))
+            .distinct()
+            .count()
+        )
+
+        season_loans_count = 0
+        if current_season_slug:
+            season_loans_count = LoanedPlayer.query.filter(
+                LoanedPlayer.window_key.like(f"{current_season_slug}%")
+            ).count()
+
         stats = {
             'total_teams': Team.query.filter_by(is_active=True).count(),
             'european_leagues': League.query.filter_by(is_european_top_league=True).count(),
             'total_active_loans': LoanedPlayer.query.filter_by(is_active=True).count(),
-            'season_loans': LoanedPlayer.query.filter_by(loan_season=current_season).count(),
-            'early_terminations': LoanedPlayer.query.filter_by(early_termination=True, loan_season=current_season).count(),
-            'teams_with_loans': db.session.query(LoanedPlayer.parent_team_id).filter_by(is_active=True).distinct().count(),
-            'total_subscriptions': UserSubscription.query.filter_by(is_active=True).count(),
+            'season_loans': season_loans_count,
+            'early_terminations': 0,
+            'teams_with_loans': teams_with_active_loans,
+            'total_subscriptions': UserSubscription.query.filter_by(active=True).count() if hasattr(UserSubscription, 'active') else UserSubscription.query.count(),
             'total_newsletters': Newsletter.query.filter_by(published=True).count(),
-            'current_season': current_season
+            'current_season': current_season_slug
         }
         return jsonify(stats)
     except Exception as e:
@@ -1423,28 +1432,27 @@ def get_overview_stats():
 def get_loan_stats():
     """Get detailed loan statistics."""
     try:
-        current_season = api_client.current_season
-        
-        # Loan type breakdown
-        loan_types = db.session.query(
-            LoanedPlayer.loan_type,
-            db.func.count(LoanedPlayer.id).label('count')
-        ).filter_by(loan_season=current_season).group_by(LoanedPlayer.loan_type).all()
-        
-        # Termination reasons
-        termination_reasons = db.session.query(
-            LoanedPlayer.termination_reason,
-            db.func.count(LoanedPlayer.id).label('count')
-        ).filter_by(early_termination=True, loan_season=current_season).group_by(LoanedPlayer.termination_reason).all()
-        
+        current_season_slug = api_client.current_season
+        season_start_year = api_client.current_season_start_year
+        if not current_season_slug and season_start_year:
+            current_season_slug = f"{season_start_year}-{str(season_start_year + 1)[-2:]}"
+
+        base_q = LoanedPlayer.query
+        if current_season_slug:
+            base_q = base_q.filter(LoanedPlayer.window_key.like(f"{current_season_slug}%"))
+
+        total_season = base_q.count()
+        active = base_q.filter(LoanedPlayer.is_active.is_(True)).count()
+        completed = base_q.filter(LoanedPlayer.is_active.is_(False)).count()
+
         stats = {
-            'current_season': current_season,
-            'loan_types': [{'type': lt[0], 'count': lt[1]} for lt in loan_types],
-            'termination_reasons': [{'reason': tr[0], 'count': tr[1]} for tr in termination_reasons if tr[0]],
-            'total_season_loans': LoanedPlayer.query.filter_by(loan_season=current_season).count(),
-            'active_loans': LoanedPlayer.query.filter_by(loan_season=current_season, is_active=True).count(),
-            'completed_loans': LoanedPlayer.query.filter_by(loan_season=current_season, is_active=False, early_termination=False).count(),
-            'early_terminations': LoanedPlayer.query.filter_by(loan_season=current_season, early_termination=True).count()
+            'current_season': current_season_slug,
+            'loan_types': [],
+            'termination_reasons': [],
+            'total_season_loans': total_season,
+            'active_loans': active,
+            'completed_loans': completed,
+            'early_terminations': 0
         }
         
         return jsonify(stats)
@@ -2039,7 +2047,7 @@ def generate_weekly_mcp_team():
         return jsonify({'error': str(e)}), 500
 
 # --- Guest loan flag endpoints ---
-from src.models.league import LoanFlag
+from src.models.league import LoanFlag, AdminSetting
 
 @api_bp.route('/loans/flags', methods=['POST'])
 def create_loan_flag():
@@ -2118,4 +2126,1382 @@ def resolve_flag(flag_id: int):
         return jsonify({'message': 'Flag resolved', 'deactivated_loans': deactivated})
     except Exception as e:
         logger.exception('Error resolving loan flag')
+        return jsonify({'error': str(e)}), 500
+
+# --- Admin config & run control ---
+
+def _get_admin_bool(key: str, default: bool = False) -> bool:
+    try:
+        row = AdminSetting.query.filter_by(key=key).first()
+        if row and row.value_json is not None:
+            v = row.value_json.strip().lower()
+            return v in ('1', 'true', 'yes', 'y')
+    except Exception:
+        pass
+    return default
+
+def _set_admin_values(kv: dict[str, str]):
+    for k, v in kv.items():
+        row = AdminSetting.query.filter_by(key=k).first()
+        if not row:
+            row = AdminSetting(key=k, value_json=str(v))
+            db.session.add(row)
+        else:
+            row.value_json = str(v)
+    db.session.commit()
+
+@api_bp.route('/admin/config', methods=['GET'])
+@require_api_key
+def get_admin_config():
+    try:
+        rows = AdminSetting.query.all()
+        return jsonify({r.key: r.value_json for r in rows})
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
+
+@api_bp.route('/admin/config', methods=['POST'])
+@require_api_key
+def update_admin_config():
+    try:
+        payload = request.get_json() or {}
+        settings = payload.get('settings') or {}
+        if not isinstance(settings, dict):
+            return jsonify({'error': 'settings must be an object'}), 400
+        # store as stringified booleans/values
+        to_store = {k: ('true' if bool(v) else 'false') if isinstance(v, bool) else str(v) for k, v in settings.items()}
+        _set_admin_values(to_store)
+        return jsonify({'message': 'Updated', 'updated': list(settings.keys())})
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
+
+@api_bp.route('/admin/run-status', methods=['GET'])
+@require_api_key
+def get_run_status():
+    try:
+        paused = _get_admin_bool('runs_paused', False)
+        return jsonify({'runs_paused': paused})
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
+
+@api_bp.route('/admin/run-status', methods=['POST'])
+@require_api_key
+def set_run_status():
+    try:
+        payload = request.get_json() or {}
+        paused = bool(payload.get('runs_paused', False))
+        _set_admin_values({'runs_paused': 'true' if paused else 'false'})
+        return jsonify({'message': 'Run status updated', 'runs_paused': paused})
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
+
+# --- Admin: Loans management ---
+@api_bp.route('/admin/loans', methods=['GET'])
+@require_api_key
+def admin_list_loans():
+    try:
+        primary_team_api_id = request.args.get('primary_team_api_id', type=int)
+        primary_team_db_id = request.args.get('primary_team_db_id', type=int)
+        season = request.args.get('season', type=int)
+        active_only = request.args.get('active_only', 'true').lower() in ('true','1','yes','y')
+
+        q = LoanedPlayer.query
+        # Filter by primary team
+        if primary_team_db_id:
+            q = q.filter(LoanedPlayer.primary_team_id == primary_team_db_id)
+        elif primary_team_api_id:
+            # Resolve DB id from API id (requires season)
+            if season is None:
+                return jsonify({'error': 'season is required when filtering by primary_team_api_id'}), 400
+            row = Team.query.filter_by(team_id=primary_team_api_id, season=season).first()
+            if not row:
+                return jsonify({'error': f'Primary team api_id={primary_team_api_id} not found for season {season}'}), 404
+            q = q.filter(LoanedPlayer.primary_team_id == row.id)
+
+        if active_only:
+            q = q.filter(LoanedPlayer.is_active.is_(True))
+
+        # Optional: basic search by player_id or name
+        player_id = request.args.get('player_id', type=int)
+        if player_id:
+            q = q.filter(LoanedPlayer.player_id == player_id)
+        player_name = request.args.get('player_name')
+        if player_name:
+            q = q.filter(LoanedPlayer.player_name.ilike(f"%{player_name}%"))
+
+        loans = q.order_by(LoanedPlayer.updated_at.desc()).all()
+        return jsonify([l.to_dict() for l in loans])
+    except Exception as e:
+        logger.exception('admin_list_loans failed')
+        return jsonify({'error': str(e)}), 500
+
+def _ensure_team_admin(api_team_id: int, season_start_year: int) -> Team | None:
+    """
+    Ensure a Team row exists for the given API team id and season.
+
+    Improvement: attach the correct League (Top‑5) for the season when creating
+    a new Team, so the admin UI can group teams by league instead of "Other".
+    """
+    try:
+        if not api_team_id:
+            return None
+
+        # 1) Existing row for this season?
+        t = Team.query.filter_by(team_id=api_team_id, season=season_start_year).first()
+        if t:
+            return t
+
+        # 2) Fetch minimal team info for naming
+        tdata = api_client.get_team_by_id(api_team_id, season_start_year)
+        ti = (tdata or {}).get('team') or {}
+        team_name = ti.get('name') or f'Team {api_team_id}'
+        team_code = ti.get('code')
+        team_country = ti.get('country') or 'Unknown'
+        founded = ti.get('founded')
+        national = bool(ti.get('national', False))
+        logo = ti.get('logo')
+
+        # 3) Try to resolve league from Top‑5 mapping for this season
+        league_fk_id = None
+        try:
+            teams_map = api_client.get_teams_with_leagues_for_season(season_start_year)  # {api_team_id: {...}}
+            meta = teams_map.get(api_team_id)
+            if meta:
+                league_api_id = meta.get('league_id')
+                league_name = meta.get('league_name')
+                league_country = meta.get('country') or 'Unknown'
+                if league_api_id and league_name:
+                    league_row = League.query.filter_by(league_id=league_api_id).first()
+                    if not league_row:
+                        league_row = League(
+                            league_id=league_api_id,
+                            name=league_name,
+                            country=league_country,
+                            season=season_start_year,
+                            is_european_top_league=True,
+                        )
+                        db.session.add(league_row)
+                        db.session.flush()
+                    league_fk_id = league_row.id
+        except Exception:
+            # Non‑fatal; leave as None if we cannot resolve
+            pass
+
+        # 4) Create team row with resolved league (if found)
+        team = Team(
+            team_id=api_team_id,
+            name=team_name,
+            code=team_code,
+            country=team_country,
+            founded=founded,
+            national=national,
+            logo=logo,
+            season=season_start_year or api_client.current_season_start_year,
+            is_active=True,
+            league_id=league_fk_id,
+        )
+        db.session.add(team)
+        db.session.flush()
+        return team
+    except Exception:
+        return None
+
+@api_bp.route('/admin/loans', methods=['POST'])
+@require_api_key
+def admin_create_loan():
+    try:
+        data = request.get_json() or {}
+        player_id = int(data.get('player_id') or 0)
+        if not player_id:
+            return jsonify({'error': 'player_id is required'}), 400
+        player_name = (data.get('player_name') or '').strip() or f'Player {player_id}'
+        season = data.get('season')
+        window_key = (data.get('window_key') or '').strip() or None
+        if season is None and window_key:
+            try:
+                season = int(window_key.split('::')[0].split('-')[0])
+            except Exception:
+                season = None
+        season = int(season) if season is not None else api_client.current_season_start_year
+
+        # Resolve or create teams from API ids
+        pt_api = data.get('primary_team_api_id')
+        lt_api = data.get('loan_team_api_id')
+        pt_db = data.get('primary_team_db_id')
+        lt_db = data.get('loan_team_db_id')
+        if not (pt_db or pt_api) or not (lt_db or lt_api):
+            return jsonify({'error': 'primary_team_* and loan_team_* are required (db_id or api_id)'}), 400
+
+        parent_team = Team.query.get(int(pt_db)) if pt_db else _ensure_team_admin(int(pt_api), season)
+        loan_team = Team.query.get(int(lt_db)) if lt_db else _ensure_team_admin(int(lt_api), season)
+        if not parent_team or not loan_team:
+            return jsonify({'error': 'Unable to resolve teams. Provide valid db ids or api ids with season.'}), 400
+
+        # Names fallback
+        primary_team_name = (data.get('primary_team_name') or parent_team.name)
+        loan_team_name = (data.get('loan_team_name') or loan_team.name)
+        reviewer_notes = (data.get('reviewer_notes') or '').strip() or None
+
+        # Enforce uniqueness by key; reactivate if an inactive row exists
+        any_row = LoanedPlayer.query.filter_by(
+            player_id=player_id,
+            primary_team_id=parent_team.id,
+            loan_team_id=loan_team.id,
+            window_key=window_key,
+        ).first()
+        if any_row:
+            if any_row.is_active:
+                return jsonify({'error': 'duplicate loan for same player/teams/window'}), 409
+            # Reactivate existing record
+            any_row.is_active = True
+            any_row.player_name = player_name or any_row.player_name
+            any_row.primary_team_name = primary_team_name or any_row.primary_team_name
+            any_row.loan_team_name = loan_team_name or any_row.loan_team_name
+            any_row.reviewer_notes = reviewer_notes or any_row.reviewer_notes
+            db.session.commit()
+            return jsonify({'message': 'reactivated', 'loan': any_row.to_dict()}), 200
+
+        loan = LoanedPlayer(
+            player_id=player_id,
+            player_name=player_name,
+            primary_team_id=parent_team.id,
+            primary_team_name=primary_team_name,
+            loan_team_id=loan_team.id,
+            loan_team_name=loan_team_name,
+            window_key=window_key,
+            reviewer_notes=reviewer_notes,
+            is_active=True,
+        )
+        db.session.add(loan)
+        db.session.commit()
+        return jsonify({'message': 'created', 'loan': loan.to_dict()}), 201
+    except Exception as e:
+        logger.exception('admin_create_loan failed')
+        db.session.rollback()
+        return jsonify({'error': str(e)}), 500
+
+@api_bp.route('/admin/loans/<int:loan_id>', methods=['PUT'])
+@require_api_key
+def admin_update_loan(loan_id: int):
+    try:
+        loan = LoanedPlayer.query.get_or_404(loan_id)
+        data = request.get_json() or {}
+
+        # Move between teams if provided
+        season = data.get('season')
+        if season is not None:
+            try:
+                season = int(season)
+            except Exception:
+                season = api_client.current_season_start_year
+        else:
+            season = api_client.current_season_start_year
+
+        def _maybe_move_team(kind: str):
+            api_id = data.get(f'{kind}_team_api_id')
+            db_id = data.get(f'{kind}_team_db_id')
+            name = data.get(f'{kind}_team_name')
+            if db_id or api_id:
+                team = Team.query.get(int(db_id)) if db_id else _ensure_team_admin(int(api_id), season)
+                if not team:
+                    raise ValueError(f"Unable to resolve {kind} team")
+                if kind == 'primary':
+                    new_primary_id = team.id
+                    new_loan_id = loan.loan_team_id
+                else:
+                    new_primary_id = loan.primary_team_id
+                    new_loan_id = team.id
+                # Pre-check for uniqueness conflict against another row
+                exists = LoanedPlayer.query.filter(
+                    LoanedPlayer.id != loan.id,
+                    LoanedPlayer.player_id == loan.player_id,
+                    LoanedPlayer.primary_team_id == new_primary_id,
+                    LoanedPlayer.loan_team_id == new_loan_id,
+                    LoanedPlayer.window_key == loan.window_key,
+                ).first()
+                if exists:
+                    raise ValueError('update would duplicate an existing loan row')
+                if kind == 'primary':
+                    loan.primary_team_id = new_primary_id
+                    if name:
+                        loan.primary_team_name = name
+                else:
+                    loan.loan_team_id = new_loan_id
+                    if name:
+                        loan.loan_team_name = name
+            elif name:
+                if kind == 'primary':
+                    loan.primary_team_name = name
+                else:
+                    loan.loan_team_name = name
+
+        _maybe_move_team('primary')
+        _maybe_move_team('loan')
+
+        if 'is_active' in data:
+            loan.is_active = bool(data.get('is_active'))
+        if 'player_name' in data:
+            loan.player_name = (data.get('player_name') or '').strip() or loan.player_name
+        if 'window_key' in data:
+            loan.window_key = (data.get('window_key') or '').strip() or None
+        if 'reviewer_notes' in data:
+            loan.reviewer_notes = (data.get('reviewer_notes') or '').strip() or None
+
+        db.session.commit()
+        return jsonify({'message': 'updated', 'loan': loan.to_dict()})
+    except Exception as e:
+        logger.exception('admin_update_loan failed')
+        db.session.rollback()
+        # Uniqueness conflict should return 409
+        msg = str(e)
+        if 'duplicate' in msg or 'unique' in msg or 'would duplicate' in msg:
+            return jsonify({'error': msg}), 409
+        return jsonify({'error': msg}), 500
+
+@api_bp.route('/admin/loans/cleanup-duplicates', methods=['POST'])
+@require_api_key
+def admin_cleanup_duplicate_loans():
+    """
+    Remove duplicate LoanedPlayer rows sharing (player_id, primary_team_id, loan_team_id, window_key).
+    Optional JSON body: { "season": 2025 } to limit by season.
+    Keeps the most recently updated row (prefer active), deletes the rest.
+    """
+    try:
+        payload = request.get_json(silent=True) or {}
+        season = payload.get('season')
+        deleted = 0
+        groups = {}
+        q = LoanedPlayer.query
+        if season:
+            slug = f"{int(season)}-{str(int(season) + 1)[-2:]}"
+            q = q.filter(LoanedPlayer.window_key.like(f"{slug}%"))
+        rows = q.all()
+        for r in rows:
+            key = (r.player_id, r.primary_team_id, r.loan_team_id, r.window_key)
+            groups.setdefault(key, []).append(r)
+        for key, lst in groups.items():
+            if len(lst) <= 1:
+                continue
+            # Pick canonical row: active first, then newest updated_at
+            lst_sorted = sorted(lst, key=lambda x: ((1 if x.is_active else 0), (x.updated_at or x.created_at)), reverse=True)
+            keep = lst_sorted[0]
+            to_delete = [r for r in lst_sorted[1:]]
+            for r in to_delete:
+                try:
+                    db.session.delete(r)
+                    deleted += 1
+                except Exception:
+                    db.session.rollback()
+                    continue
+        if deleted:
+            db.session.commit()
+        try:
+            _append_run_history({'kind': 'cleanup-duplicates', 'season': season, 'deleted': deleted})
+        except Exception:
+            pass
+        return jsonify({'deleted': deleted, 'season': season}), 200
+    except Exception as e:
+        logger.exception('admin_cleanup_duplicate_loans failed')
+        db.session.rollback()
+        return jsonify({'error': str(e)}), 500
+
+@api_bp.route('/admin/loans/<int:loan_id>/deactivate', methods=['POST'])
+@require_api_key
+def admin_deactivate_loan(loan_id: int):
+    try:
+        loan = LoanedPlayer.query.get_or_404(loan_id)
+        loan.is_active = False
+        db.session.commit()
+        return jsonify({'message': 'deactivated', 'loan': loan.to_dict()})
+    except Exception as e:
+        logger.exception('admin_deactivate_loan failed')
+        db.session.rollback()
+        return jsonify({'error': str(e)}), 500
+
+
+@api_bp.route('/admin/loans/seed-top5', methods=['POST'])
+@require_api_key
+def admin_seed_top5_loans():
+    """Seed LoanedPlayer rows for Top-5 European leagues for a given season.
+
+    Body: { season: int, window_key?: str, league_ids?: [int], dry_run?: bool }
+    - season: starting year (e.g., 2025 for 2025-26)
+    - window_key default: "{season}-{(season+1)%100:02d}::FULL"
+    - league_ids default: [39, 140, 78, 135, 61]
+    """
+    try:
+        data = request.get_json() or {}
+        season = int(data.get('season') or 0)
+        if not season:
+            return jsonify({'error': 'season is required'}), 400
+        league_ids = data.get('league_ids') or [39, 140, 78, 135, 61]
+        dry_run = bool(data.get('dry_run'))
+        overwrite = bool(data.get('overwrite'))
+
+        # Compute default window_key (e.g., 2025-26::FULL)
+        window_key = (data.get('window_key') or '').strip()
+        if not window_key:
+            end_two = str((season + 1) % 100).zfill(2)
+            window_key = f"{season}-{end_two}::FULL"
+
+        # Ensure season data in local DB
+        _sync_season(season=season)
+        api_client.set_season_year(season)
+        api_client._prime_team_cache(season)
+
+        created = 0
+        skipped = 0
+        candidates_total = 0
+        details = []
+
+        # Collect candidates from two sources: direct transfers and multi-team detection
+        direct = api_client.get_direct_loan_candidates(window_key, league_ids, season=season) or {}
+        multi_team = api_client.detect_multi_team_players(league_ids, window_key, season=season) or {}
+
+        # Merge keys
+        player_ids = set(direct.keys()) | set(multi_team.keys())
+        candidates_total = len(player_ids)
+
+        # Track candidate triplets to support overwrite/prune
+        candidate_triplets: set[tuple[int,int,int]] = set()
+
+        for player_id in player_ids:
+            try:
+                # Derive teams
+                d = direct.get(player_id) or {}
+                mt = multi_team.get(player_id) or []
+                # multi_team format often [loan_team_id, primary_team_id]
+                loan_team_api_id = d.get('loan_team_id') or (mt[0] if len(mt) > 0 else None)
+                primary_team_api_id = d.get('primary_team_id') or (mt[1] if len(mt) > 1 else None)
+                if not (loan_team_api_id and primary_team_api_id):
+                    skipped += 1
+                    details.append({'player_id': player_id, 'status': 'skip_missing_teams'})
+                    continue
+
+                # Fetch player info (name)
+                info = api_client.get_player_by_id(player_id) or {}
+                player_info = info.get('player') or {}
+                player_name = (player_info.get('name') or f'Player {player_id}')
+
+                # Resolve Team DB rows (create if needed)
+                parent_team = _ensure_team_admin(int(primary_team_api_id), season)
+                loan_team = _ensure_team_admin(int(loan_team_api_id), season)
+                if not parent_team or not loan_team:
+                    skipped += 1
+                    details.append({'player_id': player_id, 'status': 'skip_unresolved_team'})
+                    continue
+
+                # Record candidate triplet for potential pruning
+                candidate_triplets.add((int(player_id), int(parent_team.id), int(loan_team.id)))
+
+                # Duplicate handling: prefer reactivation over new row
+                any_row = LoanedPlayer.query.filter_by(
+                    player_id=int(player_id),
+                    primary_team_id=parent_team.id,
+                    loan_team_id=loan_team.id,
+                    window_key=window_key,
+                ).first()
+                if any_row:
+                    if any_row.is_active:
+                        skipped += 1
+                        details.append({'player_id': player_id, 'status': 'skip_duplicate_active'})
+                        continue
+                    if dry_run:
+                        details.append({'player_id': player_id, 'status': 'would_reactivate'})
+                        continue
+                    any_row.is_active = True
+                    any_row.player_name = player_name or any_row.player_name
+                    any_row.primary_team_name = parent_team.name
+                    any_row.loan_team_name = loan_team.name
+                    details.append({'player_id': player_id, 'status': 'reactivated'})
+                else:
+                    if dry_run:
+                        details.append({'player_id': player_id, 'status': 'dry_run'})
+                        continue
+                    loan = LoanedPlayer(
+                        player_id=int(player_id),
+                        player_name=player_name,
+                        primary_team_id=parent_team.id,
+                        primary_team_name=parent_team.name,
+                        loan_team_id=loan_team.id,
+                        loan_team_name=loan_team.name,
+                        window_key=window_key,
+                        reviewer_notes='Seeded via /admin/loans/seed-top5',
+                        is_active=True,
+                    )
+                    db.session.add(loan)
+                    created += 1
+                    details.append({'player_id': player_id, 'status': 'created'})
+            except Exception as ex:
+                skipped += 1
+                details.append({'player_id': player_id, 'status': f'error: {ex}'})
+
+        if not dry_run:
+            db.session.commit()
+
+        # Optional pruning of stale seeded loans for this season
+        pruned = 0
+        if overwrite and not dry_run:
+            try:
+                # Deactivate active rows seeded via seed-top5 for same season not present in new candidates
+                existing_rows = LoanedPlayer.query.filter(
+                    LoanedPlayer.is_active.is_(True)
+                ).all()
+                for row in existing_rows:
+                    try:
+                        if not row.window_key or not str(row.window_key).startswith(str(season)):
+                            continue
+                        # Only prune rows created by top5 seeding to avoid touching hand-entered or team‑seeded items
+                        if not row.reviewer_notes or 'seed-top5' not in row.reviewer_notes:
+                            continue
+                        triplet = (int(row.player_id), int(row.primary_team_id), int(row.loan_team_id))
+                        if triplet not in candidate_triplets:
+                            row.is_active = False
+                            pruned += 1
+                    except Exception:
+                        continue
+                if pruned:
+                    db.session.commit()
+            except Exception:
+                db.session.rollback()
+
+        # Ensure teams for this season have leagues assigned (idempotent backfill)
+        if not dry_run:
+            try:
+                team_map = api_client.get_teams_with_leagues_for_season(season) or {}
+                existing_league_fk_by_api_id: dict[int, int] = {}
+                for row in Team.query.filter(Team.league_id.isnot(None)).all():
+                    existing_league_fk_by_api_id[row.team_id] = row.league_id
+                updated = 0
+                created_leagues = 0
+                for t in Team.query.filter_by(season=season).filter(Team.league_id.is_(None)).all():
+                    meta = team_map.get(t.team_id)
+                    league_row = None
+                    if meta:
+                        league_api_id = meta.get('league_id')
+                        league_name = meta.get('league_name')
+                        league_country = meta.get('country') or 'Unknown'
+                        if league_api_id and league_name:
+                            league_row = League.query.filter_by(league_id=league_api_id).first()
+                            if not league_row:
+                                league_row = League(
+                                    league_id=league_api_id,
+                                    name=league_name,
+                                    country=league_country,
+                                    season=season,
+                                    is_european_top_league=True,
+                                )
+                                db.session.add(league_row)
+                                db.session.flush()
+                                created_leagues += 1
+                    if league_row is None:
+                        fk = existing_league_fk_by_api_id.get(t.team_id)
+                        if fk:
+                            t.league_id = fk
+                            updated += 1
+                            continue
+                    if league_row is None:
+                        continue
+                    t.league_id = league_row.id
+                    updated += 1
+                if updated or created_leagues:
+                    db.session.commit()
+            except Exception:
+                db.session.rollback()
+                pass
+
+        try:
+            _append_run_history({
+                'kind': 'seed-top5-dry' if dry_run else 'seed-top5',
+                'season': season,
+                'window_key': window_key,
+                'created': created,
+                'skipped': skipped,
+                'candidates': candidates_total,
+                'dry_run': dry_run,
+                'pruned': pruned if overwrite and not dry_run else 0,
+            })
+        except Exception:
+            pass
+
+        return jsonify({
+            'message': 'seed_complete' if not dry_run else 'dry_run_complete',
+            'season': season,
+            'window_key': window_key,
+            'candidates': candidates_total,
+            'created': created,
+            'skipped': skipped,
+            'pruned': pruned if overwrite and not dry_run else 0,
+            'dry_run': dry_run,
+            'details': details[:200],  # return a sample to limit payload
+        })
+    except Exception as e:
+        logger.exception('admin_seed_top5_loans failed')
+        db.session.rollback()
+        return jsonify({'error': str(e)}), 500
+
+
+@api_bp.route('/admin/loans/seed-team', methods=['POST'])
+@require_api_key
+def admin_seed_team_loans():
+    """Seed LoanedPlayer rows for a single parent (primary) team for a given season.
+
+    Body: { season: int, team_db_id?: int, api_team_id?: int, window_key?: str, dry_run?: bool, overwrite?: bool }
+    - season: starting year (e.g., 2025 for 2025-26)
+    - Provide either team_db_id or api_team_id (API-Football id)
+    - overwrite: if true, deactivates existing active loans for this player/primary team in the same season before creating new
+    """
+    try:
+        data = request.get_json() or {}
+        season = int(data.get('season') or 0)
+        if not season:
+            return jsonify({'error': 'season is required'}), 400
+        team_db_id = data.get('team_db_id')
+        api_team_id = data.get('api_team_id')
+        dry_run = bool(data.get('dry_run'))
+        overwrite = bool(data.get('overwrite'))
+
+        if not (team_db_id or api_team_id):
+            return jsonify({'error': 'team_db_id or api_team_id required'}), 400
+
+        # Resolve parent team and api id
+        parent_row = Team.query.get(int(team_db_id)) if team_db_id else _ensure_team_admin(int(api_team_id), season)
+        if not parent_row:
+            return jsonify({'error': 'Unable to resolve parent team'}), 400
+        parent_api_id = int(parent_row.team_id)
+
+        # Compute window_key if not provided
+        window_key = (data.get('window_key') or '').strip()
+        if not window_key:
+            end_two = str((season + 1) % 100).zfill(2)
+            window_key = f"{season}-{end_two}::FULL"
+
+        _sync_season(season=season)
+        api_client.set_season_year(season)
+        api_client._prime_team_cache(season)
+
+        # Default to Top-5 leagues; results will be filtered to parent_api_id
+        league_ids = data.get('league_ids') or [39, 140, 78, 135, 61]
+
+        direct = api_client.get_direct_loan_candidates(window_key, league_ids, season=season) or {}
+        multi_team = api_client.detect_multi_team_players(league_ids, window_key, season=season) or {}
+
+        # Filter to this parent team
+        filtered_direct = {pid: info for pid, info in direct.items() if info.get('primary_team_id') == parent_api_id}
+        filtered_multi = {pid: tids for pid, tids in multi_team.items() if (tids + [None, None])[1] == parent_api_id}
+
+        player_ids = set(filtered_direct.keys()) | set(filtered_multi.keys())
+
+        created = 0
+        skipped = 0
+        details = []
+
+        for player_id in player_ids:
+            try:
+                d = filtered_direct.get(player_id) or {}
+                mt = filtered_multi.get(player_id) or []
+                loan_team_api_id = d.get('loan_team_id') or (mt[0] if len(mt) > 0 else None)
+                primary_team_api_id = d.get('primary_team_id') or parent_api_id
+                if not (loan_team_api_id and primary_team_api_id):
+                    skipped += 1
+                    details.append({'player_id': player_id, 'status': 'skip_missing_teams'})
+                    continue
+
+                info = api_client.get_player_by_id(player_id) or {}
+                player_info = info.get('player') or {}
+                player_name = (player_info.get('name') or f'Player {player_id}')
+
+                parent_team = _ensure_team_admin(int(primary_team_api_id), season)
+                loan_team = _ensure_team_admin(int(loan_team_api_id), season)
+                if not parent_team or not loan_team:
+                    skipped += 1
+                    details.append({'player_id': player_id, 'status': 'skip_unresolved_team'})
+                    continue
+
+                if overwrite and not dry_run:
+                    # Deactivate any existing active loans for this player at this parent in this season
+                    season_start = season
+                    # window_key season match by prefix
+                    existing_rows = LoanedPlayer.query.filter(
+                        LoanedPlayer.player_id == int(player_id),
+                        LoanedPlayer.primary_team_id == parent_team.id,
+                        LoanedPlayer.is_active.is_(True),
+                    ).all()
+                    for row in existing_rows:
+                        try:
+                            # Deactivate only same-season rows if window_key matches season
+                            if row.window_key and str(row.window_key).startswith(str(season_start)):
+                                row.is_active = False
+                        except Exception:
+                            continue
+
+                # Duplicate handling: reuse/reactivate instead of creating duplicates
+                any_row = LoanedPlayer.query.filter_by(
+                    player_id=int(player_id),
+                    primary_team_id=parent_team.id,
+                    loan_team_id=loan_team.id,
+                    window_key=window_key,
+                ).first()
+                if any_row:
+                    if any_row.is_active:
+                        skipped += 1
+                        details.append({'player_id': player_id, 'status': 'skip_duplicate_active'})
+                        continue
+                    if dry_run:
+                        details.append({'player_id': player_id, 'status': 'would_reactivate'})
+                        continue
+                    any_row.is_active = True
+                    any_row.player_name = player_name or any_row.player_name
+                    any_row.primary_team_name = parent_team.name
+                    any_row.loan_team_name = loan_team.name
+                    details.append({'player_id': player_id, 'status': 'reactivated'})
+                else:
+                    if dry_run:
+                        details.append({'player_id': player_id, 'status': 'dry_run'})
+                        continue
+                    loan = LoanedPlayer(
+                        player_id=int(player_id),
+                        player_name=player_name,
+                        primary_team_id=parent_team.id,
+                        primary_team_name=parent_team.name,
+                        loan_team_id=loan_team.id,
+                        loan_team_name=loan_team.name,
+                        window_key=window_key,
+                        reviewer_notes='Seeded via /admin/loans/seed-team',
+                        is_active=True,
+                    )
+                    db.session.add(loan)
+                    created += 1
+                    details.append({'player_id': player_id, 'status': 'created'})
+            except Exception as ex:
+                skipped += 1
+                details.append({'player_id': player_id, 'status': f'error: {ex}'})
+
+        if not dry_run:
+            db.session.commit()
+
+        try:
+            _append_run_history({
+                'kind': 'seed-team',
+                'season': season,
+                'team_db_id': parent_row.id,
+                'api_team_id': parent_api_id,
+                'created': created,
+                'skipped': skipped,
+                'dry_run': dry_run,
+            })
+        except Exception:
+            pass
+
+        return jsonify({
+            'message': 'seed_team_complete' if not dry_run else 'seed_team_dry_run_complete',
+            'season': season,
+            'team_db_id': parent_row.id,
+            'api_team_id': parent_api_id,
+            'created': created,
+            'skipped': skipped,
+            'details': details[:200],
+            'dry_run': dry_run,
+        })
+    except Exception as e:
+        logger.exception('admin_seed_team_loans failed')
+        db.session.rollback()
+        return jsonify({'error': str(e)}), 500
+
+# --- Admin: Missing names helpers ---
+def _is_placeholder_name(name: str | None) -> bool:
+    if not name:
+        return True
+    s = str(name).strip()
+    if not s:
+        return True
+    low = s.lower()
+    return low.startswith('player ') or low.startswith('unknown')
+
+
+@api_bp.route('/admin/loans/missing-names', methods=['GET'])
+@require_api_key
+def admin_list_missing_player_names():
+    """List loans whose player_name looks like a placeholder.
+
+    Query params:
+      - season: int (filters by window_key prefix)
+      - primary_team_api_id: int (requires season)
+      - primary_team_db_id: int
+      - active_only: bool (default true)
+      - limit: int (default 200)
+    """
+    try:
+        season = request.args.get('season', type=int)
+        primary_team_api_id = request.args.get('primary_team_api_id', type=int)
+        primary_team_db_id = request.args.get('primary_team_db_id', type=int)
+        active_only = request.args.get('active_only', 'true').lower() in ('true','1','yes','y')
+        limit = request.args.get('limit', type=int) or 200
+
+        q = LoanedPlayer.query
+        if season is not None:
+            slug = f"{season}-{str(season + 1)[-2:]}"
+            q = q.filter(LoanedPlayer.window_key.like(f"{slug}%"))
+
+        if primary_team_db_id:
+            q = q.filter(LoanedPlayer.primary_team_id == int(primary_team_db_id))
+        elif primary_team_api_id:
+            if season is None:
+                return jsonify({'error': 'season is required when using primary_team_api_id'}), 400
+            row = Team.query.filter_by(team_id=primary_team_api_id, season=season).first()
+            if not row:
+                return jsonify({'error': f'Primary team api_id={primary_team_api_id} not found for season {season}'}), 404
+            q = q.filter(LoanedPlayer.primary_team_id == row.id)
+
+        if active_only:
+            q = q.filter(LoanedPlayer.is_active.is_(True))
+
+        # DB-side placeholder filter
+        q = q.filter(
+            or_(
+                LoanedPlayer.player_name.is_(None),
+                LoanedPlayer.player_name == '',
+                LoanedPlayer.player_name.ilike('Player %'),
+                LoanedPlayer.player_name.ilike('Unknown%'),
+            )
+        ).order_by(LoanedPlayer.updated_at.desc()).limit(limit)
+
+        rows = q.all()
+        return jsonify([r.to_dict() for r in rows])
+    except Exception as e:
+        logger.exception('admin_list_missing_player_names failed')
+        return jsonify({'error': str(e)}), 500
+
+
+@api_bp.route('/admin/loans/backfill-names', methods=['POST'])
+@require_api_key
+def admin_backfill_player_names():
+    """Backfill player_name for placeholder rows using API-Football fallbacks.
+
+    Body JSON options:
+      - season: int (required to resolve primary_team_api_id)
+      - primary_team_api_id: int (optional)
+      - primary_team_db_id: int (optional)
+      - active_only: bool (default true)
+      - limit: int (default 200)
+      - dry_run: bool (default false)
+    """
+    try:
+        data = request.get_json() or {}
+        season = data.get('season')
+        season = int(season) if season is not None else api_client.current_season_start_year
+        primary_team_api_id = data.get('primary_team_api_id')
+        primary_team_db_id = data.get('primary_team_db_id')
+        active_only = bool(data.get('active_only', True))
+        limit = int(data.get('limit') or 200)
+        dry_run = bool(data.get('dry_run'))
+
+        q = LoanedPlayer.query
+        if season is not None:
+            slug = f"{season}-{str(season + 1)[-2:]}"
+            q = q.filter(LoanedPlayer.window_key.like(f"{slug}%"))
+
+        if primary_team_db_id:
+            q = q.filter(LoanedPlayer.primary_team_id == int(primary_team_db_id))
+        elif primary_team_api_id:
+            row = Team.query.filter_by(team_id=int(primary_team_api_id), season=season).first()
+            if not row:
+                return jsonify({'error': f'Primary team api_id={primary_team_api_id} not found for season {season}'}), 404
+            q = q.filter(LoanedPlayer.primary_team_id == row.id)
+
+        if active_only:
+            q = q.filter(LoanedPlayer.is_active.is_(True))
+
+        q = q.filter(
+            or_(
+                LoanedPlayer.player_name.is_(None),
+                LoanedPlayer.player_name == '',
+                LoanedPlayer.player_name.ilike('Player %'),
+                LoanedPlayer.player_name.ilike('Unknown%'),
+            )
+        ).order_by(LoanedPlayer.updated_at.desc()).limit(limit)
+
+        rows = q.all()
+
+        updated, skipped = 0, 0
+        details = []
+
+        # Make sure API client season aligns for lookups
+        try:
+            api_client.set_season_year(season)
+        except Exception:
+            pass
+
+        for r in rows:
+            try:
+                info = api_client.get_player_by_id(int(r.player_id), season=season) or {}
+                p = (info.get('player') or {}) if isinstance(info, dict) else {}
+                name = p.get('name') or (f"{p.get('firstname','').strip()} {p.get('lastname','').strip()}".strip())
+                if not name or _is_placeholder_name(name):
+                    skipped += 1
+                    details.append({'loan_id': r.id, 'player_id': r.player_id, 'status': 'no_name_found'})
+                    continue
+                if dry_run:
+                    updated += 1
+                    details.append({'loan_id': r.id, 'player_id': r.player_id, 'new_name': name, 'status': 'would_update'})
+                else:
+                    r.player_name = name
+                    updated += 1
+                    details.append({'loan_id': r.id, 'player_id': r.player_id, 'new_name': name, 'status': 'updated'})
+            except Exception as ex:
+                skipped += 1
+                details.append({'loan_id': r.id, 'player_id': r.player_id, 'status': f'error: {ex}'})
+
+        if not dry_run and updated:
+            db.session.commit()
+
+        try:
+            _append_run_history({
+                'kind': 'backfill-player-names',
+                'season': season,
+                'team_api_id': int(primary_team_api_id) if primary_team_api_id else None,
+                'updated': updated,
+                'skipped': skipped,
+                'dry_run': dry_run,
+            })
+        except Exception:
+            pass
+
+        return jsonify({
+            'season': season,
+            'updated': updated,
+            'skipped': skipped,
+            'dry_run': dry_run,
+            'processed': len(rows),
+            'details': details[:200]
+        })
+    except Exception as e:
+        logger.exception('admin_backfill_player_names failed')
+        db.session.rollback()
+        return jsonify({'error': str(e)}), 500
+
+@api_bp.route('/admin/backfill-team-leagues/<int:season>', methods=['POST'])
+@require_api_key
+def admin_backfill_team_leagues(season: int):
+    """
+    Backfill missing Team.league_id for a given season using API‑Football Top‑5
+    league mapping. Helpful if teams were created via admin seeding before
+    syncing leagues/teams for that season.
+    """
+    try:
+        if not season:
+            return jsonify({'error': 'season is required'}), 400
+
+        # Map: API team id -> { name, league_name, league_id, country }
+        team_map = api_client.get_teams_with_leagues_for_season(season) or {}
+
+        # Build an internal fallback mapping from existing rows (any season)
+        # api_team_id -> existing league FK id
+        existing_league_fk_by_api_id: dict[int, int] = {}
+        for row in Team.query.filter(Team.league_id.isnot(None)).all():
+            existing_league_fk_by_api_id[row.team_id] = row.league_id
+
+        updated = 0
+        created_leagues = 0
+        examined = 0
+
+        rows = Team.query.filter_by(season=season).all()
+        for t in rows:
+            examined += 1
+            if t.league_id:
+                continue
+            meta = team_map.get(t.team_id)
+            league_row = None
+            if meta:
+                league_api_id = meta.get('league_id')
+                league_name = meta.get('league_name')
+                league_country = meta.get('country') or 'Unknown'
+                if league_api_id and league_name:
+                    league_row = League.query.filter_by(league_id=league_api_id).first()
+                    if not league_row:
+                        league_row = League(
+                            league_id=league_api_id,
+                            name=league_name,
+                            country=league_country,
+                            season=season,
+                            is_european_top_league=True,
+                        )
+                        db.session.add(league_row)
+                        db.session.flush()
+                        created_leagues += 1
+            # Fallback: copy league FK from any season if we have one
+            if league_row is None:
+                fallback_fk = existing_league_fk_by_api_id.get(t.team_id)
+                if fallback_fk:
+                    t.league_id = fallback_fk
+                    updated += 1
+                    continue
+            if league_row is None:
+                continue
+            t.league_id = league_row.id
+            updated += 1
+
+        db.session.commit()
+        try:
+            _append_run_history({
+                'kind': 'backfill-team-leagues',
+                'season': season,
+                'updated': updated,
+                'created_leagues': created_leagues,
+                'message': f'Backfilled leagues for season {season}: updated {updated}, created {created_leagues}'
+            })
+        except Exception:
+            pass
+        return jsonify({
+            'season': season,
+            'examined': examined,
+            'updated_teams': updated,
+            'created_leagues': created_leagues,
+        })
+    except Exception as e:
+        logger.exception('admin_backfill_team_leagues failed')
+        db.session.rollback()
+        return jsonify({'error': str(e)}), 500
+
+@api_bp.route('/admin/backfill-team-leagues', methods=['POST'])
+@require_api_key
+def admin_backfill_team_leagues_all():
+    """
+    Backfill Team.league_id across multiple seasons.
+
+    Body (optional): { "seasons": [2023, 2024, ...] }
+    If not provided, operates on all distinct Team.season values present.
+    """
+    try:
+        payload = request.get_json() or {}
+        seasons = payload.get('seasons')
+        if not seasons:
+            seasons = [row[0] for row in db.session.query(Team.season).distinct().all()]
+
+        summary = []
+        total_updated = 0
+        total_created_leagues = 0
+        total_examined = 0
+
+        for season in seasons:
+            try:
+                season = int(season)
+                team_map = api_client.get_teams_with_leagues_for_season(season) or {}
+                # Build fallback from existing rows (any season)
+                existing_league_fk_by_api_id: dict[int, int] = {}
+                for row in Team.query.filter(Team.league_id.isnot(None)).all():
+                    existing_league_fk_by_api_id[row.team_id] = row.league_id
+                updated = 0
+                created_leagues = 0
+                examined = 0
+                rows = Team.query.filter_by(season=season).all()
+                for t in rows:
+                    examined += 1
+                    if t.league_id:
+                        continue
+                    meta = team_map.get(t.team_id)
+                    league_row = None
+                    if meta:
+                        league_api_id = meta.get('league_id')
+                        league_name = meta.get('league_name')
+                        league_country = meta.get('country') or 'Unknown'
+                        if league_api_id and league_name:
+                            league_row = League.query.filter_by(league_id=league_api_id).first()
+                            if not league_row:
+                                league_row = League(
+                                    league_id=league_api_id,
+                                    name=league_name,
+                                    country=league_country,
+                                    season=season,
+                                    is_european_top_league=True,
+                                )
+                                db.session.add(league_row)
+                                db.session.flush()
+                                created_leagues += 1
+                    # Fallback: copy league FK from any season
+                    if league_row is None:
+                        fallback_fk = existing_league_fk_by_api_id.get(t.team_id)
+                        if fallback_fk:
+                            t.league_id = fallback_fk
+                            updated += 1
+                            continue
+                    if league_row is None:
+                        continue
+                    t.league_id = league_row.id
+                    updated += 1
+                db.session.commit()
+                summary.append({
+                    'season': season,
+                    'examined': examined,
+                    'updated_teams': updated,
+                    'created_leagues': created_leagues,
+                })
+                total_updated += updated
+                total_created_leagues += created_leagues
+                total_examined += examined
+            except Exception:
+                db.session.rollback()
+                summary.append({'season': int(season), 'error': 'failed'})
+
+        try:
+            _append_run_history({
+                'kind': 'backfill-team-leagues-all',
+                'seasons': seasons,
+                'updated': total_updated,
+                'created_leagues': total_created_leagues,
+                'message': f'Backfilled all seasons ({len(seasons)}): updated {total_updated}, created leagues {total_created_leagues}'
+            })
+        except Exception:
+            pass
+        return jsonify({
+            'summary': summary,
+            'totals': {
+                'seasons': len(seasons),
+                'examined': total_examined,
+                'updated_teams': total_updated,
+                'created_leagues': total_created_leagues,
+            }
+        })
+    except Exception as e:
+        logger.exception('admin_backfill_team_leagues_all failed')
+        db.session.rollback()
+        return jsonify({'error': str(e)}), 500
+
+# --- Admin: Flags management (list/update) ---
+@api_bp.route('/admin/flags', methods=['GET'])
+@require_api_key
+def admin_list_flags():
+    try:
+        status = (request.args.get('status') or 'all').strip().lower()
+        q = LoanFlag.query
+        if status in ('pending', 'resolved'):
+            q = q.filter(LoanFlag.status == status)
+        rows = q.order_by(LoanFlag.created_at.desc()).all()
+        return jsonify([{
+            'id': r.id,
+            'player_api_id': r.player_api_id,
+            'primary_team_api_id': r.primary_team_api_id,
+            'loan_team_api_id': r.loan_team_api_id,
+            'season': r.season,
+            'reason': r.reason,
+            'email': r.email,
+            'status': r.status,
+            'admin_note': r.admin_note,
+            'created_at': r.created_at.isoformat() if r.created_at else None,
+            'resolved_at': r.resolved_at.isoformat() if r.resolved_at else None,
+        } for r in rows])
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
+
+@api_bp.route('/admin/flags/<int:flag_id>', methods=['POST'])
+@require_api_key
+def admin_update_flag(flag_id: int):
+    try:
+        row = LoanFlag.query.get_or_404(flag_id)
+        data = request.get_json() or {}
+        status = (data.get('status') or '').strip().lower()
+        note = (data.get('note') or '').strip()
+        if status in ('pending', 'resolved'):
+            row.status = status
+            if status == 'resolved' and not row.resolved_at:
+                from datetime import datetime as _dt, timezone as _tz
+                row.resolved_at = _dt.now(_tz.utc)
+        if note:
+            row.admin_note = note
+        db.session.commit()
+        return jsonify({'message': 'updated'})
+    except Exception as e:
+        logger.exception('admin_update_flag failed')
+        db.session.rollback()
+        return jsonify({'error': str(e)}), 500
+
+# --- Admin: Newsletters management (list/view/update) ---
+@api_bp.route('/admin/newsletters', methods=['GET'])
+@require_api_key
+def admin_list_newsletters():
+    try:
+        q = Newsletter.query
+        team_id = request.args.get('team', type=int)
+        if team_id:
+            q = q.filter(Newsletter.team_id == team_id)
+        published_only = request.args.get('published_only')
+        if published_only is not None:
+            want = str(published_only).lower() in ('true','1','yes','y')
+            q = q.filter(Newsletter.published.is_(want))
+        # week range filter
+        week_start_str = request.args.get('week_start')
+        week_end_str = request.args.get('week_end')
+        if week_start_str and week_end_str:
+            try:
+                ws = datetime.strptime(week_start_str, '%Y-%m-%d').date()
+                we = datetime.strptime(week_end_str, '%Y-%m-%d').date()
+                q = q.filter(
+                    db.and_(
+                        Newsletter.week_start_date <= we,
+                        Newsletter.week_end_date >= ws,
+                    )
+                )
+            except ValueError:
+                pass
+        # issue_date (date of the newsletter context) range filter – primary filter
+        issue_start_str = request.args.get('issue_start')
+        issue_end_str = request.args.get('issue_end')
+        if issue_start_str and issue_end_str:
+            try:
+                isd = datetime.strptime(issue_start_str, '%Y-%m-%d').date()
+                ied = datetime.strptime(issue_end_str, '%Y-%m-%d').date()
+                q = q.filter(
+                    db.and_(
+                        Newsletter.issue_date >= isd,
+                        Newsletter.issue_date <= ied,
+                    )
+                )
+            except ValueError:
+                pass
+        # created (generated_date) range filter
+        created_start_str = request.args.get('created_start')
+        created_end_str = request.args.get('created_end')
+        if created_start_str and created_end_str:
+            try:
+                cs = datetime.strptime(created_start_str, '%Y-%m-%d').date()
+                ce = datetime.strptime(created_end_str, '%Y-%m-%d').date()
+                # generated_date is a DateTime – compare against start/end of day
+                cs_dt = datetime.combine(cs, datetime.min.time(), tzinfo=timezone.utc)
+                ce_dt = datetime.combine(ce, datetime.max.time(), tzinfo=timezone.utc)
+                q = q.filter(
+                    db.and_(
+                        Newsletter.generated_date >= cs_dt,
+                        Newsletter.generated_date <= ce_dt,
+                    )
+                )
+            except ValueError:
+                pass
+        # Ordering: issue date first if provided, otherwise created desc
+        if issue_start_str and issue_end_str:
+            q = q.order_by(Newsletter.issue_date.desc(), Newsletter.generated_date.desc())
+        else:
+            q = q.order_by(Newsletter.generated_date.desc())
+        rows = q.all()
+        return jsonify([r.to_dict() for r in rows])
+    except Exception as e:
+        logger.exception('admin_list_newsletters failed')
+        return jsonify({'error': str(e)}), 500
+
+@api_bp.route('/admin/newsletters/<int:nid>', methods=['GET'])
+@require_api_key
+def admin_get_newsletter(nid: int):
+    try:
+        n = Newsletter.query.get_or_404(nid)
+        return jsonify(n.to_dict())
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
+
+@api_bp.route('/admin/newsletters/<int:nid>', methods=['PUT'])
+@require_api_key
+def admin_update_newsletter(nid: int):
+    try:
+        n = Newsletter.query.get_or_404(nid)
+        data = request.get_json() or {}
+        # Update title
+        if 'title' in data:
+            n.title = (data.get('title') or '').strip() or n.title
+        # Update content
+        if 'content_json' in data:
+            payload = data.get('content_json')
+            try:
+                if isinstance(payload, str):
+                    obj = json.loads(payload)
+                else:
+                    obj = payload
+            except Exception:
+                return jsonify({'error': 'content_json must be valid JSON'}), 400
+            content_str = json.dumps(obj, ensure_ascii=False)
+            n.content = content_str
+            n.structured_content = content_str
+        # Update week/issue dates (optional)
+        def _parse_date(s):
+            try:
+                return datetime.strptime(s, '%Y-%m-%d').date()
+            except Exception:
+                return None
+        if 'issue_date' in data and data.get('issue_date'):
+            d = _parse_date(str(data.get('issue_date')))
+            if d:
+                n.issue_date = d
+        if 'week_start_date' in data and data.get('week_start_date'):
+            d = _parse_date(str(data.get('week_start_date')))
+            if d:
+                n.week_start_date = d
+        if 'week_end_date' in data and data.get('week_end_date'):
+            d = _parse_date(str(data.get('week_end_date')))
+            if d:
+                n.week_end_date = d
+        # Publish/unpublish toggle
+        if 'published' in data:
+            want_pub = bool(data.get('published'))
+            n.published = want_pub
+            if want_pub:
+                n.published_date = datetime.now(timezone.utc)
+            else:
+                n.published_date = None
+        n.updated_at = datetime.now(timezone.utc)
+        db.session.commit()
+        return jsonify({'message': 'updated', 'newsletter': n.to_dict()})
+    except Exception as e:
+        logger.exception('admin_update_newsletter failed')
+        db.session.rollback()
+        return jsonify({'error': str(e)}), 500
+
+# --- Simple run-history using AdminSetting key 'run_history' ---
+
+def _get_run_history_list() -> list:
+    row = AdminSetting.query.filter_by(key='run_history').first()
+    if not row or not row.value_json:
+        return []
+    try:
+        return json.loads(row.value_json) or []
+    except Exception:
+        return []
+
+
+def _save_run_history_list(items: list):
+    row = AdminSetting.query.filter_by(key='run_history').first()
+    if not row:
+        row = AdminSetting(key='run_history', value_json=json.dumps(items))
+        db.session.add(row)
+    else:
+        row.value_json = json.dumps(items)
+    db.session.commit()
+
+
+def _append_run_history(event: dict):
+    try:
+        event = dict(event or {})
+        event['ts'] = datetime.now(timezone.utc).isoformat()
+        items = _get_run_history_list()
+        items.insert(0, event)
+        _save_run_history_list(items[:200])
+    except Exception:
+        db.session.rollback()
+        logger.exception('append_run_history failed')
+
+
+@api_bp.route('/admin/runs/history', methods=['GET', 'POST'])
+@require_api_key
+def admin_runs_history():
+    try:
+        if request.method == 'GET':
+            return jsonify(_get_run_history_list())
+        _append_run_history(request.get_json() or {})
+        return jsonify({'message': 'appended'})
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
+
+
+@api_bp.route('/admin/runs/history/clear', methods=['POST'])
+@require_api_key
+def admin_runs_history_clear():
+    try:
+        _save_run_history_list([])
+        return jsonify({'message': 'cleared'})
+    except Exception as e:
         return jsonify({'error': str(e)}), 500

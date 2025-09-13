@@ -827,17 +827,19 @@ def _append_internet_section(news: dict, search_context: dict, max_items_per_pla
     try:
         items = []
         for player_name, ctx in (search_context or {}).items():
-            links = []
-            for bucket in (ctx.get('web') or [])[:max_items_per_player]:
-                url = bucket.get('url')
-                title = bucket.get('title')
-                if not url or not title:
+            # Prefer web links. Fall back to news/discussions if web is empty
+            candidates = list(ctx.get('web') or [])
+            if not candidates:
+                candidates = list(ctx.get('news') or []) + list(ctx.get('discussions') or [])
+            links: list[str] = []
+            for r in candidates:
+                try:
+                    u = (r or {}).get('url')
+                except Exception:
+                    u = None
+                if not u:
                     continue
-                links.append({
-                    'title': title,
-                    'url': url,
-                    'description': bucket.get('description') or bucket.get('snippet')
-                })
+                links.append(u)
                 if len(links) >= max_items_per_player:
                     break
             if links:
