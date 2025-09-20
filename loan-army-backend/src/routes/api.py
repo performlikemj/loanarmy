@@ -1,5 +1,5 @@
-from flask import Blueprint, request, jsonify, make_response, render_template, Response
-from src.models.league import db, League, Team, LoanedPlayer, Newsletter, UserSubscription, EmailToken, LoanFlag, AdminSetting
+from flask import Blueprint, request, jsonify, make_response, render_template, Response, current_app, g
+from src.models.league import db, League, Team, LoanedPlayer, Newsletter, UserSubscription, EmailToken, LoanFlag, AdminSetting, NewsletterComment, UserAccount, _as_utc
 from src.api_football_client import APIFootballClient
 from datetime import datetime, date, timedelta, timezone
 import uuid
@@ -7,12 +7,21 @@ import json
 import logging
 import csv
 import io
+import math
+import re
 import os
 from functools import wraps
+from uuid import uuid4
 from sqlalchemy import or_
 import time
 from datetime import timedelta
 from typing import Any
+from itsdangerous import URLSafeTimedSerializer, BadSignature, SignatureExpired
+import secrets
+import string
+import requests
+from src.extensions import limiter
+from src.utils.sanitize import sanitize_comment_body, sanitize_plain_text
 
 logger = logging.getLogger(__name__)
 
@@ -26,8 +35,10 @@ def require_api_key(f):
     """Decorator to require API key for admin endpoints with optional IP whitelisting."""
     @wraps(f)
     def decorated_function(*args, **kwargs):
+        if request.method == 'OPTIONS':
+            return make_response('', 204)
         client_ip = get_client_ip()
-        
+
         # Check IP whitelist if configured
         if ALLOWED_ADMIN_IPS and client_ip not in ALLOWED_ADMIN_IPS:
             logger.warning(f"Admin access denied for IP {client_ip} (not in whitelist)")
@@ -38,6 +49,8 @@ def require_api_key(f):
         
         # Get the API key from environment
         required_api_key = os.getenv('ADMIN_API_KEY')
+        if required_api_key:
+            required_api_key = required_api_key.strip()
         
         if not required_api_key:
             logger.warning("ADMIN_API_KEY not configured in environment")
@@ -46,29 +59,63 @@ def require_api_key(f):
                 'message': 'Contact administrator'
             }), 500
         
-        # Get API key from request headers
-        provided_key = request.headers.get('X-API-Key') or request.headers.get('Authorization')
-        
-        # Handle Authorization header format: "Bearer <key>" or "ApiKey <key>"
-        if provided_key and provided_key.startswith(('Bearer ', 'ApiKey ')):
-            provided_key = provided_key.split(' ', 1)[1]
-        
+        # Require admin Bearer token
+        auth_header = request.headers.get('Authorization') or ''
+        token_data = None
+        if auth_header.startswith('Bearer '):
+            token = auth_header.split(' ', 1)[1]
+            try:
+                data = _user_serializer().loads(token, max_age=60 * 60 * 24 * 30)
+                if (data or {}).get('role') == 'admin':
+                    token_data = data
+                    g.user_email = (data or {}).get('email')
+            except Exception as _e:
+                logger.warning(f"Bearer admin token failed for {client_ip}: {_e}")
+
+        if not token_data:
+            logger.warning(f"Admin token missing or invalid for {client_ip}")
+            return jsonify({'error': 'Admin login required', 'message': 'Provide a valid admin Bearer token'}), 401
+
+        # Require API key as a second factor
+        provided_key = request.headers.get('X-API-Key') or request.headers.get('X-Admin-Key')
+        provided_key = (provided_key or '').strip()
+
+        def _mask_admin_key(value: str | None) -> str:
+            if not value:
+                return '(none)'
+            trimmed = value.strip()
+            if len(trimmed) <= 6:
+                return trimmed
+            return f"{trimmed[:3]}...{trimmed[-3:]}"
+
+        masked_key = _mask_admin_key(provided_key)
+
         if not provided_key:
-            logger.warning(f"API key missing from {client_ip}")
-            return jsonify({
-                'error': 'API key required',
-                'message': 'Provide API key in X-API-Key header or Authorization header'
-            }), 401
-        
+            logger.warning(
+                "Admin API key missing ip=%s user=%s endpoint=%s",
+                client_ip,
+                getattr(g, 'user_email', None),
+                request.endpoint,
+            )
+            return jsonify({'error': 'Admin API key required', 'message': 'Send X-API-Key in the request headers'}), 401
+
         if provided_key != required_api_key:
-            logger.warning(f"Invalid API key attempt from {client_ip}")
-            return jsonify({
-                'error': 'Invalid API key',
-                'message': 'Access denied'
-            }), 403
-        
-        # Log successful admin access
-        logger.info(f"Admin API access granted to {client_ip} for {request.endpoint}")
+            logger.warning(
+                "Invalid admin credential ip=%s user=%s endpoint=%s key=%s",
+                client_ip,
+                getattr(g, 'user_email', None),
+                request.endpoint,
+                masked_key,
+            )
+            return jsonify({'error': 'Invalid admin credential', 'message': 'Access denied'}), 403
+
+        logger.info(
+            "Admin dual auth granted ip=%s user=%s endpoint=%s key=%s",
+            client_ip,
+            getattr(g, 'user_email', None),
+            request.endpoint,
+            masked_key,
+        )
         return f(*args, **kwargs)
     
     return decorated_function
@@ -77,9 +124,212 @@ def require_api_key(f):
 @api_bp.after_request
 def after_request(response):
     response.headers.add('Access-Control-Allow-Origin', '*')
-    response.headers.add('Access-Control-Allow-Headers', 'Content-Type,Authorization,X-API-Key')
+    response.headers.add('Access-Control-Allow-Headers', 'Content-Type,Authorization,X-API-Key,X-Admin-Key')
     response.headers.add('Access-Control-Allow-Methods', 'GET,PUT,POST,DELETE,OPTIONS')
     return response
+
+
+@api_bp.route('/admin/auth-check', methods=['GET'])
+@require_api_key
+def admin_auth_check():
+    """Lightweight endpoint to verify admin credentials from the client UI."""
+    return jsonify({
+        'status': 'ok',
+        'user': getattr(g, 'user_email', None),
+    })
+
+# --- Lightweight user token auth (for comments/login) ---
+def _user_serializer() -> URLSafeTimedSerializer:
+    secret = current_app.config.get('SECRET_KEY') or os.getenv('SECRET_KEY') or 'change-me'
+    return URLSafeTimedSerializer(secret_key=secret, salt='user-auth')
+
+# def _user_rate_limit_key() is defined near the top of this file to ensure it exists before decorator usage
+def _base_display_name_from_email(email: str) -> str:
+    local = (email or '').split('@')[0]
+    cleaned = re.sub(r'[^a-zA-Z0-9]+', '', local)
+    if not cleaned:
+        cleaned = 'loaner'
+    return cleaned[:16] or 'loaner'
+
+def _make_display_name_unique(candidate: str) -> str:
+    base = candidate[:28] or 'loaner'
+    suffix = 1
+    name = candidate
+    while UserAccount.query.filter_by(display_name_lower=name.lower()).first():
+        suffix += 1
+        trim_base = base[: max(1, 30 - len(str(suffix)))]
+        name = f"{trim_base}{suffix}"
+    return name
+
+def _generate_default_display_name(email: str) -> str:
+    base = _base_display_name_from_email(email)
+    candidate = base
+    if len(candidate) < 3:
+        candidate = f"{candidate}{'fan'}"
+    candidate = candidate.title()
+    return _make_display_name_unique(candidate)
+
+def _normalize_display_name(value: str) -> str:
+    cleaned = sanitize_plain_text(value or '')
+    cleaned = re.sub(r'\s+', ' ', cleaned).strip()
+    cleaned = re.sub(r'[^A-Za-z0-9 ._\-]', '', cleaned)
+    return cleaned[:40]
+
+def _ensure_user_account(email: str) -> UserAccount:
+    now = datetime.now(timezone.utc)
+    user = UserAccount.query.filter_by(email=email).first()
+    if user:
+        user.last_login_at = now
+        if not user.display_name:
+            display_name = _generate_default_display_name(email)
+            user.display_name = display_name
+            user.display_name_lower = display_name.lower()
+            user.display_name_confirmed = False
+        if not user.last_display_name_change_at:
+            user.last_display_name_change_at = now
+        return user
+    display_name = _generate_default_display_name(email)
+    user = UserAccount(
+        email=email,
+        display_name=display_name,
+        display_name_lower=display_name.lower(),
+        display_name_confirmed=False,
+        created_at=now,
+        updated_at=now,
+        last_login_at=now,
+        last_display_name_change_at=now,
+    )
+    db.session.add(user)
+    db.session.flush()
+    return user
+
+def issue_user_token(email: str, ttl_seconds: int = 60 * 60 * 24 * 30, role: str = 'user') -> dict:
+    s = _user_serializer()
+    # embed ts in payload for debugging; URLSafeTimedSerializer enforces max_age on loads
+    payload = {'email': email, 'role': role, 'iat': int(time.time())}
+    token = s.dumps(payload)
+    logger.info("Issued auth token payload for %s with role=%s", email, role)
+    return {
+        'token': token,
+        'expires_in': ttl_seconds
+    }
+
+def require_user_auth(f):
+    @wraps(f)
+    def decorated(*args, **kwargs):
+        auth = request.headers.get('Authorization', '')
+        if auth.startswith('Bearer '):
+            token = auth.split(' ', 1)[1]
+        else:
+            token = None
+        if not token:
+            return jsonify({'error': 'missing auth token'}), 401
+        s = _user_serializer()
+        try:
+            # Accept tokens up to 30 days old by default
+            data = s.loads(token, max_age=60 * 60 * 24 * 30)
+            g.user_email = data.get('email')
+        except SignatureExpired:
+            return jsonify({'error': 'auth token expired'}), 401
+        except BadSignature:
+            return jsonify({'error': 'invalid auth token'}), 401
+        return f(*args, **kwargs)
+    return decorated
+
+def _is_production() -> bool:
+    env = (os.getenv('ENV') or os.getenv('FLASK_ENV') or os.getenv('APP_ENV') or '').strip().lower()
+    return env in ('prod', 'production')
+
+def _safe_error_payload(exc: Exception, fallback_message: str, include_detail: bool = False) -> dict[str, str]:
+    """Return a sanitized error payload, hiding internal details in production."""
+    payload = {'error': fallback_message}
+    if include_detail or not _is_production():
+        payload['detail'] = str(exc)
+    else:
+        reference = uuid4().hex[:8]
+        payload['reference'] = reference
+        logger.error('Error reference=%s: %s', reference, exc, exc_info=True)
+    return payload
+
+def _send_login_code(email: str, code: str):
+    """Dev: print code to terminal; Prod: integrate with email provider (future).
+    Never prints the code in production logs.
+    """
+    webhook_url = os.getenv('N8N_EMAIL_WEBHOOK_URL')
+    method = (os.getenv('N8N_EMAIL_HTTP_METHOD') or 'POST').strip().upper()
+    if method not in {'GET', 'POST'}:
+        method = 'POST'
+
+    expires_minutes = 5
+    subject = 'Your Login Code'
+
+    html_body = render_template(
+        'login_code_email.html',
+        email=email,
+        code=code,
+        expires_in=expires_minutes,
+    )
+    text_body = (
+        f"Your Go On Loan login code is {code}. "
+        f"It expires in {expires_minutes} minutes. "
+        "If you did not request it, you can ignore this email."
+    )
+
+    if webhook_url:
+        headers: dict[str, str] = {}
+        if method == 'POST':
+            headers['Content-Type'] = 'application/json'
+        bearer = os.getenv('N8N_EMAIL_AUTH_BEARER')
+        if bearer:
+            headers['Authorization'] = f'Bearer {bearer}'
+
+        payload = {
+            'kind': 'login_code',
+            'email': email,
+            'code': code,
+            'expires_in_minutes': expires_minutes,
+            'subject': subject,
+            'email': [email],
+            'html': html_body,
+            'text': text_body,
+            'meta': {
+                'from': {
+                    'name': os.getenv('EMAIL_FROM_NAME', 'Go On Loan'),
+                    'email': os.getenv('EMAIL_FROM_ADDRESS', 'no-reply@loan.army'),
+                },
+            },
+        }
+
+        request_kwargs: dict[str, Any]
+        if method == 'GET':
+            param_name = os.getenv('N8N_EMAIL_GET_PARAM', 'payload').strip() or 'payload'
+            request_kwargs = {'params': {param_name: json.dumps(payload)}}
+            request_fn = requests.get
+        else:
+            request_kwargs = {'json': payload}
+            request_fn = requests.post
+
+        try:
+            resp = request_fn(webhook_url, headers=headers, timeout=10, **request_kwargs)
+            if resp.status_code >= 300:
+                logger.warning(
+                    "Login webhook responded with non-2xx for %s status=%s body=%s",
+                    email,
+                    resp.status_code,
+                    resp.text[:500] if isinstance(getattr(resp, 'text', ''), str) else '',
+                )
+            else:
+                logger.info("Login code delivered via webhook for %s status=%s", email, resp.status_code)
+        except Exception:
+            logger.exception("Failed to call login webhook for %s", email)
+    if not webhook_url or not _is_production():
+        # In development, still surface the code for manual testing.
+        msg = f"[DEV] Login code for {email}: {code} (expires in 5 minutes)"
+        try:
+            print(msg)
+        except Exception:
+            pass
+        logger.info(msg)
 
 @api_bp.route('/health', methods=['GET'])
 def health_check():
@@ -103,6 +353,181 @@ def health_check():
 def handle_options():
     return '', 200
 
+# -----------------
+# Public auth flow
+# -----------------
+
+def _generate_otp_code(length: int = 11) -> str:
+    """Generate a cryptographically-strong login code.
+    Uses upper/lowercase letters, digits, and safe special symbols.
+    """
+    alphabet = string.ascii_letters + string.digits + "!@#$%^*-_"
+    return ''.join(secrets.choice(alphabet) for _ in range(length))
+
+@api_bp.route('/auth/request-code', methods=['POST'])
+@limiter.limit("5 per minute", error_message="Too many login code requests. Please wait and try again.")
+def request_login_code():
+    email = None
+    try:
+        data = request.get_json() or {}
+        email = (data.get('email') or '').strip().lower()
+        if not email:
+            logger.warning("Login code request missing email from %s", get_client_ip())
+            return jsonify({'error': 'email is required'}), 400
+        client_ip = get_client_ip()
+        logger.info("Login code requested for %s from %s", email, client_ip)
+        code = _generate_otp_code(11)
+        # 5 minutes TTL
+        tok = _create_email_token(email=email, purpose='login', metadata={'kind': 'otp'}, ttl_minutes=5)
+        # Overwrite token string with numeric code so user types digits
+        tok.token = code
+        db.session.add(tok)
+        db.session.commit()
+
+        # Deliver or print locally depending on environment
+        _send_login_code(email, code)
+        logger.info("Login code issued for %s from %s (token_id=%s)", email, client_ip, tok.id)
+        return jsonify({'message': 'Login code sent'})
+    except Exception as e:
+        logger.exception("Failed to issue login code for email=%s", email)
+        try:
+            db.session.rollback()
+        except Exception:
+            pass
+        return jsonify(_safe_error_payload(e, 'An unexpected error occurred. Please try again later.')), 500
+
+@api_bp.route('/auth/me', methods=['GET'])
+@require_user_auth
+def auth_me():
+    try:
+        auth = request.headers.get('Authorization', '')
+        token = auth.split(' ', 1)[1] if auth.startswith('Bearer ') else None
+        role = 'user'
+        if token:
+            try:
+                data = _user_serializer().loads(token, max_age=60 * 60 * 24 * 30)
+                role = (data or {}).get('role') or 'user'
+            except Exception:
+                pass
+        email = getattr(g, 'user_email', None)
+        user = UserAccount.query.filter_by(email=email).first() if email else None
+        return jsonify({
+            'email': email,
+            'role': role,
+            'user_id': user.id if user else None,
+            'display_name': user.display_name if user else None,
+            'display_name_confirmed': bool(user.display_name_confirmed) if user else False,
+        })
+    except Exception as e:
+        return jsonify(_safe_error_payload(e, 'An unexpected error occurred. Please try again later.')), 500
+
+def _user_rate_limit_key() -> str | None:
+    return getattr(g, 'user_email', None) or (request.remote_addr or 'anon')
+
+@api_bp.route('/auth/display-name', methods=['POST'])
+@require_user_auth
+@limiter.limit("3 per minute", key_func=_user_rate_limit_key)
+def update_display_name():
+    try:
+        payload = request.get_json() or {}
+        raw = (payload.get('display_name') or '').strip()
+        normalized = _normalize_display_name(raw)
+        if not normalized or len(normalized) < 3:
+            return jsonify({'error': 'Display name must be at least 3 characters'}), 400
+        if not re.match(r'^[A-Za-z0-9]', normalized):
+            return jsonify({'error': 'Display name must start with a letter or number'}), 400
+        email = getattr(g, 'user_email', None)
+        if not email:
+            return jsonify({'error': 'auth context missing email'}), 401
+        user = UserAccount.query.filter_by(email=email).first()
+        if not user:
+            user = _ensure_user_account(email)
+        lower = normalized.lower()
+        now = datetime.now(timezone.utc)
+        cooldown = timedelta(hours=24)
+        if user.display_name_lower != lower:
+            last_change = _as_utc(user.last_display_name_change_at) or _as_utc(user.updated_at) or _as_utc(user.created_at)
+            enforce_cooldown = bool(user.display_name_confirmed)
+            if enforce_cooldown and last_change and (now - last_change) < cooldown:
+                remaining = cooldown - (now - last_change)
+                hours = int(remaining.total_seconds() // 3600)
+                minutes = int((remaining.total_seconds() % 3600) // 60)
+                return jsonify({
+                    'error': 'Display name recently updated. Try again later.',
+                    'retry_after_seconds': int(remaining.total_seconds()),
+                    'retry_after_human': f"{hours}h {minutes}m"
+                }), 429
+            conflict = UserAccount.query.filter(UserAccount.display_name_lower == lower, UserAccount.id != user.id).first()
+            if conflict:
+                return jsonify({'error': 'Display name already in use'}), 409
+            user.display_name = normalized
+            user.display_name_lower = lower
+            user.display_name_confirmed = True
+            user.last_display_name_change_at = now
+            user.updated_at = now
+        else:
+            if not user.display_name_confirmed:
+                user.display_name_confirmed = True
+        db.session.commit()
+        return jsonify({
+            'message': 'Display name updated',
+            'display_name': user.display_name,
+            'display_name_confirmed': bool(user.display_name_confirmed),
+        })
+    except Exception as e:
+        try:
+            db.session.rollback()
+        except Exception:
+            pass
+        return jsonify(_safe_error_payload(e, 'An unexpected error occurred. Please try again later.')), 500
+
+@api_bp.route('/auth/verify-code', methods=['POST'])
+@limiter.limit("10 per minute", error_message="Too many verification attempts. Please wait a moment and try again.")
+def verify_login_code():
+    email = None
+    try:
+        data = request.get_json() or {}
+        email = (data.get('email') or '').strip().lower()
+        code = (data.get('code') or '').strip()
+        if not email or not code:
+            logger.warning(
+                "Verify-login missing fields email_present=%s code_present=%s from %s",
+                bool(email),
+                bool(code),
+                get_client_ip(),
+            )
+            return jsonify({'error': 'email and code are required'}), 400
+        client_ip = get_client_ip()
+        logger.info("Verifying login code for %s from %s", email, client_ip)
+        row = EmailToken.query.filter_by(email=email, token=code, purpose='login').first()
+        if not row or not row.is_valid():
+            logger.warning("Invalid/expired login code for %s from %s", email, client_ip)
+            return jsonify({'error': 'invalid or expired code'}), 400
+        # Mark used and issue an auth token
+        row.used_at = datetime.now(timezone.utc)
+        user = _ensure_user_account(email)
+        if user:
+            user.last_login_at = datetime.now(timezone.utc)
+        db.session.commit()
+        # Determine role by env allowlist
+        allowed = [x.strip().lower() for x in (os.getenv('ADMIN_EMAILS') or '').split(',') if x.strip()]
+        role = 'admin' if email in allowed else 'user'
+        logger.info("Login verified for %s from %s role=%s", email, client_ip, role)
+        out = issue_user_token(email, role=role)
+        return jsonify({
+            'message': 'Logged in',
+            'role': role,
+            'display_name': user.display_name if user else None,
+            'display_name_confirmed': bool(user.display_name_confirmed) if user else False,
+            **out,
+        })
+    except Exception as e:
+        logger.exception("Failed to verify login code for email=%s", email)
+        try:
+            db.session.rollback()
+        except Exception:
+            pass
+        return jsonify(_safe_error_payload(e, 'Unable to verify login code right now. Please try again later.')), 500
 @api_bp.route('/auth/status', methods=['GET'])
 def auth_status():
     """Get API authentication status and instructions."""
@@ -250,7 +675,6 @@ def get_client_ip():
     # Fall back to direct connection IP
     return request.remote_addr
 
-
 # League endpoints
 @api_bp.route('/leagues', methods=['GET'])
 def get_leagues():
@@ -259,9 +683,7 @@ def get_leagues():
         leagues = League.query.filter_by(is_european_top_league=True).all()
         return jsonify([league.to_dict() for league in leagues])
     except Exception as e:
-        return jsonify({'error': str(e)}), 500
-
-
+        return jsonify(_safe_error_payload(e, 'An unexpected error occurred. Please try again later.')), 500
 
 # Team endpoints
 @api_bp.route('/teams', methods=['GET'])
@@ -385,7 +807,7 @@ def get_teams():
         logger.error(f"❌ Exception type: {type(e).__name__}")
         import traceback
         logger.error(f"❌ Traceback: {traceback.format_exc()}")
-        return jsonify({'error': str(e)}), 500
+        return jsonify(_safe_error_payload(e, 'An unexpected error occurred. Please try again later.')), 500
 
 @api_bp.route('/teams/<int:team_id>', methods=['GET'])
 def get_team(team_id):
@@ -404,7 +826,7 @@ def get_team(team_id):
         
         return jsonify(team_dict)
     except Exception as e:
-        return jsonify({'error': str(e)}), 500
+        return jsonify(_safe_error_payload(e, 'An unexpected error occurred. Please try again later.')), 500
 
 @api_bp.route('/teams/<int:team_id>/loans', methods=['GET'])
 def get_team_loans(team_id):
@@ -414,7 +836,7 @@ def get_team_loans(team_id):
         loans = LoanedPlayer.query.filter_by(primary_team_id=team.id).all()
         return jsonify([loan.to_dict() for loan in loans])
     except Exception as e:
-        return jsonify({'error': str(e)}), 500
+        return jsonify(_safe_error_payload(e, 'An unexpected error occurred. Please try again later.')), 500
 
 @api_bp.route('/teams/<int:team_id>/loans/season/<int:season>', methods=['GET'])
 def get_team_loans_by_season(team_id: int, season: int):
@@ -433,7 +855,7 @@ def get_team_loans_by_season(team_id: int, season: int):
         loans = q.order_by(LoanedPlayer.updated_at.desc()).all()
         return jsonify([loan.to_dict() for loan in loans])
     except Exception as e:
-        return jsonify({'error': str(e)}), 500
+        return jsonify(_safe_error_payload(e, 'An unexpected error occurred. Please try again later.')), 500
 
 @api_bp.route('/teams/season/<int:season>', methods=['GET'])
 def get_teams_for_season(season):
@@ -447,7 +869,7 @@ def get_teams_for_season(season):
         })
     except Exception as e:
         logger.error(f"Error fetching teams for season {season}: {e}")
-        return jsonify({'error': str(e)}), 500
+        return jsonify(_safe_error_payload(e, 'An unexpected error occurred. Please try again later.')), 500
 
 @api_bp.route('/teams/<int:team_id>/api-info', methods=['GET'])
 def get_team_api_info(team_id):
@@ -466,7 +888,7 @@ def get_team_api_info(team_id):
         })
     except Exception as e:
         logger.error(f"Error fetching team {team_id} from API: {e}")
-        return jsonify({'error': str(e)}), 500
+        return jsonify(_safe_error_payload(e, 'An unexpected error occurred. Please try again later.')), 500
 
 def resolve_team_ids(id_or_api_id: int, season: int = None) -> tuple[int | None, int | None, str | None]:
     """
@@ -521,8 +943,7 @@ def get_loans():
         loans = query.order_by(LoanedPlayer.updated_at.desc()).all()
         return jsonify([loan.to_dict() for loan in loans])
     except Exception as e:
-        return jsonify({'error': str(e)}), 500
-
+        return jsonify(_safe_error_payload(e, 'An unexpected error occurred. Please try again later.')), 500
 
 @api_bp.route('/loans/active', methods=['GET'])
 def get_active_loans():
@@ -531,7 +952,7 @@ def get_active_loans():
         loans = LoanedPlayer.query.filter_by(is_active=True).all()
         return jsonify([loan.to_dict() for loan in loans])
     except Exception as e:
-        return jsonify({'error': str(e)}), 500
+        return jsonify(_safe_error_payload(e, 'An unexpected error occurred. Please try again later.')), 500
 
 @api_bp.route('/loans/season/<int:season>', methods=['GET'])
 def get_loans_by_season(season: int):
@@ -541,7 +962,7 @@ def get_loans_by_season(season: int):
         loans = LoanedPlayer.query.filter(LoanedPlayer.window_key.like(f"{slug}%")).all()
         return jsonify([loan.to_dict() for loan in loans])
     except Exception as e:
-        return jsonify({'error': str(e)}), 500
+        return jsonify(_safe_error_payload(e, 'An unexpected error occurred. Please try again later.')), 500
 
 # ---------------------------------------------------------------------
 # Weekly Loans Report Endpoint
@@ -615,7 +1036,7 @@ def weekly_loans_report():
         return jsonify(report)
     except Exception as e:
         logger.error(f"Error generating weekly loans report: {e}")
-        return jsonify({'error': str(e)}), 500
+        return jsonify(_safe_error_payload(e, 'An unexpected error occurred. Please try again later.')), 500
 
 @api_bp.route('/loans/<int:loan_id>/terminate', methods=['POST'])
 @require_api_key
@@ -653,7 +1074,7 @@ def terminate_loan(loan_id):
         
     except Exception as e:
         logger.error(f"Error terminating loan: {e}")
-        return jsonify({'error': str(e)}), 500
+        return jsonify(_safe_error_payload(e, 'An unexpected error occurred. Please try again later.')), 500
 
 @api_bp.route('/loans/<int:loan_id>/performance', methods=['PUT'])
 @require_api_key
@@ -687,8 +1108,7 @@ def update_loan_performance(loan_id):
         
     except Exception as e:
         logger.error(f"Error updating performance: {e}")
-        return jsonify({'error': str(e)}), 500
-
+        return jsonify(_safe_error_payload(e, 'An unexpected error occurred. Please try again later.')), 500
 
 @api_bp.route("/reviewed-loan-candidates/upload", methods=["POST"])
 @require_api_key
@@ -936,7 +1356,7 @@ def get_csv_template():
         
     except Exception as e:
         logger.error(f"Error generating CSV template: {e}")
-        return jsonify({'error': str(e)}), 500
+        return jsonify(_safe_error_payload(e, 'An unexpected error occurred. Please try again later.')), 500
 
 # Newsletter endpoints
 @api_bp.route('/newsletters', methods=['GET'])
@@ -949,11 +1369,26 @@ def get_newsletters():
         team_id = request.args.get('team')
         if team_id:
             query = query.filter_by(team_id=team_id)
+
+        # Filter by multiple teams (comma-separated list)
+        raw_team_ids = request.args.get('team_ids')
+        if raw_team_ids:
+            try:
+                ids = [int(x.strip()) for x in str(raw_team_ids).split(',') if str(x).strip().isdigit()]
+                if ids:
+                    query = query.filter(Newsletter.team_id.in_(ids))
+            except Exception:
+                pass
         
         # Filter by newsletter type
         newsletter_type = request.args.get('type')
         if newsletter_type:
             query = query.filter_by(newsletter_type=newsletter_type)
+
+        # Filter by league (by leagues PK)
+        league_id = request.args.get('league_id', type=int)
+        if league_id:
+            query = query.join(Team).filter(Team.league_id == league_id)
         
         # Filter by published status
         published_only = request.args.get('published_only', 'false').lower() == 'true'
@@ -1019,7 +1454,20 @@ def get_newsletters():
         newsletters = query.order_by(Newsletter.generated_date.desc()).all()
         return jsonify([newsletter.to_dict() for newsletter in newsletters])
     except Exception as e:
-        return jsonify({'error': str(e)}), 500
+        return jsonify(_safe_error_payload(e, 'An unexpected error occurred. Please try again later.')), 500
+
+@api_bp.route('/subscriptions/me', methods=['GET'])
+@require_user_auth
+def my_subscriptions():
+    """Return active subscriptions for the authenticated user's email."""
+    try:
+        email = getattr(g, 'user_email', None)
+        if not email:
+            return jsonify({'error': 'Unauthorized'}), 401
+        subs = UserSubscription.query.filter_by(email=email, active=True).all()
+        return jsonify([s.to_dict() for s in subs])
+    except Exception as e:
+        return jsonify(_safe_error_payload(e, 'An unexpected error occurred. Please try again later.')), 500
 
 @api_bp.route('/newsletters/<int:newsletter_id>', methods=['GET'])
 def get_newsletter(newsletter_id):
@@ -1039,7 +1487,60 @@ def get_newsletter(newsletter_id):
             pass
         return jsonify(payload)
     except Exception as e:
-        return jsonify({'error': str(e)}), 500
+        return jsonify(_safe_error_payload(e, 'An unexpected error occurred. Please try again later.')), 500
+
+@api_bp.route('/newsletters/<int:newsletter_id>/comments', methods=['GET'])
+def list_newsletter_comments(newsletter_id: int):
+    try:
+        # Ensure newsletter exists
+        Newsletter.query.get_or_404(newsletter_id)
+        rows = NewsletterComment.query\
+            .filter_by(newsletter_id=newsletter_id, is_deleted=False)\
+            .order_by(NewsletterComment.created_at.asc())\
+            .all()
+        return jsonify([r.to_dict() for r in rows])
+    except Exception as e:
+        return jsonify(_safe_error_payload(e, 'An unexpected error occurred. Please try again later.')), 500
+
+@api_bp.route('/newsletters/<int:newsletter_id>/comments', methods=['POST'])
+@require_user_auth
+@limiter.limit("8 per minute", key_func=_user_rate_limit_key)
+def create_newsletter_comment(newsletter_id: int):
+    try:
+        nl = Newsletter.query.get_or_404(newsletter_id)
+        payload = request.get_json() or {}
+        raw_body = (payload.get('body') or '').strip()
+        if not raw_body:
+            return jsonify({'error': 'body is required'}), 400
+        body = sanitize_comment_body(raw_body)
+        user_email = getattr(g, 'user_email', None)
+        if not user_email:
+            return jsonify({'error': 'auth context missing email'}), 401
+        user = UserAccount.query.filter_by(email=user_email).first()
+        if not user:
+            user = _ensure_user_account(user_email)
+        if not body:
+            return jsonify({'error': 'body is required'}), 400
+        c = NewsletterComment(
+            newsletter_id=nl.id,
+            user_id=user.id if user else None,
+            author_email=user_email,
+            author_name=user.display_name if user else None,
+            author_name_legacy=user.display_name if user else None,
+            user=user,
+            body=body,
+        )
+        if not c.author_email:
+            return jsonify({'error': 'auth context missing email'}), 401
+        db.session.add(c)
+        db.session.commit()
+        return jsonify({'message': 'Comment created', 'comment': c.to_dict()}), 201
+    except Exception as e:
+        try:
+            db.session.rollback()
+        except Exception:
+            pass
+        return jsonify(_safe_error_payload(e, 'An unexpected error occurred. Please try again later.')), 500
 
 @api_bp.route('/newsletters/generate', methods=['POST'])
 def generate_newsletter():
@@ -1111,7 +1612,7 @@ def generate_newsletter():
         except Exception:
             pass
         logger.error(f"Error generating newsletter: {e}")
-        return jsonify({'error': str(e)}), 500
+        return jsonify(_safe_error_payload(e, 'An unexpected error occurred. Please try again later.')), 500
 
 def generate_newsletter_content(*args, **kwargs):  # pragma: no cover - legacy shim
     """Deprecated: shim retained for backward compatibility.
@@ -1134,7 +1635,7 @@ def get_subscriptions():
         subscriptions = query.all()
         return jsonify([sub.to_dict() for sub in subscriptions])
     except Exception as e:
-        return jsonify({'error': str(e)}), 500
+        return jsonify(_safe_error_payload(e, 'An unexpected error occurred. Please try again later.')), 500
 
 @api_bp.route('/subscriptions', methods=['POST'])
 def create_subscription():
@@ -1180,7 +1681,7 @@ def create_subscription():
             'subscription': subscription.to_dict()
         }), 201
     except Exception as e:
-        return jsonify({'error': str(e)}), 500
+        return jsonify(_safe_error_payload(e, 'An unexpected error occurred. Please try again later.')), 500
 
 @api_bp.route('/subscriptions/bulk_create', methods=['POST'])
 def bulk_create_subscriptions():
@@ -1249,7 +1750,7 @@ def bulk_create_subscriptions():
             'subscriptions': [s.to_dict() for s in subs]
         }), 201 if created_ids else 200
     except Exception as e:
-        return jsonify({'error': str(e)}), 500
+        return jsonify(_safe_error_payload(e, 'An unexpected error occurred. Please try again later.')), 500
 
 def _create_email_token(email: str, purpose: str, metadata: dict | None = None, ttl_minutes: int = 60) -> EmailToken:
     token = str(uuid.uuid4())
@@ -1263,6 +1764,13 @@ def _create_email_token(email: str, purpose: str, metadata: dict | None = None, 
     )
     db.session.add(row)
     db.session.flush()
+    logger.info(
+        "Created email token id=%s purpose=%s email=%s expires_at=%s",
+        row.id,
+        purpose,
+        email,
+        expires_at.isoformat(),
+    )
     return row
 
 @api_bp.route('/subscriptions/request-manage-link', methods=['POST'])
@@ -1278,7 +1786,7 @@ def request_manage_link():
         db.session.commit()
         return jsonify({'message': 'Manage link created', 'token': tok.token, 'expires_at': tok.expires_at.isoformat()})
     except Exception as e:
-        return jsonify({'error': str(e)}), 500
+        return jsonify(_safe_error_payload(e, 'An unexpected error occurred. Please try again later.')), 500
 
 @api_bp.route('/subscriptions/manage/<token>', methods=['GET'])
 def get_manage_state(token: str):
@@ -1290,7 +1798,7 @@ def get_manage_state(token: str):
         subs = UserSubscription.query.filter_by(email=row.email, active=True).all()
         return jsonify({'email': row.email, 'subscriptions': [s.to_dict() for s in subs], 'expires_at': row.expires_at.isoformat()})
     except Exception as e:
-        return jsonify({'error': str(e)}), 500
+        return jsonify(_safe_error_payload(e, 'An unexpected error occurred. Please try again later.')), 500
 
 @api_bp.route('/subscriptions/manage/<token>', methods=['POST'])
 def update_manage_state(token: str):
@@ -1333,7 +1841,7 @@ def update_manage_state(token: str):
         db.session.commit()
         return jsonify({'message': 'Subscriptions updated'})
     except Exception as e:
-        return jsonify({'error': str(e)}), 500
+        return jsonify(_safe_error_payload(e, 'An unexpected error occurred. Please try again later.')), 500
 
 @api_bp.route('/subscriptions/unsubscribe/<token>', methods=['POST'])
 def token_unsubscribe(token: str):
@@ -1346,7 +1854,7 @@ def token_unsubscribe(token: str):
         db.session.commit()
         return jsonify({'message': 'Unsubscribed successfully'})
     except Exception as e:
-        return jsonify({'error': str(e)}), 500
+        return jsonify(_safe_error_payload(e, 'An unexpected error occurred. Please try again later.')), 500
 
 @api_bp.route('/verify/request', methods=['POST'])
 def request_verification_token():
@@ -1361,7 +1869,7 @@ def request_verification_token():
         db.session.commit()
         return jsonify({'message': 'Verification token created', 'token': tok.token, 'expires_at': tok.expires_at.isoformat()})
     except Exception as e:
-        return jsonify({'error': str(e)}), 500
+        return jsonify(_safe_error_payload(e, 'An unexpected error occurred. Please try again later.')), 500
 
 @api_bp.route('/verify/<token>', methods=['POST'])
 def verify_email_token(token: str):
@@ -1374,7 +1882,7 @@ def verify_email_token(token: str):
         db.session.commit()
         return jsonify({'message': 'Email verified', 'email': row.email})
     except Exception as e:
-        return jsonify({'error': str(e)}), 500
+        return jsonify(_safe_error_payload(e, 'An unexpected error occurred. Please try again later.')), 500
 
 @api_bp.route('/subscriptions/<int:subscription_id>', methods=['DELETE'])
 def delete_subscription(subscription_id):
@@ -1386,7 +1894,7 @@ def delete_subscription(subscription_id):
         
         return jsonify({'message': 'Unsubscribed successfully'})
     except Exception as e:
-        return jsonify({'error': str(e)}), 500
+        return jsonify(_safe_error_payload(e, 'An unexpected error occurred. Please try again later.')), 500
 
 # Statistics endpoints
 @api_bp.route('/stats/overview', methods=['GET'])
@@ -1426,7 +1934,7 @@ def get_overview_stats():
         }
         return jsonify(stats)
     except Exception as e:
-        return jsonify({'error': str(e)}), 500
+        return jsonify(_safe_error_payload(e, 'An unexpected error occurred. Please try again later.')), 500
 
 @api_bp.route('/stats/loans', methods=['GET'])
 def get_loan_stats():
@@ -1457,7 +1965,7 @@ def get_loan_stats():
         
         return jsonify(stats)
     except Exception as e:
-        return jsonify({'error': str(e)}), 500
+        return jsonify(_safe_error_payload(e, 'An unexpected error occurred. Please try again later.')), 500
 
 # Data sync endpoints
 @api_bp.route('/init-data', methods=['POST'])
@@ -1472,7 +1980,7 @@ def init_data():
             'leagues_synced': League.query.count()
         })
     except Exception as e:
-        return jsonify({'error': str(e)}), 500
+        return jsonify(_safe_error_payload(e, 'An unexpected error occurred. Please try again later.')), 500
 
 @api_bp.route('/sync-leagues', methods=['POST'])
 @require_api_key
@@ -1521,7 +2029,7 @@ def sync_leagues():
         
     except Exception as e:
         logger.error(f"Error syncing leagues: {e}")
-        return jsonify({'error': str(e)}), 500
+        return jsonify(_safe_error_payload(e, 'An unexpected error occurred. Please try again later.')), 500
 
 @api_bp.route('/sync-teams/<int:season>', methods=['POST'])
 @require_api_key
@@ -1579,7 +2087,7 @@ def sync_teams(season):
         
     except Exception as e:
         logger.error(f"Error syncing teams: {e}")
-        return jsonify({'error': str(e)}), 500
+        return jsonify(_safe_error_payload(e, 'An unexpected error occurred. Please try again later.')), 500
 
 # Loan Detection Endpoints
 
@@ -1666,8 +2174,7 @@ def detect_loan_candidates():
         
     except Exception as e:
         logger.error(f"Error detecting loan candidates: {e}")
-        return jsonify({'error': str(e)}), 500
-
+        return jsonify(_safe_error_payload(e, 'An unexpected error occurred. Please try again later.')), 500
 
 @api_bp.route('/export-loan-candidates/csv', methods=['GET'])
 @require_api_key
@@ -1896,7 +2403,7 @@ def export_loan_candidates_csv():
         
     except Exception as e:
         logger.error(f"Error exporting loan candidates CSV: {e}")
-        return jsonify({'error': str(e)}), 500
+        return jsonify(_safe_error_payload(e, 'An unexpected error occurred. Please try again later.')), 500
 
 # Newsletter rendering helpers
 try:
@@ -1905,7 +2412,6 @@ try:
 except Exception:
     def lint_and_enrich(x: dict) -> dict:  # fallback
         return x
-
 
 def _load_newsletter_json(n: Newsletter) -> dict | None:
     try:
@@ -1920,7 +2426,6 @@ def _load_newsletter_json(n: Newsletter) -> dict | None:
         return None
     except Exception:
         return None
-
 
 def _plain_text_from_news(data: dict, meta: Newsletter) -> str:
     team = meta.team.name if meta.team else ""
@@ -1966,6 +2471,144 @@ def _plain_text_from_news(data: dict, meta: Newsletter) -> str:
                 lines.append(f"  - {n}")
     return "\n".join(lines).strip() + "\n"
 
+# --- Newsletter delivery helpers ---
+def _newsletter_render_context(n: Newsletter) -> dict[str, Any]:
+    data = _load_newsletter_json(n) or {}
+    return {
+        'meta': n,
+        'team_name': n.team.name if n.team else '',
+        'title': data.get('title') or n.title,
+        'range': data.get('range'),
+        'summary': data.get('summary'),
+        'highlights': data.get('highlights') or [],
+        'sections': data.get('sections') or [],
+        'by_numbers': data.get('by_numbers') or {},
+        'fan_pulse': data.get('fan_pulse') or [],
+    }
+
+def _deliver_newsletter_via_webhook(
+    n: Newsletter,
+    *,
+    recipients: list[str] | None = None,
+    subject_override: str | None = None,
+    webhook_url_override: str | None = None,
+    http_method_override: str | None = None,
+    dry_run: bool = False,
+) -> dict:
+    """Render newsletter to HTML/TXT and POST to n8n webhook.
+    Returns dict with 'status', 'http_status', and 'recipient_count'.
+    """
+    # Resolve webhook URL and headers
+    webhook_url = webhook_url_override or os.getenv('N8N_EMAIL_WEBHOOK_URL')
+    if not webhook_url:
+        raise RuntimeError('N8N_EMAIL_WEBHOOK_URL is not configured')
+    method = (http_method_override or os.getenv('N8N_EMAIL_HTTP_METHOD') or 'POST').strip().upper()
+    if method not in {'GET', 'POST'}:
+        method = 'POST'
+
+    headers = {}
+    if method == 'POST':
+        headers['Content-Type'] = 'application/json'
+    bearer = os.getenv('N8N_EMAIL_AUTH_BEARER')
+    if bearer:
+        headers['Authorization'] = f'Bearer {bearer}'
+
+    # Gather recipients from active team subscriptions if not provided
+    if recipients is None:
+        subs = UserSubscription.query.filter_by(team_id=n.team_id, active=True).all()
+        recipients = [s.email for s in subs if (s.email or '').strip() and not s.email_bounced]
+
+    recipients = [r for r in (recipients or []) if (r or '').strip()]
+    total_recipients = len(recipients)
+    if total_recipients == 0:
+        return {
+            'status': 'no_recipients',
+            'http_status': None,
+            'recipient_count': 0,
+            'webhook_url': webhook_url,
+            'response_text': '',
+        }
+
+    # Render content
+    ctx = _newsletter_render_context(n)
+    html = render_template('newsletter_email.html', **ctx)
+    text = _plain_text_from_news(_load_newsletter_json(n) or {}, n)
+    subject = subject_override or (ctx['title'] or 'Weekly Loan Update')
+
+    from_addr = {
+        'name': os.getenv('EMAIL_FROM_NAME', 'Go On Loan'),
+        'email': os.getenv('EMAIL_FROM_ADDRESS', 'no-reply@loan.army'),
+    }
+
+    # Optional public base URL for manage/unsubscribe links if the n8n flow uses it
+    public_base = os.getenv('PUBLIC_BASE_URL', '').rstrip('/')
+
+    delivered_count = 0
+    failures: list[dict[str, Any]] = []
+    last_status_code: int | None = None
+    last_response_text = ''
+
+    for email in recipients:
+        payload = {
+            'newsletter_id': n.id,
+            'team_id': n.team_id,
+            'team_name': n.team.name if n.team else None,
+            'subject': subject,
+            'from': from_addr,
+            'email': email,
+            'html': html,
+            'text': text,
+            'meta': {
+                'issue_date': n.issue_date.isoformat() if n.issue_date else None,
+                'week_start': n.week_start_date.isoformat() if n.week_start_date else None,
+                'week_end': n.week_end_date.isoformat() if n.week_end_date else None,
+                'public_base_url': public_base or None,
+                'dry_run': bool(dry_run),
+            },
+        }
+
+        request_kwargs: dict[str, Any]
+        if method == 'GET':
+            param_name = os.getenv('N8N_EMAIL_GET_PARAM', 'payload').strip() or 'payload'
+            request_kwargs = {'params': {param_name: json.dumps(payload)}}
+            request_fn = requests.get
+        else:
+            request_kwargs = {'json': payload}
+            request_fn = requests.post
+
+        try:
+            r = request_fn(webhook_url, headers=headers, timeout=20, **request_kwargs)
+            last_status_code = r.status_code
+            last_response_text = (r.text[:5000] if isinstance(getattr(r, 'text', ''), str) else '')
+            if 200 <= r.status_code < 300:
+                delivered_count += 1
+            else:
+                failures.append({
+                    'email': email,
+                    'http_status': r.status_code,
+                    'response_text': last_response_text,
+                })
+        except requests.RequestException as exc:
+            last_status_code = getattr(getattr(exc, 'response', None), 'status_code', None)
+            last_response_text = str(exc)[:5000]
+            failures.append({
+                'email': email,
+                'error': str(exc),
+                'http_status': last_status_code,
+            })
+
+    status = 'ok' if delivered_count == total_recipients else ('partial' if delivered_count else 'error')
+    result: dict[str, Any] = {
+        'status': status,
+        'http_status': last_status_code,
+        'recipient_count': total_recipients,
+        'delivered_count': delivered_count,
+        'webhook_url': webhook_url,
+        'response_text': last_response_text,
+    }
+    if failures:
+        result['failures'] = failures
+    return result
 
 @api_bp.route('/newsletters/<int:newsletter_id>/render.<fmt>', methods=['GET'])
 @require_api_key
@@ -1996,8 +2639,91 @@ def render_newsletter(newsletter_id: int, fmt: str):
         return jsonify({'error': 'Unsupported format. Use html, email, or text'}), 400
     except Exception as e:
         logger.exception('Error rendering newsletter')
-        return jsonify({'error': str(e)}), 500
+        return jsonify(_safe_error_payload(e, 'An unexpected error occurred. Please try again later.')), 500
 
+@api_bp.route('/newsletters/<int:newsletter_id>/send', methods=['POST'])
+@require_api_key
+def send_newsletter(newsletter_id: int):
+    """Send a newsletter via n8n webhook.
+    Body options:
+      - test_to: string or list of emails (optional). If provided, bypasses published check and does not mark as sent.
+      - subject: override subject (optional)
+      - webhook_url: override webhook URL (optional)
+      - dry_run: bool, forward to webhook (optional)
+    """
+    try:
+        n = Newsletter.query.get_or_404(newsletter_id)
+        payload = request.get_json(silent=True) or {}
+        test_to = payload.get('test_to')
+        subject_override = payload.get('subject')
+        webhook_override = payload.get('webhook_url')
+        dry_run = bool(payload.get('dry_run'))
+
+        recipients: list[str] | None = None
+        is_test = False
+        if test_to:
+            # Support string or list
+            if isinstance(test_to, str):
+                recipients = [test_to]
+            elif isinstance(test_to, list):
+                recipients = [str(x) for x in test_to if str(x).strip()]
+            else:
+                return jsonify({'error': 'test_to must be string or list of strings'}), 400
+            is_test = True
+
+        if not is_test:
+            # Require published before full send
+            if not n.published:
+                return jsonify({'error': 'newsletter must be published/approved before sending'}), 400
+            if n.email_sent:
+                return jsonify({'error': 'newsletter already sent'}), 400
+
+        # Deliver
+        out = _deliver_newsletter_via_webhook(
+            n,
+            recipients=recipients,  # None => fetch active subscribers
+            subject_override=subject_override,
+            webhook_url_override=webhook_override,
+            dry_run=dry_run,
+        )
+
+        # Mark sent only for non-test ok runs
+        if out.get('status') == 'ok' and not is_test:
+            from datetime import datetime as _dt, timezone as _tz
+            # Count recipients used
+            if recipients is None:
+                subs = UserSubscription.query.filter_by(team_id=n.team_id, active=True).all()
+                valid_subs = [s for s in subs if (s.email or '').strip() and not s.email_bounced]
+                used_count = len(valid_subs)
+            else:
+                used_count = len(recipients)
+            n.email_sent = True
+            n.email_sent_date = _dt.now(_tz.utc)
+            n.subscriber_count = used_count
+            # Update last_email_sent for subscriptions we attempted to deliver
+            try:
+                ts = n.email_sent_date
+                if recipients is None:
+                    for s in valid_subs:
+                        s.last_email_sent = ts
+                else:
+                    # Update only those included in recipients list
+                    recip_set = set(recipients)
+                    subs_sel = UserSubscription.query.filter_by(team_id=n.team_id, active=True).all()
+                    for s in subs_sel:
+                        if (s.email or '').strip() in recip_set:
+                            s.last_email_sent = ts
+            except Exception:
+                pass
+            db.session.commit()
+        return jsonify({'newsletter_id': n.id, **out})
+    except Exception as e:
+        logger.exception('send_newsletter failed')
+        try:
+            db.session.rollback()
+        except Exception:
+            pass
+        return jsonify(_safe_error_payload(e, 'An unexpected error occurred. Please try again later.')), 500
 
 @api_bp.route('/newsletters/latest/render.<fmt>', methods=['GET'])
 @require_api_key
@@ -2017,7 +2743,7 @@ def render_latest_newsletter(fmt: str):
         return render_newsletter(n.id, fmt)
     except Exception as e:
         logger.exception('Error rendering latest newsletter')
-        return jsonify({'error': str(e)}), 500
+        return jsonify(_safe_error_payload(e, 'An unexpected error occurred. Please try again later.')), 500
 
 @api_bp.route('/newsletters/generate-weekly-mcp-team', methods=['POST'])
 @require_api_key
@@ -2044,7 +2770,7 @@ def generate_weekly_mcp_team():
         return jsonify({'team_db_id': team_db_id, 'ran_for': tdate.isoformat(), 'result': out})
     except Exception as e:
         logger.exception("generate-weekly-mcp-team failed")
-        return jsonify({'error': str(e)}), 500
+        return jsonify(_safe_error_payload(e, 'An unexpected error occurred. Please try again later.')), 500
 
 # --- Guest loan flag endpoints ---
 from src.models.league import LoanFlag, AdminSetting
@@ -2073,7 +2799,7 @@ def create_loan_flag():
         return jsonify({'message': 'Flag submitted', 'id': lf.id}), 201
     except Exception as e:
         logger.exception('Error creating loan flag')
-        return jsonify({'error': str(e)}), 500
+        return jsonify(_safe_error_payload(e, 'An unexpected error occurred. Please try again later.')), 500
 
 @api_bp.route('/loans/flags/pending', methods=['GET'])
 @require_api_key
@@ -2091,7 +2817,7 @@ def list_pending_flags():
             'created_at': r.created_at.isoformat() if r.created_at else None
         } for r in rows])
     except Exception as e:
-        return jsonify({'error': str(e)}), 500
+        return jsonify(_safe_error_payload(e, 'An unexpected error occurred. Please try again later.')), 500
 
 @api_bp.route('/loans/flags/<int:flag_id>/resolve', methods=['POST'])
 @require_api_key
@@ -2126,7 +2852,7 @@ def resolve_flag(flag_id: int):
         return jsonify({'message': 'Flag resolved', 'deactivated_loans': deactivated})
     except Exception as e:
         logger.exception('Error resolving loan flag')
-        return jsonify({'error': str(e)}), 500
+        return jsonify(_safe_error_payload(e, 'An unexpected error occurred. Please try again later.')), 500
 
 # --- Admin config & run control ---
 
@@ -2157,7 +2883,7 @@ def get_admin_config():
         rows = AdminSetting.query.all()
         return jsonify({r.key: r.value_json for r in rows})
     except Exception as e:
-        return jsonify({'error': str(e)}), 500
+        return jsonify(_safe_error_payload(e, 'An unexpected error occurred. Please try again later.')), 500
 
 @api_bp.route('/admin/config', methods=['POST'])
 @require_api_key
@@ -2172,7 +2898,7 @@ def update_admin_config():
         _set_admin_values(to_store)
         return jsonify({'message': 'Updated', 'updated': list(settings.keys())})
     except Exception as e:
-        return jsonify({'error': str(e)}), 500
+        return jsonify(_safe_error_payload(e, 'An unexpected error occurred. Please try again later.')), 500
 
 @api_bp.route('/admin/run-status', methods=['GET'])
 @require_api_key
@@ -2181,7 +2907,7 @@ def get_run_status():
         paused = _get_admin_bool('runs_paused', False)
         return jsonify({'runs_paused': paused})
     except Exception as e:
-        return jsonify({'error': str(e)}), 500
+        return jsonify(_safe_error_payload(e, 'An unexpected error occurred. Please try again later.')), 500
 
 @api_bp.route('/admin/run-status', methods=['POST'])
 @require_api_key
@@ -2192,7 +2918,7 @@ def set_run_status():
         _set_admin_values({'runs_paused': 'true' if paused else 'false'})
         return jsonify({'message': 'Run status updated', 'runs_paused': paused})
     except Exception as e:
-        return jsonify({'error': str(e)}), 500
+        return jsonify(_safe_error_payload(e, 'An unexpected error occurred. Please try again later.')), 500
 
 # --- Admin: Loans management ---
 @api_bp.route('/admin/loans', methods=['GET'])
@@ -2232,7 +2958,7 @@ def admin_list_loans():
         return jsonify([l.to_dict() for l in loans])
     except Exception as e:
         logger.exception('admin_list_loans failed')
-        return jsonify({'error': str(e)}), 500
+        return jsonify(_safe_error_payload(e, 'An unexpected error occurred. Please try again later.')), 500
 
 def _ensure_team_admin(api_team_id: int, season_start_year: int) -> Team | None:
     """
@@ -2377,7 +3103,7 @@ def admin_create_loan():
     except Exception as e:
         logger.exception('admin_create_loan failed')
         db.session.rollback()
-        return jsonify({'error': str(e)}), 500
+        return jsonify(_safe_error_payload(e, 'An unexpected error occurred. Please try again later.')), 500
 
 @api_bp.route('/admin/loans/<int:loan_id>', methods=['PUT'])
 @require_api_key
@@ -2502,7 +3228,7 @@ def admin_cleanup_duplicate_loans():
     except Exception as e:
         logger.exception('admin_cleanup_duplicate_loans failed')
         db.session.rollback()
-        return jsonify({'error': str(e)}), 500
+        return jsonify(_safe_error_payload(e, 'An unexpected error occurred. Please try again later.')), 500
 
 @api_bp.route('/admin/loans/<int:loan_id>/deactivate', methods=['POST'])
 @require_api_key
@@ -2515,8 +3241,7 @@ def admin_deactivate_loan(loan_id: int):
     except Exception as e:
         logger.exception('admin_deactivate_loan failed')
         db.session.rollback()
-        return jsonify({'error': str(e)}), 500
-
+        return jsonify(_safe_error_payload(e, 'An unexpected error occurred. Please try again later.')), 500
 
 @api_bp.route('/admin/loans/seed-top5', methods=['POST'])
 @require_api_key
@@ -2536,6 +3261,18 @@ def admin_seed_top5_loans():
         league_ids = data.get('league_ids') or [39, 140, 78, 135, 61]
         dry_run = bool(data.get('dry_run'))
         overwrite = bool(data.get('overwrite'))
+
+        requester = getattr(g, 'user_email', None)
+        client_ip = get_client_ip()
+        logger.info(
+            'Admin seed-top5 request season=%s dry_run=%s overwrite=%s leagues=%s user=%s ip=%s',
+            season,
+            dry_run,
+            overwrite,
+            league_ids,
+            requester,
+            client_ip,
+        )
 
         # Compute default window_key (e.g., 2025-26::FULL)
         window_key = (data.get('window_key') or '').strip()
@@ -2723,7 +3460,7 @@ def admin_seed_top5_loans():
         except Exception:
             pass
 
-        return jsonify({
+        summary_payload = {
             'message': 'seed_complete' if not dry_run else 'dry_run_complete',
             'season': season,
             'window_key': window_key,
@@ -2733,12 +3470,24 @@ def admin_seed_top5_loans():
             'pruned': pruned if overwrite and not dry_run else 0,
             'dry_run': dry_run,
             'details': details[:200],  # return a sample to limit payload
-        })
+        }
+        logger.info(
+            'Admin seed-top5 completed season=%s dry_run=%s overwrite=%s created=%s skipped=%s pruned=%s',
+            season,
+            dry_run,
+            overwrite,
+            summary_payload['created'],
+            summary_payload['skipped'],
+            summary_payload['pruned'],
+        )
+        return jsonify(summary_payload)
     except Exception as e:
         logger.exception('admin_seed_top5_loans failed')
-        db.session.rollback()
-        return jsonify({'error': str(e)}), 500
-
+        try:
+            db.session.rollback()
+        except Exception:
+            logger.warning('db.session.rollback failed during admin_seed_top5_loans error handling')
+        return jsonify(_safe_error_payload(e, 'Failed to seed top five leagues. Please try again later.', include_detail=True)), 500
 
 @api_bp.route('/admin/loans/seed-team', methods=['POST'])
 @require_api_key
@@ -2905,7 +3654,7 @@ def admin_seed_team_loans():
     except Exception as e:
         logger.exception('admin_seed_team_loans failed')
         db.session.rollback()
-        return jsonify({'error': str(e)}), 500
+        return jsonify(_safe_error_payload(e, 'An unexpected error occurred. Please try again later.')), 500
 
 # --- Admin: Missing names helpers ---
 def _is_placeholder_name(name: str | None) -> bool:
@@ -2916,7 +3665,6 @@ def _is_placeholder_name(name: str | None) -> bool:
         return True
     low = s.lower()
     return low.startswith('player ') or low.startswith('unknown')
-
 
 @api_bp.route('/admin/loans/missing-names', methods=['GET'])
 @require_api_key
@@ -2969,8 +3717,7 @@ def admin_list_missing_player_names():
         return jsonify([r.to_dict() for r in rows])
     except Exception as e:
         logger.exception('admin_list_missing_player_names failed')
-        return jsonify({'error': str(e)}), 500
-
+        return jsonify(_safe_error_payload(e, 'An unexpected error occurred. Please try again later.')), 500
 
 @api_bp.route('/admin/loans/backfill-names', methods=['POST'])
 @require_api_key
@@ -3077,7 +3824,7 @@ def admin_backfill_player_names():
     except Exception as e:
         logger.exception('admin_backfill_player_names failed')
         db.session.rollback()
-        return jsonify({'error': str(e)}), 500
+        return jsonify(_safe_error_payload(e, 'An unexpected error occurred. Please try again later.')), 500
 
 @api_bp.route('/admin/backfill-team-leagues/<int:season>', methods=['POST'])
 @require_api_key
@@ -3160,7 +3907,7 @@ def admin_backfill_team_leagues(season: int):
     except Exception as e:
         logger.exception('admin_backfill_team_leagues failed')
         db.session.rollback()
-        return jsonify({'error': str(e)}), 500
+        return jsonify(_safe_error_payload(e, 'An unexpected error occurred. Please try again later.')), 500
 
 @api_bp.route('/admin/backfill-team-leagues', methods=['POST'])
 @require_api_key
@@ -3264,7 +4011,7 @@ def admin_backfill_team_leagues_all():
     except Exception as e:
         logger.exception('admin_backfill_team_leagues_all failed')
         db.session.rollback()
-        return jsonify({'error': str(e)}), 500
+        return jsonify(_safe_error_payload(e, 'An unexpected error occurred. Please try again later.')), 500
 
 # --- Admin: Flags management (list/update) ---
 @api_bp.route('/admin/flags', methods=['GET'])
@@ -3290,7 +4037,7 @@ def admin_list_flags():
             'resolved_at': r.resolved_at.isoformat() if r.resolved_at else None,
         } for r in rows])
     except Exception as e:
-        return jsonify({'error': str(e)}), 500
+        return jsonify(_safe_error_payload(e, 'An unexpected error occurred. Please try again later.')), 500
 
 @api_bp.route('/admin/flags/<int:flag_id>', methods=['POST'])
 @require_api_key
@@ -3312,7 +4059,7 @@ def admin_update_flag(flag_id: int):
     except Exception as e:
         logger.exception('admin_update_flag failed')
         db.session.rollback()
-        return jsonify({'error': str(e)}), 500
+        return jsonify(_safe_error_payload(e, 'An unexpected error occurred. Please try again later.')), 500
 
 # --- Admin: Newsletters management (list/view/update) ---
 @api_bp.route('/admin/newsletters', methods=['GET'])
@@ -3375,16 +4122,46 @@ def admin_list_newsletters():
                 )
             except ValueError:
                 pass
+        page = request.args.get('page', type=int) or 1
+        page_size = request.args.get('page_size', type=int) or 20
+        if page < 1:
+            page = 1
+        if page_size < 1:
+            page_size = 1
+        if page_size > 200:
+            page_size = 200
+
+        total = q.order_by(None).count()
+
+        total_pages = 1
+        if page_size:
+            total_pages = max(1, math.ceil(total / page_size))
+            if page > total_pages:
+                page = total_pages
+
         # Ordering: issue date first if provided, otherwise created desc
         if issue_start_str and issue_end_str:
             q = q.order_by(Newsletter.issue_date.desc(), Newsletter.generated_date.desc())
         else:
             q = q.order_by(Newsletter.generated_date.desc())
+
+        if page_size:
+            offset = (page - 1) * page_size
+            if offset < 0:
+                offset = 0
+            q = q.offset(offset).limit(page_size)
+
         rows = q.all()
-        return jsonify([r.to_dict() for r in rows])
+        return jsonify({
+            'items': [r.to_dict() for r in rows],
+            'page': page,
+            'page_size': page_size,
+            'total': total,
+            'total_pages': total_pages,
+        })
     except Exception as e:
         logger.exception('admin_list_newsletters failed')
-        return jsonify({'error': str(e)}), 500
+        return jsonify(_safe_error_payload(e, 'An unexpected error occurred. Please try again later.')), 500
 
 @api_bp.route('/admin/newsletters/<int:nid>', methods=['GET'])
 @require_api_key
@@ -3393,7 +4170,7 @@ def admin_get_newsletter(nid: int):
         n = Newsletter.query.get_or_404(nid)
         return jsonify(n.to_dict())
     except Exception as e:
-        return jsonify({'error': str(e)}), 500
+        return jsonify(_safe_error_payload(e, 'An unexpected error occurred. Please try again later.')), 500
 
 @api_bp.route('/admin/newsletters/<int:nid>', methods=['PUT'])
 @require_api_key
@@ -3436,8 +4213,11 @@ def admin_update_newsletter(nid: int):
             if d:
                 n.week_end_date = d
         # Publish/unpublish toggle
+        auto_send_trigger = False
         if 'published' in data:
             want_pub = bool(data.get('published'))
+            # Detect transition from not published -> published
+            auto_send_trigger = (want_pub is True and not n.published)
             n.published = want_pub
             if want_pub:
                 n.published_date = datetime.now(timezone.utc)
@@ -3445,11 +4225,50 @@ def admin_update_newsletter(nid: int):
                 n.published_date = None
         n.updated_at = datetime.now(timezone.utc)
         db.session.commit()
+
+        # Optional: auto-send on approval
+        try:
+            if auto_send_trigger and (os.getenv('NEWSLETTER_AUTO_SEND_ON_APPROVAL', '1').lower() in ('1','true','yes')) and not n.email_sent:
+                out = _deliver_newsletter_via_webhook(n)
+                print(f"Auto-send newsletter {n.id} to {n.team_id} - {out.get('status')} - out: {out}")
+                if out.get('status') == 'ok':
+                    from datetime import datetime as _dt, timezone as _tz
+                    subs = UserSubscription.query.filter_by(team_id=n.team_id, active=True).all()
+                    valid_subs = [s for s in subs if (s.email or '').strip() and not s.email_bounced]
+                    used_count = len(valid_subs)
+                    n.email_sent = True
+                    n.email_sent_date = _dt.now(_tz.utc)
+                    n.subscriber_count = used_count
+                    # Update last_email_sent for valid subscribers
+                    try:
+                        ts = n.email_sent_date
+                        for s in valid_subs:
+                            s.last_email_sent = ts
+                    except Exception:
+                        pass
+                    db.session.commit()
+                # Record run-history regardless of outcome
+                try:
+                    _append_run_history({
+                        'kind': 'newsletter-auto-send',
+                        'newsletter_id': n.id,
+                        'team_id': n.team_id,
+                        'status': out.get('status'),
+                        'http_status': out.get('http_status'),
+                        'recipient_count': out.get('recipient_count'),
+                    })
+                except Exception:
+                    pass
+        except Exception:
+            # Do not fail the update if auto-send fails
+            logger.exception('auto-send on approval failed')
+            db.session.rollback()
+
         return jsonify({'message': 'updated', 'newsletter': n.to_dict()})
     except Exception as e:
         logger.exception('admin_update_newsletter failed')
         db.session.rollback()
-        return jsonify({'error': str(e)}), 500
+        return jsonify(_safe_error_payload(e, 'An unexpected error occurred. Please try again later.')), 500
 
 # --- Simple run-history using AdminSetting key 'run_history' ---
 
@@ -3462,7 +4281,6 @@ def _get_run_history_list() -> list:
     except Exception:
         return []
 
-
 def _save_run_history_list(items: list):
     row = AdminSetting.query.filter_by(key='run_history').first()
     if not row:
@@ -3471,7 +4289,6 @@ def _save_run_history_list(items: list):
     else:
         row.value_json = json.dumps(items)
     db.session.commit()
-
 
 def _append_run_history(event: dict):
     try:
@@ -3484,7 +4301,6 @@ def _append_run_history(event: dict):
         db.session.rollback()
         logger.exception('append_run_history failed')
 
-
 @api_bp.route('/admin/runs/history', methods=['GET', 'POST'])
 @require_api_key
 def admin_runs_history():
@@ -3494,8 +4310,7 @@ def admin_runs_history():
         _append_run_history(request.get_json() or {})
         return jsonify({'message': 'appended'})
     except Exception as e:
-        return jsonify({'error': str(e)}), 500
-
+        return jsonify(_safe_error_payload(e, 'An unexpected error occurred. Please try again later.')), 500
 
 @api_bp.route('/admin/runs/history/clear', methods=['POST'])
 @require_api_key
@@ -3504,4 +4319,4 @@ def admin_runs_history_clear():
         _save_run_history_list([])
         return jsonify({'message': 'cleared'})
     except Exception as e:
-        return jsonify({'error': str(e)}), 500
+        return jsonify(_safe_error_payload(e, 'An unexpected error occurred. Please try again later.')), 500
