@@ -20,6 +20,7 @@ from src.agents.weekly_agent import (
     _set_latest_player_lookup,
     _normalize_player_key,
     to_initial_last,
+    _render_variants,
 )
 
 # If you have an MCP client already for Brave (Model Context Protocol), import it here.
@@ -871,12 +872,25 @@ def persist_newsletter(team_db_id: int, content_json_str: str, week_start: date,
     parsed = json.loads(content_json_str)
     title = parsed.get("title") or "Weekly Loan Update"
 
+    # Get team info for rendering
+    team = Team.query.get(team_db_id)
+    team_name = team.name if team else None
+
+    # Render and embed variants (web_html, email_html, text) for convenience
+    try:
+        variants = _render_variants(parsed, team_name)
+        parsed['rendered'] = variants
+        content_json_str = json.dumps(parsed, ensure_ascii=False)
+    except Exception:
+        # Non-fatal; continue without rendered variants
+        pass
+
     now = datetime.now(timezone.utc)
     newsletter = Newsletter(
         team_id=team_db_id,
         newsletter_type=newsletter_type,
         title=title,
-        content=content_json_str,           # store verbatim JSON as content
+        content=content_json_str,           # store JSON with rendered variants
         structured_content=content_json_str,
         week_start_date=week_start,
         week_end_date=week_end,
