@@ -22,6 +22,7 @@ import string
 import requests
 from src.extensions import limiter
 from src.utils.sanitize import sanitize_comment_body, sanitize_plain_text
+from src.agents.errors import NoActiveLoaneesError
 
 logger = logging.getLogger(__name__)
 
@@ -29,6 +30,21 @@ api_bp = Blueprint('api', __name__)
 
 # Initialize API-Football client
 api_client = APIFootballClient()
+
+SUBSCRIPTIONS_REQUIRE_VERIFY = os.getenv('SUBSCRIPTIONS_REQUIRE_VERIFY', '1').lower() in ('1', 'true', 'yes', 'on')
+try:
+    SUBSCRIPTIONS_VERIFY_TTL_MINUTES = int(os.getenv('SUBSCRIPTIONS_VERIFY_TTL_MINUTES') or 60 * 24)
+except Exception:
+    SUBSCRIPTIONS_VERIFY_TTL_MINUTES = 60 * 24
+
+
+def _admin_email_list() -> list[str]:
+    raw = os.getenv('ADMIN_EMAILS') or ''
+    emails = [item.strip() for item in raw.split(',') if item.strip()]
+    if not emails:
+        return []
+    # Preserve order while removing duplicates
+    return list(dict.fromkeys(emails))
 
 # API Key Authentication Decorator
 def require_api_key(f):
@@ -236,6 +252,31 @@ def require_user_auth(f):
         return f(*args, **kwargs)
     return decorated
 
+
+def _get_authorized_email() -> str | None:
+    """Resolve the authenticated email from the current request, if present."""
+    email = getattr(g, 'user_email', None)
+    if email:
+        return email
+
+    auth_header = request.headers.get('Authorization', '')
+    if auth_header.startswith('Bearer '):
+        token = auth_header.split(' ', 1)[1].strip()
+        if token:
+            serializer = _user_serializer()
+            try:
+                data = serializer.loads(token, max_age=60 * 60 * 24 * 30)
+                resolved = (data or {}).get('email')
+                if resolved:
+                    g.user_email = resolved
+                    return resolved
+            except (SignatureExpired, BadSignature):
+                return None
+            except Exception:
+                logger.exception('Failed to decode auth token while resolving email')
+                return None
+    return None
+
 def _is_production() -> bool:
     env = (os.getenv('ENV') or os.getenv('FLASK_ENV') or os.getenv('APP_ENV') or '').strip().lower()
     return env in ('prod', 'production')
@@ -330,6 +371,98 @@ def _send_login_code(email: str, code: str):
         except Exception:
             pass
         logger.info(msg)
+
+
+def _send_email_via_webhook(
+    *,
+    email: str,
+    subject: str,
+    text: str,
+    html: str | None = None,
+    meta: dict | None = None,
+    http_method_override: str | None = None,
+) -> dict:
+    webhook_url = os.getenv('N8N_EMAIL_WEBHOOK_URL')
+    if not webhook_url:
+        raise RuntimeError('N8N_EMAIL_WEBHOOK_URL is not configured')
+
+    method = (http_method_override or os.getenv('N8N_EMAIL_HTTP_METHOD') or 'POST').strip().upper()
+    if method not in {'GET', 'POST'}:
+        method = 'POST'
+
+    headers: dict[str, str] = {}
+    if method == 'POST':
+        headers['Content-Type'] = 'application/json'
+
+    bearer = os.getenv('N8N_EMAIL_AUTH_BEARER')
+    if bearer:
+        headers['Authorization'] = f'Bearer {bearer}'
+
+    payload = {
+        'email': email,
+        'subject': subject,
+        'text': text,
+        'html': html or text,
+        'meta': meta or {},
+    }
+
+    try:
+        if method == 'GET':
+            param_name = os.getenv('N8N_EMAIL_GET_PARAM', 'payload').strip() or 'payload'
+            response = requests.get(
+                webhook_url,
+                params={param_name: json.dumps(payload)},
+                timeout=10,
+            )
+        else:
+            response = requests.post(
+                webhook_url,
+                headers=headers,
+                data=json.dumps(payload),
+                timeout=10,
+            )
+        return {
+            'status': 'ok' if response.ok else 'error',
+            'http_status': response.status_code,
+            'response_text': response.text,
+        }
+    except Exception as exc:
+        logger.exception('Failed to send webhook email to %s', email)
+        raise RuntimeError(f'Email delivery failed: {exc}') from exc
+
+
+def _send_subscription_verification_email(email: str, team_names: list[str], token: str) -> dict:
+    public_base = os.getenv('PUBLIC_BASE_URL', '').rstrip('/')
+    confirm_path = f"/verify?token={token}"
+    confirm_url = f"{public_base}{confirm_path}" if public_base else confirm_path
+
+    subject = f"Confirm your newsletter subscription"
+
+    team_lines_html = ''.join(f'<li>{name}</li>' for name in team_names)
+    team_lines_text = '\n'.join(f" • {name}" for name in team_names)
+
+    html = f"""
+    <p>Thanks for subscribing to Go On Loan newsletters.</p>
+    <p>Please confirm your email address to start receiving weekly updates.</p>
+    <p><a href="{confirm_url}">Confirm subscription</a></p>
+    <p>You requested updates for:</p>
+    <ul>{team_lines_html}</ul>
+    <p>If you did not make this request, you can ignore this message.</p>
+    """
+    text = (
+        "Thanks for subscribing to Go On Loan newsletters.\n\n"
+        "Confirm your email address to start receiving updates:\n"
+        f"{confirm_url}\n\n"
+        "You requested updates for:\n"
+        f"{team_lines_text}\n\n"
+        "If you did not make this request, you can ignore this message."
+    )
+
+    meta = {
+        'kind': 'subscription_verification',
+        'team_count': len(team_names),
+    }
+    return _send_email_via_webhook(email=email, subject=subject, text=text, html=html, meta=meta)
 
 @api_bp.route('/health', methods=['GET'])
 def health_check():
@@ -1462,11 +1595,116 @@ def my_subscriptions():
     """Return active subscriptions for the authenticated user's email."""
     try:
         email = getattr(g, 'user_email', None)
-        if not email:
+        email_norm = (email or '').strip().lower()
+        if not email_norm:
             return jsonify({'error': 'Unauthorized'}), 401
-        subs = UserSubscription.query.filter_by(email=email, active=True).all()
+        subs = UserSubscription.query.filter_by(email=email_norm, active=True).all()
         return jsonify([s.to_dict() for s in subs])
     except Exception as e:
+        return jsonify(_safe_error_payload(e, 'An unexpected error occurred. Please try again later.')), 500
+
+
+@api_bp.route('/subscriptions/me', methods=['POST'])
+@require_user_auth
+def update_my_subscriptions():
+    """Create, reactivate, or deactivate team subscriptions for the signed-in user."""
+    try:
+        email = getattr(g, 'user_email', None)
+        if not email:
+            return jsonify({'error': 'Unauthorized'}), 401
+
+        payload = request.get_json() or {}
+        team_ids_raw = payload.get('team_ids') or []
+        preferred_frequency = (payload.get('preferred_frequency') or 'weekly').strip() or 'weekly'
+
+        parsed_ids: list[int] = []
+        rejected_inputs: list[Any] = []
+        for raw in team_ids_raw:
+            try:
+                tid = int(raw)
+            except (TypeError, ValueError):
+                rejected_inputs.append(raw)
+                continue
+            parsed_ids.append(tid)
+
+        # Preserve order but drop duplicates
+        unique_ids: list[int] = []
+        seen: set[int] = set()
+        for tid in parsed_ids:
+            if tid not in seen:
+                seen.add(tid)
+                unique_ids.append(tid)
+
+        team_rows = Team.query.filter(Team.id.in_(unique_ids)).all() if unique_ids else []
+        valid_ids = {row.id for row in team_rows}
+        missing_team_ids = [tid for tid in unique_ids if tid not in valid_ids]
+
+        desired_team_ids = set(valid_ids)
+        email_norm = (email or '').strip().lower()
+        now = datetime.now(timezone.utc)
+
+        existing_rows = UserSubscription.query.filter_by(email=email_norm).all()
+        existing_map = {row.team_id: row for row in existing_rows}
+
+        created_count = 0
+        reactivated_count = 0
+        updated_pref_count = 0
+
+        for team in team_rows:
+            sub = existing_map.get(team.id)
+            if sub:
+                changed = False
+                if not sub.active:
+                    sub.active = True
+                    changed = True
+                    reactivated_count += 1
+                if sub.preferred_frequency != preferred_frequency:
+                    sub.preferred_frequency = preferred_frequency
+                    changed = True
+                    updated_pref_count += 1
+                if not sub.unsubscribe_token:
+                    sub.unsubscribe_token = str(uuid.uuid4())
+                    changed = True
+                if changed:
+                    sub.updated_at = now
+            else:
+                subscription = UserSubscription(
+                    email=email_norm,
+                    team_id=team.id,
+                    preferred_frequency=preferred_frequency,
+                    active=True,
+                    unsubscribe_token=str(uuid.uuid4()),
+                    created_at=now,
+                    updated_at=now,
+                )
+                db.session.add(subscription)
+                created_count += 1
+
+        deactivated_count = 0
+        for sub in existing_rows:
+            if sub.team_id not in desired_team_ids and sub.active:
+                sub.active = False
+                sub.updated_at = now
+                deactivated_count += 1
+
+        db.session.commit()
+
+        active_subs = UserSubscription.query.filter_by(email=email_norm, active=True).all()
+        response = {
+            'message': 'Subscriptions updated',
+            'created_count': created_count,
+            'reactivated_count': reactivated_count,
+            'updated_frequency_count': updated_pref_count,
+            'deactivated_count': deactivated_count,
+            'ignored_team_ids': missing_team_ids + rejected_inputs,
+            'subscriptions': [s.to_dict() for s in active_subs],
+        }
+        return jsonify(response)
+    except Exception as e:
+        try:
+            db.session.rollback()
+        except Exception:
+            pass
         return jsonify(_safe_error_payload(e, 'An unexpected error occurred. Please try again later.')), 500
 
 @api_bp.route('/newsletters/<int:newsletter_id>', methods=['GET'])
@@ -1485,6 +1723,18 @@ def get_newsletter(newsletter_id):
                 }
         except Exception:
             pass
+
+        try:
+            comments = (
+                NewsletterComment.query
+                .filter_by(newsletter_id=newsletter_id, is_deleted=False)
+                .order_by(NewsletterComment.created_at.asc())
+                .all()
+            )
+            payload['comments'] = [comment.to_dict() for comment in comments]
+        except Exception:
+            payload['comments'] = []
+
         return jsonify(payload)
     except Exception as e:
         return jsonify(_safe_error_payload(e, 'An unexpected error occurred. Please try again later.')), 500
@@ -1637,6 +1887,143 @@ def get_subscriptions():
     except Exception as e:
         return jsonify(_safe_error_payload(e, 'An unexpected error occurred. Please try again later.')), 500
 
+
+def _activate_subscriptions(email: str, team_ids: list[int], preferred_frequency: str = 'weekly') -> dict[str, Any]:
+    created_ids: list[int] = []
+    updated_ids: list[int] = []
+    skipped: list[dict[str, Any]] = []
+
+    unique_ids: list[int] = []
+    seen_ids: set[int] = set()
+    for tid in team_ids:
+        if tid in seen_ids:
+            continue
+        seen_ids.add(tid)
+        unique_ids.append(tid)
+
+    team_rows = Team.query.filter(Team.id.in_(unique_ids)).all() if unique_ids else []
+    team_map = {row.id: row for row in team_rows}
+
+    for tid in unique_ids:
+        team = team_map.get(tid)
+        if not team:
+            skipped.append({'team_id': tid, 'reason': 'team not found'})
+            continue
+
+        existing = UserSubscription.query.filter_by(email=email, team_id=team.id).first()
+        if existing:
+            changed = False
+            if not existing.active:
+                existing.active = True
+                changed = True
+            if existing.preferred_frequency != preferred_frequency:
+                existing.preferred_frequency = preferred_frequency
+                changed = True
+            if not existing.unsubscribe_token:
+                existing.unsubscribe_token = str(uuid.uuid4())
+                changed = True
+            if changed:
+                updated_ids.append(existing.id)
+            else:
+                skipped.append({'team_id': team.id, 'reason': 'already active'})
+            continue
+
+        subscription = UserSubscription(
+            email=email,
+            team_id=team.id,
+            preferred_frequency=preferred_frequency,
+            active=True,
+            unsubscribe_token=str(uuid.uuid4()),
+        )
+        db.session.add(subscription)
+        db.session.flush()
+        created_ids.append(subscription.id)
+
+    result_ids = created_ids + updated_ids
+    subs = UserSubscription.query.filter(UserSubscription.id.in_(result_ids)).all() if result_ids else []
+
+    return {
+        'message': 'Subscriptions updated',
+        'created_count': len(created_ids),
+        'updated_count': len(updated_ids),
+        'skipped': skipped,
+        'created_ids': created_ids,
+        'updated_ids': updated_ids,
+        'subscriptions': [s.to_dict() for s in subs],
+    }
+
+
+def _process_subscriptions(email: str, team_ids_raw: list[Any], preferred_frequency: str) -> tuple[dict[str, Any], int]:
+    if not email:
+        return {'error': 'email is required'}, 400
+    if not team_ids_raw:
+        return {'error': 'team_ids are required'}, 400
+
+    parsed_ids: list[int] = []
+    skipped: list[dict[str, Any]] = []
+    for raw_id in team_ids_raw:
+        try:
+            tid = int(raw_id)
+        except (TypeError, ValueError):
+            skipped.append({'team_id': raw_id, 'reason': 'invalid team id'})
+            continue
+        parsed_ids.append(tid)
+
+    if not parsed_ids:
+        return {'error': 'No valid team ids provided', 'skipped': skipped}, 400
+
+    team_rows = Team.query.filter(Team.id.in_(parsed_ids)).all()
+    team_map = {row.id: row for row in team_rows}
+
+    valid_ids: list[int] = []
+    team_names: list[str] = []
+    seen_ids: set[int] = set()
+    for tid in parsed_ids:
+        if tid in seen_ids:
+            continue
+        seen_ids.add(tid)
+        team = team_map.get(tid)
+        if not team:
+            skipped.append({'team_id': tid, 'reason': 'team not found'})
+            continue
+        valid_ids.append(tid)
+        team_names.append(team.name or f'Team #{tid}')
+
+    if not valid_ids:
+        return {'error': 'No valid team ids provided', 'skipped': skipped}, 400
+
+    if SUBSCRIPTIONS_REQUIRE_VERIFY:
+        try:
+            token_row = _create_email_token(
+                email=email,
+                purpose='subscribe_confirm',
+                metadata={'team_ids': valid_ids, 'preferred_frequency': preferred_frequency},
+                ttl_minutes=SUBSCRIPTIONS_VERIFY_TTL_MINUTES,
+            )
+            db.session.flush()
+            _send_subscription_verification_email(email, team_names, token_row.token)
+            db.session.commit()
+            return ({
+                'message': 'Verification email sent. Please check your inbox to confirm.',
+                'verification_required': True,
+                'team_count': len(valid_ids),
+                'expires_at': token_row.expires_at.isoformat() if token_row.expires_at else None,
+                'skipped': skipped,
+            }, 202)
+        except Exception as exc:
+            try:
+                db.session.rollback()
+            except Exception:
+                pass
+            logger.exception('Failed to queue subscription verification for %s', email)
+            return _safe_error_payload(exc, 'Failed to send verification email'), 500
+
+    result = _activate_subscriptions(email, valid_ids, preferred_frequency)
+    result['skipped'].extend(skipped)
+    db.session.commit()
+    status = 201 if result['created_count'] else 200
+    return result, status
+
 @api_bp.route('/subscriptions', methods=['POST'])
 def create_subscription():
     """Create a new subscription for a single team."""
@@ -1647,39 +2034,11 @@ def create_subscription():
         team_id = data.get('team_id')
         preferred_frequency = data.get('preferred_frequency', 'weekly')
 
-        if not email or not team_id:
+        if not email or team_id is None:
             return jsonify({'error': 'email and team_id are required'}), 400
 
-        team = Team.query.get_or_404(int(team_id))
-
-        existing = UserSubscription.query.filter_by(email=email, team_id=team.id).first()
-        if existing:
-            # Reactivate/update existing subscription
-            existing.active = True
-            existing.preferred_frequency = preferred_frequency
-            if not existing.unsubscribe_token:
-                existing.unsubscribe_token = str(uuid.uuid4())
-            db.session.commit()
-            return jsonify({
-                'message': 'Subscription already existed and was updated',
-                'subscription': existing.to_dict()
-            }), 200
-
-        subscription = UserSubscription(
-            email=email,
-            team_id=team.id,
-            preferred_frequency=preferred_frequency,
-            active=True,
-            unsubscribe_token=str(uuid.uuid4()),
-        )
-        
-        db.session.add(subscription)
-        db.session.commit()
-        
-        return jsonify({
-            'message': 'Subscription created successfully',
-            'subscription': subscription.to_dict()
-        }), 201
+        payload, status = _process_subscriptions(email, [team_id], preferred_frequency)
+        return jsonify(payload), status
     except Exception as e:
         return jsonify(_safe_error_payload(e, 'An unexpected error occurred. Please try again later.')), 500
 
@@ -1695,60 +2054,8 @@ def bulk_create_subscriptions():
         if not email or not team_ids:
             return jsonify({'error': 'email and team_ids are required'}), 400
 
-        created_ids: list[int] = []
-        updated_ids: list[int] = []
-        skipped: list[dict] = []
-
-        for raw_id in team_ids:
-            try:
-                tid = int(raw_id)
-            except Exception:
-                skipped.append({'team_id': raw_id, 'reason': 'invalid team id'})
-                continue
-
-            team = Team.query.get(tid)
-            if not team:
-                skipped.append({'team_id': tid, 'reason': 'team not found'})
-                continue
-
-            existing = UserSubscription.query.filter_by(email=email, team_id=team.id).first()
-            if existing:
-                if not existing.active or existing.preferred_frequency != preferred_frequency:
-                    existing.active = True
-                    existing.preferred_frequency = preferred_frequency
-                    if not existing.unsubscribe_token:
-                        existing.unsubscribe_token = str(uuid.uuid4())
-                    updated_ids.append(existing.id)
-                else:
-                    skipped.append({'team_id': team.id, 'reason': 'already active'})
-                continue
-
-            sub = UserSubscription(
-                email=email,
-                team_id=team.id,
-                preferred_frequency=preferred_frequency,
-                active=True,
-                unsubscribe_token=str(uuid.uuid4()),
-            )
-            db.session.add(sub)
-            db.session.flush()
-            created_ids.append(sub.id)
-
-        db.session.commit()
-
-        result_ids = created_ids + updated_ids
-        subs = UserSubscription.query.filter(UserSubscription.id.in_(result_ids)).all() if result_ids else []
-
-        return jsonify({
-            'message': f'Processed {len(team_ids)} team(s)',
-            'created_count': len(created_ids),
-            'updated_count': len(updated_ids),
-            'skipped_count': len(skipped),
-            'created_ids': created_ids,
-            'updated_ids': updated_ids,
-            'skipped': skipped,
-            'subscriptions': [s.to_dict() for s in subs]
-        }), 201 if created_ids else 200
+        payload, status = _process_subscriptions(email, team_ids, preferred_frequency)
+        return jsonify(payload), status
     except Exception as e:
         return jsonify(_safe_error_payload(e, 'An unexpected error occurred. Please try again later.')), 500
 
@@ -1843,18 +2150,156 @@ def update_manage_state(token: str):
     except Exception as e:
         return jsonify(_safe_error_payload(e, 'An unexpected error occurred. Please try again later.')), 500
 
-@api_bp.route('/subscriptions/unsubscribe/<token>', methods=['POST'])
-def token_unsubscribe(token: str):
-    """Unsubscribe a single subscription by its unsubscribe token."""
+
+@api_bp.route('/subscriptions/unsubscribe', methods=['POST'])
+def unsubscribe_by_email():
+    """Unsubscribe an email address from one or more teams."""
     try:
-        sub = UserSubscription.query.filter_by(unsubscribe_token=token).first()
-        if not sub:
-            return jsonify({'error': 'invalid token'}), 404
-        sub.active = False
+        payload = request.get_json() or {}
+        email_raw = payload.get('email')
+        email = (email_raw or '').strip().lower()
+        team_ids = payload.get('team_ids') or []
+
+        if not email:
+            auth_email = _get_authorized_email()
+            if auth_email:
+                email = auth_email.strip().lower()
+
+        if not email:
+            return jsonify({'error': 'email is required'}), 400
+
+        query = UserSubscription.query.filter_by(email=email)
+        parsed_ids: set[int] = set()
+        for raw in team_ids:
+            try:
+                parsed_ids.add(int(raw))
+            except (TypeError, ValueError):
+                continue
+        if parsed_ids:
+            query = query.filter(UserSubscription.team_id.in_(parsed_ids))
+
+        subs = query.all()
+        if not subs:
+            return jsonify({'message': 'No matching subscriptions found', 'count': 0}), 200
+
+        count = 0
+        for sub in subs:
+            if sub.active:
+                sub.active = False
+                count += 1
         db.session.commit()
-        return jsonify({'message': 'Unsubscribed successfully'})
+        return jsonify({'message': 'Unsubscribed successfully', 'count': count})
     except Exception as e:
+        try:
+            db.session.rollback()
+        except Exception:
+            pass
         return jsonify(_safe_error_payload(e, 'An unexpected error occurred. Please try again later.')), 500
+
+
+def _unsubscribe_subscription_by_token(token: str) -> tuple[UserSubscription | None, str, int]:
+    token = (token or '').strip()
+    if not token:
+        return None, 'missing_token', 400
+
+    sub = UserSubscription.query.filter_by(unsubscribe_token=token).first()
+    if not sub:
+        return None, 'not_found', 404
+
+    if sub.active:
+        try:
+            sub.active = False
+            db.session.commit()
+        except Exception:
+            db.session.rollback()
+            raise
+        return sub, 'unsubscribed', 200
+
+    return sub, 'already_unsubscribed', 200
+
+
+def _public_manage_url() -> str | None:
+    base = os.getenv('PUBLIC_BASE_URL', '').rstrip('/')
+    if not base:
+        return None
+    manage_path = os.getenv('PUBLIC_MANAGE_PATH', '/manage')
+    return f"{base}{manage_path}"
+
+
+@api_bp.route('/subscriptions/unsubscribe/<token>', methods=['GET', 'POST'])
+def token_unsubscribe(token: str):
+    """Unsubscribe a single subscription by its unsubscribe token.
+
+    POST returns JSON for programmatic callers. GET immediately unsubscribes
+    and renders a lightweight confirmation page suitable for email links.
+    """
+    if request.method == 'POST':
+        try:
+            sub, status, code = _unsubscribe_subscription_by_token(token)
+        except Exception as e:
+            logger.exception('Error unsubscribing via token (POST)')
+            return jsonify(_safe_error_payload(e, 'An unexpected error occurred. Please try again later.')), 500
+
+        if status == 'missing_token':
+            return jsonify({'error': 'token is required'}), code
+        if status == 'not_found':
+            return jsonify({'error': 'invalid token'}), code
+
+        message = 'Unsubscribed successfully' if status == 'unsubscribed' else 'Subscription already inactive'
+        return jsonify({'message': message}), code
+
+    # GET: render confirmation page
+    try:
+        sub, status, code = _unsubscribe_subscription_by_token(token)
+    except Exception as e:
+        logger.exception('Error unsubscribing via token (GET)')
+        error_ctx = {
+            'status': 'error',
+            'headline': 'Something went wrong',
+            'body': 'We were unable to process your unsubscribe request. Please try again later.',
+            'manage_url': _public_manage_url(),
+        }
+        return render_template('unsubscribe_confirmation.html', **error_ctx), 500
+
+    manage_url = _public_manage_url()
+    team_name = sub.team.name if sub and getattr(sub, 'team', None) else None
+
+    if status == 'missing_token':
+        ctx = {
+            'status': 'error',
+            'headline': 'Invalid unsubscribe link',
+            'body': 'The unsubscribe link is missing required information. Please check the email and try again.',
+            'manage_url': manage_url,
+            'team_name': team_name,
+        }
+    elif status == 'not_found':
+        ctx = {
+            'status': 'error',
+            'headline': 'Link expired or invalid',
+            'body': 'We could not find a subscription for this link. It may have already been used or expired.',
+            'manage_url': manage_url,
+            'team_name': team_name,
+        }
+    elif status == 'unsubscribed':
+        ctx = {
+            'status': 'ok',
+            'headline': 'You are unsubscribed',
+            'body': 'You will no longer receive updates for this team. You can manage other preferences anytime.',
+            'manage_url': manage_url,
+            'team_name': team_name,
+            'email': sub.email if sub else None,
+        }
+    else:  # already_unsubscribed
+        ctx = {
+            'status': 'ok',
+            'headline': 'Already unsubscribed',
+            'body': 'This email was already unsubscribed from this team. No further action is required.',
+            'manage_url': manage_url,
+            'team_name': team_name,
+            'email': sub.email if sub else None,
+        }
+
+    return render_template('unsubscribe_confirmation.html', **ctx), code
 
 @api_bp.route('/verify/request', methods=['POST'])
 def request_verification_token():
@@ -1873,15 +2318,48 @@ def request_verification_token():
 
 @api_bp.route('/verify/<token>', methods=['POST'])
 def verify_email_token(token: str):
-    """Mark verification token as used and return success if valid."""
+    """Mark verification token as used; handles generic verification and subscription confirmation."""
     try:
-        row = EmailToken.query.filter_by(token=token, purpose='verify').first()
+        row = EmailToken.query.filter_by(token=token).first()
         if not row or not row.is_valid():
             return jsonify({'error': 'invalid or expired token'}), 400
-        row.used_at = datetime.now(timezone.utc)
-        db.session.commit()
-        return jsonify({'message': 'Email verified', 'email': row.email})
+
+        purpose = (row.purpose or '').strip().lower()
+        if purpose == 'subscribe_confirm':
+            meta = {}
+            try:
+                meta = json.loads(row.metadata_json or '{}')
+            except Exception:
+                meta = {}
+            team_ids_raw = meta.get('team_ids') or []
+            preferred_frequency = meta.get('preferred_frequency', 'weekly')
+            try:
+                team_ids = [int(tid) for tid in team_ids_raw]
+            except Exception:
+                team_ids = []
+            if not team_ids:
+                return jsonify({'error': 'Token metadata missing team ids'}), 400
+            result = _activate_subscriptions(row.email, team_ids, preferred_frequency)
+            row.used_at = datetime.now(timezone.utc)
+            db.session.commit()
+            status = 201 if result['created_count'] else 200
+            return jsonify({
+                'message': 'Subscriptions confirmed',
+                'email': row.email,
+                **result,
+            }), status
+
+        if purpose == 'verify':
+            row.used_at = datetime.now(timezone.utc)
+            db.session.commit()
+            return jsonify({'message': 'Email verified', 'email': row.email})
+
+        return jsonify({'error': f'Unsupported token purpose: {purpose or "unknown"}'}), 400
     except Exception as e:
+        try:
+            db.session.rollback()
+        except Exception:
+            pass
         return jsonify(_safe_error_payload(e, 'An unexpected error occurred. Please try again later.')), 500
 
 @api_bp.route('/subscriptions/<int:subscription_id>', methods=['DELETE'])
@@ -2513,10 +2991,66 @@ def _deliver_newsletter_via_webhook(
     if bearer:
         headers['Authorization'] = f'Bearer {bearer}'
 
+    team_ids: list[int] = []
+    if n.team_id:
+        try:
+            team_ids.append(int(n.team_id))
+        except (TypeError, ValueError):
+            pass
+
+    team_api_id = None
+    if getattr(n, 'team', None) is not None:
+        team_api_id = getattr(n.team, 'team_id', None)
+    if team_api_id is None and n.team_id:
+        try:
+            team_row = Team.query.with_entities(Team.team_id).filter(Team.id == n.team_id).first()
+            if team_row:
+                team_api_id = team_row[0]
+        except Exception:
+            team_api_id = None
+
+    if team_api_id is not None:
+        try:
+            alt_ids = (
+                Team.query.with_entities(Team.id)
+                .filter(Team.team_id == team_api_id)
+                .all()
+            )
+            team_ids.extend(int(row[0]) for row in alt_ids if row and row[0])
+        except Exception:
+            pass
+
+    team_ids = list(dict.fromkeys(team_ids))
+
+    if team_ids:
+        subs = (
+            UserSubscription.query
+            .filter(UserSubscription.active.is_(True))
+            .filter(UserSubscription.team_id.in_(team_ids))
+            .all()
+        )
+    else:
+        subs = []
+
+    def _normalize_email(value: str | None) -> str:
+        return (value or '').strip().lower()
+
+    sub_lookup: dict[str, UserSubscription] = {}
+    ordered_sub_emails: list[str] = []
+    for s in subs:
+        if s.email_bounced:
+            continue
+        raw_email = (s.email or '').strip()
+        key = _normalize_email(raw_email)
+        if not raw_email or not key:
+            continue
+        if key not in sub_lookup:
+            sub_lookup[key] = s
+            ordered_sub_emails.append(raw_email)
+
     # Gather recipients from active team subscriptions if not provided
     if recipients is None:
-        subs = UserSubscription.query.filter_by(team_id=n.team_id, active=True).all()
-        recipients = [s.email for s in subs if (s.email or '').strip() and not s.email_bounced]
+        recipients = ordered_sub_emails
 
     recipients = [r for r in (recipients or []) if (r or '').strip()]
     total_recipients = len(recipients)
@@ -2531,8 +3065,7 @@ def _deliver_newsletter_via_webhook(
 
     # Render content
     ctx = _newsletter_render_context(n)
-    html = render_template('newsletter_email.html', **ctx)
-    text = _plain_text_from_news(_load_newsletter_json(n) or {}, n)
+    text_base = _plain_text_from_news(_load_newsletter_json(n) or {}, n)
     subject = subject_override or (ctx['title'] or 'Weekly Loan Update')
 
     from_addr = {
@@ -2542,6 +3075,22 @@ def _deliver_newsletter_via_webhook(
 
     # Optional public base URL for manage/unsubscribe links if the n8n flow uses it
     public_base = os.getenv('PUBLIC_BASE_URL', '').rstrip('/')
+    link_base = os.getenv('NEWSLETTER_LINK_BASE_URL', '').rstrip('/')
+    unsubscribe_base = (
+        link_base
+        or os.getenv('PUBLIC_UNSUBSCRIBE_BASE_URL', '').rstrip('/')
+        or os.getenv('PUBLIC_API_BASE_URL', '').rstrip('/')
+        or public_base
+    )
+    manage_url = _public_manage_url()
+
+    meta_base = {
+        'issue_date': n.issue_date.isoformat() if n.issue_date else None,
+        'week_start': n.week_start_date.isoformat() if n.week_start_date else None,
+        'week_end': n.week_end_date.isoformat() if n.week_end_date else None,
+        'public_base_url': public_base or None,
+        'dry_run': bool(dry_run),
+    }
 
     delivered_count = 0
     failures: list[dict[str, Any]] = []
@@ -2549,6 +3098,34 @@ def _deliver_newsletter_via_webhook(
     last_response_text = ''
 
     for email in recipients:
+        normalized_email = _normalize_email(email)
+        subscription = sub_lookup.get(normalized_email)
+        unsubscribe_url = None
+        if subscription and subscription.unsubscribe_token:
+            token_path = f"/subscriptions/unsubscribe/{subscription.unsubscribe_token}"
+            if unsubscribe_base:
+                unsubscribe_url = f"{unsubscribe_base.rstrip('/')}{token_path}"
+            else:
+                unsubscribe_url = token_path
+
+        html = render_template(
+            'newsletter_email.html',
+            **ctx,
+            unsubscribe_url=unsubscribe_url,
+            manage_url=manage_url,
+        )
+
+        text = text_base
+        if unsubscribe_url:
+            text = f"{text_base}\n\nTo unsubscribe from this team, visit: {unsubscribe_url}\n"
+
+        meta_payload = meta_base.copy()
+        meta_payload.update({
+            'unsubscribe_url': unsubscribe_url,
+            'subscription_id': subscription.id if subscription else None,
+            'manage_url': manage_url,
+        })
+
         payload = {
             'newsletter_id': n.id,
             'team_id': n.team_id,
@@ -2558,13 +3135,7 @@ def _deliver_newsletter_via_webhook(
             'email': email,
             'html': html,
             'text': text,
-            'meta': {
-                'issue_date': n.issue_date.isoformat() if n.issue_date else None,
-                'week_start': n.week_start_date.isoformat() if n.week_start_date else None,
-                'week_end': n.week_end_date.isoformat() if n.week_end_date else None,
-                'public_base_url': public_base or None,
-                'dry_run': bool(dry_run),
-            },
+            'meta': meta_payload,
         }
 
         request_kwargs: dict[str, Any]
@@ -2616,6 +3187,9 @@ def render_newsletter(newsletter_id: int, fmt: str):
     try:
         n = Newsletter.query.get_or_404(newsletter_id)
         data = _load_newsletter_json(n) or {}
+        team_logo = data.get('team_logo')
+        if not team_logo and n.team and getattr(n.team, 'logo', None):
+            team_logo = n.team.logo
         context: dict[str, Any] = {
             'meta': n,
             'team_name': n.team.name if n.team else '',
@@ -2626,6 +3200,7 @@ def render_newsletter(newsletter_id: int, fmt: str):
             'sections': data.get('sections') or [],
             'by_numbers': data.get('by_numbers') or {},
             'fan_pulse': data.get('fan_pulse') or [],
+            'team_logo': team_logo,
         }
         if fmt in ('html', 'web'):
             html = render_template('newsletter_web.html', **context)
@@ -2661,15 +3236,26 @@ def send_newsletter(newsletter_id: int):
 
         recipients: list[str] | None = None
         is_test = False
+        admin_preview = False
         if test_to:
-            # Support string or list
             if isinstance(test_to, str):
-                recipients = [test_to]
+                sentinel = test_to.strip().lower()
+                if sentinel in {'__admins__', '__admin__', 'admins'}:
+                    recipients = _admin_email_list()
+                    if not recipients:
+                        return jsonify({
+                            'error': 'admin_emails_not_configured',
+                            'message': 'Set ADMIN_EMAILS to a comma-separated list before sending admin previews.',
+                        }), 400
+                    admin_preview = True
+                else:
+                    recipients = [test_to]
+                is_test = True
             elif isinstance(test_to, list):
                 recipients = [str(x) for x in test_to if str(x).strip()]
+                is_test = True
             else:
                 return jsonify({'error': 'test_to must be string or list of strings'}), 400
-            is_test = True
 
         if not is_test:
             # Require published before full send
@@ -2677,6 +3263,17 @@ def send_newsletter(newsletter_id: int):
                 return jsonify({'error': 'newsletter must be published/approved before sending'}), 400
             if n.email_sent:
                 return jsonify({'error': 'newsletter already sent'}), 400
+
+        if recipients is not None:
+            deduped: list[str] = []
+            seen: set[str] = set()
+            for email in recipients:
+                cleaned = (email or '').strip()
+                key = cleaned.lower()
+                if cleaned and key not in seen:
+                    seen.add(key)
+                    deduped.append(cleaned)
+            recipients = deduped
 
         # Deliver
         out = _deliver_newsletter_via_webhook(
@@ -2686,6 +3283,23 @@ def send_newsletter(newsletter_id: int):
             webhook_url_override=webhook_override,
             dry_run=dry_run,
         )
+
+        if admin_preview:
+            try:
+                _append_run_history({
+                    'kind': 'newsletter-admin-test-send',
+                    'newsletter_id': n.id,
+                    'team_id': n.team_id,
+                    'status': out.get('status'),
+                    'http_status': out.get('http_status'),
+                    'recipient_count': out.get('recipient_count'),
+                    'delivered_count': out.get('delivered_count'),
+                    'admin_recipients': recipients,
+                    'dry_run': bool(dry_run),
+                    'run_by': getattr(g, 'user_email', None),
+                })
+            except Exception:
+                pass
 
         # Mark sent only for non-test ok runs
         if out.get('status') == 'ok' and not is_test:
@@ -2716,7 +3330,11 @@ def send_newsletter(newsletter_id: int):
             except Exception:
                 pass
             db.session.commit()
-        return jsonify({'newsletter_id': n.id, **out})
+        response_payload = {'newsletter_id': n.id, **out}
+        if admin_preview:
+            response_payload['admin_preview'] = True
+            response_payload['admin_recipients'] = recipients
+        return jsonify(response_payload)
     except Exception as e:
         logger.exception('send_newsletter failed')
         try:
@@ -2725,6 +3343,30 @@ def send_newsletter(newsletter_id: int):
             pass
         return jsonify(_safe_error_payload(e, 'An unexpected error occurred. Please try again later.')), 500
 
+
+@api_bp.route('/newsletters/<int:newsletter_id>', methods=['DELETE'])
+@require_api_key
+def delete_newsletter(newsletter_id: int):
+    try:
+        newsletter = Newsletter.query.get_or_404(newsletter_id)
+
+        try:
+            NewsletterComment.query.filter_by(newsletter_id=newsletter.id).delete(synchronize_session=False)
+        except Exception:
+            db.session.rollback()
+            raise
+
+        db.session.delete(newsletter)
+        db.session.commit()
+
+        return jsonify({'status': 'deleted', 'newsletter_id': newsletter_id})
+    except Exception as e:
+        logger.exception('delete_newsletter failed')
+        try:
+            db.session.rollback()
+        except Exception:
+            pass
+        return jsonify(_safe_error_payload(e, 'An unexpected error occurred. Please try again later.')), 500
 @api_bp.route('/newsletters/latest/render.<fmt>', methods=['GET'])
 @require_api_key
 def render_latest_newsletter(fmt: str):
@@ -2766,7 +3408,16 @@ def generate_weekly_mcp_team():
                 return jsonify({'error': f'Team api_id={api_team_id} not found for season {season}'}), 404
             team_db_id = row.id
         from src.agents.weekly_agent import generate_weekly_newsletter_with_mcp_sync
-        out = generate_weekly_newsletter_with_mcp_sync(int(team_db_id), tdate)
+        try:
+            out = generate_weekly_newsletter_with_mcp_sync(int(team_db_id), tdate)
+        except NoActiveLoaneesError as e:
+            return jsonify({
+                'team_db_id': team_db_id,
+                'ran_for': tdate.isoformat(),
+                'status': 'skipped',
+                'reason': 'no_active_loanees',
+                'message': str(e),
+            }), 200
         return jsonify({'team_db_id': team_db_id, 'ran_for': tdate.isoformat(), 'result': out})
     except Exception as e:
         logger.exception("generate-weekly-mcp-team failed")
@@ -4123,21 +4774,27 @@ def admin_list_newsletters():
             except ValueError:
                 pass
         page = request.args.get('page', type=int) or 1
-        page_size = request.args.get('page_size', type=int) or 20
         if page < 1:
             page = 1
-        if page_size < 1:
-            page_size = 1
-        if page_size > 200:
-            page_size = 200
+
+        page_size_param = request.args.get('page_size', type=int)
+        page_size = None
+        if page_size_param is not None:
+            page_size = page_size_param
+            if page_size < 1:
+                page_size = 1
+            if page_size > 200:
+                page_size = 200
 
         total = q.order_by(None).count()
 
         total_pages = 1
-        if page_size:
+        if page_size is not None:
             total_pages = max(1, math.ceil(total / page_size))
             if page > total_pages:
                 page = total_pages
+        else:
+            page = 1
 
         # Ordering: issue date first if provided, otherwise created desc
         if issue_start_str and issue_end_str:
@@ -4145,17 +4802,18 @@ def admin_list_newsletters():
         else:
             q = q.order_by(Newsletter.generated_date.desc())
 
-        if page_size:
+        if page_size is not None:
             offset = (page - 1) * page_size
             if offset < 0:
                 offset = 0
             q = q.offset(offset).limit(page_size)
 
         rows = q.all()
+        effective_page_size = page_size if page_size is not None else total
         return jsonify({
             'items': [r.to_dict() for r in rows],
             'page': page,
-            'page_size': page_size,
+            'page_size': effective_page_size,
             'total': total,
             'total_pages': total_pages,
         })
@@ -4227,48 +4885,80 @@ def admin_update_newsletter(nid: int):
         db.session.commit()
 
         # Optional: auto-send on approval
-        try:
-            if auto_send_trigger and (os.getenv('NEWSLETTER_AUTO_SEND_ON_APPROVAL', '1').lower() in ('1','true','yes')) and not n.email_sent:
-                out = _deliver_newsletter_via_webhook(n)
-                print(f"Auto-send newsletter {n.id} to {n.team_id} - {out.get('status')} - out: {out}")
-                if out.get('status') == 'ok':
-                    from datetime import datetime as _dt, timezone as _tz
-                    subs = UserSubscription.query.filter_by(team_id=n.team_id, active=True).all()
-                    valid_subs = [s for s in subs if (s.email or '').strip() and not s.email_bounced]
-                    used_count = len(valid_subs)
-                    n.email_sent = True
-                    n.email_sent_date = _dt.now(_tz.utc)
-                    n.subscriber_count = used_count
-                    # Update last_email_sent for valid subscribers
-                    try:
-                        ts = n.email_sent_date
-                        for s in valid_subs:
-                            s.last_email_sent = ts
-                    except Exception:
-                        pass
-                    db.session.commit()
-                # Record run-history regardless of outcome
-                try:
-                    _append_run_history({
-                        'kind': 'newsletter-auto-send',
-                        'newsletter_id': n.id,
-                        'team_id': n.team_id,
-                        'status': out.get('status'),
-                        'http_status': out.get('http_status'),
-                        'recipient_count': out.get('recipient_count'),
-                    })
-                except Exception:
-                    pass
-        except Exception:
-            # Do not fail the update if auto-send fails
-            logger.exception('auto-send on approval failed')
-            db.session.rollback()
+        _maybe_auto_send_on_publish(n, auto_send_trigger)
 
         return jsonify({'message': 'updated', 'newsletter': n.to_dict()})
     except Exception as e:
         logger.exception('admin_update_newsletter failed')
         db.session.rollback()
         return jsonify(_safe_error_payload(e, 'An unexpected error occurred. Please try again later.')), 500
+
+
+@api_bp.route('/admin/newsletters/bulk-publish', methods=['POST'])
+@require_api_key
+def admin_bulk_publish_newsletters():
+    try:
+        data = request.get_json() or {}
+        raw_ids = data.get('ids') or []
+        publish_flag = bool(data.get('publish'))
+        if not isinstance(raw_ids, list) or not raw_ids:
+            return jsonify({'error': 'ids array required'}), 400
+
+        ids = []
+        for value in raw_ids:
+            try:
+                ids.append(int(value))
+            except (TypeError, ValueError):
+                continue
+        ids = list(dict.fromkeys([i for i in ids if i > 0]))
+        if not ids:
+            return jsonify({'error': 'No valid newsletter ids provided'}), 400
+
+        rows = Newsletter.query.filter(Newsletter.id.in_(ids)).all()
+        found_ids = {row.id for row in rows}
+        missing = [i for i in ids if i not in found_ids]
+
+        now = datetime.now(timezone.utc)
+        updated = 0
+        auto_send_targets = []
+        for row in rows:
+            was_published = row.published
+            if publish_flag:
+                if not was_published:
+                    row.published = True
+                    row.published_date = now
+                    updated += 1
+                    auto_send_targets.append(row)
+            else:
+                if was_published:
+                    row.published = False
+                    row.published_date = None
+                    updated += 1
+        db.session.commit()
+
+        logger.info(
+            'Admin bulk publish user=%s publish=%s updated=%s ids=%s missing=%s',
+            getattr(g, 'user_email', None),
+            publish_flag,
+            updated,
+            ids,
+            missing,
+        )
+
+        if publish_flag and auto_send_targets:
+            for target in auto_send_targets:
+                _maybe_auto_send_on_publish(target, auto_send_trigger=True)
+
+        return jsonify({
+            'updated': updated,
+            'missing': missing,
+            'publish': publish_flag,
+            'total_requested': len(ids),
+        })
+    except Exception as e:
+        logger.exception('admin_bulk_publish_newsletters failed')
+        db.session.rollback()
+        return jsonify(_safe_error_payload(e, 'Failed to update newsletter status. Please try again later.')), 500
 
 # --- Simple run-history using AdminSetting key 'run_history' ---
 
@@ -4300,6 +4990,62 @@ def _append_run_history(event: dict):
     except Exception:
         db.session.rollback()
         logger.exception('append_run_history failed')
+
+
+def _maybe_auto_send_on_publish(n: Newsletter, auto_send_trigger: bool):
+    """Attempt to auto-send a newsletter after it is published."""
+    if not auto_send_trigger:
+        return None
+    try:
+        if os.getenv('NEWSLETTER_AUTO_SEND_ON_APPROVAL', '1').lower() not in ('1', 'true', 'yes'):
+            return None
+        if n.email_sent:
+            return None
+
+        out = _deliver_newsletter_via_webhook(n)
+        logger.info(
+            "Auto-send newsletter %s to team %s - status=%s", n.id, n.team_id, out.get('status')
+        )
+
+        if out.get('status') == 'ok':
+            from datetime import datetime as _dt, timezone as _tz
+
+            subs = UserSubscription.query.filter_by(team_id=n.team_id, active=True).all()
+            valid_subs = [s for s in subs if (s.email or '').strip() and not s.email_bounced]
+            used_count = len(valid_subs)
+            n.email_sent = True
+            n.email_sent_date = _dt.now(_tz.utc)
+            n.subscriber_count = used_count
+
+            try:
+                ts = n.email_sent_date
+                for s in valid_subs:
+                    s.last_email_sent = ts
+            except Exception:
+                pass
+
+            db.session.commit()
+
+        try:
+            _append_run_history({
+                'kind': 'newsletter-auto-send',
+                'newsletter_id': n.id,
+                'team_id': n.team_id,
+                'status': out.get('status'),
+                'http_status': out.get('http_status'),
+                'recipient_count': out.get('recipient_count'),
+            })
+        except Exception:
+            pass
+
+        return out
+    except Exception:
+        logger.exception('auto-send on approval failed')
+        try:
+            db.session.rollback()
+        except Exception:
+            pass
+        return None
 
 @api_bp.route('/admin/runs/history', methods=['GET', 'POST'])
 @require_api_key

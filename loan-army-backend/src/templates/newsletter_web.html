@@ -3,7 +3,29 @@
   <head>
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
-    <title>{{ title or 'Weekly Loan Update' }}</title>
+    {% set page_title = (social_meta.title if social_meta and social_meta.title else (title or 'Weekly Loan Update')) %}
+    <title>{{ page_title }}</title>
+    {% if social_meta %}
+    {% if social_meta.description %}<meta name="description" content="{{ social_meta.description }}">{% endif %}
+    <meta property="og:type" content="article">
+    <meta property="og:title" content="{{ social_meta.title }}">
+    <meta property="og:description" content="{{ social_meta.description }}">
+    <meta property="og:url" content="{{ social_meta.og_url }}">
+    <meta property="og:site_name" content="{{ social_meta.site_name }}">
+    {% if social_meta.og_image %}
+    <meta property="og:image" content="{{ social_meta.og_image }}">
+    <meta property="og:image:width" content="{{ social_meta.og_image_width }}">
+    <meta property="og:image:height" content="{{ social_meta.og_image_height }}">
+    {% endif %}
+    {% if social_meta.published_time %}<meta property="article:published_time" content="{{ social_meta.published_time }}">{% endif %}
+    {% if social_meta.article_author %}<meta property="article:author" content="{{ social_meta.article_author }}">{% endif %}
+    <meta name="twitter:card" content="summary_large_image">
+    <meta name="twitter:title" content="{{ social_meta.title }}">
+    <meta name="twitter:description" content="{{ social_meta.description }}">
+    {% if social_meta.og_image %}<meta name="twitter:image" content="{{ social_meta.og_image }}">{% endif %}
+    {% if social_meta.twitter_handle %}<meta name="twitter:site" content="{{ social_meta.twitter_handle }}">{% endif %}
+    {% endif %}
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.1/css/all.min.css" integrity="sha512-DTOQO9RWCH3ppGqcWaEA1BIZOC6xxalwEsw9c2QQeAIftl+Vegovlnee1c9QX4TctnWMn13TZye+giMm8e2LwA==" crossorigin="anonymous" referrerpolicy="no-referrer" />
     <style>
       :root {
         color-scheme: light dark;
@@ -27,6 +49,19 @@
         margin: 0 0 4px 0;
         font-size: 28px;
         letter-spacing: -0.01em;
+      }
+      .title-row {
+        display: flex;
+        align-items: center;
+        gap: 14px;
+      }
+      .title-logo {
+        width: 52px;
+        height: 52px;
+        border-radius: 50%;
+        object-fit: cover;
+        background: #f3f4f6;
+        flex-shrink: 0;
       }
       .meta {
         color: #666;
@@ -62,9 +97,22 @@
       .item-header {
         display: flex;
         justify-content: space-between;
-        align-items: baseline;
-        gap: 8px;
+        align-items: flex-start;
+        gap: 12px;
         margin-bottom: 6px;
+      }
+      .player-block {
+        display: flex;
+        align-items: center;
+        gap: 12px;
+      }
+      .player-photo {
+        width: 48px;
+        height: 48px;
+        border-radius: 50%;
+        object-fit: cover;
+        background: #e5e7eb;
+        flex-shrink: 0;
       }
       .player {
         font-weight: 600;
@@ -72,6 +120,17 @@
       .loan-team {
         color: #555;
         font-size: 14px;
+        display: flex;
+        align-items: center;
+        gap: 8px;
+      }
+      .team-logo {
+        width: 28px;
+        height: 28px;
+        border-radius: 50%;
+        object-fit: cover;
+        background: #f3f4f6;
+        flex-shrink: 0;
       }
       .stats {
         font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace;
@@ -82,6 +141,129 @@
         margin: 8px 0 0;
         padding-left: 18px;
       }
+      .sofascore-card {
+        margin-top: 16px;
+        display: flex;
+        flex-direction: column;
+        gap: 6px;
+        align-items: flex-start;
+      }
+      .sofascore-card iframe {
+        border: 0;
+        width: 100%;
+        max-width: 360px;
+        height: 568px;
+      }
+      .sofascore-card small {
+        font-size: 12px;
+        color: #4b5563;
+      }
+      .player-links {
+        margin-top: 12px;
+        display: flex;
+        flex-wrap: wrap;
+        gap: 8px;
+        align-items: center;
+      }
+      .player-links a {
+        display: inline-flex;
+        align-items: center;
+        gap: 6px;
+        padding: 6px 14px;
+        border-radius: 6px;
+        font-size: 14px;
+        font-weight: 500;
+        text-decoration: none;
+        transition: all 0.2s;
+      }
+      .youtube-link {
+        background: #ff0000;
+        color: #fff !important;
+        border: 1px solid #ff0000;
+      }
+      .youtube-link:hover {
+        background: #cc0000;
+        border-color: #cc0000;
+        transform: translateY(-1px);
+        box-shadow: 0 2px 6px rgba(255, 0, 0, 0.3);
+      }
+      .youtube-icon {
+        width: 18px;
+        height: 18px;
+        display: inline-block;
+      }
+      .generic-link {
+        background: #f3f4f6;
+        color: #374151 !important;
+        border: 1px solid #d1d5db;
+      }
+      .generic-link:hover {
+        background: #e5e7eb;
+        border-color: #9ca3af;
+      }
+      .player-stats-grid {
+        display: grid;
+        grid-template-columns: repeat(auto-fit, minmax(140px, 1fr));
+        gap: 12px;
+        margin: 12px 0;
+        padding: 12px;
+        background: #f9fafb;
+        border-radius: 8px;
+      }
+      .stat-group {
+        background: #fff;
+        border: 1px solid #e5e7eb;
+        border-radius: 6px;
+        padding: 8px 10px;
+      }
+      .stat-group h5 {
+        margin: 0 0 6px 0;
+        font-size: 11px;
+        text-transform: uppercase;
+        color: #6b7280;
+        font-weight: 600;
+        letter-spacing: 0.5px;
+      }
+      .stat-items {
+        display: flex;
+        flex-direction: column;
+        gap: 4px;
+      }
+      .stat-item {
+        display: flex;
+        justify-content: space-between;
+        align-items: center;
+        font-size: 13px;
+      }
+      .stat-label {
+        color: #6b7280;
+      }
+      .stat-value {
+        font-weight: 600;
+        color: #111827;
+      }
+      .rating-badge {
+        display: inline-flex;
+        align-items: center;
+        gap: 4px;
+        padding: 4px 10px;
+        background: linear-gradient(135deg, #fbbf24 0%, #f59e0b 100%);
+        color: #fff;
+        border-radius: 20px;
+        font-weight: 700;
+        font-size: 14px;
+        box-shadow: 0 2px 4px rgba(251, 191, 36, 0.3);
+      }
+      .position-badge {
+        display: inline-block;
+        padding: 2px 8px;
+        background: #e5e7eb;
+        color: #374151;
+        border-radius: 4px;
+        font-size: 11px;
+        font-weight: 600;
+        margin-left: 6px;
+      }
       .by-numbers, .fan-pulse {
         background: #fff;
         border: 1px solid #eee;
@@ -89,14 +271,51 @@
         padding: 12px 16px;
         margin: 16px 0;
       }
+      .support-callout {
+        display: flex;
+        justify-content: center;
+        margin: 16px 0;
+        padding: 12px;
+        background: #fff;
+        border: 1px solid #eee;
+        border-radius: 10px;
+      }
+      .support-callout img {
+        max-width: 220px;
+        height: auto;
+        display: block;
+      }
+      .footer-links {
+        background: #fff;
+        border: 1px solid #eee;
+        border-radius: 10px;
+        margin: 16px 0;
+        padding: 14px 16px;
+        font-size: 14px;
+        color: #4b5563;
+      }
+      .footer-links a {
+        color: #0f62fe;
+        text-decoration: underline;
+      }
       a { color: #0f62fe; text-decoration: none; }
       a:hover { text-decoration: underline; }
     </style>
   </head>
   <body>
     <div class="container">
+      <div class="support-callout">
+        <a href="https://buymeacoffee.com/goonloan" target="_blank" rel="noopener">
+          <img src="/static/assets/buy_me_a_coffee/black-bmc-button.jpg" alt="Buy me a coffee" />
+        </a>
+      </div>
       <header>
-        <h1 class="title">{{ title }}</h1>
+        <div class="title-row">
+          {% if team_logo %}
+            <img class="title-logo" src="{{ team_logo }}" alt="{{ team_name or 'Team' }} crest" loading="lazy" />
+          {% endif %}
+          <h1 class="title">{{ title }}</h1>
+        </div>
         <div class="meta">
           {% if team_name %}<span>{{ team_name }}</span>{% if range %} · {% endif %}{% endif %}
           {% if range %}<span>{{ range[0] }} – {{ range[1] }}</span>{% endif %}
@@ -121,16 +340,227 @@
       <section class="sections">
         {% for sec in sections %}
           <h2>{{ sec.title }}</h2>
-          {% for it in (sec['items'] or []) %}
+        {% set items = [] %}
+        {% if sec is mapping %}
+          {% set raw_items = sec.get('items') %}
+        {% elif sec and ('items' in sec) %}
+          {% set raw_items = sec['items'] %}
+        {% else %}
+          {% set raw_items = [] %}
+        {% endif %}
+        {% if raw_items is iterable and raw_items is not string %}
+          {% set items = raw_items %}
+        {% endif %}
+        {% for it in items if it is mapping %}
             <article class="item">
               <div class="item-header">
-                <div>
-                  <div class="player">{{ it.player_name }}</div>
-                  <div class="loan-team">{{ it.loan_team or it.loan_team_name }}</div>
+                <div class="player-block">
+                  {% if it.player_photo %}
+                    <img class="player-photo" src="{{ it.player_photo }}" alt="{{ it.player_name }} headshot" loading="lazy" />
+                  {% endif %}
+                  <div>
+                    <div class="player">{{ it.player_name }}</div>
+                    <div class="loan-team">
+                      {% if it.loan_team_logo %}
+                        <img class="team-logo" src="{{ it.loan_team_logo }}" alt="{{ (it.loan_team or it.loan_team_name) }} logo" loading="lazy" />
+                      {% endif %}
+                      <span>{{ it.loan_team or it.loan_team_name }}</span>
+                    </div>
+                  </div>
                 </div>
+              {% set can_track = it.can_fetch_stats if it.can_fetch_stats is defined else True %}
+              {% if can_track and it.stats is defined and it.stats is not none %}
                 {% set s = it.stats or {} %}
-                <div class="stats">{{ (s.minutes or 0)|int }}’ · {{ (s.goals or 0)|int }}G {{ (s.assists or 0)|int }}A · {{ (s.yellows or 0)|int }}Y {{ (s.reds or 0)|int }}R</div>
+                <div class="stats">
+                  {{ s.get('minutes', 0)|int }}'
+                  {# Position-specific stats (API-Football returns: Goalkeeper, Defender, Midfielder, Attacker, Forward) #}
+                  {% set pos = s.get('position', '') %}
+                  {% if pos in ['G', 'Goalkeeper'] %}
+                    {# Goalkeeper: Show saves and goals conceded #}
+                    · {{ s.get('saves', 0)|int }} Saves · {{ s.get('goals_conceded', 0)|int }} Conceded
+                  {% elif pos in ['D', 'Defender'] %}
+                    {# Defender: Show tackles, interceptions, then G+A if any #}
+                    {% if s.get('tackles_total') or s.get('tackles_interceptions') %}
+                      · {{ s.get('tackles_total', 0)|int }}T {{ s.get('tackles_interceptions', 0)|int }}I
+                    {% endif %}
+                    {% if s.get('goals', 0)|int > 0 or s.get('assists', 0)|int > 0 %}
+                      · {{ s.get('goals', 0)|int }}G {{ s.get('assists', 0)|int }}A
+                    {% endif %}
+                  {% elif pos in ['M', 'Midfielder'] %}
+                    {# Midfielder: Show G+A and key passes #}
+                    · {{ s.get('goals', 0)|int }}G {{ s.get('assists', 0)|int }}A
+                    {% if s.get('passes_key') %}
+                      · {{ s.get('passes_key', 0)|int }} Key Passes
+                    {% endif %}
+                  {% else %}
+                    {# Forward/Attacker or unknown: Show G+A and shots #}
+                    · {{ s.get('goals', 0)|int }}G {{ s.get('assists', 0)|int }}A
+                    {% if s.get('shots_total') %}
+                      · {{ s.get('shots_total', 0)|int }} Shots
+                    {% endif %}
+                  {% endif %}
+                  {% if s.get('rating') %}
+                    · <span class="rating-badge">⭐ {{ "%.1f"|format(s.get('rating')|float) }}</span>
+                  {% endif %}
+                  {% if s.get('position') %}
+                    <span class="position-badge">{{ s.get('position') }}</span>
+                  {% endif %}
+                </div>
+              {% elif not can_track %}
+                <div class="stats unavailable">We can't track detailed stats for this player yet.</div>
+              {% endif %}
               </div>
+              
+              {# Expanded Statistics Grid #}
+              {% if can_track and it.stats is defined and it.stats is not none %}
+                {% set s = it.stats or {} %}
+                {% set has_expanded_stats = s.get('shots_total') or s.get('passes_total') or s.get('tackles_total') or s.get('duels_total') %}
+                {% if has_expanded_stats %}
+                <div class="player-stats-grid">
+                  {# Attacking Stats #}
+                  {% if s.get('shots_total') or s.get('dribbles_attempts') or s.get('offsides') %}
+                  <div class="stat-group">
+                    <h5>⚽ Attacking</h5>
+                    <div class="stat-items">
+                      {% if s.get('shots_total') %}
+                      <div class="stat-item">
+                        <span class="stat-label">Shots</span>
+                        <span class="stat-value">{{ s.get('shots_total') }} ({{ s.get('shots_on', 0) }} on)</span>
+                      </div>
+                      {% endif %}
+                      {% if s.get('dribbles_attempts') %}
+                      <div class="stat-item">
+                        <span class="stat-label">Dribbles</span>
+                        <span class="stat-value">{{ s.get('dribbles_success', 0) }}/{{ s.get('dribbles_attempts') }}</span>
+                      </div>
+                      {% endif %}
+                      {% if s.get('offsides') %}
+                      <div class="stat-item">
+                        <span class="stat-label">Offsides</span>
+                        <span class="stat-value">{{ s.get('offsides') }}</span>
+                      </div>
+                      {% endif %}
+                    </div>
+                  </div>
+                  {% endif %}
+                  
+                  {# Passing Stats #}
+                  {% if s.get('passes_total') or s.get('passes_key') %}
+                  <div class="stat-group">
+                    <h5>🎯 Passing</h5>
+                    <div class="stat-items">
+                      {% if s.get('passes_total') %}
+                      <div class="stat-item">
+                        <span class="stat-label">Passes</span>
+                        <span class="stat-value">{{ s.get('passes_total') }}</span>
+                      </div>
+                      {% endif %}
+                      {% if s.get('passes_key') %}
+                      <div class="stat-item">
+                        <span class="stat-label">Key passes</span>
+                        <span class="stat-value">{{ s.get('passes_key') }}</span>
+                      </div>
+                      {% endif %}
+                      {% if s.get('passes_accuracy') %}
+                      <div class="stat-item">
+                        <span class="stat-label">Accuracy</span>
+                        <span class="stat-value">{{ s.get('passes_accuracy') }}</span>
+                      </div>
+                      {% endif %}
+                    </div>
+                  </div>
+                  {% endif %}
+                  
+                  {# Defensive Stats #}
+                  {% if s.get('tackles_total') or s.get('tackles_interceptions') %}
+                  <div class="stat-group">
+                    <h5>🛡️ Defending</h5>
+                    <div class="stat-items">
+                      {% if s.get('tackles_total') %}
+                      <div class="stat-item">
+                        <span class="stat-label">Tackles</span>
+                        <span class="stat-value">{{ s.get('tackles_total') }}</span>
+                      </div>
+                      {% endif %}
+                      {% if s.get('tackles_interceptions') %}
+                      <div class="stat-item">
+                        <span class="stat-label">Interceptions</span>
+                        <span class="stat-value">{{ s.get('tackles_interceptions') }}</span>
+                      </div>
+                      {% endif %}
+                      {% if s.get('tackles_blocks') %}
+                      <div class="stat-item">
+                        <span class="stat-label">Blocks</span>
+                        <span class="stat-value">{{ s.get('tackles_blocks') }}</span>
+                      </div>
+                      {% endif %}
+                    </div>
+                  </div>
+                  {% endif %}
+                  
+                  {# Duels #}
+                  {% if s.get('duels_total') %}
+                  <div class="stat-group">
+                    <h5>⚔️ Duels</h5>
+                    <div class="stat-items">
+                      <div class="stat-item">
+                        <span class="stat-label">Won</span>
+                        <span class="stat-value">{{ s.get('duels_won', 0) }}/{{ s.get('duels_total') }}</span>
+                      </div>
+                    </div>
+                  </div>
+                  {% endif %}
+                  
+                  {# Goalkeeper Stats #}
+                  {% if s.get('position') in ['G', 'Goalkeeper'] and (s.get('saves') or s.get('goals_conceded')) %}
+                  <div class="stat-group">
+                    <h5>🧤 Goalkeeper</h5>
+                    <div class="stat-items">
+                      {% if s.get('saves') is not none %}
+                      <div class="stat-item">
+                        <span class="stat-label">Saves</span>
+                        <span class="stat-value">{{ s.get('saves') }}</span>
+                      </div>
+                      {% endif %}
+                      {% if s.get('goals_conceded') is not none %}
+                      <div class="stat-item">
+                        <span class="stat-label">Conceded</span>
+                        <span class="stat-value">{{ s.get('goals_conceded') }}</span>
+                      </div>
+                      {% endif %}
+                    </div>
+                  </div>
+                  {% endif %}
+                  
+                  {# Discipline #}
+                  {% if s.get('fouls_committed') or s.get('fouls_drawn') or s.get('yellows', 0)|int > 0 or s.get('reds', 0)|int > 0 %}
+                  <div class="stat-group">
+                    <h5>⚠️ Discipline</h5>
+                    <div class="stat-items">
+                      {% if s.get('fouls_committed') %}
+                      <div class="stat-item">
+                        <span class="stat-label">Fouls</span>
+                        <span class="stat-value">{{ s.get('fouls_committed') }}</span>
+                      </div>
+                      {% endif %}
+                      {% if s.get('fouls_drawn') %}
+                      <div class="stat-item">
+                        <span class="stat-label">Fouled</span>
+                        <span class="stat-value">{{ s.get('fouls_drawn') }}</span>
+                      </div>
+                      {% endif %}
+                      {% if s.get('yellows', 0)|int > 0 or s.get('reds', 0)|int > 0 %}
+                      <div class="stat-item">
+                        <span class="stat-label">Cards</span>
+                        <span class="stat-value">{{ s.get('yellows', 0)|int }}Y {{ s.get('reds', 0)|int }}R</span>
+                      </div>
+                      {% endif %}
+                    </div>
+                  </div>
+                  {% endif %}
+                </div>
+                {% endif %}
+              {% endif %}
               {% if it.week_summary %}
                 <p>{{ it.week_summary }}</p>
               {% endif %}
@@ -142,17 +572,37 @@
                 </ul>
               {% endif %}
                       {% if it.links %}
-                        <p>
+                        <div class="player-links">
                           {% for link in it.links %}
-                            {% if link is string %}
-                              <a href="{{ link }}" target="_blank" rel="noopener">Link {{ loop.index }}</a>
-                            {% elif link.url %}
-                              <a href="{{ link.url }}" target="_blank" rel="noopener">{{ link.title or ('Link ' ~ loop.index) }}</a>
+                            {% set link_url = link if link is string else link.url %}
+                            {% set link_title = link.title if link is mapping and link.title else ('Link ' ~ loop.index) %}
+                            {% set is_youtube = 'youtube.com' in link_url or 'youtu.be' in link_url %}
+                            {% if link_url %}
+                              <a href="{{ link_url }}" target="_blank" rel="noopener" class="{{ 'youtube-link' if is_youtube else 'generic-link' }}">
+                                {% if is_youtube %}
+                                <i class="fab fa-youtube youtube-icon"></i>
+                                {% endif %}
+                                <span>{{ link_title }}</span>
+                              </a>
                             {% endif %}
-                            {% if not loop.last %} · {% endif %}
                           {% endfor %}
-                        </p>
+                        </div>
                       {% endif %}
+              {% if it.sofascore_player_id %}
+                <div class="sofascore-card">
+                  <h4>Sofascore for {{ it.player_name or 'this player' }}</h4>
+                  <iframe
+                    id="sofa-player-embed-{{ it.sofascore_player_id }}"
+                    src="https://widgets.sofascore.com/embed/player/{{ it.sofascore_player_id }}?widgetTheme=dark"
+                    loading="lazy"
+                    frameborder="0"
+                    scrolling="no"
+                  ></iframe>
+                  <small>
+                    Player stats provided by <a href="https://sofascore.com/" target="_blank" rel="noopener">Sofascore</a>
+                  </small>
+                </div>
+              {% endif %}
             </article>
           {% endfor %}
         {% endfor %}
@@ -190,6 +640,18 @@
         </ul>
       </section>
       {% endif %}
+
+      {% if manage_url %}
+      <section class="footer-links">
+        Manage your subscription preferences anytime at <a href="{{ manage_url }}" target="_blank" rel="noopener">{{ manage_url }}</a>.
+      </section>
+      {% endif %}
+
+      <div class="support-callout">
+        <a href="https://buymeacoffee.com/goonloan" target="_blank" rel="noopener">
+          <img src="/static/assets/buy_me_a_coffee/black-bmc-button.jpg" alt="Buy me a coffee" />
+        </a>
+      </div>
     </div>
   </body>
   </html>

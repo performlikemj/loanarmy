@@ -1,7 +1,7 @@
-import { useState, useEffect, useMemo } from 'react'
-import { BrowserRouter as Router, Routes, Route, Link, useLocation } from 'react-router-dom'
+import { useState, useEffect, useMemo, useCallback, useContext, createContext, useRef } from 'react'
+import { BrowserRouter as Router, Routes, Route, Link, Navigate, useLocation, useParams, useNavigate } from 'react-router-dom'
 import { Button } from '@/components/ui/button.jsx'
-import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card.jsx'
+import { Card, CardContent, CardDescription, CardFooter, CardHeader, CardTitle } from '@/components/ui/card.jsx'
 import { Badge } from '@/components/ui/badge.jsx'
 import { Input } from '@/components/ui/input.jsx'
 import { Label } from '@/components/ui/label.jsx'
@@ -10,8 +10,14 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs.jsx'
 import TeamMultiSelect from '@/components/ui/TeamMultiSelect.jsx'
 import TeamSelect from '@/components/ui/TeamSelect.jsx'
+import { BuyMeCoffeeButton } from '@/components/BuyMeCoffeeButton.jsx'
 import { Accordion, AccordionContent, AccordionItem, AccordionTrigger } from '@/components/ui/accordion.jsx'
 import { Alert, AlertDescription } from '@/components/ui/alert.jsx'
+import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from '@/components/ui/dialog.jsx'
+import { Drawer, DrawerTrigger, DrawerContent, DrawerHeader, DrawerFooter, DrawerTitle, DrawerDescription, DrawerClose } from '@/components/ui/drawer.jsx'
+import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover.jsx'
+import { useIsMobile } from '@/hooks/use-mobile.js'
+import { normalizeNewsletterIds, formatSendPreviewSummary, formatDeleteSummary } from '@/lib/newsletter-admin.js'
 import { 
   Users, 
   Mail, 
@@ -20,6 +26,7 @@ import {
   TrendingUp, 
   Globe, 
   Star,
+  ArrowLeft,
   ArrowRight,
   CheckCircle,
   AlertCircle,
@@ -28,12 +35,21 @@ import {
   FileText,
   Settings,
   BarChart3,
-  Loader2
+  Loader2,
+  ShieldCheck,
+  ShieldAlert,
+  KeyRound,
+  LogIn,
+  LogOut,
+  MessageCircle,
+  UserCog,
+  X,
+  Copy
 } from 'lucide-react'
 import './App.css'
 
 // API configuration
-const API_BASE_URL = '/api'
+const API_BASE_URL = (typeof import.meta !== 'undefined' && import.meta.env && import.meta.env.VITE_API_BASE) || '/api'
 
 // Universal Date Picker Component
 function UniversalDatePicker({ onDateChange, className = "" }) {
@@ -41,7 +57,7 @@ function UniversalDatePicker({ onDateChange, className = "" }) {
   const [endDate, setEndDate] = useState('')
   const [isCustomRange, setIsCustomRange] = useState(false)
 
-  const handlePresetChange = (preset) => {
+  const handlePresetChange = useCallback((preset) => {
     const today = new Date()
     let start, end
 
@@ -50,10 +66,12 @@ function UniversalDatePicker({ onDateChange, className = "" }) {
         start = end = today.toISOString().split('T')[0]
         break
       case 'this_week':
-        const monday = new Date(today)
-        monday.setDate(today.getDate() - today.getDay() + 1)
-        start = monday.toISOString().split('T')[0]
-        end = new Date(monday.getTime() + 6 * 24 * 60 * 60 * 1000).toISOString().split('T')[0]
+        {
+          const monday = new Date(today)
+          monday.setDate(today.getDate() - today.getDay() + 1)
+          start = monday.toISOString().split('T')[0]
+          end = new Date(monday.getTime() + 6 * 24 * 60 * 60 * 1000).toISOString().split('T')[0]
+        }
         break
       case 'this_month':
         start = new Date(today.getFullYear(), today.getMonth(), 1).toISOString().split('T')[0]
@@ -86,7 +104,7 @@ function UniversalDatePicker({ onDateChange, className = "" }) {
     setEndDate(end)
     setIsCustomRange(false)
     onDateChange({ startDate: start, endDate: end, preset })
-  }
+  }, [onDateChange])
 
   const handleCustomDateChange = () => {
     if (startDate && endDate) {
@@ -97,7 +115,7 @@ function UniversalDatePicker({ onDateChange, className = "" }) {
   useEffect(() => {
     // Set default to last 30 days
     handlePresetChange('last_30_days')
-  }, [])
+  }, [handlePresetChange])
 
   return (
     <div className={`space-y-4 ${className}`}>
@@ -204,10 +222,165 @@ function UniversalDatePicker({ onDateChange, className = "" }) {
 // API service
 class APIService {
   static adminKey = (typeof localStorage !== 'undefined' && localStorage.getItem('loan_army_admin_key')) || null
+  static userToken = (typeof localStorage !== 'undefined' && localStorage.getItem('loan_army_user_token')) || null
+  static isAdminFlag = (typeof localStorage !== 'undefined' && localStorage.getItem('loan_army_is_admin') === 'true') || false
+  static displayName = (typeof localStorage !== 'undefined' && localStorage.getItem('loan_army_display_name')) || null
+  static displayNameConfirmedFlag = (typeof localStorage !== 'undefined' && localStorage.getItem('loan_army_display_name_confirmed') === 'true') || false
+  static authEventName = 'loan_auth_changed'
+
+  static _emitAuthChanged(extra = {}) {
+    if (typeof window === 'undefined' || typeof window.dispatchEvent !== 'function') return
+    const detail = {
+      token: this.userToken,
+      isAdmin: this.isAdmin(),
+      hasApiKey: !!this.adminKey,
+      displayName: this.displayName,
+      displayNameConfirmed: this.displayNameConfirmed(),
+      ...extra,
+    }
+    try {
+      window.dispatchEvent(new CustomEvent(this.authEventName, { detail }))
+    } catch (err) {
+      console.warn('Failed to dispatch auth event', err)
+    }
+  }
+
+  static displayNameConfirmed() {
+    if (typeof window === 'undefined') return !!this.displayNameConfirmedFlag
+    if (!this.displayNameConfirmedFlag && typeof localStorage !== 'undefined') {
+      try {
+        this.displayNameConfirmedFlag = localStorage.getItem('loan_army_display_name_confirmed') === 'true'
+      } catch (err) {
+        console.warn('Failed to read display name confirmation flag', err)
+      }
+    }
+    return !!this.displayNameConfirmedFlag
+  }
+
+  static setDisplayNameConfirmed(value, { silent = false } = {}) {
+    this.displayNameConfirmedFlag = !!value
+    try {
+      if (this.displayNameConfirmedFlag) {
+        localStorage.setItem('loan_army_display_name_confirmed', 'true')
+      } else {
+        localStorage.removeItem('loan_army_display_name_confirmed')
+      }
+    } catch (err) {
+      console.warn('Failed to persist display name confirmation flag', err)
+    }
+    if (!silent) {
+      this._emitAuthChanged({ displayNameConfirmed: this.displayNameConfirmedFlag })
+    }
+  }
 
   static setAdminKey(key) {
-    this.adminKey = key
-    try { localStorage.setItem('loan_army_admin_key', key || '') } catch (e) {}
+    const trimmed = (key || '').trim()
+    this.adminKey = trimmed || null
+    try {
+      if (trimmed) {
+        localStorage.setItem('loan_army_admin_key', trimmed)
+      } else {
+        localStorage.removeItem('loan_army_admin_key')
+      }
+    } catch (err) {
+      console.warn('Failed to persist admin key', err)
+    }
+    this._emitAuthChanged()
+  }
+
+  static setUserToken(token) {
+    this.userToken = token || null
+    try {
+      if (token) {
+        localStorage.setItem('loan_army_user_token', token)
+      } else {
+        localStorage.removeItem('loan_army_user_token')
+      }
+    } catch (err) {
+      console.warn('Failed to persist user token', err)
+    }
+    if (!token) {
+      this.setDisplayName(null)
+      this.setIsAdmin(false)
+    } else {
+      this._emitAuthChanged()
+    }
+  }
+
+  static setIsAdmin(isAdmin) {
+    this.isAdminFlag = !!isAdmin
+    try {
+      localStorage.setItem('loan_army_is_admin', this.isAdminFlag ? 'true' : 'false')
+    } catch (err) {
+      console.warn('Failed to persist admin flag', err)
+    }
+    this._emitAuthChanged()
+  }
+
+  static isAdmin() {
+    if (this.isAdminFlag) return true
+    if (typeof localStorage === 'undefined') return false
+    try {
+      return localStorage.getItem('loan_army_is_admin') === 'true'
+    } catch (err) {
+      console.warn('Failed to read admin flag', err)
+      return false
+    }
+  }
+
+  static setDisplayName(name) {
+    this.displayName = name || null
+    try {
+      if (name) {
+        localStorage.setItem('loan_army_display_name', name)
+      } else {
+        localStorage.removeItem('loan_army_display_name')
+      }
+    } catch (err) {
+      console.warn('Failed to persist display name', err)
+    }
+    if (!name) {
+      this.setDisplayNameConfirmed(false, { silent: true })
+    }
+    this._emitAuthChanged()
+  }
+
+  static clearDisplayNameCache() {
+    this.displayName = null
+    try {
+      localStorage.removeItem('loan_army_display_name')
+    } catch (err) {
+      console.warn('Failed to clear display name cache', err)
+    }
+    this.setDisplayNameConfirmed(false, { silent: true })
+  }
+
+  static async getProfile() {
+    const res = await this.request('/auth/me')
+    if (typeof res?.display_name_confirmed !== 'undefined') {
+      this.setDisplayNameConfirmed(res.display_name_confirmed, { silent: true })
+    }
+    if (res?.display_name) {
+      this.setDisplayName(res.display_name)
+    }
+    if (typeof res?.role !== 'undefined') {
+      this.setIsAdmin(res.role === 'admin')
+    }
+    return res
+  }
+
+  static async updateDisplayName(displayName) {
+    const res = await this.request('/auth/display-name', {
+      method: 'POST',
+      body: JSON.stringify({ display_name: displayName })
+    })
+    if (res?.display_name) {
+      this.setDisplayName(res.display_name)
+    }
+    if (typeof res?.display_name_confirmed !== 'undefined') {
+      this.setDisplayNameConfirmed(res.display_name_confirmed, { silent: true })
+    }
+    return res
   }
 
   static async request(endpoint, options = {}, extra = {}) {
@@ -218,13 +391,27 @@ class APIService {
         'Content-Type': 'application/json',
         ...options.headers,
       }
-      if (admin && this.adminKey) {
+      if (admin) {
+        if (!this.userToken) {
+          const err = new Error('Admin login required. Please sign in with an admin email.')
+          err.status = 401
+          throw err
+        }
+        if (!this.adminKey) {
+          const err = new Error('Admin API key required. Save your key under API Credentials.')
+          err.status = 401
+          throw err
+        }
+        headers['Authorization'] = `Bearer ${this.userToken}`
         headers['X-API-Key'] = this.adminKey
+        headers['X-Admin-Key'] = this.adminKey
+      } else if (this.userToken) {
+        headers['Authorization'] = `Bearer ${this.userToken}`
       }
       const response = await fetch(`${API_BASE_URL}${endpoint}`, { headers, ...options })
-      
+
       console.log(`📡 Response status: ${response.status} ${response.statusText}`)
-      
+
       if (!response.ok) {
         const contentType = response.headers.get('content-type') || ''
         let parsed = null
@@ -236,8 +423,12 @@ class APIService {
           } else {
             errorText = await response.text()
           }
-        } catch (_) {
-          try { errorText = await response.text() } catch (_) { errorText = '' }
+        } catch {
+          try {
+            errorText = await response.text()
+          } catch {
+            errorText = ''
+          }
         }
         console.error(`❌ HTTP error response body:`, parsed || errorText)
         const err = new Error(parsed?.error || errorText || `HTTP ${response.status}`)
@@ -245,7 +436,9 @@ class APIService {
         err.body = parsed || errorText
         throw err
       }
-      
+
+      if (response.status === 204) return null
+
       const data = await response.json()
       console.log(`✅ API response data:`, data)
       return data
@@ -275,8 +468,33 @@ class APIService {
     return this.request(`/newsletters?${params}`)
   }
 
+  static async getNewsletter(id) {
+    if (!id) {
+      throw new Error('newsletter id is required')
+    }
+    return this.request(`/newsletters/${encodeURIComponent(id)}`)
+  }
+
   static async createSubscriptions(data) {
     return this.request('/subscriptions/bulk_create', {
+      method: 'POST',
+      body: JSON.stringify(data),
+    })
+  }
+
+  static async unsubscribeEmail(data = {}) {
+    return this.request('/subscriptions/unsubscribe', {
+      method: 'POST',
+      body: JSON.stringify(data),
+    })
+  }
+
+  static async getMySubscriptions() {
+    return this.request('/subscriptions/me')
+  }
+
+  static async updateMySubscriptions(data = {}) {
+    return this.request('/subscriptions/me', {
       method: 'POST',
       body: JSON.stringify(data),
     })
@@ -317,7 +535,7 @@ class APIService {
 
   static async debugDatabase() {
     console.log('🔍 Checking database debug info...')
-    return this.request('/debug/database')
+    return this.request('/debug/database', {}, { admin: true })
   }
 
   static async generateNewsletter(data) {
@@ -328,7 +546,83 @@ class APIService {
     })
   }
 
+  static async requestLoginCode(email) {
+    const trimmed = (email || '').trim().toLowerCase()
+    if (!trimmed) {
+      const err = new Error('Email is required')
+      err.status = 400
+      throw err
+    }
+    return this.request('/auth/request-code', {
+      method: 'POST',
+      body: JSON.stringify({ email: trimmed })
+    })
+  }
+
+  static _recordLoginResult(payload = {}) {
+    const role = payload.role || 'user'
+    const token = payload.token || payload.access_token
+    if (token) {
+      this.setUserToken(token)
+    }
+    this.setIsAdmin(role === 'admin')
+    if (typeof payload.display_name_confirmed !== 'undefined') {
+      this.setDisplayNameConfirmed(payload.display_name_confirmed, { silent: true })
+    }
+    if (typeof payload.display_name !== 'undefined' && payload.display_name !== null) {
+      this.setDisplayName(payload.display_name)
+    } else if (!payload.display_name && !token) {
+      this.clearDisplayNameCache()
+    }
+    this._emitAuthChanged({
+      role,
+      displayNameConfirmed: payload.display_name_confirmed,
+      expiresIn: payload.expires_in,
+    })
+    return payload
+  }
+
+  static async verifyLoginCode(email, code) {
+    const trimmedEmail = (email || '').trim().toLowerCase()
+    const trimmedCode = (code || '').trim()
+    if (!trimmedEmail || !trimmedCode) {
+      const err = new Error('Email and code are required')
+      err.status = 400
+      throw err
+    }
+    const res = await this.request('/auth/verify-code', {
+      method: 'POST',
+      body: JSON.stringify({ email: trimmedEmail, code: trimmedCode })
+    })
+    this._recordLoginResult(res || {})
+    return res
+  }
+
+  static async refreshProfile() {
+    try {
+      return await this.getProfile()
+    } catch (err) {
+      if (err?.status === 401) {
+        this.logout()
+      }
+      throw err
+    }
+  }
+
+  static logout({ clearAdminKey = false } = {}) {
+    this.setUserToken('')
+    this.clearDisplayNameCache()
+    if (clearAdminKey) {
+      this.setAdminKey('')
+    }
+    this.setIsAdmin(false)
+    this._emitAuthChanged({ role: 'user', token: null })
+  }
+
   // Admin endpoints
+  static async validateAdminCredentials() {
+    return this.request('/admin/auth-check', {}, { admin: true })
+  }
   static async adminGetConfig() { return this.request('/admin/config', {}, { admin: true }) }
   static async adminUpdateConfig(settings) {
     return this.request('/admin/config', { method: 'POST', body: JSON.stringify({ settings }) }, { admin: true })
@@ -344,7 +638,6 @@ class APIService {
   static async adminResolveFlag(flagId, { deactivateLoan = false, note = '' } = {}) {
     return this.request(`/loans/flags/${flagId}/resolve`, { method: 'POST', body: JSON.stringify({ action: deactivateLoan ? 'deactivate_loan' : 'none', note }) }, { admin: true })
   }
-  // Admin loans CRUD
   static async adminLoansList(params = {}) {
     const q = new URLSearchParams(params)
     return this.request(`/admin/loans?${q}`, {}, { admin: true })
@@ -372,7 +665,6 @@ class APIService {
     const body = seasons && seasons.length ? { seasons } : {}
     return this.request(`/admin/backfill-team-leagues`, { method: 'POST', body: JSON.stringify(body) }, { admin: true })
   }
-  // Admin: missing names helpers
   static async adminMissingNames(params = {}) {
     const q = new URLSearchParams(params)
     return this.request(`/admin/loans/missing-names?${q}`, {}, { admin: true })
@@ -380,10 +672,16 @@ class APIService {
   static async adminBackfillNames(payload = {}) {
     return this.request(`/admin/loans/backfill-names`, { method: 'POST', body: JSON.stringify(payload) }, { admin: true })
   }
-  // Admin newsletters
   static async adminNewslettersList(params = {}) {
     const q = new URLSearchParams(params)
-    return this.request(`/admin/newsletters?${q}`, {}, { admin: true })
+    const query = q.toString()
+    const url = query ? `/admin/newsletters?${query}` : '/admin/newsletters'
+    const data = await this.request(url, {}, { admin: true })
+    if (!data) return []
+    if (Array.isArray(data)) return data
+    if (Array.isArray(data.items)) return data.items
+    if (Array.isArray(data.results)) return data.results
+    return []
   }
   static async adminNewsletterGet(id) {
     return this.request(`/admin/newsletters/${id}`, {}, { admin: true })
@@ -391,10 +689,41 @@ class APIService {
   static async adminNewsletterUpdate(id, payload) {
     return this.request(`/admin/newsletters/${id}`, { method: 'PUT', body: JSON.stringify(payload) }, { admin: true })
   }
+  static async adminNewsletterBulkPublish(ids = [], publish = true) {
+    const uniqueIds = Array.from(new Set((Array.isArray(ids) ? ids : []).map(Number))).filter((id) => Number.isInteger(id) && id > 0)
+    if (uniqueIds.length === 0) {
+      throw new Error('No newsletter ids provided')
+    }
+    const body = JSON.stringify({ ids: uniqueIds, publish: !!publish })
+    return this.request('/admin/newsletters/bulk-publish', { method: 'POST', body }, { admin: true })
+  }
+  static async adminNewsletterSendPreview(id, overrides = {}) {
+    const normalized = Number(id)
+    if (!Number.isInteger(normalized) || normalized <= 0) {
+      throw new Error('Newsletter id must be a positive integer')
+    }
+    const payload = { test_to: '__admins__' }
+    if (overrides && typeof overrides === 'object') {
+      for (const [key, value] of Object.entries(overrides)) {
+        if (typeof value === 'undefined') continue
+        payload[key] = value
+      }
+    }
+    return this.request(`/newsletters/${normalized}/send`, { method: 'POST', body: JSON.stringify(payload) }, { admin: true })
+  }
+  static async adminNewsletterDelete(id) {
+    const normalized = Number(id)
+    if (!Number.isInteger(normalized) || normalized <= 0) {
+      throw new Error('Newsletter id must be a positive integer')
+    }
+    return this.request(`/newsletters/${normalized}`, { method: 'DELETE' }, { admin: true })
+  }
   static async adminNewsletterRender(id, fmt = 'web') {
     const headers = { 'Accept': 'text/html' }
     const key = this.adminKey || (typeof localStorage !== 'undefined' && localStorage.getItem('loan_army_admin_key'))
     if (key) headers['X-API-Key'] = key
+    const token = this.userToken || (typeof localStorage !== 'undefined' && localStorage.getItem('loan_army_user_token'))
+    if (token) headers['Authorization'] = `Bearer ${token}`
     const res = await fetch(`${API_BASE_URL}/newsletters/${id}/render.${fmt}`, { headers, method: 'GET' })
     const text = await res.text()
     if (!res.ok) {
@@ -405,6 +734,81 @@ class APIService {
     }
     return text
   }
+
+  static async listNewsletterComments(newsletterId) {
+    return this.request(`/newsletters/${newsletterId}/comments`)
+  }
+
+  static async createNewsletterComment(newsletterId, body) {
+    return this.request(`/newsletters/${newsletterId}/comments`, {
+      method: 'POST',
+      body: JSON.stringify({ body }),
+    })
+  }
+}
+
+const AuthContext = createContext({
+  token: null,
+  isAdmin: false,
+  hasApiKey: false,
+  displayName: null,
+  displayNameConfirmed: false,
+})
+
+const AuthUIContext = createContext({
+  openLoginModal: () => {},
+  closeLoginModal: () => {},
+  logout: () => {},
+  isLoginModalOpen: false,
+})
+
+const useAuth = () => useContext(AuthContext)
+const useAuthUI = () => useContext(AuthUIContext)
+
+const buildAuthSnapshot = (detail = {}) => {
+  const snapshot = {
+    token: APIService.userToken,
+    isAdmin: APIService.isAdmin(),
+    hasApiKey: !!APIService.adminKey,
+    displayName: typeof detail.displayName !== 'undefined'
+      ? detail.displayName
+      : (APIService.displayName || null),
+    displayNameConfirmed: typeof detail.displayNameConfirmed !== 'undefined'
+      ? !!detail.displayNameConfirmed
+      : APIService.displayNameConfirmed(),
+  }
+  return snapshot
+}
+
+const RELATIVE_TIME_DIVISIONS = [
+  { amount: 60, unit: 'second' },
+  { amount: 60, unit: 'minute' },
+  { amount: 24, unit: 'hour' },
+  { amount: 7, unit: 'day' },
+  { amount: 4.34524, unit: 'week' },
+  { amount: 12, unit: 'month' },
+  { amount: Infinity, unit: 'year' },
+]
+
+const relativeTimeFormatter = typeof Intl !== 'undefined' && typeof Intl.RelativeTimeFormat === 'function'
+  ? new Intl.RelativeTimeFormat(undefined, { numeric: 'auto' })
+  : null
+
+function formatRelativeTime(value) {
+  if (!value) return ''
+  const date = new Date(value)
+  if (Number.isNaN(date.getTime())) return ''
+  if (!relativeTimeFormatter) {
+    return date.toLocaleString()
+  }
+  let duration = (date.getTime() - Date.now()) / 1000
+  for (const division of RELATIVE_TIME_DIVISIONS) {
+    if (Math.abs(duration) < division.amount || division.amount === Infinity) {
+      return relativeTimeFormatter.format(Math.round(duration), division.unit)
+    }
+    duration /= division.amount
+  }
+  return date.toLocaleString()
 }
 
 // League colors for visual identity
@@ -416,9 +820,51 @@ const LEAGUE_COLORS = {
   'Ligue 1': '#dae025'
 }
 
+const NEWSLETTER_PAGE_SIZE = 5
+const ADMIN_NEWSLETTER_PAGE_SIZE = 10
+
+const filterLatestSeasonTeams = (rows = []) => {
+  if (!Array.isArray(rows) || rows.length === 0) {
+    return { season: null, teams: [] }
+  }
+
+  const seasons = rows
+    .map((team) => parseInt(team?.season, 10))
+    .filter((value) => !Number.isNaN(value))
+
+  const latestSeason = seasons.length ? Math.max(...seasons) : null
+  const seasonFiltered = latestSeason !== null
+    ? rows.filter((team) => parseInt(team?.season, 10) === latestSeason)
+    : rows
+
+  const deduped = new Map()
+  for (const team of seasonFiltered) {
+    if (!team) continue
+    const key = team.team_id != null ? String(team.team_id) : team.id != null ? `db:${team.id}` : null
+    if (!key) continue
+    const existing = deduped.get(key)
+    if (!existing) {
+      deduped.set(key, team)
+      continue
+    }
+    const existingUpdated = existing.updated_at ? Date.parse(existing.updated_at) : 0
+    const candidateUpdated = team.updated_at ? Date.parse(team.updated_at) : 0
+    if (candidateUpdated >= existingUpdated) {
+      deduped.set(key, team)
+    }
+  }
+
+  const teams = Array.from(deduped.values()).sort((a, b) => {
+    return (a?.name || '').localeCompare(b?.name || '')
+  })
+
+  return { season: latestSeason, teams }
+}
+
 // Historical Newsletters page component
 function HistoricalNewslettersPage() {
   const [teams, setTeams] = useState([])
+  const [currentSeason, setCurrentSeason] = useState(null)
   const [selectedTeams, setSelectedTeams] = useState([])
   const [selectedDate, setSelectedDate] = useState('')
   const [newsletters, setNewsletters] = useState([])
@@ -432,7 +878,10 @@ function HistoricalNewslettersPage() {
         console.log('🏟️ [Historical] Loading teams...')
         const data = await APIService.getTeams({ european_only: 'true' })
         console.log('✅ [Historical] Teams loaded:', data.length, 'teams')
-        setTeams(data)
+        const { season, teams: filtered } = filterLatestSeasonTeams(data)
+        console.log('🎯 [Historical] Filtering teams to latest season:', season, 'count:', filtered.length)
+        setTeams(filtered)
+        setCurrentSeason(season)
       } catch (error) {
         console.error('❌ [Historical] Failed to load teams:', error)
         setMessage({ type: 'error', text: 'Failed to load teams' })
@@ -518,6 +967,9 @@ function HistoricalNewslettersPage() {
           <p className="text-lg text-gray-600">
             Generate newsletters for any date. Select teams and a date to see loan activities for that week.
           </p>
+          {currentSeason !== null && (
+            <p className="text-sm text-gray-500">Latest season detected: {currentSeason}–{String(currentSeason + 1).slice(-2)}</p>
+          )}
         </div>
 
         {message && (
@@ -660,14 +1112,345 @@ function HistoricalNewslettersPage() {
             </Card>
           </div>
         </div>
+      ) : (
+        <div className="rounded-lg border border-dashed bg-muted/40 p-6 text-sm text-muted-foreground space-y-3">
+          {authToken && !hasAdminToken ? (
+            <>
+              <p>This account is signed in but is not authorized for admin tools.</p>
+              <div className="flex flex-wrap gap-2">
+                <Button size="sm" variant="outline" onClick={() => triggerLogout({ clearAdminKey: true })}>
+                  Log out
+                </Button>
+              </div>
+            </>
+          ) : (
+            <>
+              <p>Admin tools are locked. Sign in with an approved admin email and store the API key above.</p>
+              <div className="flex flex-wrap gap-2">
+                {!hasAdminToken && (
+                  <Button size="sm" onClick={openLoginModal}>
+                    <LogIn className="mr-1 h-4 w-4" /> Sign in as admin
+                  </Button>
+                )}
+                {hasAdminToken && !hasStoredKey && (
+                  <Button size="sm" variant="outline" asChild>
+                    <Link to="/admin">
+                      <KeyRound className="mr-1 h-4 w-4" /> Add API key
+                    </Link>
+                  </Button>
+                )}
+              </div>
+            </>
+          )}
+        </div>
+      )
+
       </div>
     </div>
   )
 }
 
+function AdminNewsletterDetailPage() {
+  const { newsletterId } = useParams()
+  const navigate = useNavigate()
+  const [loading, setLoading] = useState(true)
+  const [newsletter, setNewsletter] = useState(null)
+  const [error, setError] = useState('')
+  const [renderHtml, setRenderHtml] = useState('')
+  const [htmlError, setHtmlError] = useState('')
+  const [copyLabel, setCopyLabel] = useState('Copy ID')
+
+  useEffect(() => {
+    let cancelled = false
+    const load = async () => {
+      const trimmedId = (newsletterId || '').trim()
+      if (!trimmedId) {
+        setError('Newsletter id is required')
+        setLoading(false)
+        return
+      }
+
+      setLoading(true)
+      setError('')
+      setHtmlError('')
+      try {
+        const data = await APIService.adminNewsletterGet(trimmedId)
+        if (cancelled) return
+        setNewsletter(data)
+        try {
+          const html = await APIService.adminNewsletterRender(trimmedId, 'web')
+          if (!cancelled) {
+            setRenderHtml(html)
+          }
+        } catch (renderErr) {
+          if (!cancelled) {
+            setHtmlError(renderErr?.message || 'Unable to load rendered preview')
+          }
+        }
+      } catch (err) {
+        if (!cancelled) {
+          setError(err?.message || 'Failed to load newsletter')
+        }
+      } finally {
+        if (!cancelled) {
+          setLoading(false)
+        }
+      }
+    }
+
+    load()
+    return () => {
+      cancelled = true
+    }
+  }, [newsletterId])
+
+  const handleCopyId = useCallback(() => {
+    if (!newsletter?.id) return
+    const idStr = String(newsletter.id)
+    if (navigator?.clipboard?.writeText) {
+      navigator.clipboard.writeText(idStr)
+        .then(() => {
+          setCopyLabel('Copied!')
+          setTimeout(() => setCopyLabel('Copy ID'), 2000)
+        })
+        .catch(() => setCopyLabel('Copy ID'))
+    }
+  }, [newsletter?.id])
+
+  const handleOpenPreview = useCallback(() => {
+    if (!renderHtml) return
+    const blob = new Blob([renderHtml], { type: 'text/html' })
+    const url = URL.createObjectURL(blob)
+    window.open(url, '_blank', 'noopener')
+    setTimeout(() => URL.revokeObjectURL(url), 60_000)
+  }, [renderHtml])
+
+  const fallbackContent = useMemo(() => {
+    if (!newsletter?.content) return null
+    try {
+      const obj = typeof newsletter.content === 'string' ? JSON.parse(newsletter.content) : (newsletter.content || {})
+      const highlights = Array.isArray(obj.highlights) ? obj.highlights : []
+      const sections = Array.isArray(obj.sections) ? obj.sections : []
+      return (
+        <div className="space-y-6">
+          <div className="bg-gradient-to-r from-blue-50 to-gray-50 p-6 rounded-lg border-l-4 border-blue-500">
+            <h2 className="text-2xl font-bold text-gray-900 mb-3">{obj.title || newsletter.title}</h2>
+            {obj.range && (
+              <div className="text-sm text-gray-600 mb-3">
+                📅 Week: {obj.range[0]} - {obj.range[1]}
+              </div>
+            )}
+            {obj.summary && (
+              <div className="text-gray-700 leading-relaxed text-lg">
+                {obj.summary}
+              </div>
+            )}
+          </div>
+
+          {highlights.length > 0 && (
+            <div className="bg-yellow-50 p-5 rounded-lg border-l-4 border-yellow-400">
+              <h3 className="text-lg font-bold text-gray-900 mb-3 flex items-center">
+                ⭐ Key Highlights
+              </h3>
+              <ul className="space-y-2">
+                {highlights.map((highlight, idx) => (
+                  <li key={idx} className="flex items-start">
+                    <span className="bg-yellow-400 text-yellow-900 rounded-full w-6 h-6 flex items-center justify-center text-xs font-bold mr-3 mt-0.5 flex-shrink-0">
+                      {idx + 1}
+                    </span>
+                    <span className="text-gray-700">{highlight}</span>
+                  </li>
+                ))}
+              </ul>
+            </div>
+          )}
+
+          {sections.map((section, index) => {
+            const items = Array.isArray(section?.items) ? section.items : []
+            if (!items.length) return null
+            return (
+              <div key={index} className="space-y-4">
+                {section?.title && (
+                  <div className="border-b pb-2">
+                    <h3 className="text-xl font-semibold text-gray-900">{section.title}</h3>
+                    {section?.subtitle && (
+                      <p className="text-sm text-gray-600">{section.subtitle}</p>
+                    )}
+                  </div>
+                )}
+                <div className="space-y-4">
+                  {items.map((item, itemIdx) => (
+                    <div key={itemIdx} className="border rounded-lg p-4 bg-white shadow-sm">
+                      <div className="flex flex-wrap items-start justify-between gap-3">
+                        <div>
+                          <div className="text-lg font-semibold text-gray-900">{item.player_name}</div>
+                          <div className="text-sm text-gray-600">{item.loan_team || item.loan_team_name}</div>
+                        </div>
+                        <div className="text-sm text-gray-500">
+                          {item.competition || item.match_name}
+                        </div>
+                      </div>
+                      {item.week_summary && (
+                        <p className="mt-3 text-gray-700 leading-relaxed">{item.week_summary}</p>
+                      )}
+                      {item.match_notes && Array.isArray(item.match_notes) && item.match_notes.length > 0 && (
+                        <ul className="mt-3 list-disc space-y-1 pl-5 text-sm text-gray-600">
+                          {item.match_notes.map((note, noteIndex) => (
+                            <li key={noteIndex}>{note}</li>
+                          ))}
+                        </ul>
+                      )}
+                    </div>
+                  ))}
+                </div>
+              </div>
+            )
+          })}
+        </div>
+      )
+    } catch (err) {
+      return (
+        <div className="bg-gray-50 p-4 rounded-lg">
+          <h3 className="text-lg font-medium text-gray-900 mb-2">Newsletter Content</h3>
+          <div className="whitespace-pre-wrap text-gray-700">{newsletter.content}</div>
+        </div>
+      )
+    }
+  }, [newsletter])
+
+  const metaEntries = useMemo(() => {
+    if (!newsletter) return []
+    const items = []
+    items.push({ label: 'Newsletter ID', value: newsletter.id })
+    if (newsletter.team_name) items.push({ label: 'Team', value: newsletter.team_name })
+    if (newsletter.week_start_date || newsletter.week_end_date) {
+      const range = [newsletter.week_start_date, newsletter.week_end_date].filter(Boolean).join(' → ')
+      items.push({ label: 'Week', value: range })
+    }
+    if (newsletter.issue_date) items.push({ label: 'Issue Date', value: newsletter.issue_date })
+    if (newsletter.published_date) items.push({ label: 'Published', value: newsletter.published_date })
+    if (newsletter.generated_date) items.push({ label: 'Generated', value: newsletter.generated_date })
+    if (newsletter.email_sent_date) items.push({ label: 'Email Sent', value: newsletter.email_sent_date })
+    if (typeof newsletter.subscriber_count === 'number') {
+      items.push({ label: 'Subscriber Count', value: newsletter.subscriber_count })
+    }
+    return items
+  }, [newsletter])
+
+  return (
+    <div className="max-w-6xl mx-auto px-4 py-8 space-y-6">
+      <Button variant="ghost" size="sm" onClick={() => navigate(-1)}>
+        <ArrowLeft className="mr-2 h-4 w-4" />
+        Back
+      </Button>
+
+      {loading ? (
+        <div className="flex flex-col items-center justify-center py-20 text-gray-600">
+          <Loader2 className="h-10 w-10 animate-spin mb-4" />
+          Loading newsletter…
+        </div>
+      ) : error ? (
+        <Card>
+          <CardHeader>
+            <CardTitle className="text-lg text-red-600">Unable to load newsletter</CardTitle>
+            <CardDescription>{error}</CardDescription>
+          </CardHeader>
+          <CardFooter>
+            <Button variant="outline" onClick={() => navigate('/admin')}>
+              Return to admin dashboard
+            </Button>
+          </CardFooter>
+        </Card>
+      ) : (
+        <div className="space-y-6">
+          <Card>
+            <CardHeader className="flex flex-col gap-3">
+              <div className="flex flex-wrap items-center justify-between gap-3">
+                <div>
+                  <CardTitle className="text-2xl">{newsletter?.title || 'Newsletter detail'}</CardTitle>
+                  <CardDescription className="text-sm text-gray-600">
+                    Review the generated newsletter and metadata before sending.
+                  </CardDescription>
+                </div>
+                <div className="flex flex-wrap items-center gap-2">
+                  <Badge variant={newsletter?.published ? 'default' : 'secondary'}>
+                    {newsletter?.published ? 'Published' : 'Draft'}
+                  </Badge>
+                  {newsletter?.email_sent && (
+                    <Badge variant="outline" className="border-green-300 text-green-700">
+                      Email sent
+                    </Badge>
+                  )}
+                  <Button size="sm" variant="outline" onClick={handleCopyId}>
+                    <Copy className="mr-2 h-4 w-4" />
+                    {copyLabel}
+                  </Button>
+                </div>
+              </div>
+            </CardHeader>
+            <CardContent className="space-y-6">
+              {metaEntries.length > 0 && (
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 text-sm">
+                  {metaEntries.map((item) => (
+                    <div key={item.label} className="flex flex-col rounded border bg-gray-50 p-3">
+                      <span className="text-xs uppercase tracking-wide text-gray-500">{item.label}</span>
+                      <span className="text-gray-900 font-medium break-words">{item.value || '—'}</span>
+                    </div>
+                  ))}
+                </div>
+              )}
+
+              <div className="flex flex-wrap gap-3">
+                <Button size="sm" disabled={!renderHtml} onClick={handleOpenPreview}>
+                  Open web preview
+                </Button>
+                {htmlError && (
+                  <span className="text-sm text-red-600">{htmlError}</span>
+                )}
+              </div>
+
+              <div className="rounded-lg border bg-white p-6">
+                {renderHtml ? (
+                  <div dangerouslySetInnerHTML={{ __html: renderHtml }} className="prose max-w-none" />
+                ) : fallbackContent ? (
+                  fallbackContent
+                ) : (
+                  <div className="text-sm text-gray-500">No content available for this newsletter.</div>
+                )}
+              </div>
+            </CardContent>
+          </Card>
+        </div>
+      )}
+    </div>
+  )
+}
+
+function RequireAdmin({ children }) {
+  const { token, isAdmin, hasApiKey } = useAuth()
+  if (!token || !isAdmin || !hasApiKey) {
+    return <Navigate to="/" replace />
+  }
+  return children
+}
+
+function RequireAuth({ children }) {
+  const { token } = useAuth()
+  if (!token) {
+    return <Navigate to="/" replace />
+  }
+  return children
+}
+
 // Admin page
 function AdminPage() {
   const [adminKey, setAdminKey] = useState(APIService.adminKey || '')
+  const [adminKeyInput, setAdminKeyInput] = useState('')
+  const [showKeyValue, setShowKeyValue] = useState(false)
+  const [editingKey, setEditingKey] = useState(!APIService.adminKey)
+  const [validatingKey, setValidatingKey] = useState(false)
+  const [initialKeyValidated, setInitialKeyValidated] = useState(false)
+  const [isAdmin, setIsAdmin] = useState(APIService.isAdmin())
   const [runDate, setRunDate] = useState('')
   const [seedSeason, setSeedSeason] = useState('')
   const [runStatus, setRunStatus] = useState(null)
@@ -679,6 +1462,7 @@ function AdminPage() {
     search_strict_range: false,
   })
   const [flags, setFlags] = useState([])
+  const [flagEditors, setFlagEditors] = useState({})
   const [loans, setLoans] = useState([])
   const [loanFilters, setLoanFilters] = useState({ active_only: 'true', player_name: '', season: '' })
   const [loanForm, setLoanForm] = useState({ player_id: '', player_name: '', primary_team_api_id: '', loan_team_api_id: '', season: '' })
@@ -689,16 +1473,135 @@ function AdminPage() {
   const [message, setMessage] = useState(null)
   const [nlFilters, setNlFilters] = useState({ published_only: '', week_start: '', week_end: '', issue_start: '', issue_end: '', created_start: '', created_end: '' })
   const [newslettersAdmin, setNewslettersAdmin] = useState([])
+  const [selectedNewsletterIds, setSelectedNewsletterIds] = useState([])
+  const [bulkPublishBusy, setBulkPublishBusy] = useState(false)
+  const [sendPreviewBusyIds, setSendPreviewBusyIds] = useState([])
+  const [sendSelectedBusy, setSendSelectedBusy] = useState(false)
+  const [bulkDeleteBusy, setBulkDeleteBusy] = useState(false)
+  const [deleteBusyIds, setDeleteBusyIds] = useState([])
   const [editingNl, setEditingNl] = useState(null)
   const [previewHtml, setPreviewHtml] = useState('')
+  const [previewError, setPreviewError] = useState('')
   const [previewFormat, setPreviewFormat] = useState('web')
   const [runHistory, setRunHistory] = useState([])
   const [runTeams, setRunTeams] = useState([])
   const [selectedRunTeams, setSelectedRunTeams] = useState([])
   const [teamRunBusy, setTeamRunBusy] = useState(false)
   const [teamRunMsg, setTeamRunMsg] = useState(null)
+  const [adminNewsPage, setAdminNewsPage] = useState(1)
+  const pageSelectRef = useRef(null)
+  const adminTotalPages = useMemo(() => {
+    const total = Math.ceil(newslettersAdmin.length / ADMIN_NEWSLETTER_PAGE_SIZE)
+    return total > 0 ? total : 1
+  }, [newslettersAdmin])
+  const adminPageStart = newslettersAdmin.length ? (adminNewsPage - 1) * ADMIN_NEWSLETTER_PAGE_SIZE + 1 : 0
+  const adminPageEnd = newslettersAdmin.length ? Math.min(adminNewsPage * ADMIN_NEWSLETTER_PAGE_SIZE, newslettersAdmin.length) : 0
+  const paginatedNewslettersAdmin = useMemo(() => {
+    const start = (adminNewsPage - 1) * ADMIN_NEWSLETTER_PAGE_SIZE
+    return newslettersAdmin.slice(start, start + ADMIN_NEWSLETTER_PAGE_SIZE)
+  }, [newslettersAdmin, adminNewsPage])
+  const selectedNewsletterIdsSet = useMemo(() => new Set(selectedNewsletterIds), [selectedNewsletterIds])
+  const currentPageNewsletterIds = useMemo(() => paginatedNewslettersAdmin.map((n) => n.id), [paginatedNewslettersAdmin])
+  const allPageSelected = currentPageNewsletterIds.length > 0 && currentPageNewsletterIds.every((id) => selectedNewsletterIdsSet.has(id))
+  const somePageSelected = currentPageNewsletterIds.some((id) => selectedNewsletterIdsSet.has(id))
+  const selectedNewsletterCount = selectedNewsletterIds.length
 
-  const load = async () => {
+  const buildTeamOptionsForLoan = useCallback((loanRecords = []) => {
+    const map = new Map()
+    for (const team of runTeams) {
+      if (team && team.id) {
+        map.set(team.id, team)
+      }
+    }
+    for (const loan of loanRecords) {
+      if (!loan) continue
+      if (loan.primary_team_id && !map.has(loan.primary_team_id)) {
+        map.set(loan.primary_team_id, {
+          id: loan.primary_team_id,
+          name: loan.primary_team_name || `Team #${loan.primary_team_id}`,
+          league_name: loan.primary_team_league_name || 'Other',
+          team_id: loan.primary_team_api_id,
+        })
+      }
+      if (loan.loan_team_id && !map.has(loan.loan_team_id)) {
+        map.set(loan.loan_team_id, {
+          id: loan.loan_team_id,
+          name: loan.loan_team_name || `Team #${loan.loan_team_id}`,
+          league_name: loan.loan_team_league_name || 'Other',
+          team_id: loan.loan_team_api_id,
+        })
+      }
+    }
+    return Array.from(map.values())
+  }, [runTeams])
+
+  const auth = useAuth()
+  const { openLoginModal, logout: triggerLogout } = useAuthUI()
+
+  const hasStoredKey = Boolean(adminKey)
+  const hasAdminToken = Boolean(isAdmin)
+  const hasAdminAccess = hasStoredKey && hasAdminToken
+  const authToken = !!auth.token
+
+  const accessChecklist = useMemo(() => {
+    if (authToken && !hasAdminToken) {
+      return [{
+        key: 'unauthorized',
+        label: 'Admin authorization',
+        ok: false,
+        description: 'This account is not on the approved admin list. Contact an administrator to request access.',
+      }]
+    }
+    return [
+      {
+        key: 'login',
+        label: 'Admin login',
+        ok: hasAdminToken,
+        description: hasAdminToken
+          ? 'OTP session active for this browser.'
+          : 'Sign in with your approved admin email to request a one-time code.',
+      },
+      {
+        key: 'key',
+        label: 'Admin API key',
+        ok: hasStoredKey,
+        description: hasStoredKey
+          ? 'Key stored locally; never sent until an admin request is made.'
+          : 'Paste the API key provided in settings to unlock admin tools.',
+      },
+    ]
+  }, [authToken, hasAdminToken, hasStoredKey])
+
+  const adminReady = hasAdminAccess
+
+  const maskedKey = adminKey ? `${'•'.repeat(Math.max(adminKey.length - 4, 4))}${adminKey.slice(-4)}` : ''
+  const adminWarning = !hasAdminToken
+    ? authToken
+      ? 'This account is not authorized for admin operations.'
+      : 'Admin login required. Sign in with an approved admin email.'
+    : !hasStoredKey
+      ? 'Add your admin API key to enable admin operations.'
+      : null
+
+  useEffect(() => {
+    if (typeof window === 'undefined') return undefined
+    const handleAuthChange = () => {
+      const currentKey = APIService.adminKey || ''
+      setAdminKey(currentKey)
+      setAdminKeyInput('')
+      setShowKeyValue(false)
+      setEditingKey(!currentKey)
+      setIsAdmin(APIService.isAdmin())
+    }
+    window.addEventListener(APIService.authEventName, handleAuthChange)
+    window.addEventListener('storage', handleAuthChange)
+    return () => {
+      window.removeEventListener(APIService.authEventName, handleAuthChange)
+      window.removeEventListener('storage', handleAuthChange)
+    }
+  }, [])
+
+  const load = useCallback(async () => {
     try {
       const conf = await APIService.adminGetConfig()
       setSettings(s => ({
@@ -717,17 +1620,23 @@ function AdminPage() {
       setLoans(ls)
       // initial newsletters
       const nls = await APIService.adminNewslettersList({})
-      setNewslettersAdmin(nls)
-    } catch (e) {
-      console.error('Admin load failed', e)
+      setNewslettersAdmin(Array.isArray(nls) ? nls : [])
+      setSelectedNewsletterIds([])
+    } catch (error) {
+      console.error('Admin load failed', error)
     }
-  }
+  }, [])
 
   useEffect(() => {
-    if (APIService.adminKey || (adminKey && adminKey.trim())) {
+    if (hasAdminAccess) {
       load()
+    } else {
+      setFlags([])
+      setLoans([])
+      setNewslettersAdmin([])
+      setSelectedNewsletterIds([])
     }
-  }, [adminKey])
+  }, [hasAdminAccess, load])
 
   useEffect(() => {
     (async () => {
@@ -736,8 +1645,10 @@ function AdminPage() {
         const seasonYear = parseInt((loanFilters.season || '').trim(), 10)
         if (!isNaN(seasonYear)) filters.season = seasonYear
         const teams = await APIService.getTeams(filters)
-        setRunTeams(Array.isArray(teams) ? teams : [])
-      } catch (e) {
+        const { teams: filtered } = filterLatestSeasonTeams(Array.isArray(teams) ? teams : [])
+        setRunTeams(filtered)
+      } catch (error) {
+        console.error('Failed to load run teams', error)
         setRunTeams([])
       }
     })()
@@ -747,21 +1658,122 @@ function AdminPage() {
     try {
       const rows = await APIService.request('/admin/runs/history', {}, { admin: true })
       setRunHistory(Array.isArray(rows) ? rows : [])
-    } catch (e) {
-      // ignore
+    } catch (error) {
+      console.warn('Failed to refresh run history', error)
     }
   }
-  useEffect(() => { if (adminKey?.trim()) refreshRunHistory() }, [adminKey])
+  useEffect(() => {
+    if (hasAdminAccess) {
+      refreshRunHistory()
+    } else {
+      setRunHistory([])
+    }
+  }, [hasAdminAccess])
 
-  const saveKey = () => {
-    APIService.setAdminKey(adminKey.trim())
-    setMessage({ type: 'success', text: 'Admin key saved locally' })
+  useEffect(() => {
+    const total = Math.ceil(newslettersAdmin.length / ADMIN_NEWSLETTER_PAGE_SIZE)
+    const normalizedTotal = total > 0 ? total : 1
+    if (adminNewsPage > normalizedTotal) {
+      setAdminNewsPage(normalizedTotal)
+    }
+  }, [newslettersAdmin, adminNewsPage])
+
+  useEffect(() => {
+    if (pageSelectRef.current) {
+      pageSelectRef.current.indeterminate = somePageSelected && !allPageSelected
+    }
+  }, [somePageSelected, allPageSelected])
+
+  useEffect(() => {
+    if (!hasAdminToken) {
+      setInitialKeyValidated(false)
+      return
+    }
+    if (initialKeyValidated) return
+    if (!adminKey) return
+    let cancelled = false
+    const verifyExistingKey = async () => {
+      try {
+        await APIService.validateAdminCredentials()
+        if (!cancelled) {
+          setInitialKeyValidated(true)
+        }
+      } catch (error) {
+        if (cancelled) return
+        APIService.setAdminKey('')
+        setAdminKey('')
+        setAdminKeyInput('')
+        const baseError = error?.body?.error || error.message || 'Key rejected by server'
+        const detail = error?.body?.detail || (error?.body?.reference ? `Reference: ${error.body.reference}` : '')
+        setMessage({
+          type: 'error',
+          text: `Stored admin key was rejected: ${baseError}${detail ? ` — ${detail}` : ''}`
+        })
+        setEditingKey(true)
+        setInitialKeyValidated(true)
+      }
+    }
+    verifyExistingKey()
+    return () => {
+      cancelled = true
+    }
+  }, [hasAdminToken, adminKey, initialKeyValidated])
+
+  const saveKey = async () => {
+    const trimmed = (adminKeyInput || '').trim()
+    if (!trimmed) {
+      clearKey()
+      return
+    }
+    const previousKey = adminKey
+    setValidatingKey(true)
+    setMessage({ type: 'info', text: 'Validating admin API key…' })
+    APIService.setAdminKey(trimmed)
+    try {
+      await APIService.validateAdminCredentials()
+      setAdminKey(trimmed)
+      setAdminKeyInput('')
+      setEditingKey(false)
+      setShowKeyValue(false)
+      setMessage({ type: 'success', text: 'Admin key saved and verified' })
+      setInitialKeyValidated(true)
+    } catch (error) {
+      APIService.setAdminKey(previousKey || '')
+      setAdminKey(previousKey || '')
+      setAdminKeyInput(trimmed)
+      const baseError = error?.body?.error || error.message || 'Key rejected by server'
+      const detail = error?.body?.detail || (error?.body?.reference ? `Reference: ${error.body.reference}` : '')
+      setMessage({
+        type: 'error',
+        text: `Admin key not accepted: ${baseError}${detail ? ` — ${detail}` : ''}`
+      })
+      setEditingKey(true)
+    } finally {
+      setValidatingKey(false)
+    }
+  }
+
+  const clearKey = () => {
+    APIService.setAdminKey('')
+    setAdminKey('')
+    setAdminKeyInput('')
+    setEditingKey(true)
+    setShowKeyValue(false)
+    setMessage({ type: 'success', text: 'Admin key cleared' })
+    setInitialKeyValidated(false)
+  }
+
+  const startEditingKey = () => {
+    setEditingKey(true)
+    setAdminKeyInput(adminKey || '')
+    setShowKeyValue(false)
   }
   const saveSettings = async () => {
     try {
       await APIService.adminUpdateConfig(settings)
       setMessage({ type: 'success', text: 'Settings updated' })
-    } catch (e) {
+    } catch (error) {
+      console.error('Failed to update admin settings', error)
       setMessage({ type: 'error', text: 'Failed to update settings' })
     }
   }
@@ -770,33 +1782,245 @@ function AdminPage() {
       const next = !runStatus
       await APIService.adminSetRunStatus(next)
       setRunStatus(next)
-    } catch (e) {}
+    } catch (error) {
+      console.error('Failed to toggle run status', error)
+    }
   }
   const runAll = async () => {
     setRunning(true)
     setMessage(null)
     try {
-      const d = runDate || new Date().toISOString().slice(0,10)
+      const d = runDate || new Date().toISOString().slice(0, 10)
       const out = await APIService.adminGenerateAll(d)
       const results = Array.isArray(out?.results) ? out.results : []
-      const ok = results.filter(r => r && r.newsletter_id).length
-      const errs = results.filter(r => r && r.error).length
-      const extra = results.length ? ` (${ok} ok, ${errs} errors)` : ''
+      const ok = results.filter((r) => r && r.newsletter_id).length
+      const errs = results.filter((r) => r && r.error).length
+      const skipped = results.filter((r) => r && r.skipped === 'no_active_loanees').length
+      const parts = []
+      parts.push(`${ok} ok`)
+      parts.push(`${errs} errors`)
+      if (skipped) parts.push(`${skipped} skipped`)
+      const extra = results.length ? ` (${parts.join(', ')})` : ''
       setMessage({ type: 'success', text: `Triggered run for ${out?.ran_for || d}${extra}` })
       // pull in new run-history entry
-      try { await refreshRunHistory() } catch {}
-    } catch (e) {
-      const detail = (e && (e.body?.error || e.message)) ? `: ${String(e.body?.error || e.message)}` : ''
+      try {
+        await refreshRunHistory()
+      } catch (error) {
+        console.warn('Failed to refresh run history after runAll', error)
+      }
+    } catch (error) {
+      const detail = (error && (error.body?.error || error.message))
+        ? `: ${String(error.body?.error || error.message)}`
+        : ''
       setMessage({ type: 'error', text: `Failed to trigger run${detail}` })
     } finally {
       setRunning(false)
     }
   }
-  const resolveFlag = async (id, deactivate=false) => {
+  const resolveFlag = async (id, deactivate = false) => {
     try {
       await APIService.adminResolveFlag(id, { deactivateLoan: deactivate })
-      setFlags(flags.filter(f => f.id !== id))
-    } catch (e) {}
+      setFlags((prev) => prev.filter((f) => f.id !== id))
+      setFlagEditors((prev) => {
+        if (!prev[id]) return prev
+        const next = { ...prev }
+        delete next[id]
+        return next
+      })
+    } catch (error) {
+      console.error('Failed to resolve flag', error)
+    }
+  }
+  const openFlagEditor = async (flag) => {
+    setFlagEditors((prev) => ({
+      ...prev,
+      [flag.id]: {
+        open: true,
+        loading: true,
+        saving: false,
+        error: null,
+        loans: prev[flag.id]?.loans || [],
+        selectedLoanId: prev[flag.id]?.selectedLoanId || null,
+        primaryTeamId: prev[flag.id]?.primaryTeamId || null,
+        loanTeamId: prev[flag.id]?.loanTeamId || null,
+      },
+    }))
+    try {
+      const rows = await APIService.adminLoansList({ player_id: flag.player_api_id, active_only: 'false' })
+      const list = Array.isArray(rows) ? rows : []
+      if (list.length === 0) {
+        setFlagEditors((prev) => ({
+          ...prev,
+          [flag.id]: {
+            open: true,
+            loading: false,
+            saving: false,
+            error: 'No matching loan records were found for this player.',
+            loans: [],
+            selectedLoanId: null,
+            primaryTeamId: null,
+            loanTeamId: null,
+          },
+        }))
+        return
+      }
+      const preferred = list.find((l) => l.is_active) || list[0]
+      setFlagEditors((prev) => ({
+        ...prev,
+        [flag.id]: {
+          open: true,
+          loading: false,
+          saving: false,
+          error: null,
+          loans: list,
+          selectedLoanId: preferred?.id || null,
+          primaryTeamId: preferred?.primary_team_id ?? null,
+          loanTeamId: preferred?.loan_team_id ?? null,
+        },
+      }))
+    } catch (error) {
+      const msg = error?.body?.error || error.message || 'Failed to load loan details.'
+      setFlagEditors((prev) => ({
+        ...prev,
+        [flag.id]: {
+          open: true,
+          loading: false,
+          saving: false,
+          error: msg,
+          loans: [],
+          selectedLoanId: null,
+          primaryTeamId: null,
+          loanTeamId: null,
+        },
+      }))
+    }
+  }
+  const closeFlagEditor = (flagId) => {
+    setFlagEditors((prev) => {
+      if (!prev[flagId]) return prev
+      const next = { ...prev }
+      delete next[flagId]
+      return next
+    })
+  }
+  const selectFlagLoanRecord = (flagId, loanId) => {
+    const numeric = Number(loanId)
+    setFlagEditors((prev) => {
+      const editor = prev[flagId]
+      if (!editor) return prev
+      const loan = (editor.loans || []).find((l) => l.id === numeric)
+      if (!loan) return prev
+      return {
+        ...prev,
+        [flagId]: {
+          ...editor,
+          selectedLoanId: numeric,
+          primaryTeamId: loan.primary_team_id ?? editor.primaryTeamId ?? null,
+          loanTeamId: loan.loan_team_id ?? editor.loanTeamId ?? null,
+        },
+      }
+    })
+  }
+  const setFlagPrimaryTeam = (flagId, teamId) => {
+    const numeric = teamId != null ? Number(teamId) : null
+    setFlagEditors((prev) => {
+      const editor = prev[flagId]
+      if (!editor) return prev
+      return {
+        ...prev,
+        [flagId]: {
+          ...editor,
+          primaryTeamId: Number.isNaN(numeric) ? null : numeric,
+        },
+      }
+    })
+  }
+  const setFlagLoanTeam = (flagId, teamId) => {
+    const numeric = teamId != null ? Number(teamId) : null
+    setFlagEditors((prev) => {
+      const editor = prev[flagId]
+      if (!editor) return prev
+      return {
+        ...prev,
+        [flagId]: {
+          ...editor,
+          loanTeamId: Number.isNaN(numeric) ? null : numeric,
+        },
+      }
+    })
+  }
+  const saveFlagLoanChanges = async (flag) => {
+    const editor = flagEditors[flag.id]
+    if (!editor || editor.loading || editor.saving) return
+    if (!editor.selectedLoanId) {
+      setFlagEditors((prev) => ({
+        ...prev,
+        [flag.id]: {
+          ...editor,
+          error: 'Select a loan record before saving.',
+        },
+      }))
+      return
+    }
+    setFlagEditors((prev) => ({
+      ...prev,
+      [flag.id]: {
+        ...editor,
+        saving: true,
+        error: null,
+      },
+    }))
+    try {
+      const payload = {}
+      if (editor.primaryTeamId) payload.primary_team_db_id = editor.primaryTeamId
+      if (editor.loanTeamId) payload.loan_team_db_id = editor.loanTeamId
+      if (flag.season) payload.season = flag.season
+      const result = await APIService.adminLoanUpdate(editor.selectedLoanId, payload)
+      const updatedLoan = result?.loan || null
+      setFlagEditors((prev) => {
+        const current = prev[flag.id]
+        if (!current) return prev
+        const nextLoans = updatedLoan
+          ? (current.loans || []).map((l) => (l.id === updatedLoan.id ? updatedLoan : l))
+          : current.loans || []
+        return {
+          ...prev,
+          [flag.id]: {
+            ...current,
+            loans: nextLoans,
+            primaryTeamId: updatedLoan?.primary_team_id ?? current.primaryTeamId,
+            loanTeamId: updatedLoan?.loan_team_id ?? current.loanTeamId,
+            saving: false,
+            error: null,
+          },
+        }
+      })
+      if (updatedLoan) {
+        setFlags((prev) => prev.map((f) => (f.id === flag.id
+          ? {
+              ...f,
+              primary_team_api_id: updatedLoan.primary_team_api_id,
+              loan_team_api_id: updatedLoan.loan_team_api_id,
+            }
+          : f)))
+      }
+      setMessage({ type: 'success', text: 'Loan assignment updated.' })
+    } catch (error) {
+      const msg = error?.body?.error || error.message || 'Failed to update loan.'
+      setFlagEditors((prev) => {
+        const current = prev[flag.id]
+        if (!current) return prev
+        return {
+          ...prev,
+          [flag.id]: {
+            ...current,
+            saving: false,
+            error: msg,
+          },
+        }
+      })
+      setMessage({ type: 'error', text: `Loan update failed: ${msg}` })
+    }
   }
   const refreshLoans = async () => {
     const params = { ...loanFilters }
@@ -816,9 +2040,10 @@ function AdminPage() {
       setMessage({ type: 'success', text: `Backfilled leagues for ${seasonYear} (updated ${res.updated_teams} teams)` })
       // Reload teams list for this season
       const teams = await APIService.getTeams({ european_only: 'true', season: seasonYear })
-      setRunTeams(Array.isArray(teams) ? teams : [])
-    } catch (e) {
-      setMessage({ type: 'error', text: `Backfill failed: ${e?.body?.error || e.message}` })
+      const { teams: filtered } = filterLatestSeasonTeams(Array.isArray(teams) ? teams : [])
+      setRunTeams(filtered)
+    } catch (error) {
+      setMessage({ type: 'error', text: `Backfill failed: ${error?.body?.error || error.message}` })
     }
   }
   const backfillAllSeasons = async () => {
@@ -833,8 +2058,8 @@ function AdminPage() {
       if (!isNaN(seasonYear)) filters.season = seasonYear
       const teams = await APIService.getTeams(filters)
       setRunTeams(Array.isArray(teams) ? teams : [])
-    } catch (e) {
-      setMessage({ type: 'error', text: `Backfill (all) failed: ${e?.body?.error || e.message}` })
+    } catch (error) {
+      setMessage({ type: 'error', text: `Backfill (all) failed: ${error?.body?.error || error.message}` })
     }
   }
   const listMissingNames = async () => {
@@ -848,9 +2073,9 @@ function AdminPage() {
       else if (mnTeamApiId && mnTeamApiId.trim()) params.primary_team_api_id = parseInt(mnTeamApiId, 10)
       const rows = await APIService.adminMissingNames(params)
       setMissingNames(Array.isArray(rows) ? rows : [])
-    } catch (e) {
+    } catch (error) {
       setMissingNames([])
-      setMessage({ type: 'error', text: `List missing names failed: ${e?.body?.error || e.message}` })
+      setMessage({ type: 'error', text: `List missing names failed: ${error?.body?.error || error.message}` })
     } finally {
       setMnBusy(false)
     }
@@ -872,8 +2097,8 @@ function AdminPage() {
       setMessage({ type: 'success', text: `Backfilled ${up} player names` })
       await refreshLoans()
       await listMissingNames()
-    } catch (e) {
-      setMessage({ type: 'error', text: `Backfill names failed: ${e?.body?.error || e.message}` })
+    } catch (error) {
+      setMessage({ type: 'error', text: `Backfill names failed: ${error?.body?.error || error.message}` })
     } finally {
       setMnBusy(false)
     }
@@ -891,19 +2116,8 @@ function AdminPage() {
       setMessage({ type: 'success', text: 'Loan created' })
       setLoanForm({ player_id: '', player_name: '', primary_team_api_id: '', loan_team_api_id: '', season: '' })
       await refreshLoans()
-    } catch (e) {
-      setMessage({ type: 'error', text: `Create failed: ${e?.body?.error || e.message}` })
-    }
-  }
-  const moveLoan = async (loan, kind, apiId) => {
-    try {
-      const payload = {}
-      if (kind === 'primary') payload.primary_team_api_id = parseInt(apiId, 10)
-      else payload.loan_team_api_id = parseInt(apiId, 10)
-      await APIService.adminLoanUpdate(loan.id, payload)
-      await refreshLoans()
-    } catch (e) {
-      setMessage({ type: 'error', text: `Update failed: ${e?.body?.error || e.message}` })
+    } catch (error) {
+      setMessage({ type: 'error', text: `Create failed: ${error?.body?.error || error.message}` })
     }
   }
   const moveLoanDb = async (loan, kind, dbId) => {
@@ -913,16 +2127,16 @@ function AdminPage() {
       else payload.loan_team_db_id = parseInt(dbId, 10)
       await APIService.adminLoanUpdate(loan.id, payload)
       await refreshLoans()
-    } catch (e) {
-      setMessage({ type: 'error', text: `Update failed: ${e?.body?.error || e.message}` })
+    } catch (error) {
+      setMessage({ type: 'error', text: `Update failed: ${error?.body?.error || error.message}` })
     }
   }
   const deactivateLoan = async (loan) => {
     try {
       await APIService.adminLoanDeactivate(loan.id)
       await refreshLoans()
-    } catch (e) {
-      setMessage({ type: 'error', text: `Deactivate failed: ${e?.body?.error || e.message}` })
+    } catch (error) {
+      setMessage({ type: 'error', text: `Deactivate failed: ${error?.body?.error || error.message}` })
     }
   }
   const teamIdToTeam = useMemo(() => {
@@ -979,13 +2193,162 @@ function AdminPage() {
       params.created_end = nlFilters.created_end
     }
     const rows = await APIService.adminNewslettersList(params)
-    setNewslettersAdmin(rows)
+    const normalizedRows = Array.isArray(rows) ? rows : []
+    const allowedIds = new Set(normalizedRows.map((row) => row.id))
+    setSelectedNewsletterIds((prev) => prev.filter((id) => allowedIds.has(id)))
+    setNewslettersAdmin(normalizedRows)
+    setAdminNewsPage(1)
   }
   const resetNewsletterFilters = () => setNlFilters({ published_only: '', week_start: '', week_end: '', issue_start: '', issue_end: '', created_start: '', created_end: '' })
+  const toggleNewsletterSelection = (id) => {
+    const numericId = Number(id)
+    if (!Number.isInteger(numericId) || numericId <= 0) return
+    setSelectedNewsletterIds((prev) =>
+      prev.includes(numericId)
+        ? prev.filter((value) => value !== numericId)
+        : [...prev, numericId]
+    )
+  }
+  const togglePageSelection = (checked) => {
+    const ids = currentPageNewsletterIds
+    if (ids.length === 0) return
+    if (checked) {
+      setSelectedNewsletterIds((prev) => {
+        const merged = new Set(prev)
+        for (const value of ids) merged.add(value)
+        return Array.from(merged)
+      })
+    } else {
+      setSelectedNewsletterIds((prev) => prev.filter((value) => !ids.includes(value)))
+    }
+  }
+  const clearNewsletterSelection = () => setSelectedNewsletterIds([])
+  const addSendingIds = useCallback((ids) => {
+    const normalized = normalizeNewsletterIds(ids)
+    if (normalized.length === 0) return
+    setSendPreviewBusyIds((prev) => {
+      const merged = new Set(prev)
+      for (const id of normalized) merged.add(id)
+      return Array.from(merged)
+    })
+  }, [])
+  const removeSendingIds = useCallback((ids) => {
+    const normalized = normalizeNewsletterIds(ids)
+    if (normalized.length === 0) return
+    setSendPreviewBusyIds((prev) => prev.filter((value) => !normalized.includes(value)))
+  }, [])
+  const addDeletingIds = useCallback((ids) => {
+    const normalized = normalizeNewsletterIds(ids)
+    if (normalized.length === 0) return
+    setDeleteBusyIds((prev) => {
+      const merged = new Set(prev)
+      for (const id of normalized) merged.add(id)
+      return Array.from(merged)
+    })
+  }, [])
+  const removeDeletingIds = useCallback((ids) => {
+    const normalized = normalizeNewsletterIds(ids)
+    if (normalized.length === 0) return
+    setDeleteBusyIds((prev) => prev.filter((value) => !normalized.includes(value)))
+  }, [])
+  const deleteNewsletters = useCallback(async (ids, { confirmPrompt = true, trackBulk = false } = {}) => {
+    const normalized = normalizeNewsletterIds(ids)
+    if (normalized.length === 0) {
+      setMessage({ type: 'error', text: 'Select at least one newsletter first.' })
+      return { successIds: [], failureDetails: [] }
+    }
+
+    let confirmed = true
+    if (confirmPrompt && typeof window !== 'undefined') {
+      const label = normalized.length === 1 ? `newsletter #${normalized[0]}` : `${normalized.length} newsletters`
+      confirmed = window.confirm(`Delete ${label}? This cannot be undone.`)
+    }
+    if (!confirmed) {
+      return { successIds: [], failureDetails: [] }
+    }
+
+    if (trackBulk) setBulkDeleteBusy(true)
+    addDeletingIds(normalized)
+    const successIds = []
+    const failureDetails = []
+    try {
+      for (const id of normalized) {
+        try {
+          await APIService.adminNewsletterDelete(id)
+          successIds.push(id)
+        } catch (error) {
+          failureDetails.push({ id, error })
+        }
+      }
+    } finally {
+      removeDeletingIds(normalized)
+      if (trackBulk) setBulkDeleteBusy(false)
+    }
+
+    if (successIds.length > 0) {
+      setSelectedNewsletterIds((prev) => prev.filter((value) => !successIds.includes(value)))
+      try {
+        await refreshNewsletters()
+      } catch (error) {
+        console.warn('Failed to refresh newsletters after delete', error)
+      }
+    }
+
+    const type = failureDetails.length ? (successIds.length ? 'warning' : 'error') : 'success'
+    setMessage({ type, text: formatDeleteSummary({ successIds, failureDetails }) })
+    return { successIds, failureDetails }
+  }, [addDeletingIds, removeDeletingIds, refreshNewsletters, setMessage, setSelectedNewsletterIds])
+  const sendAdminPreview = useCallback(async (ids, { trackBulk = false } = {}) => {
+    const normalized = normalizeNewsletterIds(ids)
+    if (normalized.length === 0) {
+      setMessage({ type: 'error', text: 'Select at least one newsletter first.' })
+      return { successIds: [], failureDetails: [] }
+    }
+    if (trackBulk) setSendSelectedBusy(true)
+    addSendingIds(normalized)
+    const successIds = []
+    const failureDetails = []
+    try {
+      for (const id of normalized) {
+        try {
+          await APIService.adminNewsletterSendPreview(id)
+          successIds.push(id)
+        } catch (error) {
+          failureDetails.push({ id, error })
+        }
+      }
+    } finally {
+      removeSendingIds(normalized)
+      if (trackBulk) setSendSelectedBusy(false)
+    }
+    const type = failureDetails.length ? (successIds.length ? 'warning' : 'error') : 'success'
+    setMessage({ type, text: formatSendPreviewSummary({ successIds, failureDetails }) })
+    return { successIds, failureDetails }
+  }, [addSendingIds, removeSendingIds, setMessage])
+  const sendAdminPreviewSelected = useCallback(() => sendAdminPreview(selectedNewsletterIds, { trackBulk: true }), [sendAdminPreview, selectedNewsletterIds])
+  const deleteSelectedNewsletters = useCallback(() => deleteNewsletters(selectedNewsletterIds, { confirmPrompt: true, trackBulk: true }), [deleteNewsletters, selectedNewsletterIds])
+  const bulkPublishSelected = async (publishFlag) => {
+    if (selectedNewsletterIds.length === 0) {
+      setMessage({ type: 'error', text: 'Select at least one newsletter first.' })
+      return
+    }
+    setBulkPublishBusy(true)
+    try {
+      await APIService.adminNewsletterBulkPublish(selectedNewsletterIds, publishFlag)
+      setSelectedNewsletterIds([])
+      await refreshNewsletters()
+      setMessage({ type: 'success', text: publishFlag ? 'Published selected newsletters.' : 'Unpublished selected newsletters.' })
+    } catch (error) {
+      setMessage({ type: 'error', text: `Bulk update failed: ${error?.body?.error || error.message}` })
+    } finally {
+      setBulkPublishBusy(false)
+    }
+  }
   const startEditNewsletter = async (row) => {
     const full = await APIService.adminNewsletterGet(row.id)
     setEditingNl(full)
     setPreviewHtml('')
+    setPreviewError('')
   }
   const saveNewsletter = async () => {
     if (!editingNl) return
@@ -1002,48 +2365,208 @@ function AdminPage() {
       setMessage({ type: 'success', text: 'Newsletter updated' })
       setEditingNl(null)
       await refreshNewsletters()
-    } catch (e) {
-      setMessage({ type: 'error', text: `Save failed: ${e?.body?.error || e.message}` })
+    } catch (error) {
+      setMessage({ type: 'error', text: `Save failed: ${error?.body?.error || error.message}` })
     }
   }
-  const refreshPreview = async () => {
+  const refreshPreview = useCallback(async () => {
     if (!editingNl) return
     try {
-      const html = await APIService.adminNewsletterRender(editingNl.id, previewFormat === 'email' ? 'email' : 'web')
+      const html = await APIService.adminNewsletterRender(
+        editingNl.id,
+        previewFormat === 'email' ? 'email' : 'web'
+      )
       setPreviewHtml(html)
-    } catch (e) {
-      setPreviewHtml(`<div style="padding:12px;color:#b91c1c;background:#fee2e2;border:1px solid #fecaca;">Failed to load preview: ${String(e.body || e.message || e)}</div>`) 
+      setPreviewError('')
+    } catch (error) {
+      setPreviewHtml('')
+      setPreviewError(`Failed to load preview: ${String(error.body || error.message || error)}`)
     }
-  }
+  }, [editingNl, previewFormat])
 
   useEffect(() => {
     if (editingNl && editingNl.id) {
       refreshPreview()
     }
-  }, [editingNl, previewFormat])
+  }, [editingNl, previewFormat, refreshPreview])
 
   return (
     <div className="max-w-6xl mx-auto py-6 sm:px-6 lg:px-8">
       <div className="px-4 py-6 sm:px-0 space-y-6">
         <h1 className="text-3xl font-bold">Admin</h1>
         {message && (
-          <div className={`p-3 rounded ${message.type==='error'?'bg-red-100 text-red-700':'bg-green-100 text-green-700'}`}>{message.text}</div>
-        )}
-        <div className="sticky top-2 z-10 bg-white/80 backdrop-blur border rounded p-2 flex flex-wrap gap-2">
-          <a href="#admin-api"><Button size="sm" variant="outline">API Key</Button></a>
-          <a href="#admin-runs"><Button size="sm" variant="outline">Runs</Button></a>
-          <a href="#admin-seed"><Button size="sm" variant="outline">Seed Top-5</Button></a>
-          <a href="#admin-loans"><Button size="sm" variant="outline">Loans Manager</Button></a>
-          <a href="#admin-newsletters"><Button size="sm" variant="outline">Newsletters</Button></a>
-        </div>
-        <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-          <div id="admin-api" className="border rounded p-4">
-            <h2 className="font-semibold mb-3">API Key</h2>
-            <input className="border rounded p-2 w-full" placeholder="Admin API Key" value={adminKey} onChange={e=>setAdminKey(e.target.value)} />
-            <div className="mt-2">
-              <Button onClick={saveKey}>Save Key</Button>
-            </div>
+          <div
+            className={`p-3 rounded ${message.type === 'error'
+              ? 'bg-red-100 text-red-700'
+              : message.type === 'warning'
+                ? 'bg-amber-100 text-amber-800'
+                : 'bg-green-100 text-green-700'}`}
+          >
+            {message.text}
           </div>
+        )}
+        {adminWarning && (
+          <Alert className="border-amber-200 bg-amber-50 text-amber-900">
+            <AlertCircle className="h-4 w-4" />
+            <AlertDescription>{adminWarning}</AlertDescription>
+          </Alert>
+        )}
+
+        <div className="space-y-6">
+          <div id="admin-access" className="rounded-lg border bg-white/80 p-4 shadow-sm space-y-4">
+            <div className="flex items-center justify-between gap-3">
+              <div>
+                <h2 className="text-lg font-semibold flex items-center gap-2">
+                  {adminReady ? (
+                    <ShieldCheck className="h-4 w-4 text-emerald-600" />
+                  ) : (
+                    <ShieldAlert className="h-4 w-4 text-amber-600" />
+                  )}
+                  Admin Access
+                </h2>
+                <p className="text-sm text-muted-foreground">
+                  Complete both steps to unlock the management console.
+                </p>
+              </div>
+              <Badge variant={adminReady ? 'default' : 'secondary'}>
+                {adminReady ? 'Ready' : 'Action needed'}
+              </Badge>
+            </div>
+            <div className="grid gap-3 sm:grid-cols-2">
+              {accessChecklist.map(({ key, label, ok, description }) => (
+                <div
+                  key={key}
+                  className={`flex items-start gap-3 rounded-md border p-3 ${ok ? 'border-emerald-200/80 bg-emerald-50/70' : 'border-amber-200/70 bg-amber-50/70'}`}
+                >
+                  {ok ? (
+                    <CheckCircle className="mt-0.5 h-4 w-4 text-emerald-600" />
+                  ) : (
+                    <AlertCircle className="mt-0.5 h-4 w-4 text-amber-600" />
+                  )}
+                  <div>
+                    <div className="text-sm font-medium">{label}</div>
+                    <p className="text-xs text-muted-foreground">{description}</p>
+                  </div>
+                </div>
+              ))}
+            </div>
+            {!adminReady && (
+              <div className="flex flex-wrap gap-2 pt-2">
+                {!hasAdminToken
+                  ? (
+                    authToken
+                      ? (
+                          <Button
+                            size="sm"
+                            variant="outline"
+                            onClick={() => {
+                              triggerLogout({ clearAdminKey: true })
+                              setIsAdmin(false)
+                            }}
+                          >
+                            Log out
+                          </Button>
+                        )
+                      : (
+                          <Button size="sm" onClick={openLoginModal}>
+                            <LogIn className="mr-1 h-4 w-4" /> Sign in as admin
+                          </Button>
+                        )
+                  ) : null}
+                {hasAdminToken && !hasStoredKey && !editingKey && (
+                  <Button size="sm" variant="outline" onClick={startEditingKey}>
+                    <KeyRound className="mr-1 h-4 w-4" /> Add API key
+                  </Button>
+                )}
+              </div>
+            )}
+          </div>
+
+          {hasAdminToken && (
+          <div id="admin-api" className="rounded-lg border bg-white/90 p-4 shadow-sm space-y-4">
+            <div className="flex items-start justify-between gap-3">
+              <div>
+                <h2 className="text-lg font-semibold flex items-center gap-2">
+                  <KeyRound className="h-4 w-4 text-blue-600" />
+                  API Key
+                </h2>
+                <p className="text-sm text-muted-foreground">
+                  Stored locally; only sent when you trigger an admin action.
+                </p>
+              </div>
+              {hasStoredKey && !editingKey && (
+                <Button size="sm" variant="ghost" type="button" onClick={() => setShowKeyValue(v => !v)}>
+                  {showKeyValue ? 'Hide key' : 'Reveal key'}
+                </Button>
+              )}
+            </div>
+            {hasStoredKey && !editingKey ? (
+              <div className="rounded-md border bg-muted/40 p-3 flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+                <code className="font-mono text-sm break-all">
+                  {showKeyValue ? adminKey : maskedKey}
+                </code>
+                <div className="flex flex-wrap gap-2">
+                  <Button size="sm" variant="secondary" type="button" onClick={startEditingKey}>Replace</Button>
+                  <Button size="sm" variant="ghost" type="button" onClick={clearKey}>Clear</Button>
+                </div>
+              </div>
+            ) : (
+              <form
+                className="space-y-3"
+                onSubmit={async (event) => {
+                  event.preventDefault()
+                  await saveKey()
+                }}
+              >
+                <div className="space-y-2">
+                  <Label htmlFor="admin-key-input" className="text-sm font-medium">Admin API key</Label>
+                  <Input
+                    id="admin-key-input"
+                    type={showKeyValue ? 'text' : 'password'}
+                    value={adminKeyInput}
+                    onChange={(e) => setAdminKeyInput(e.target.value)}
+                    placeholder="Paste the admin API key"
+                    autoComplete="off"
+                  />
+                </div>
+                <div className="flex flex-wrap items-center gap-2">
+                  <Button type="submit" size="sm" disabled={validatingKey}>
+                    {validatingKey ? 'Validating…' : 'Save key'}
+                  </Button>
+                  {hasStoredKey && (
+                    <Button
+                      type="button"
+                      size="sm"
+                      variant="ghost"
+                      onClick={() => {
+                        setEditingKey(false)
+                        setAdminKeyInput('')
+                        setShowKeyValue(false)
+                      }}
+                    >
+                      Cancel
+                    </Button>
+                  )}
+                  <Button type="button" size="sm" variant="ghost" onClick={() => setShowKeyValue(v => !v)}>
+                    {showKeyValue ? 'Hide' : 'Show'}
+                  </Button>
+                </div>
+              </form>
+            )}
+          </div>
+          )}
+        </div>
+
+        {hasAdminAccess ? (
+          <>
+          <div className="sticky top-2 z-10 bg-white/80 backdrop-blur border rounded p-2 flex flex-wrap gap-2">
+            <a href="#admin-api"><Button size="sm" variant="outline">API Key</Button></a>
+            <a href="#admin-runs"><Button size="sm" variant="outline">Runs</Button></a>
+            <a href="#admin-seed"><Button size="sm" variant="outline">Seed Top-5</Button></a>
+            <a href="#admin-loans"><Button size="sm" variant="outline">Loans Manager</Button></a>
+            <a href="#admin-newsletters"><Button size="sm" variant="outline">Newsletters</Button></a>
+          </div>
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
           <div id="admin-runs" className="border rounded p-4">
             <h2 className="font-semibold mb-3">Runs</h2>
             <div className="flex gap-2 items-center">
@@ -1079,7 +2602,7 @@ function AdminPage() {
                   />
                 </div>
                 <div className="flex items-end">
-                  <Button size="sm" variant="outline" onClick={async ()=>{
+                  <Button size="sm" variant="outline" onClick={async () => {
                     const y = parseInt((seedSeason || (runDate||'').slice(0,4)),10)
                     if (!y) { setTeamRunMsg({ type:'error', text:'Enter a valid season year'}); return }
                     try{
@@ -1087,13 +2610,25 @@ function AdminPage() {
                       const res = await APIService.request('/admin/loans/seed-top5', { method:'POST', body: JSON.stringify({ season: y, overwrite: true }) }, { admin: true })
                       setTeamRunMsg({ type: 'success', text: `Seeded ${res.created} players (skipped ${res.skipped}) for ${res.season}` })
                       await refreshLoans()
-                      try { await refreshRunHistory() } catch {}
-                    }catch(e){ setTeamRunMsg({ type:'error', text: `Seed failed: ${e?.body?.error || e.message}` }) }
+                      try {
+                        await refreshRunHistory()
+                      } catch (error) {
+                        console.warn('Failed to refresh history after seed', error)
+                      }
+                    } catch (error) {
+                      const baseError = error?.body?.error || error.message || 'Unknown error'
+                      const detail = error?.body?.detail || (error?.body?.reference ? `Reference: ${error.body.reference}` : '')
+                      const detailText = detail ? ` — ${detail}` : ''
+                      setTeamRunMsg({
+                        type:'error',
+                        text: `Seed failed: ${baseError}${detailText}`
+                      })
+                    }
                     finally{ setTeamRunBusy(false) }
                   }} disabled={teamRunBusy}>Seed Top-5 Loans</Button>
                 </div>
                 <div className="flex items-end">
-                  <Button size="sm" variant="ghost" onClick={async ()=>{
+                  <Button size="sm" variant="ghost" onClick={async () => {
                     const y = parseInt((seedSeason || (runDate||'').slice(0,4)),10)
                     if (!y) { setTeamRunMsg({ type:'error', text:'Enter a valid season year'}); return }
                     try{
@@ -1101,8 +2636,20 @@ function AdminPage() {
                       const res = await APIService.request('/admin/loans/seed-top5', { method:'POST', body: JSON.stringify({ season: y, dry_run: true }) }, { admin: true })
                       const wouldCreate = (res.details||[]).filter(d=>d.status==='created').length
                       setTeamRunMsg({ type: 'success', text: `Dry-run: would create ${wouldCreate} of ${res.candidates}` })
-                      try { await refreshRunHistory() } catch {}
-                    }catch(e){ setTeamRunMsg({ type:'error', text: `Dry-run failed: ${e?.body?.error || e.message}` }) }
+                      try {
+                        await refreshRunHistory()
+                      } catch (error) {
+                        console.warn('Failed to refresh history after dry-run', error)
+                      }
+                    } catch (error) {
+                      const baseError = error?.body?.error || error.message || 'Unknown error'
+                      const detail = error?.body?.detail || (error?.body?.reference ? `Reference: ${error.body.reference}` : '')
+                      const detailText = detail ? ` — ${detail}` : ''
+                      setTeamRunMsg({
+                        type:'error',
+                        text: `Dry-run failed: ${baseError}${detailText}`
+                      })
+                    }
                     finally{ setTeamRunBusy(false) }
                   }} disabled={teamRunBusy}>Dry-run</Button>
                 </div>
@@ -1117,7 +2664,9 @@ function AdminPage() {
                     try {
                       await APIService.generateNewsletter({ team_id: tid, target_date: d, type: 'weekly' })
                       ok++
-                    } catch (e) { errs++ }
+                    } catch {
+                      errs++
+                    }
                   }
                   setTeamRunMsg({ type: errs? 'error':'success', text: `OpenAI run: ${ok} ok, ${errs} errors` })
                   setTeamRunBusy(false)
@@ -1132,12 +2681,18 @@ function AdminPage() {
                     try {
                       const res = await APIService.request('/admin/loans/seed-team', { method:'POST', body: JSON.stringify({ season: y, team_db_id: dbId, overwrite: true }) }, { admin: true })
                       created += (res.created||0)
-                    } catch (e) { errs++ }
+                    } catch {
+                      errs++
+                    }
                   }
                   setTeamRunMsg({ type: errs? 'error':'success', text: `Seeded ${created} players across ${selectedRunTeams.length} team(s)` })
                   setTeamRunBusy(false)
                   await refreshLoans()
-                  try { await refreshRunHistory() } catch {}
+                  try {
+                    await refreshRunHistory()
+                  } catch (error) {
+                    console.warn('Failed to refresh history after team seed', error)
+                  }
                 }} disabled={teamRunBusy || selectedRunTeams.length===0}>Seed Selected Team(s)</Button>
                 {(teamRunBusy || running) && <Loader2 className="h-4 w-4 animate-spin text-muted-foreground" />}
                 {(teamRunBusy || running) && <span className="text-xs text-muted-foreground">Working…</span>}
@@ -1424,10 +2979,69 @@ function AdminPage() {
               {newslettersAdmin.length === 0 ? (
                 <div className="text-sm text-gray-600">No newsletters.</div>
               ) : (
+                <>
+                <div className="flex flex-wrap items-center gap-2 mb-2">
+                  <span className="text-xs text-gray-600">Selected {selectedNewsletterCount}</span>
+                  <Button
+                    size="sm"
+                    onClick={sendAdminPreviewSelected}
+                    disabled={selectedNewsletterCount === 0 || sendSelectedBusy || bulkDeleteBusy}
+                  >
+                    {sendSelectedBusy && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}Send admin preview
+                  </Button>
+                  <Button
+                    size="sm"
+                    onClick={() => bulkPublishSelected(true)}
+                    disabled={selectedNewsletterCount === 0 || bulkPublishBusy || bulkDeleteBusy}
+                  >
+                    Publish selected
+                  </Button>
+                  <Button
+                    size="sm"
+                    variant="outline"
+                    onClick={() => bulkPublishSelected(false)}
+                    disabled={selectedNewsletterCount === 0 || bulkPublishBusy || bulkDeleteBusy}
+                  >
+                    Unpublish selected
+                  </Button>
+                  <Button
+                    size="sm"
+                    variant="destructive"
+                    onClick={deleteSelectedNewsletters}
+                    disabled={selectedNewsletterCount === 0 || bulkDeleteBusy}
+                  >
+                    {bulkDeleteBusy ? (
+                      <span className="inline-flex items-center gap-2">
+                        <Loader2 className="h-4 w-4 animate-spin" />
+                        Deleting…
+                      </span>
+                    ) : (
+                      'Delete selected'
+                    )}
+                  </Button>
+                  <Button
+                    size="sm"
+                    variant="ghost"
+                    onClick={clearNewsletterSelection}
+                    disabled={selectedNewsletterCount === 0 || bulkPublishBusy || bulkDeleteBusy}
+                  >
+                    Clear selection
+                  </Button>
+                </div>
                 <div className="overflow-x-auto">
                   <table className="min-w-full text-sm">
                     <thead>
                       <tr className="text-left border-b">
+                        <th className="p-2 w-10">
+                          <input
+                            ref={pageSelectRef}
+                            type="checkbox"
+                            checked={allPageSelected}
+                            onChange={(e) => togglePageSelection(e.target.checked)}
+                            aria-label="Select newsletters on this page"
+                          />
+                        </th>
+                        <th className="p-2">ID</th>
                         <th className="p-2">Team</th>
                         <th className="p-2">Title</th>
                         <th className="p-2">Week</th>
@@ -1436,20 +3050,82 @@ function AdminPage() {
                       </tr>
                     </thead>
                     <tbody>
-                      {newslettersAdmin.map(n => (
+                      {paginatedNewslettersAdmin.map(n => (
                         <tr key={n.id} className="border-b">
+                          <td className="p-2 align-top">
+                            <input
+                              type="checkbox"
+                              checked={selectedNewsletterIdsSet.has(n.id)}
+                              onChange={() => toggleNewsletterSelection(n.id)}
+                              aria-label={`Select newsletter ${n.id}`}
+                            />
+                          </td>
+                          <td className="p-2 align-top text-sm text-gray-600">#{n.id}</td>
                           <td className="p-2 whitespace-nowrap">{n.team_name}</td>
                           <td className="p-2">{n.title}</td>
                           <td className="p-2">{n.week_start_date ? `${n.week_start_date} → ${n.week_end_date}` : ''}</td>
                           <td className="p-2">{n.published ? `Yes (${n.published_date?.slice(0,10) || ''})` : 'No'}</td>
                           <td className="p-2">
-                            <Button size="sm" variant="outline" onClick={()=>startEditNewsletter(n)}>View/Edit</Button>
+                            <div className="flex flex-wrap items-center gap-2">
+                              <Button
+                                size="sm"
+                                onClick={() => sendAdminPreview([n.id])}
+                                disabled={sendPreviewBusyIds.includes(n.id) || sendSelectedBusy || bulkDeleteBusy}
+                              >
+                                {(sendPreviewBusyIds.includes(n.id) || sendSelectedBusy) && (
+                                  <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                                )}
+                                Send preview
+                              </Button>
+                              <Button size="sm" variant="outline" onClick={()=>startEditNewsletter(n)}>View/Edit</Button>
+                              <Button size="sm" variant="ghost" asChild>
+                                <Link to={`/admin/newsletters/${n.id}`} className="text-blue-600 hover:underline">
+                                  Open detail
+                                </Link>
+                              </Button>
+                              <Button
+                                size="sm"
+                                variant="destructive"
+                                onClick={() => deleteNewsletters([n.id])}
+                                disabled={deleteBusyIds.includes(n.id) || bulkDeleteBusy}
+                              >
+                                {(deleteBusyIds.includes(n.id) || bulkDeleteBusy) && (
+                                  <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                                )}
+                                Delete
+                              </Button>
+                            </div>
                           </td>
                         </tr>
                       ))}
                     </tbody>
                   </table>
                 </div>
+                <div className="flex flex-wrap items-center justify-between gap-3 border-t border-gray-200 pt-4 mt-4 text-sm text-gray-600">
+                  <span>
+                    Page {adminNewsPage} of {adminTotalPages}
+                    {adminPageStart > 0 ? ` • Showing ${adminPageStart}–${adminPageEnd} of ${newslettersAdmin.length}` : ''}
+                  </span>
+                  <div className="flex gap-2">
+                    <Button
+                      variant="outline"
+                      size="sm"
+                      onClick={() => setAdminNewsPage((page) => Math.max(1, page - 1))}
+                      disabled={adminNewsPage === 1}
+                    >
+                      Previous
+                    </Button>
+                    <Button
+                      variant="outline"
+                      size="sm"
+                      onClick={() => setAdminNewsPage((page) => Math.min(adminTotalPages, page + 1))}
+                      disabled={adminNewsPage === adminTotalPages || newslettersAdmin.length === 0}
+                    >
+                      Next
+                    </Button>
+                  </div>
+                </div>
+                </>
               )}
             </div>
             {editingNl && (
@@ -1476,6 +3152,9 @@ function AdminPage() {
                         {(() => {
                           try {
                             const obj = (() => { try { return typeof editingNl.content === 'string' ? JSON.parse(editingNl.content) : (editingNl.content || {}) } catch { return {} } })()
+                            const previewSections = Array.isArray(obj.sections)
+                              ? obj.sections.filter((section) => ((section?.title || '').trim().toLowerCase()) !== 'what the internet is saying')
+                              : []
                             return (
                               <div className="space-y-4">
                                 <div className="bg-gradient-to-r from-blue-50 to-gray-50 p-4 rounded border-l-4 border-blue-500">
@@ -1495,33 +3174,33 @@ function AdminPage() {
                                     </ul>
                                   </div>
                                 )}
-                                {obj.sections && obj.sections.length > 0 && (
+                                {previewSections.length > 0 && (
                                   <div className="space-y-3">
-                                    {obj.sections.map((sec, si) => (
+                                    {previewSections.map((sec, si) => (
                                       <div key={si} className="bg-white border rounded">
-                                        {sec.title && (
-                                          <div className="bg-gray-100 px-3 py-2 border-b text-sm font-semibold">{sec.title}</div>
-                                        )}
-                                        <div className="p-3 space-y-2">
-                                          {sec.items && sec.items.map((it, ii) => (
-                                            <div key={ii} className="border-l-4 border-blue-200 pl-3 py-1">
-                                              <div className="flex flex-wrap items-center gap-2">
-                                                {it.player_name && (<span className="font-semibold text-gray-900">{it.player_name}</span>)}
-                                                {it.loan_team && (<span className="bg-blue-100 text-blue-800 px-2 py-0.5 rounded text-xs">→ {it.loan_team}</span>)}
-                                                {it.stats && (
-                                                  <div className="flex gap-1 text-xs">
-                                                    {it.stats.goals > 0 && (<span className="bg-green-100 text-green-800 px-1 rounded">{it.stats.goals}G</span>)}
-                                                    {it.stats.assists > 0 && (<span className="bg-purple-100 text-purple-800 px-1 rounded">{it.stats.assists}A</span>)}
-                                                    {it.stats.minutes > 0 && (<span className="bg-blue-100 text-blue-800 px-1 rounded">{it.stats.minutes}'</span>)}
-                                                  </div>
-                                                )}
+                                          {sec.title && (
+                                            <div className="bg-gray-100 px-3 py-2 border-b text-sm font-semibold">{sec.title}</div>
+                                          )}
+                                          <div className="p-3 space-y-2">
+                                            {sec.items && sec.items.map((it, ii) => (
+                                              <div key={ii} className="border-l-4 border-blue-200 pl-3 py-1">
+                                                <div className="flex flex-wrap items-center gap-2">
+                                                  {it.player_name && (<span className="font-semibold text-gray-900">{it.player_name}</span>)}
+                                                  {it.loan_team && (<span className="bg-blue-100 text-blue-800 px-2 py-0.5 rounded text-xs">→ {it.loan_team}</span>)}
+                                                  {it.stats && (
+                                                    <div className="flex gap-1 text-xs">
+                                                      {it.stats.goals > 0 && (<span className="bg-green-100 text-green-800 px-1 rounded">{it.stats.goals}G</span>)}
+                                                      {it.stats.assists > 0 && (<span className="bg-purple-100 text-purple-800 px-1 rounded">{it.stats.assists}A</span>)}
+                                                      {it.stats.minutes > 0 && (<span className="bg-blue-100 text-blue-800 px-1 rounded">{it.stats.minutes}'</span>)}
+                                                    </div>
+                                                  )}
+                                                </div>
+                                                {it.week_summary && (<div className="text-sm text-gray-700">{it.week_summary}</div>)}
                                               </div>
-                                              {it.week_summary && (<div className="text-sm text-gray-700">{it.week_summary}</div>)}
-                                            </div>
-                                          ))}
+                                            ))}
+                                          </div>
                                         </div>
-                                      </div>
-                                    ))}
+                                      ))}
                                   </div>
                                 )}
                               </div>
@@ -1542,7 +3221,11 @@ function AdminPage() {
                         </div>
                       </div>
                       <div className="border rounded bg-white max-h-[520px] overflow-auto">
-                        {previewHtml ? (
+                        {previewError ? (
+                          <div className="p-3 text-sm text-red-700 bg-red-50 border border-red-200">
+                            {previewError}
+                          </div>
+                        ) : previewHtml ? (
                           <div dangerouslySetInnerHTML={{ __html: previewHtml }} />
                         ) : (
                           <div className="p-3 text-sm text-gray-500">No preview loaded yet.</div>
@@ -1583,75 +3266,629 @@ function AdminPage() {
               <p className="text-sm text-gray-600">No pending flags.</p>
             ) : (
               <div className="space-y-3">
-                {flags.map(f => (
-                  <div key={f.id} className="border rounded p-3">
-                    <div className="text-sm">Flag #{f.id}</div>
-                    <div className="text-sm">Player API: {f.player_api_id}</div>
-                    <div className="text-sm">Primary Team API: {f.primary_team_api_id}</div>
-                    {f.loan_team_api_id && <div className="text-sm">Loan Team API: {f.loan_team_api_id}</div>}
-                    {f.season && <div className="text-sm">Season: {f.season}</div>}
-                    <div className="text-sm">Reason: {f.reason}</div>
-                    <div className="mt-2 flex gap-2">
-                      <Button size="sm" onClick={()=>resolveFlag(f.id,false)}>Resolve</Button>
-                      <Button size="sm" variant="outline" onClick={()=>resolveFlag(f.id,true)}>Resolve + Deactivate Loan</Button>
+                {flags.map(f => {
+                  const editor = flagEditors[f.id]
+                  const loanOptions = editor?.loans || []
+                  const teamOptions = buildTeamOptionsForLoan(loanOptions)
+                  const selectedLoan = loanOptions.find((l) => l.id === editor?.selectedLoanId)
+                  return (
+                    <div key={f.id} className="border rounded p-3">
+                      <div className="text-sm font-semibold">Flag #{f.id}</div>
+                      <div className="mt-1 grid gap-1 text-sm text-gray-700">
+                        <div>Player API: {f.player_api_id}</div>
+                        <div>Primary Team API: {f.primary_team_api_id}</div>
+                        {f.loan_team_api_id && <div>Loan Team API: {f.loan_team_api_id}</div>}
+                        {f.season && <div>Season: {f.season}</div>}
+                        <div className="text-gray-800">Reason: {f.reason}</div>
+                      </div>
+                      <div className="mt-2 flex flex-wrap gap-2">
+                        <Button
+                          size="sm"
+                          variant="outline"
+                          onClick={() => (editor ? closeFlagEditor(f.id) : openFlagEditor(f))}
+                          disabled={editor?.saving}
+                        >
+                          {editor ? 'Hide editor' : 'Edit loan assignment'}
+                        </Button>
+                        <Button size="sm" onClick={()=>resolveFlag(f.id,false)}>Resolve</Button>
+                        <Button size="sm" variant="outline" onClick={()=>resolveFlag(f.id,true)}>Resolve + Deactivate Loan</Button>
+                      </div>
+                      {editor && (
+                        <div className="mt-3 space-y-3 rounded border border-dashed bg-white/70 p-3 text-sm">
+                          {editor.loading ? (
+                            <div className="flex items-center gap-2 text-gray-600">
+                              <Loader2 className="h-4 w-4 animate-spin" /> Loading loan details…
+                            </div>
+                          ) : editor.error ? (
+                            <div className="rounded border border-red-200 bg-red-50 p-2 text-red-700">{editor.error}</div>
+                          ) : (
+                            <>
+                              {loanOptions.length > 1 && (
+                                <div className="grid gap-1">
+                                  <Label className="text-xs uppercase tracking-wide text-gray-500">Loan record</Label>
+                                  <Select
+                                    value={String(editor.selectedLoanId)}
+                                    onValueChange={(value) => selectFlagLoanRecord(f.id, value)}
+                                  >
+                                    <SelectTrigger>
+                                      <SelectValue />
+                                    </SelectTrigger>
+                                    <SelectContent>
+                                      {loanOptions.map((loan) => (
+                                        <SelectItem key={loan.id} value={String(loan.id)}>
+                                          {loan.primary_team_name} → {loan.loan_team_name} {loan.is_active ? '(active)' : '(inactive)'}
+                                        </SelectItem>
+                                      ))}
+                                    </SelectContent>
+                                  </Select>
+                                </div>
+                              )}
+                              {selectedLoan && (
+                                <div className="rounded bg-gray-50 p-2 text-xs text-gray-600">
+                                  Current assignment: {selectedLoan.primary_team_name} → {selectedLoan.loan_team_name}
+                                </div>
+                              )}
+                              <div className="grid gap-3 sm:grid-cols-2">
+                                <div className="space-y-1">
+                                  <Label className="text-xs uppercase tracking-wide text-gray-500">Primary team</Label>
+                                  <TeamSelect
+                                    teams={teamOptions}
+                                    value={editor.primaryTeamId ?? null}
+                                    onChange={(id) => setFlagPrimaryTeam(f.id, id)}
+                                    placeholder="Select primary team…"
+                                  />
+                                </div>
+                                <div className="space-y-1">
+                                  <Label className="text-xs uppercase tracking-wide text-gray-500">Loan team</Label>
+                                  <TeamSelect
+                                    teams={teamOptions}
+                                    value={editor.loanTeamId ?? null}
+                                    onChange={(id) => setFlagLoanTeam(f.id, id)}
+                                    placeholder="Select loan team…"
+                                  />
+                                </div>
+                              </div>
+                              <div className="flex flex-wrap gap-2">
+                                <Button
+                                  size="sm"
+                                  onClick={() => saveFlagLoanChanges(f)}
+                                  disabled={editor.saving}
+                                >
+                                  {editor.saving && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}Save loan changes
+                                </Button>
+                                <Button
+                                  size="sm"
+                                  variant="ghost"
+                                  onClick={() => closeFlagEditor(f.id)}
+                                  disabled={editor.saving}
+                                >
+                                  Cancel
+                                </Button>
+                              </div>
+                            </>
+                          )}
+                        </div>
+                      )}
                     </div>
-                  </div>
-                ))}
+                  )
+                })}
               </div>
             )}
           </div>
         </div>
-      </div>
+        </>
+      ) : (
+        <div className="rounded-lg border border-dashed bg-muted/40 p-6 text-sm text-muted-foreground space-y-3">
+          <p>Admin tools are locked. Sign in with an approved admin email and store the API key above.</p>
+          <div className="flex flex-wrap gap-2">
+            {!hasAdminToken && (
+              <Button size="sm" onClick={openLoginModal}>
+                <LogIn className="mr-1 h-4 w-4" /> Sign in as admin
+              </Button>
+            )}
+            {!hasStoredKey && (
+              <Button size="sm" variant="outline" onClick={startEditingKey}>
+                <KeyRound className="mr-1 h-4 w-4" /> Add API key
+              </Button>
+            )}
+          </div>
+        </div>
+      )}
     </div>
+  </div>
   )
 }
 // Navigation component
+const BRAND_LOGO_SRC = '/assets/loan_army_assets/apple-touch-icon.png'
+
+function SoccerBallToggleIcon({ spinning }) {
+  return (
+    <svg
+      viewBox="0 0 64 64"
+      className="h-10 w-10 text-gray-800"
+      style={{ transform: spinning ? 'rotate(360deg)' : 'rotate(0deg)', transition: 'transform 0.6s ease' }}
+      aria-hidden="true"
+    >
+      <circle cx="32" cy="32" r="28" fill="#f5f5f5" stroke="currentColor" strokeWidth="4" />
+      <polygon points="32,22 38,26 36,34 28,34 26,26" fill="currentColor" />
+      <path d="M32 16L23 22L16 30L19 40L28 46H36L45 40L48 30L41 22Z" fill="none" stroke="currentColor" strokeWidth="3" strokeLinejoin="round" />
+      <path d="M23 22L18 14" stroke="currentColor" strokeWidth="3" strokeLinecap="round" />
+      <path d="M41 22L46 14" stroke="currentColor" strokeWidth="3" strokeLinecap="round" />
+      <path d="M19 40L11 43" stroke="currentColor" strokeWidth="3" strokeLinecap="round" />
+      <path d="M45 40L53 43" stroke="currentColor" strokeWidth="3" strokeLinecap="round" />
+      <path d="M28 46L25 56" stroke="currentColor" strokeWidth="3" strokeLinecap="round" />
+      <path d="M36 46L39 56" stroke="currentColor" strokeWidth="3" strokeLinecap="round" />
+    </svg>
+  )
+}
+
 function Navigation() {
   const location = useLocation()
-  
-  const navItems = [
-    { path: '/', label: 'Home', icon: Home },
-    { path: '/teams', label: 'Browse Teams', icon: Users },
-    { path: '/newsletters', label: 'Newsletters', icon: FileText },
-    { path: '/admin', label: 'Admin', icon: Settings }
-  ]
+  const isMobile = useIsMobile()
+  const { token, isAdmin, hasApiKey } = useAuth()
+  const [drawerOpen, setDrawerOpen] = useState(false)
+
+  const adminUnlocked = !!token && isAdmin && hasApiKey
+
+  const navItems = useMemo(() => {
+    const items = [
+      { path: '/', label: 'Home', icon: Home },
+      { path: '/teams', label: 'Browse Teams', icon: Users },
+      { path: '/newsletters', label: 'Newsletters', icon: FileText },
+    ]
+    if (token) {
+      items.push({ path: '/settings', label: 'Settings', icon: UserCog })
+    }
+    if (adminUnlocked) {
+      items.push({ path: '/admin', label: 'Admin', icon: Settings })
+    }
+    return items
+  }, [adminUnlocked, token])
+
+  const linkClasses = (isActive) => (
+    `inline-flex items-center gap-2 rounded-md px-2.5 py-2 text-sm font-medium transition-colors sm:px-3 ` +
+    (isActive ? 'text-blue-600 bg-blue-50' : 'text-gray-600 hover:text-blue-600 hover:bg-blue-50/60')
+  )
+
+  const renderNavLinks = (variant) => navItems.map((item) => {
+    const { path, label, icon } = item
+    const Icon = icon
+    const isActive = location.pathname === path
+    const content = (
+      <span className="flex items-center gap-2">
+        <Icon className="h-4 w-4" />
+        {label}
+      </span>
+    )
+    if (variant === 'mobile') {
+      return (
+        <DrawerClose asChild key={path}>
+          <Link
+            to={path}
+            className={linkClasses(isActive) + ' justify-start'}
+            onClick={() => setDrawerOpen(false)}
+          >
+            {content}
+          </Link>
+        </DrawerClose>
+      )
+    }
+    return (
+      <Link key={path} to={path} className={linkClasses(isActive)}>
+        {content}
+      </Link>
+    )
+  })
 
   return (
-    <nav className="bg-white shadow-sm border-b">
-      <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
-        <div className="flex justify-between h-16">
-          <div className="flex items-center">
-            <Link to="/" className="flex items-center space-x-2">
-              <Trophy className="h-8 w-8 text-blue-600" />
-              <span className="text-xl font-bold text-gray-900">Loan Army</span>
-            </Link>
+    <nav className="border-b bg-white/90 backdrop-blur supports-[backdrop-filter]:bg-white/70">
+      <div className="mx-auto flex h-16 max-w-7xl items-center justify-between px-4 sm:px-6 lg:px-8">
+        <Link to="/" className="flex items-center gap-2 text-gray-900 sm:gap-3">
+          <span className="inline-flex h-10 w-10 items-center justify-center rounded bg-slate-900 shadow">
+            <img src={BRAND_LOGO_SRC} alt="Go On Loan logo" className="h-7 w-7" />
+          </span>
+          <div className="flex flex-col leading-tight">
+            <span className="text-lg font-semibold">Go On Loan</span>
+            <span className="hidden text-xs text-gray-500 sm:block">European loans tracker</span>
           </div>
-          <div className="flex space-x-8">
-            {navItems.map(({ path, label, icon: Icon }) => (
-              <Link
-                key={path}
-                to={path}
-                className={`inline-flex items-center px-1 pt-1 text-sm font-medium ${
-                  location.pathname === path
-                    ? 'text-blue-600 border-b-2 border-blue-600'
-                    : 'text-gray-500 hover:text-gray-700'
-                }`}
+        </Link>
+
+        {isMobile ? (
+            <Drawer open={drawerOpen} onOpenChange={setDrawerOpen}>
+              <DrawerTrigger asChild>
+                <button
+                  type="button"
+                  className="inline-flex items-center justify-center rounded-full border border-gray-300 bg-gray-100 p-2 shadow-sm transition hover:bg-gray-200"
+                aria-label="Toggle navigation menu"
+                aria-expanded={drawerOpen}
               >
-                <Icon className="h-4 w-4 mr-1" />
-                {label}
-              </Link>
-            ))}
+                <SoccerBallToggleIcon spinning={drawerOpen} />
+              </button>
+            </DrawerTrigger>
+            <DrawerContent className="pb-6">
+              <DrawerHeader>
+                <DrawerTitle className="text-base font-semibold">Go On Loan</DrawerTitle>
+                <DrawerDescription>Quick access to every page.</DrawerDescription>
+              </DrawerHeader>
+              <div className="flex flex-col gap-2 px-4">
+                {renderNavLinks('mobile')}
+              </div>
+              <DrawerFooter>
+                <AuthControls isMobile onNavigate={() => setDrawerOpen(false)} />
+              </DrawerFooter>
+            </DrawerContent>
+          </Drawer>
+        ) : (
+          <div className="flex min-w-0 items-center gap-4">
+            <div className="flex min-w-0 items-center gap-2 sm:gap-3 md:gap-4">
+              {renderNavLinks('desktop')}
+            </div>
+            <AuthControls />
           </div>
-        </div>
+        )}
       </div>
     </nav>
   )
 }
 
+function AuthControls({ isMobile = false, onNavigate }) {
+  const { token, displayName, isAdmin, hasApiKey } = useAuth()
+  const { openLoginModal, logout } = useAuthUI()
+
+  const [apiKeyPopoverOpen, setApiKeyPopoverOpen] = useState(false)
+  const [apiKeyInput, setApiKeyInput] = useState('')
+  const [apiKeyError, setApiKeyError] = useState(null)
+  const [savingApiKey, setSavingApiKey] = useState(false)
+
+  const adminUnlocked = isAdmin && hasApiKey
+
+  useEffect(() => {
+    if (!apiKeyPopoverOpen) {
+      setApiKeyInput('')
+      setApiKeyError(null)
+      setSavingApiKey(false)
+    }
+  }, [apiKeyPopoverOpen])
+
+  const handleAdminKeySubmit = (event) => {
+    event.preventDefault()
+    const trimmed = apiKeyInput.trim()
+    if (!trimmed) {
+      setApiKeyError('Enter the admin API key to continue.')
+      return
+    }
+    setApiKeyError(null)
+    setSavingApiKey(true)
+    try {
+      APIService.setAdminKey(trimmed)
+      setApiKeyPopoverOpen(false)
+    } catch (error) {
+      console.error('Failed to persist admin API key', error)
+      setApiKeyError('Could not store the API key. Try again.')
+    } finally {
+      setSavingApiKey(false)
+    }
+  }
+
+  if (!token) {
+    return (
+      <Button
+        size={isMobile ? 'lg' : 'sm'}
+        className={isMobile ? 'w-full' : ''}
+        onClick={() => {
+          openLoginModal()
+          onNavigate?.()
+        }}
+      >
+        <LogIn className="mr-2 h-4 w-4" /> Sign In
+      </Button>
+    )
+  }
+
+  return (
+    <div className={isMobile ? 'flex flex-col gap-3' : 'flex items-center gap-4'}>
+      {isAdmin && !adminUnlocked && (
+        <span className="sr-only">Admin access requires API key</span>
+      )}
+      <div className="flex items-center gap-2 text-sm">
+        <span
+          className="max-w-[140px] truncate font-semibold text-gray-900 sm:max-w-[200px]"
+          title={displayName || 'Signed in'}
+        >
+          {displayName || 'Signed in'}
+        </span>
+        {isAdmin ? (
+          adminUnlocked ? (
+            <Badge variant="default" className="bg-emerald-100 text-emerald-700 border-emerald-200">
+              Admin ready
+            </Badge>
+          ) : (
+            <Popover open={apiKeyPopoverOpen} onOpenChange={setApiKeyPopoverOpen}>
+              <PopoverTrigger asChild>
+                <Badge
+                  asChild
+                  variant="outline"
+                  className="border-amber-300 text-amber-700 cursor-pointer hover:bg-amber-50"
+                >
+                  <button
+                    type="button"
+                    className="inline-flex items-center gap-1 focus:outline-none"
+                    aria-haspopup="dialog"
+                    aria-expanded={apiKeyPopoverOpen}
+                  >
+                    <KeyRound className="h-3.5 w-3.5" />
+                    API key needed
+                  </button>
+                </Badge>
+              </PopoverTrigger>
+              <PopoverContent align="end" className="w-72 space-y-3">
+                <div className="space-y-1">
+                  <p className="text-sm font-semibold text-gray-900">Add admin API key</p>
+                  <p className="text-xs text-gray-600">
+                    Paste the API key supplied in admin settings to unlock admin tools on this device.
+                  </p>
+                </div>
+                <form className="space-y-3" onSubmit={handleAdminKeySubmit}>
+                  <div className="space-y-1.5">
+                    <Label htmlFor={`nav-admin-api-key-${isMobile ? 'mobile' : 'desktop'}`} className="text-xs text-gray-500">
+                      API key
+                    </Label>
+                    <Input
+                      id={`nav-admin-api-key-${isMobile ? 'mobile' : 'desktop'}`}
+                      autoComplete="off"
+                      value={apiKeyInput}
+                      onChange={(event) => setApiKeyInput(event.target.value)}
+                      placeholder="sk_live_..."
+                    />
+                  </div>
+                  {apiKeyError && (
+                    <p className="text-xs text-red-600">{apiKeyError}</p>
+                  )}
+                  <Button type="submit" size="sm" className="w-full" disabled={savingApiKey}>
+                    {savingApiKey && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
+                    Save key
+                  </Button>
+                </form>
+              </PopoverContent>
+            </Popover>
+          )
+        ) : (
+          <Badge variant="secondary">Goon Member</Badge>
+        )}
+      </div>
+      <div className={isMobile ? 'flex flex-col gap-2' : 'flex items-center gap-2'}>
+        <Button
+          size="sm"
+          variant="ghost"
+          onClick={() => {
+            logout()
+            onNavigate?.()
+          }}
+        >
+          <LogOut className="mr-1 h-4 w-4" /> Log Out
+        </Button>
+      </div>
+    </div>
+  )
+}
+
+function AuthModal() {
+  const { isLoginModalOpen, closeLoginModal, logout } = useAuthUI()
+  const auth = useAuth()
+  const [email, setEmail] = useState('')
+  const [code, setCode] = useState('')
+  const [requestSent, setRequestSent] = useState(false)
+  const [busy, setBusy] = useState(false)
+  const [status, setStatus] = useState(null)
+  const [displayNameInput, setDisplayNameInput] = useState(auth.displayName || '')
+  const [displayNameBusy, setDisplayNameBusy] = useState(false)
+  const [displayNameStatus, setDisplayNameStatus] = useState(null)
+
+  useEffect(() => {
+    if (!isLoginModalOpen) {
+      setEmail('')
+      setCode('')
+      setRequestSent(false)
+      setStatus(null)
+      setDisplayNameStatus(null)
+    }
+  }, [isLoginModalOpen])
+
+  useEffect(() => {
+    setDisplayNameInput(auth.displayName || '')
+  }, [auth.displayName, auth.token])
+
+  const handleRequest = async (event) => {
+    event.preventDefault()
+    const trimmed = (email || '').trim().toLowerCase()
+    if (!trimmed) {
+      setStatus({ type: 'error', message: 'Enter the email you use for Loan Army.' })
+      return
+    }
+    setBusy(true)
+    try {
+      await APIService.requestLoginCode(trimmed)
+      setStatus({ type: 'success', message: 'Code sent! Check your email within five minutes.' })
+      setRequestSent(true)
+    } catch (error) {
+      setStatus({ type: 'error', message: error?.body?.error || error.message || 'Failed to send login code.' })
+    } finally {
+      setBusy(false)
+    }
+  }
+
+  const handleVerify = async (event) => {
+    event.preventDefault()
+    const trimmedEmail = (email || '').trim().toLowerCase()
+    const trimmedCode = (code || '').trim()
+    if (!trimmedEmail || !trimmedCode) {
+      setStatus({ type: 'error', message: 'Enter both email and code to continue.' })
+      return
+    }
+    setBusy(true)
+    try {
+      console.log('[AuthModal] Verifying OTP for', trimmedEmail)
+      const result = await APIService.verifyLoginCode(trimmedEmail, trimmedCode)
+      console.log('[AuthModal] Verification payload', result)
+      const confirmed = !!result?.display_name_confirmed
+      setStatus({ type: 'success', message: confirmed ? 'Signed in! Welcome back.' : 'Signed in! Pick a display name to finish.' })
+      setRequestSent(false)
+      setCode('')
+      if (!confirmed) {
+        console.log('[AuthModal] No confirmed display name, entering edit mode')
+        setDisplayNameInput(result?.display_name || auth.displayName || '')
+        setDisplayNameStatus(null)
+      } else {
+        console.log('[AuthModal] Display name confirmed; closing modal after delay')
+        setTimeout(() => {
+          closeLoginModal()
+        }, 700)
+      }
+    } catch (error) {
+      setStatus({ type: 'error', message: error?.body?.error || error.message || 'Verification failed. Try again.' })
+    } finally {
+      setBusy(false)
+    }
+  }
+
+  const handleDisplayNameSave = async (event) => {
+    event.preventDefault()
+    const trimmed = (displayNameInput || '').trim()
+    if (trimmed.length < 3) {
+      setDisplayNameStatus({ type: 'error', message: 'Display name must be at least 3 characters.' })
+      return
+    }
+    setDisplayNameBusy(true)
+    console.log('[AuthModal] Saving display name attempt', trimmed)
+    try {
+      await APIService.updateDisplayName(trimmed)
+      await APIService.refreshProfile().catch(() => {})
+      setDisplayNameStatus({ type: 'success', message: 'Display name updated.' })
+    } catch (error) {
+      setDisplayNameStatus({ type: 'error', message: error?.body?.error || error.message || 'Failed to update display name.' })
+    } finally {
+      setDisplayNameBusy(false)
+    }
+  }
+
+  return (
+    <Dialog open={isLoginModalOpen} onOpenChange={(open) => { if (!open) closeLoginModal() }}>
+      <DialogContent className="sm:max-w-md">
+        <DialogHeader>
+          <DialogTitle>{auth.token ? 'Account' : 'Sign in to Loan Army'}</DialogTitle>
+          <DialogDescription>
+            {auth.token
+              ? 'Update your display name or sign out of your session.'
+              : 'We’ll email you a one-time code to finish signing in.'}
+          </DialogDescription>
+        </DialogHeader>
+
+        {auth.token ? (
+          <div className="space-y-4">
+            <div className="rounded-md border bg-muted/40 p-3 text-sm">
+              <div className="font-medium text-gray-900">Signed in as {auth.displayName || 'Loan Army supporter'}</div>
+              {auth.isAdmin && (
+                <div className="text-xs text-gray-600 mt-1">
+                  Admin access: {auth.hasApiKey ? 'ready' : 'missing API key'}
+                </div>
+              )}
+            </div>
+            <form className="space-y-2" onSubmit={handleDisplayNameSave}>
+              <Label htmlFor="display-name">Display name</Label>
+              <Input
+                id="display-name"
+                value={displayNameInput}
+                onChange={(e) => setDisplayNameInput(e.target.value)}
+                maxLength={40}
+                placeholder="Your public name"
+              />
+              {displayNameStatus && (
+                <p className={`text-xs ${displayNameStatus.type === 'error' ? 'text-red-600' : 'text-emerald-600'}`}>
+                  {displayNameStatus.message}
+                </p>
+              )}
+              <div className="flex items-center gap-2">
+                <Button size="sm" type="submit" disabled={displayNameBusy}>
+                  {displayNameBusy && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}Save
+                </Button>
+                <Button size="sm" variant="ghost" type="button" onClick={() => setDisplayNameInput(auth.displayName || '')}>
+                  Reset
+                </Button>
+              </div>
+            </form>
+          </div>
+        ) : (
+          <div className="space-y-4">
+            <form className="space-y-3" onSubmit={handleRequest}>
+              <div className="space-y-2">
+                <Label htmlFor="login-email">Email</Label>
+                <Input
+                  id="login-email"
+                  type="email"
+                  autoComplete="email"
+                  value={email}
+                  onChange={(e) => setEmail(e.target.value)}
+                  placeholder="you@example.com"
+                  required
+                />
+              </div>
+              <Button type="submit" disabled={busy} className="w-full">
+                {busy && !requestSent ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : null}
+                Send login code
+              </Button>
+            </form>
+
+            {requestSent && (
+              <form className="space-y-3" onSubmit={handleVerify}>
+                <div className="space-y-2">
+                  <Label htmlFor="login-code">Verification code</Label>
+                  <Input
+                    id="login-code"
+                    value={code}
+                    onChange={(e) => setCode(e.target.value)}
+                    placeholder="Enter the 11-character code"
+                    autoComplete="one-time-code"
+                  />
+                </div>
+                <Button type="submit" disabled={busy} className="w-full">
+                  {busy ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : null}
+                  Verify & sign in
+                </Button>
+              </form>
+            )}
+
+            {status && (
+              <Alert className={`border ${status.type === 'error' ? 'border-red-200 bg-red-50 text-red-700' : 'border-emerald-200 bg-emerald-50 text-emerald-700'}`}>
+                {status.type === 'error' ? <AlertCircle className="h-4 w-4" /> : <CheckCircle className="h-4 w-4" />}
+                <AlertDescription>{status.message}</AlertDescription>
+              </Alert>
+            )}
+          </div>
+        )}
+
+        <DialogFooter className="flex items-center justify-between">
+          {auth.token ? (
+            <Button variant="ghost" onClick={() => { logout(); closeLoginModal() }}>
+              <LogOut className="mr-2 h-4 w-4" /> Log out
+            </Button>
+          ) : requestSent ? (
+            <Button variant="ghost" onClick={() => { setRequestSent(false); setCode(''); setStatus(null) }}>
+              Back
+            </Button>
+          ) : <span />}
+          <Button variant="outline" onClick={closeLoginModal}>Close</Button>
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
+  )
+}
+
 // Home page component
 function HomePage() {
+  const auth = useAuth()
   const [stats, setStats] = useState(null)
   const [loading, setLoading] = useState(true)
+  const adminUnlocked = !!auth?.token && auth?.isAdmin && auth?.hasApiKey
 
   useEffect(() => {
     const loadStats = async () => {
@@ -1697,12 +3934,14 @@ function HomePage() {
                 Browse Teams
               </Button>
             </Link>
-            <Link to="/admin">
-              <Button size="lg">
-                <Settings className="h-5 w-5 mr-2" />
-                Admin
-              </Button>
-            </Link>
+            {adminUnlocked && (
+              <Link to="/admin">
+                <Button size="lg">
+                  <Settings className="h-5 w-5 mr-2" />
+                  Admin
+                </Button>
+              </Link>
+            )}
           </div>
         </div>
 
@@ -1827,8 +4066,9 @@ function SubscribePage() {
 
         console.log('🏟️ Loading teams...')
         const data = await APIService.getTeams({ european_only: 'true' })
-        console.log('✅ Teams loaded successfully:', data.length, 'teams')
-        setTeams(data)
+        console.log('✅ Teams loaded successfully:', Array.isArray(data) ? data.length : 0, 'teams')
+        const { teams: filtered } = filterLatestSeasonTeams(Array.isArray(data) ? data : [])
+        setTeams(filtered)
       } catch (error) {
         console.error('❌ Failed to load teams:', error)
         setMessage({ type: 'error', text: 'Failed to load teams. Check console for details.' })
@@ -1858,19 +4098,37 @@ function SubscribePage() {
 
     setSubmitting(true)
     try {
-      const result = await APIService.createSubscriptions({
+      const response = await APIService.createSubscriptions({
         email,
         team_ids: selectedTeams
       })
-      
-      setMessage({ 
-        type: 'success', 
-        text: `Successfully subscribed to ${selectedTeams.length} teams!` 
-      })
+
+      if (response?.verification_required) {
+        const teamCount = response.team_count ?? selectedTeams.length
+        const expiresLabel = response?.expires_at ? new Date(response.expires_at).toLocaleString() : null
+        const detail = expiresLabel ? ` The confirmation link expires on ${expiresLabel}.` : ''
+        setMessage({
+          type: 'success',
+          text: `Almost done! We sent a confirmation email to ${email} for ${teamCount} team${teamCount === 1 ? '' : 's'}.${detail}`,
+        })
+      } else {
+        const created = response?.created_count ?? 0
+        const updated = response?.updated_count ?? 0
+        const skippedCount = Array.isArray(response?.skipped) ? response.skipped.length : 0
+        const parts = []
+        if (created) parts.push(`${created} new`)
+        if (updated) parts.push(`${updated} updated`)
+        let text = parts.length ? `Subscriptions saved: ${parts.join(', ')}.` : 'Subscriptions updated.'
+        if (skippedCount) {
+          text += ` ${skippedCount} already active.`
+        }
+        setMessage({ type: 'success', text })
+      }
       setSelectedTeams([])
-      setEmail('')
     } catch (error) {
-      setMessage({ type: 'error', text: 'Failed to create subscriptions' })
+      console.error('Failed to create subscriptions', error)
+      const detail = error?.body?.error || error.message || 'Failed to create subscriptions'
+      setMessage({ type: 'error', text: detail })
     } finally {
       setSubmitting(false)
     }
@@ -1923,6 +4181,9 @@ function SubscribePage() {
                   placeholder="your.email@example.com"
                   required
                 />
+                <p className="mt-1 text-xs text-gray-500">
+                  We’ll email you a confirmation link to comply with anti-spam rules.
+                </p>
               </div>
             </CardContent>
           </Card>
@@ -2032,8 +4293,10 @@ function TeamsPage() {
         
         console.log('🏟️ [TeamsPage] Loading teams with filters:', filters)
         const data = await APIService.getTeams(filters)
-        console.log('✅ [TeamsPage] Teams loaded successfully:', data.length, 'teams')
-        setTeams(data)
+        console.log('✅ [TeamsPage] Teams loaded successfully:', Array.isArray(data) ? data.length : 0, 'teams')
+        const { season, teams: filtered } = filterLatestSeasonTeams(Array.isArray(data) ? data : [])
+        console.log('🎯 [TeamsPage] Latest season detected:', season, 'unique teams:', filtered.length)
+        setTeams(filtered)
       } catch (error) {
         console.error('❌ [TeamsPage] Failed to load teams:', error)
       } finally {
@@ -2050,8 +4313,8 @@ function TeamsPage() {
       try {
         const loans = await APIService.getTeamLoans(teamId)
         setTeamLoans(prev => ({ ...prev, [teamId]: loans }))
-      } catch (e) {
-        console.error('❌ Failed to load loans for team', teamId, e)
+      } catch (error) {
+        console.error('❌ Failed to load loans for team', teamId, error)
       }
     }
   }
@@ -2080,8 +4343,8 @@ function TeamsPage() {
       })
       alert('Thanks for the report. We will review it.')
       closeFlag()
-    } catch (e) {
-      console.error('Flag submit failed', e)
+    } catch (error) {
+      console.error('Flag submit failed', error)
       alert('Failed to submit flag. Please try again later.')
     } finally {
       setSubmittingFlag(false)
@@ -2108,7 +4371,8 @@ function TeamsPage() {
       setMessage({ type: 'success', text: `Successfully subscribed to ${selectedTeams.length} teams!` })
       setSelectedTeams([])
       setEmail('')
-    } catch (e) {
+    } catch (error) {
+      console.error('Failed to create subscriptions', error)
       setMessage({ type: 'error', text: 'Failed to create subscriptions' })
     } finally {
       setSubmitting(false)
@@ -2179,6 +4443,8 @@ function TeamsPage() {
             </CardContent>
           </Card>
         </div>
+
+        <BuyMeCoffeeButton />
 
         {loading ? (
           <div className="text-center py-12">
@@ -2262,6 +4528,8 @@ function TeamsPage() {
             ))}
           </Accordion>
         )}
+
+        <BuyMeCoffeeButton className="mt-10" />
       </div>
     </div>
   )
@@ -2269,10 +4537,182 @@ function TeamsPage() {
 
 // Newsletters page component
 function NewslettersPage() {
+  const [rawNewsletters, setRawNewsletters] = useState([])
   const [newsletters, setNewsletters] = useState([])
   const [loading, setLoading] = useState(true)
   const [dateRange, setDateRange] = useState({ startDate: '', endDate: '', preset: 'all_time' })
   const [expandedId, setExpandedId] = useState(null)
+  const auth = useAuth()
+  const { openLoginModal } = useAuthUI()
+  const navigate = useNavigate()
+  const { newsletterId: newsletterIdParam } = useParams()
+  const [commentsByNewsletter, setCommentsByNewsletter] = useState({})
+  const commentsRef = useRef(new Map())
+  const [commentsLoading, setCommentsLoading] = useState({})
+  const [commentsError, setCommentsError] = useState({})
+  const [commentDrafts, setCommentDrafts] = useState({})
+  const [commentBusy, setCommentBusy] = useState({})
+  const [displayNameEditing, setDisplayNameEditing] = useState(false)
+  const [displayNameInput, setDisplayNameInput] = useState(auth.displayName || '')
+  const [displayNameBusy, setDisplayNameBusy] = useState(false)
+  const [displayNameStatus, setDisplayNameStatus] = useState(null)
+  const prefetchedCommentsRef = useRef(new Set())
+  const [trackedTeamIds, setTrackedTeamIds] = useState([])
+  const [trackedTeamMeta, setTrackedTeamMeta] = useState({})
+  const [currentPage, setCurrentPage] = useState(1)
+  const [allTeams, setAllTeams] = useState([])
+  const [latestSeason, setLatestSeason] = useState(null)
+  const [followedTeamFilter, setFollowedTeamFilter] = useState('')
+  const [leagueFilter, setLeagueFilter] = useState('')
+  const [teamFilter, setTeamFilter] = useState('')
+
+  const trackedTeamIdSet = useMemo(() => new Set(trackedTeamIds.map((id) => String(id))), [trackedTeamIds])
+  const latestTeamIds = useMemo(() => {
+    if (!allTeams.length) return new Set()
+    return new Set(allTeams.map((team) => String(team.id)))
+  }, [allTeams])
+
+  const focusedNewsletterId = useMemo(() => {
+    if (!newsletterIdParam) return null
+    const parsed = Number(newsletterIdParam)
+    return Number.isFinite(parsed) ? parsed : null
+  }, [newsletterIdParam])
+
+  const focusedViewActive = useMemo(() => focusedNewsletterId !== null, [focusedNewsletterId])
+
+  const teamMetaById = useMemo(() => {
+    const meta = {}
+    for (const [key, value] of Object.entries(trackedTeamMeta)) {
+      if (!key) continue
+      meta[key] = {
+        name: value?.name || `Team #${key}`,
+        league: value?.league || 'Other'
+      }
+    }
+    for (const team of allTeams) {
+      if (!team || typeof team.id === 'undefined' || team.id === null) continue
+      const key = String(team.id)
+      meta[key] = {
+        name: team.name || `Team #${key}`,
+        league: team.league_name || team.league || 'Other'
+      }
+    }
+    for (const newsletter of newsletters) {
+      if (!newsletter || typeof newsletter.team_id === 'undefined' || newsletter.team_id === null) continue
+      const key = String(newsletter.team_id)
+      const existing = meta[key] || {}
+      meta[key] = {
+        name: existing.name || newsletter.team_name || `Team #${key}`,
+        league: existing.league || newsletter.team_league_name || 'Other'
+      }
+    }
+    return meta
+  }, [trackedTeamMeta, allTeams, newsletters])
+
+  const teamsByLeagueMap = useMemo(() => {
+    const result = {}
+    for (const [id, meta] of Object.entries(teamMetaById)) {
+      const league = meta?.league || 'Other'
+      if (!result[league]) result[league] = []
+      result[league].push({ id, name: meta?.name || `Team #${id}` })
+    }
+    for (const values of Object.values(result)) {
+      values.sort((a, b) => a.name.localeCompare(b.name))
+    }
+    return result
+  }, [teamMetaById])
+
+  const leagueOptions = useMemo(() => Object.keys(teamsByLeagueMap).sort((a, b) => a.localeCompare(b)), [teamsByLeagueMap])
+
+  const teamsForSelectedLeague = useMemo(() => {
+    if (!leagueFilter) return []
+    return teamsByLeagueMap[leagueFilter] || []
+  }, [leagueFilter, teamsByLeagueMap])
+
+  const followedTeamOptions = useMemo(() => {
+    if (!trackedTeamIds.length) return []
+    const seen = new Set()
+    const options = []
+    for (const id of trackedTeamIds) {
+      const key = String(id)
+      if (seen.has(key)) continue
+      seen.add(key)
+      const meta = teamMetaById[key]
+      options.push({ id: key, name: meta?.name || `Team #${key}` })
+    }
+    options.sort((a, b) => a.name.localeCompare(b.name))
+    return options
+  }, [trackedTeamIds, teamMetaById])
+
+  const filtersActive = useMemo(() => Boolean(followedTeamFilter || leagueFilter || teamFilter), [followedTeamFilter, leagueFilter, teamFilter])
+
+  const clearFilters = useCallback(() => {
+    setFollowedTeamFilter('')
+    setLeagueFilter('')
+    setTeamFilter('')
+  }, [])
+
+  const prioritizedNewsletters = useMemo(() => {
+    if (!trackedTeamIdSet.size) return newsletters
+    const favorites = []
+    const others = []
+    for (const item of newsletters) {
+      const key = typeof item.team_id !== 'undefined' ? String(item.team_id) : undefined
+      if (key && trackedTeamIdSet.has(key)) {
+        favorites.push(item)
+      } else {
+        others.push(item)
+      }
+    }
+    return [...favorites, ...others]
+  }, [newsletters, trackedTeamIdSet])
+
+  const filteredNewsletters = useMemo(() => {
+    let pool = prioritizedNewsletters
+    if (focusedViewActive && focusedNewsletterId !== null) {
+      return pool.filter((item) => Number(item.id) === focusedNewsletterId)
+    }
+    if (followedTeamFilter) {
+      pool = pool.filter((item) => String(item.team_id) === followedTeamFilter)
+    } else if (teamFilter) {
+      pool = pool.filter((item) => String(item.team_id) === teamFilter)
+    } else if (leagueFilter) {
+      pool = pool.filter((item) => {
+        if (typeof item.team_id === 'undefined' || item.team_id === null) return false
+        const key = String(item.team_id)
+        const meta = teamMetaById[key]
+        const leagueName = meta?.league || item.team_league_name || 'Other'
+        return leagueName === leagueFilter
+      })
+    }
+    return pool
+  }, [prioritizedNewsletters, followedTeamFilter, teamFilter, leagueFilter, teamMetaById])
+
+  const totalPages = useMemo(() => {
+    if (!filteredNewsletters.length) return 1
+    return Math.max(1, Math.ceil(filteredNewsletters.length / NEWSLETTER_PAGE_SIZE))
+  }, [filteredNewsletters])
+
+  const paginatedNewsletters = useMemo(() => {
+    if (!filteredNewsletters.length) return []
+    const start = (currentPage - 1) * NEWSLETTER_PAGE_SIZE
+    return filteredNewsletters.slice(start, start + NEWSLETTER_PAGE_SIZE)
+  }, [filteredNewsletters, currentPage])
+
+  const focusedNewsletters = useMemo(() => {
+    if (!focusedViewActive || focusedNewsletterId === null) return []
+    return filteredNewsletters.filter((item) => Number(item.id) === focusedNewsletterId)
+  }, [focusedViewActive, filteredNewsletters, focusedNewsletterId])
+
+  const displayNewsletters = focusedViewActive ? focusedNewsletters : paginatedNewsletters
+
+  const focusedNewsletterFound = focusedViewActive && focusedNewsletters.length > 0
+
+  const filteredTotal = focusedViewActive ? focusedNewsletters.length : filteredNewsletters.length
+  const pageStart = displayNewsletters.length
+    ? (focusedViewActive ? 1 : (currentPage - 1) * NEWSLETTER_PAGE_SIZE + 1)
+    : 0
+  const pageEnd = displayNewsletters.length ? pageStart + displayNewsletters.length - 1 : 0
 
   useEffect(() => {
     const loadNewsletters = async () => {
@@ -2286,7 +4726,7 @@ function NewslettersPage() {
         }
         
         const data = await APIService.getNewsletters(params)
-        setNewsletters(data)
+        setRawNewsletters(Array.isArray(data) ? data : [])
       } catch (error) {
         console.error('Failed to load newsletters:', error)
       } finally {
@@ -2296,6 +4736,293 @@ function NewslettersPage() {
 
     loadNewsletters()
   }, [dateRange])
+
+  useEffect(() => {
+    if (!rawNewsletters.length) {
+      setNewsletters([])
+      return
+    }
+    if (!latestTeamIds.size) {
+      setNewsletters(rawNewsletters)
+      return
+    }
+    const filtered = rawNewsletters.filter((item) => latestTeamIds.has(String(item.team_id)))
+    setNewsletters(filtered)
+  }, [rawNewsletters, latestTeamIds])
+
+  useEffect(() => {
+    commentsRef.current = new Map(Object.entries(commentsByNewsletter))
+  }, [commentsByNewsletter])
+
+  useEffect(() => {
+    let cancelled = false
+    if (!auth.token) {
+      setTrackedTeamIds((prev) => (prev.length ? [] : prev))
+      setTrackedTeamMeta({})
+      return () => { cancelled = true }
+    }
+
+    const loadTrackedTeams = async () => {
+      try {
+        const rows = await APIService.getMySubscriptions()
+        if (cancelled) return
+        const normalized = Array.isArray(rows)
+          ? Array.from(new Set(
+              rows
+                .map((row) => row?.team_id)
+                .filter((id) => id !== null && id !== undefined)
+                .map((id) => String(id))
+            ))
+          : []
+        const meta = {}
+        if (Array.isArray(rows)) {
+          for (const row of rows) {
+            if (!row || row.team_id === null || row.team_id === undefined) continue
+            const key = String(row.team_id)
+            const team = row.team || {}
+            if (!meta[key]) {
+              meta[key] = {
+                name: team.name || team.team_name || `Team #${key}`,
+                league: team.league_name || team.league || 'Other'
+              }
+            }
+          }
+        }
+        setTrackedTeamIds((prev) => {
+          if (prev.length === normalized.length && prev.every((id, index) => id === normalized[index])) {
+            return prev
+          }
+          return normalized
+        })
+        setTrackedTeamMeta(meta)
+      } catch (error) {
+        if (!cancelled) {
+          console.warn('Failed to load user subscriptions', error)
+          setTrackedTeamIds((prev) => (prev.length ? [] : prev))
+          setTrackedTeamMeta({})
+        }
+      }
+    }
+
+    loadTrackedTeams()
+    return () => {
+      cancelled = true
+    }
+  }, [auth.token])
+
+  useEffect(() => {
+    setCurrentPage(1)
+  }, [dateRange, trackedTeamIds, followedTeamFilter, leagueFilter, teamFilter])
+
+  useEffect(() => {
+    if (currentPage > totalPages) {
+      setCurrentPage(totalPages)
+    }
+  }, [currentPage, totalPages])
+
+  useEffect(() => {
+    if (focusedViewActive) return
+    if (!expandedId) return
+    const visibleIds = new Set(displayNewsletters.map((n) => n.id))
+    if (!visibleIds.has(expandedId)) {
+      setExpandedId(null)
+    }
+  }, [focusedViewActive, displayNewsletters, expandedId])
+
+  useEffect(() => {
+    let cancelled = false
+    if (allTeams.length) return undefined
+
+    const loadTeamsMeta = async () => {
+      try {
+        const rows = await APIService.getTeams({ european_only: 'true' })
+        if (cancelled) return
+        if (!Array.isArray(rows)) {
+          setAllTeams([])
+          setLatestSeason(null)
+          return
+        }
+        const seasons = rows
+          .map((team) => parseInt(team.season, 10))
+          .filter((value) => !Number.isNaN(value))
+        const latest = seasons.length ? Math.max(...seasons) : null
+        const filtered = latest !== null
+          ? rows.filter((team) => parseInt(team.season, 10) === latest)
+          : rows
+        setLatestSeason(latest)
+        setAllTeams(filtered)
+      } catch (error) {
+        if (!cancelled) {
+          console.warn('Failed to load team metadata', error)
+        }
+      }
+    }
+
+    loadTeamsMeta()
+    return () => {
+      cancelled = true
+    }
+  }, [allTeams.length])
+
+  useEffect(() => {
+    if (followedTeamFilter) {
+      if (leagueFilter) setLeagueFilter('')
+      if (teamFilter) setTeamFilter('')
+    }
+  }, [followedTeamFilter, leagueFilter, teamFilter])
+
+  useEffect(() => {
+    if (leagueFilter) {
+      if (followedTeamFilter) setFollowedTeamFilter('')
+    } else if (teamFilter) {
+      setTeamFilter('')
+    }
+  }, [leagueFilter, followedTeamFilter, teamFilter])
+
+  useEffect(() => {
+    if (teamFilter && followedTeamFilter) {
+      setFollowedTeamFilter('')
+    }
+  }, [teamFilter, followedTeamFilter])
+
+  const loadComments = useCallback(async (newsletterId, { force = false } = {}) => {
+    if (!newsletterId) return
+    if (!force && commentsRef.current.has(String(newsletterId))) return
+    commentsRef.current.set(String(newsletterId), true)
+    setCommentsError(prev => ({ ...prev, [newsletterId]: null }))
+    setCommentsLoading(prev => ({ ...prev, [newsletterId]: true }))
+    try {
+      const rows = await APIService.listNewsletterComments(newsletterId)
+      setCommentsByNewsletter(prev => ({ ...prev, [newsletterId]: Array.isArray(rows) ? rows : [] }))
+    } catch (error) {
+      const message = error?.body?.error || error?.message || 'Failed to load comments'
+      setCommentsError(prev => ({ ...prev, [newsletterId]: message }))
+    } finally {
+      setCommentsLoading(prev => ({ ...prev, [newsletterId]: false }))
+    }
+  }, [])
+
+  useEffect(() => {
+    if (!displayNewsletters.length) return
+    const toPrefetch = displayNewsletters.slice(0, 5)
+    for (const n of toPrefetch) {
+      const key = String(n.id)
+      if (prefetchedCommentsRef.current.has(key)) continue
+      prefetchedCommentsRef.current.add(key)
+      loadComments(n.id)
+    }
+  }, [displayNewsletters, loadComments])
+
+  useEffect(() => {
+    setDisplayNameInput(auth.displayName || '')
+  }, [auth.displayName, auth.token])
+
+  useEffect(() => {
+    if (!auth.token) {
+      setDisplayNameEditing(false)
+      setDisplayNameStatus(null)
+    }
+  }, [auth.token])
+
+  const canComment = Boolean(auth.token)
+
+  useEffect(() => {
+    if (expandedId) {
+      loadComments(expandedId)
+    }
+  }, [expandedId, loadComments])
+
+  useEffect(() => {
+    if (!focusedViewActive) return
+    if (focusedNewsletterFound) {
+      const targetId = focusedNewsletters[0]?.id
+      if (typeof targetId !== 'undefined' && targetId !== null) {
+        setExpandedId((prev) => (prev === targetId ? prev : targetId))
+      }
+    } else if (!loading) {
+      setExpandedId(null)
+    }
+  }, [focusedViewActive, focusedNewsletterFound, focusedNewsletters, loading])
+
+  useEffect(() => {
+    if (focusedViewActive) return
+    if (!expandedId) return
+    const visibleIds = new Set(displayNewsletters.map((n) => n.id))
+    if (!visibleIds.has(expandedId)) {
+      setExpandedId(null)
+    }
+  }, [focusedViewActive, displayNewsletters, expandedId])
+
+  const handleDraftChange = (newsletterId, value) => {
+    setCommentsError(prev => ({ ...prev, [newsletterId]: null }))
+    setCommentDrafts(prev => ({ ...prev, [newsletterId]: value }))
+  }
+
+  const handleSubmitComment = async (newsletterId) => {
+    if (!newsletterId) return
+    if (!auth.token) {
+      openLoginModal()
+      return
+    }
+    const draft = (commentDrafts[newsletterId] || '').trim()
+    if (!draft) {
+      setCommentsError(prev => ({ ...prev, [newsletterId]: 'Comment cannot be empty' }))
+      return
+    }
+    setCommentBusy(prev => ({ ...prev, [newsletterId]: true }))
+    setCommentsError(prev => ({ ...prev, [newsletterId]: null }))
+    try {
+      const res = await APIService.createNewsletterComment(newsletterId, draft)
+      const comment = res?.comment || res
+      setCommentsByNewsletter(prev => {
+        const existing = prev[newsletterId] || []
+        return { ...prev, [newsletterId]: [...existing, comment] }
+      })
+      setCommentDrafts(prev => ({ ...prev, [newsletterId]: '' }))
+      try {
+        await APIService.refreshProfile()
+      } catch (err) {
+        console.warn('Profile refresh after comment failed', err)
+      }
+    } catch (error) {
+      const message = error?.body?.error || error?.message || 'Failed to post comment'
+      setCommentsError(prev => ({ ...prev, [newsletterId]: message }))
+    } finally {
+      setCommentBusy(prev => ({ ...prev, [newsletterId]: false }))
+    }
+  }
+
+  const handleDisplayNameSave = async () => {
+    const trimmed = (displayNameInput || '').trim()
+    if (trimmed.length < 3) {
+      setDisplayNameStatus({ type: 'error', message: 'Display name must be at least 3 characters.' })
+      return
+    }
+    setDisplayNameBusy(true)
+    setDisplayNameStatus(null)
+    try {
+      await APIService.updateDisplayName(trimmed)
+      await APIService.refreshProfile().catch(() => {})
+      setDisplayNameStatus({ type: 'success', message: 'Display name updated.' })
+      setDisplayNameEditing(false)
+    } catch (error) {
+      const message = error?.body?.error || error?.message || 'Failed to update display name'
+      setDisplayNameStatus({ type: 'error', message })
+    } finally {
+      setDisplayNameBusy(false)
+    }
+  }
+
+  const toggleDisplayNameEdit = () => {
+    setDisplayNameEditing((editing) => {
+      const next = !editing
+      if (next) {
+        setDisplayNameInput(auth.displayName || '')
+        setDisplayNameStatus(null)
+      }
+      return next
+    })
+  }
 
 
 
@@ -2309,17 +5036,133 @@ function NewslettersPage() {
           <p className="text-lg text-gray-600">
             Insights about European team loan activities
           </p>
+          {latestSeason !== null && (
+            <p className="text-sm text-gray-500">
+              Showing season {latestSeason}–{String(latestSeason + 1).slice(-2)} newsletters
+            </p>
+          )}
         </div>
 
+        <BuyMeCoffeeButton className="mb-8" />
+
+        {focusedViewActive && (
+          <div className="mb-4 flex justify-start">
+            <Button variant="ghost" size="sm" onClick={() => navigate('/newsletters')}>
+              <ArrowLeft className="mr-2 h-4 w-4" /> Back to all newsletters
+            </Button>
+          </div>
+        )}
+
+        {!focusedViewActive && (
+          <Card className="mb-6">
+            <CardHeader>
+              <CardTitle>Filter by Date Range</CardTitle>
+              <CardDescription>Select a date range to view newsletters from that period</CardDescription>
+            </CardHeader>
+            <CardContent>
+              <UniversalDatePicker onDateChange={setDateRange} />
+            </CardContent>
+          </Card>
+        )}
+
+        {!focusedViewActive && (
         <Card className="mb-6">
           <CardHeader>
-            <CardTitle>Filter by Date Range</CardTitle>
-            <CardDescription>Select a date range to view newsletters from that period</CardDescription>
+            <CardTitle>Filter by Team</CardTitle>
+            <CardDescription>
+              Jump to newsletters from teams you follow or browse by league and team.
+            </CardDescription>
           </CardHeader>
-          <CardContent>
-            <UniversalDatePicker onDateChange={setDateRange} />
+          <CardContent className="space-y-4">
+            {followedTeamOptions.length > 0 && (
+              <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
+                <Label className="text-sm font-medium text-gray-700">Teams you follow</Label>
+                <div className="flex w-full flex-col gap-2 sm:w-auto sm:flex-row sm:items-center">
+                  <Select
+                    value={followedTeamFilter || 'all'}
+                    onValueChange={(value) => setFollowedTeamFilter(value === 'all' ? '' : value)}
+                  >
+                    <SelectTrigger className="sm:w-64">
+                      <SelectValue placeholder="All followed teams" />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="all">All followed teams</SelectItem>
+                      {followedTeamOptions.map((team) => (
+                        <SelectItem key={team.id} value={team.id}>{team.name}</SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                </div>
+              </div>
+            )}
+
+            <div className="space-y-2">
+              <Label className="text-sm font-medium text-gray-700">Browse by league</Label>
+              <div className="flex flex-col gap-2 sm:flex-row sm:items-center">
+                <Select
+                  value={leagueFilter || 'all'}
+                  onValueChange={(value) => setLeagueFilter(value === 'all' ? '' : value)}
+                >
+                  <SelectTrigger className="sm:w-64">
+                    <SelectValue placeholder="All leagues" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="all">All leagues</SelectItem>
+                    {leagueOptions.map((league) => (
+                      <SelectItem key={league} value={league}>{league}</SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+                <Select
+                  value={teamFilter || 'all'}
+                  onValueChange={(value) => setTeamFilter(value === 'all' ? '' : value)}
+                  disabled={!leagueFilter || !teamsForSelectedLeague.length}
+                >
+                  <SelectTrigger className="sm:w-64">
+                    <SelectValue placeholder={leagueFilter ? 'Select a team' : 'Select a league first'} />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="all">All teams in league</SelectItem>
+                    {teamsForSelectedLeague.map((team) => (
+                      <SelectItem key={team.id} value={team.id}>{team.name}</SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              </div>
+            </div>
+
+            <div className="flex flex-wrap items-center justify-between gap-2 text-sm text-gray-600">
+              <span>{filtersActive ? 'Filters applied' : 'No team filters applied'}</span>
+              <Button variant="ghost" size="sm" onClick={clearFilters} disabled={!filtersActive}>
+                Clear filters
+              </Button>
+            </div>
+            {auth.token && trackedTeamIds.length > 0 && (
+              <div className="flex flex-wrap items-center justify-between gap-2 rounded-md bg-gray-50 p-3 text-sm text-gray-700 border border-gray-200">
+                <span>You’re following {trackedTeamIds.length} team{trackedTeamIds.length === 1 ? '' : 's'}.</span>
+                <Button
+                  variant="outline"
+                  size="sm"
+                  onClick={async () => {
+                    try {
+                      const resp = await APIService.unsubscribeEmail({ email: auth.email, team_ids: trackedTeamIds })
+                      const removed = resp?.count ?? 0
+                      setTrackedTeamIds([])
+                      setMessage({ type: 'success', text: removed ? `Unsubscribed from ${removed} team${removed === 1 ? '' : 's'}.` : 'No active subscriptions were found.' })
+                    } catch (error) {
+                      console.error('Failed to unsubscribe', error)
+                      const detail = error?.body?.error || error.message || 'Failed to unsubscribe.'
+                      setMessage({ type: 'error', text: detail })
+                    }
+                  }}
+                >
+                  Unsubscribe from all followed teams
+                </Button>
+              </div>
+            )}
           </CardContent>
         </Card>
+        )}
 
         {loading ? (
           <div className="text-center py-12">
@@ -2334,29 +5177,75 @@ function NewslettersPage() {
               Newsletters will appear here once they are generated and published.
             </p>
           </div>
+        ) : (focusedViewActive && !loading && !focusedNewsletterFound) ? (
+          <div className="text-center py-12">
+            <Alert className="max-w-lg mx-auto">
+              <AlertCircle className="h-4 w-4" />
+              <AlertDescription>
+                We couldn't find that newsletter. It may have been unpublished or removed. Return to the full list to browse other issues.
+              </AlertDescription>
+            </Alert>
+          </div>
+        ) : (!focusedViewActive && filteredNewsletters.length === 0) ? (
+          <div className="text-center py-12">
+            <FileText className="h-12 w-12 text-gray-400 mx-auto mb-4" />
+            <h3 className="text-lg font-medium text-gray-900 mb-2">No newsletters match your filters</h3>
+            <p className="text-gray-600 mb-4">
+              Try adjusting the team filters or clearing them to see all newsletters.
+            </p>
+            <Button variant="outline" onClick={clearFilters} disabled={!filtersActive}>
+              Clear filters
+            </Button>
+          </div>
         ) : (
           <div className="space-y-6">
-            {newsletters.map((newsletter) => (
-              <Card key={newsletter.id}>
-                <CardHeader>
-                  <div className="flex justify-between items-start">
-                    <div>
-                      <CardTitle className="text-xl">{newsletter.title}</CardTitle>
-                      <CardDescription className="mt-1">
-                        {newsletter.team_name} • {newsletter.newsletter_type} newsletter
-                      </CardDescription>
+            {!focusedViewActive && trackedTeamIdSet.size > 0 && (
+              <div className="rounded-md border border-blue-100 bg-blue-50 px-3 py-2 text-sm text-blue-700">
+                Newsletters from teams you follow appear first.
+              </div>
+            )}
+            {displayNewsletters.map((newsletter) => {
+              const isTrackedTeam = trackedTeamIdSet.size > 0 && typeof newsletter.team_id !== 'undefined' && trackedTeamIdSet.has(String(newsletter.team_id))
+              return (
+                <Card key={newsletter.id}>
+                  <CardHeader>
+                    <div className="flex justify-between items-start gap-4">
+                      <div>
+                        <CardTitle className="text-xl">{newsletter.title}</CardTitle>
+                        <CardDescription className="mt-1">
+                          {newsletter.team_name} • {newsletter.newsletter_type} newsletter
+                        </CardDescription>
+                      </div>
+                      <div className="flex items-center gap-2">
+                        {isTrackedTeam && (
+                          <Badge variant="outline" className="border-green-300 bg-green-50 text-green-700">
+                            Tracking
+                          </Badge>
+                        )}
+                        <Badge variant="secondary">
+                          {new Date(newsletter.published_date).toLocaleDateString()}
+                        </Badge>
+                        <Button
+                          size="sm"
+                          variant="outline"
+                          onClick={() => navigate(`/newsletters/${newsletter.id}`)}
+                          disabled={focusedViewActive && expandedId === newsletter.id}
+                        >
+                          {focusedViewActive ? 'Viewing details' : 'Open detail view'}
+                        </Button>
+                        {!focusedViewActive && (
+                          <Button
+                            size="sm"
+                            variant="ghost"
+                            onClick={() => setExpandedId(expandedId === newsletter.id ? null : newsletter.id)}
+                          >
+                            {expandedId === newsletter.id ? 'Hide preview' : 'Quick preview'}
+                          </Button>
+                        )}
+                      </div>
                     </div>
-                    <div className="flex items-center space-x-2">
-                      <Badge variant="secondary">
-                        {new Date(newsletter.published_date).toLocaleDateString()}
-                      </Badge>
-                      <Button size="sm" variant="outline" onClick={() => setExpandedId(expandedId === newsletter.id ? null : newsletter.id)}>
-                        {expandedId === newsletter.id ? 'Hide' : 'Read'}
-                      </Button>
-                    </div>
-                  </div>
-                </CardHeader>
-                <CardContent>
+                  </CardHeader>
+                  <CardContent>
                   <div className="text-sm text-gray-500 mb-2">
                     <Calendar className="h-4 w-4 inline mr-1" />
                     {newsletter.week_start_date && newsletter.week_end_date && (
@@ -2371,6 +5260,9 @@ function NewslettersPage() {
                         (() => {
                           try {
                             const obj = JSON.parse(newsletter.content)
+                            const detailedSections = Array.isArray(obj.sections)
+                              ? obj.sections.filter((section) => ((section?.title || '').trim().toLowerCase()) !== 'what the internet is saying')
+                              : []
                             return (
                               <div className="space-y-6">
                                 {/* Newsletter Header */}
@@ -2459,85 +5351,103 @@ function NewslettersPage() {
                                 )}
 
                                 {/* Detailed Sections */}
-                                {obj.sections && obj.sections.length > 0 && (
+                                {detailedSections.length > 0 && (
                                   <div className="space-y-4">
                                     <h3 className="text-lg font-bold text-gray-900 flex items-center">
                                       📋 Detailed Report
                                     </h3>
-                                    {obj.sections.map((sec, idx) => (
-                                      <div key={idx} className="bg-white border rounded-lg overflow-hidden shadow-sm">
-                                        {sec.title && (
-                                          <div className="bg-gray-100 px-5 py-3 border-b">
-                                            <h4 className="font-semibold text-gray-900">{sec.title}</h4>
-                                          </div>
-                                        )}
-                                        <div className="p-5">
-                                          {sec.content && (
-                                            <div className="text-gray-700 mb-4">{sec.content}</div>
+                                    {detailedSections.map((sec, idx) => (
+                                        <div key={idx} className="bg-white border rounded-lg overflow-hidden shadow-sm">
+                                          {sec.title && (
+                                            <div className="bg-gray-100 px-5 py-3 border-b">
+                                              <h4 className="font-semibold text-gray-900">{sec.title}</h4>
+                                            </div>
                                           )}
-                                          {sec.items && Array.isArray(sec.items) && (
-                                            <div className="space-y-4">
-                                              {sec.items.map((it, j) => (
-                                                <div key={j} className="border-l-4 border-blue-200 pl-4 py-2">
-                                                  <div className="flex flex-wrap items-center gap-2 mb-2">
-                                                    {it.player_name && (
-                                                      <span className="font-semibold text-lg text-gray-900">
-                                                        {it.player_name}
-                                                      </span>
+                                          <div className="p-5">
+                                            {sec.content && (
+                                              <div className="text-gray-700 mb-4">{sec.content}</div>
+                                            )}
+                                            {sec.items && Array.isArray(sec.items) && (
+                                              <div className="space-y-4">
+                                                {sec.items.map((it, j) => (
+                                                  <div key={j} className="border-l-4 border-blue-200 pl-4 py-2">
+                                                    <div className="flex flex-wrap items-center gap-2 mb-2">
+                                                      {it.player_name && (
+                                                        <span className="font-semibold text-lg text-gray-900">
+                                                          {it.player_name}
+                                                        </span>
+                                                      )}
+                                                      {it.loan_team && (
+                                                        <span className="bg-blue-100 text-blue-800 px-2 py-1 rounded text-sm font-medium">
+                                                          → {it.loan_team}
+                                                        </span>
+                                                      )}
+                                                      {it.stats && (
+                                                        <div className="flex gap-1">
+                                                          {it.stats.goals > 0 && (
+                                                            <span className="bg-green-100 text-green-800 px-2 py-1 rounded text-xs">
+                                                              {it.stats.goals}G
+                                                            </span>
+                                                          )}
+                                                          {it.stats.assists > 0 && (
+                                                            <span className="bg-purple-100 text-purple-800 px-2 py-1 rounded text-xs">
+                                                              {it.stats.assists}A
+                                                            </span>
+                                                          )}
+                                                          {it.stats.minutes > 0 && (
+                                                            <span className="bg-blue-100 text-blue-800 px-2 py-1 rounded text-xs">
+                                                              {it.stats.minutes}'
+                                                            </span>
+                                                          )}
+                                                        </div>
+                                                      )}
+                                                    </div>
+                                                    {it.week_summary && (
+                                                      <p className="text-gray-700 leading-relaxed">{it.week_summary}</p>
                                                     )}
-                                                    {it.loan_team && (
-                                                      <span className="bg-blue-100 text-blue-800 px-2 py-1 rounded text-sm font-medium">
-                                                        → {it.loan_team}
-                                                      </span>
+                                                    {it.match_notes && Array.isArray(it.match_notes) && it.match_notes.length > 0 && (
+                                                      <ul className="mt-2 list-disc space-y-1 pl-5 text-sm text-gray-600">
+                                                        {it.match_notes.map((note, noteIndex) => (
+                                                          <li key={noteIndex}>{note}</li>
+                                                        ))}
+                                                      </ul>
                                                     )}
-                                                    {it.stats && (
-                                                      <div className="flex gap-1">
-                                                        {it.stats.goals > 0 && (
-                                                          <span className="bg-green-100 text-green-800 px-2 py-1 rounded text-xs">
-                                                            {it.stats.goals}G
-                                                          </span>
-                                                        )}
-                                                        {it.stats.assists > 0 && (
-                                                          <span className="bg-purple-100 text-purple-800 px-2 py-1 rounded text-xs">
-                                                            {it.stats.assists}A
-                                                          </span>
-                                                        )}
-                                                        {it.stats.minutes > 0 && (
-                                                          <span className="bg-blue-100 text-blue-800 px-2 py-1 rounded text-xs">
-                                                            {it.stats.minutes}'
-                                                          </span>
-                                                        )}
+                                                    {it.links && Array.isArray(it.links) && it.links.length > 0 && (
+                                                      <div className="mt-3 space-y-2">
+                                                        <div className="text-xs font-semibold uppercase tracking-wide text-gray-500">Further reading</div>
+                                                        <ul className="space-y-1 text-sm text-blue-600">
+                                                          {it.links.map((link, linkIdx) => {
+                                                            const linkObj = typeof link === 'string' ? { url: link, title: null } : link
+                                                            if (!linkObj || !linkObj.url) return null
+                                                            const label = linkObj.title || linkObj.url
+                                                            return (
+                                                              <li key={linkIdx}>
+                                                                <a
+                                                                  href={linkObj.url}
+                                                                  target="_blank"
+                                                                  rel="noreferrer"
+                                                                  className="inline-flex items-center gap-1 hover:underline"
+                                                                >
+                                                                  <span>{label}</span>
+                                                                  <ArrowRight className="h-3.5 w-3.5" />
+                                                                </a>
+                                                              </li>
+                                                            )
+                                                          })}
+                                                        </ul>
                                                       </div>
                                                     )}
                                                   </div>
-                                                  {it.week_summary && (
-                                                    <p className="text-gray-700 leading-relaxed">{it.week_summary}</p>
-                                                  )}
-                                                </div>
-                                              ))}
-                                            </div>
-                                          )}
+                                                ))}
+                                              </div>
+                                            )}
+                                          </div>
                                         </div>
-                                      </div>
-                                    ))}
+                                      ))}
                                   </div>
                                 )}
 
                                 {/* Fan Pulse Section */}
-                                {obj.fan_pulse && Array.isArray(obj.fan_pulse) && obj.fan_pulse.length > 0 && (
-                                  <div className="bg-purple-50 p-5 rounded-lg border-l-4 border-purple-400">
-                                    <h3 className="text-lg font-bold text-gray-900 mb-3 flex items-center">
-                                      💬 Fan Pulse
-                                    </h3>
-                                    <div className="space-y-3">
-                                      {obj.fan_pulse.map((pulse, idx) => (
-                                        <div key={idx} className="bg-white p-3 rounded border-l-2 border-purple-200">
-                                          <p className="text-gray-700 italic">"{pulse}"</p>
-                                        </div>
-                                      ))}
-                                    </div>
-                                  </div>
-                                )}
                               </div>
                             )
                           } catch {
@@ -2552,14 +5462,153 @@ function NewslettersPage() {
                           }
                         })()
                       )}
+
+                      <div className="mt-10 space-y-4 border-t pt-6">
+                        <div className="flex flex-wrap items-center justify-between gap-2">
+                          <div className="flex items-center gap-2">
+                            <MessageCircle className="h-5 w-5 text-blue-600" />
+                            <h3 className="text-lg font-semibold">Comments</h3>
+                            {(commentsByNewsletter[newsletter.id] || []).length > 0 && (
+                              <Badge variant="secondary">{(commentsByNewsletter[newsletter.id] || []).length}</Badge>
+                            )}
+                          </div>
+                          <Button
+                            size="sm"
+                            variant="ghost"
+                            onClick={() => loadComments(newsletter.id, { force: true })}
+                            disabled={commentsLoading[newsletter.id]}
+                          >
+                            {commentsLoading[newsletter.id] && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
+                            Refresh
+                          </Button>
+                        </div>
+                        {commentsError[newsletter.id] && (
+                          <div className="text-sm text-red-600">{commentsError[newsletter.id]}</div>
+                        )}
+                        {commentsLoading[newsletter.id] ? (
+                          <div className="flex items-center gap-2 text-sm text-gray-500">
+                            <Loader2 className="h-4 w-4 animate-spin" />
+                            Loading comments...
+                          </div>
+                        ) : (commentsByNewsletter[newsletter.id] || []).length === 0 ? (
+                          <div className="rounded-md border border-dashed bg-gray-50 p-4 text-sm text-gray-600">
+                            No comments yet. Be the first to share your take.
+                          </div>
+                        ) : (
+                          <div className="space-y-3">
+                            {(commentsByNewsletter[newsletter.id] || []).map((comment) => (
+                              <div key={comment.id} className="rounded-md border bg-white p-4 shadow-sm">
+                                <div className="flex flex-wrap items-center justify-between gap-2 text-xs text-muted-foreground">
+                                  <span className="text-sm font-semibold text-gray-900">
+                                    {comment.author_display_name || comment.author_name || 'Loan Army supporter'}
+                                  </span>
+                                  <span>{formatRelativeTime(comment.created_at)}</span>
+                                </div>
+                                <div className="mt-2 whitespace-pre-wrap text-sm text-gray-700">
+                                  {comment.body}
+                                </div>
+                              </div>
+                            ))}
+                          </div>
+                        )}
+                        <div className="rounded-lg border bg-white p-4 shadow-sm space-y-3">
+                          {canComment ? (
+                            <>
+                              <div className="flex flex-wrap items-center gap-2 text-sm text-gray-600">
+                                <span>Commenting as</span>
+                                <span className="font-semibold text-gray-900">{auth.displayName || 'Loan Army supporter'}</span>
+                                {auth.isAdmin && auth.hasApiKey && (
+                                  <Badge variant="outline" className="border-blue-200 text-blue-600">Admin</Badge>
+                                )}
+                                {!auth.displayNameConfirmed && (
+                                  <Badge variant="outline" className="border-amber-300 text-amber-700">Name pending</Badge>
+                                )}
+                                <Button type="button" variant="ghost" size="xs" onClick={toggleDisplayNameEdit}>
+                                  {displayNameEditing ? 'Cancel name edit' : 'Edit display name'}
+                                </Button>
+                              </div>
+                              {displayNameEditing && (
+                                <form
+                                  className="space-y-2"
+                                  onSubmit={(event) => {
+                                    event.preventDefault()
+                                    handleDisplayNameSave()
+                                  }}
+                                >
+                                  <Input
+                                    value={displayNameInput}
+                                    onChange={(e) => setDisplayNameInput(e.target.value)}
+                                    maxLength={40}
+                                    placeholder="Choose a display name"
+                                  />
+                                  <div className="flex flex-wrap items-center gap-2">
+                                    <Button size="sm" type="submit" disabled={displayNameBusy}>
+                                      {displayNameBusy && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
+                                      Save
+                                    </Button>
+                                    <Button
+                                      size="sm"
+                                      variant="ghost"
+                                      type="button"
+                                      onClick={() => {
+                                        setDisplayNameEditing(false)
+                                        setDisplayNameInput(auth.displayName || '')
+                                        setDisplayNameStatus(null)
+                                      }}
+                                    >
+                                      Cancel
+                                    </Button>
+                                  </div>
+                                  {displayNameStatus && (
+                                    <p className={`text-xs ${displayNameStatus.type === 'error' ? 'text-red-600' : 'text-emerald-600'}`}>
+                                      {displayNameStatus.message}
+                                    </p>
+                                  )}
+                                </form>
+                              )}
+                              {!displayNameEditing && displayNameStatus && (
+                                <p className={`text-xs ${displayNameStatus.type === 'error' ? 'text-red-600' : 'text-emerald-600'}`}>
+                                  {displayNameStatus.message}
+                                </p>
+                              )}
+                              <Textarea
+                                value={commentDrafts[newsletter.id] || ''}
+                                onChange={(e) => handleDraftChange(newsletter.id, e.target.value)}
+                                placeholder="What stood out to you this week?"
+                                rows={3}
+                              />
+                              <div className="flex flex-wrap items-center justify-between gap-2">
+                                <Button size="sm" onClick={() => handleSubmitComment(newsletter.id)} disabled={commentBusy[newsletter.id]}>
+                                  {commentBusy[newsletter.id] ? (
+                                    <>
+                                      <Loader2 className="mr-2 h-4 w-4 animate-spin" /> Posting...
+                                    </>
+                                  ) : (
+                                    'Post Comment'
+                                  )}
+                                </Button>
+                                <span className="text-xs text-muted-foreground">Keep it friendly—no spam or spoilers.</span>
+                              </div>
+                            </>
+                          ) : (
+                            <div className="flex flex-col items-start gap-2 text-sm text-gray-600">
+                              <p>Sign in to share your thoughts.</p>
+                              <Button size="sm" onClick={() => { setExpandedId(newsletter.id); openLoginModal() }}>
+                                <LogIn className="mr-2 h-4 w-4" /> Sign in to comment
+                              </Button>
+                            </div>
+                          )}
+                        </div>
+                      </div>
                     </div>
                   ) : (
-                    <div className="prose max-w-none">
-                      {(() => {
-                        try {
-                          const obj = JSON.parse(newsletter.content)
-                          return (
-                            <div className="space-y-3">
+                    <>
+                      <div className="prose max-w-none">
+                        {(() => {
+                          try {
+                            const obj = JSON.parse(newsletter.content)
+                            return (
+                              <div className="space-y-3">
                               {/* Summary */}
                               {obj.summary && (
                                 <div className="text-gray-700 leading-relaxed">
@@ -2631,48 +5680,389 @@ function NewslettersPage() {
                               
                               {/* Read More indicator */}
                               <div className="mt-4 pt-3 border-t border-gray-200">
-                                <div className="text-sm text-blue-600 font-medium">
-                                  Click "Read" to see the complete newsletter
-                                </div>
+                                <Button
+                                  variant="link"
+                                  size="sm"
+                                  className="px-0"
+                                  onClick={() => setExpandedId(newsletter.id)}
+                                >
+                                  Open quick preview
+                                </Button>
                               </div>
-                            </div>
-                          )
-                        } catch {
-                          // Fallback to showing content summary if JSON parsing fails
-                          const content = newsletter.content || newsletter.structured_content || ''
-                          if (content.length > 200) {
+                              </div>
+                            )
+                          } catch {
+                            // Fallback to showing content summary if JSON parsing fails
+                            const content = newsletter.content || newsletter.structured_content || ''
+                            if (content.length > 200) {
+                              return (
+                                <div className="space-y-3">
+                                  <div className="text-gray-700 leading-relaxed">
+                                    {content.substring(0, 200)}...
+                                  </div>
+                                  <div className="pt-3 border-t border-gray-200">
+                                    <Button
+                                      variant="link"
+                                      size="sm"
+                                      className="px-0"
+                                      onClick={() => setExpandedId(newsletter.id)}
+                                    >
+                                      Open quick preview
+                                    </Button>
+                                  </div>
+                                </div>
+                              )
+                            }
                             return (
                               <div className="space-y-3">
                                 <div className="text-gray-700 leading-relaxed">
-                                  {content.substring(0, 200)}...
+                                  {content}
                                 </div>
                                 <div className="pt-3 border-t border-gray-200">
-                                  <div className="text-sm text-blue-600 font-medium">
-                                    Click "Read" to see the complete newsletter
-                                  </div>
+                                  <Button
+                                    variant="link"
+                                    size="sm"
+                                    className="px-0"
+                                    onClick={() => setExpandedId(newsletter.id)}
+                                  >
+                                    Open quick preview
+                                  </Button>
                                 </div>
                               </div>
                             )
                           }
-                          return (
-                            <div className="space-y-3">
-                              <div className="text-gray-700 leading-relaxed">
-                                {content}
-                              </div>
-                              <div className="pt-3 border-t border-gray-200">
-                                <div className="text-sm text-blue-600 font-medium">
-                                  Click "Read" to see the complete newsletter
+                        })()}
+                      </div>
+                      {(() => {
+                        const preview = (commentsByNewsletter[newsletter.id] || []).slice(0, 3)
+                        if (!preview.length) return null
+                        return (
+                          <div className="mt-6 rounded-lg border bg-white p-4 shadow-sm space-y-2">
+                            <div className="text-xs font-semibold text-gray-500 uppercase tracking-wide">Top comments</div>
+                            <div className="space-y-2">
+                              {preview.map((comment) => (
+                                <div key={comment.id} className="rounded border bg-gray-50 px-3 py-2">
+                                  <div className="text-xs text-gray-500">{comment.author_display_name || comment.author_name || 'Loan Army supporter'}</div>
+                                  <div className="mt-1 text-sm text-gray-700 line-clamp-3">{comment.body}</div>
                                 </div>
+                              ))}
+                            </div>
+                          </div>
+                        )
+                      })()}
+                    </>
+                  )}
+                  </CardContent>
+              </Card>
+              )
+            })}
+            {!focusedViewActive && totalPages > 1 && (
+              <div className="flex flex-wrap items-center justify-between gap-3 border-t border-gray-200 pt-4">
+                <span className="text-sm text-gray-600">
+                  Page {currentPage} of {totalPages}
+                  {pageStart > 0 && pageEnd >= pageStart ? ` • Showing ${pageStart}–${pageEnd} of ${filteredTotal}` : ''}
+                </span>
+                <div className="flex gap-2">
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    onClick={() => setCurrentPage((page) => Math.max(1, page - 1))}
+                    disabled={currentPage === 1}
+                  >
+                    Previous
+                  </Button>
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    onClick={() => setCurrentPage((page) => Math.min(totalPages, page + 1))}
+                    disabled={currentPage === totalPages}
+                  >
+                    Next
+                  </Button>
+                </div>
+              </div>
+            )}
+          </div>
+        )}
+      </div>
+      <BuyMeCoffeeButton className="mt-12" />
+    </div>
+  )
+}
+
+// Authenticated settings page
+function SettingsPage() {
+  const auth = useAuth()
+  const { openLoginModal } = useAuthUI()
+
+  const [displayNameInput, setDisplayNameInput] = useState(auth.displayName || '')
+  const [displayNameStatus, setDisplayNameStatus] = useState(null)
+  const [displayNameBusy, setDisplayNameBusy] = useState(false)
+
+  const [teams, setTeams] = useState([])
+  const [selectedTeamIds, setSelectedTeamIds] = useState([])
+  const [subscriptions, setSubscriptions] = useState([])
+  const [loading, setLoading] = useState(true)
+  const [initialError, setInitialError] = useState(null)
+  const [message, setMessage] = useState(null)
+  const [savingSubs, setSavingSubs] = useState(false)
+
+  useEffect(() => {
+    setDisplayNameInput(auth.displayName || '')
+  }, [auth.displayName])
+
+  useEffect(() => {
+    if (!auth.token) {
+      setTeams([])
+      setSelectedTeamIds([])
+      setSubscriptions([])
+      setLoading(false)
+      return
+    }
+
+    let cancelled = false
+
+    const load = async () => {
+      setLoading(true)
+      setInitialError(null)
+      try {
+        const [teamData, subscriptionData] = await Promise.all([
+          APIService.getTeams({ is_active: 'true' }),
+          APIService.getMySubscriptions(),
+        ])
+        if (cancelled) return
+
+        const teamList = Array.isArray(teamData) ? teamData.slice() : []
+        teamList.sort((a, b) => (a.name || '').localeCompare(b.name || ''))
+
+        setTeams(teamList)
+        const subs = Array.isArray(subscriptionData) ? subscriptionData : []
+        setSubscriptions(subs)
+        setSelectedTeamIds(subs.map((sub) => sub.team_id))
+      } catch (error) {
+        if (cancelled) return
+        console.error('Failed to load account settings', error)
+        setInitialError(error?.body?.error || error.message || 'Failed to load account settings.')
+      } finally {
+        if (!cancelled) setLoading(false)
+      }
+    }
+
+    load()
+    return () => {
+      cancelled = true
+    }
+  }, [auth.token])
+
+  const selectedTeamDetails = useMemo(() => {
+    if (!selectedTeamIds.length) return []
+    const teamMap = new Map(teams.map((team) => [team.id, team]))
+    const subscriptionMap = new Map(
+      subscriptions
+        .filter((sub) => sub?.team)
+        .map((sub) => [sub.team_id, sub.team])
+    )
+    return selectedTeamIds.map((id) => {
+      const team = teamMap.get(id) || subscriptionMap.get(id) || {}
+      return {
+        id,
+        name: team.name || `Team #${id}`,
+        league: team.league_name || team.league || null,
+        loans: team.current_loaned_out_count,
+      }
+    })
+  }, [selectedTeamIds, subscriptions, teams])
+
+  const handleDisplayNameSave = async (event) => {
+    event?.preventDefault?.()
+    if (!auth.token) {
+      setDisplayNameStatus({ type: 'error', message: 'Sign in to update your display name.' })
+      return
+    }
+    const trimmed = (displayNameInput || '').trim()
+    if (trimmed.length < 3) {
+      setDisplayNameStatus({ type: 'error', message: 'Display name must be at least 3 characters.' })
+      return
+    }
+    setDisplayNameStatus(null)
+    setDisplayNameBusy(true)
+    try {
+      const res = await APIService.updateDisplayName(trimmed)
+      setDisplayNameInput(res?.display_name || trimmed)
+      setDisplayNameStatus({ type: 'success', message: 'Display name updated.' })
+    } catch (error) {
+      console.error('Failed to update display name', error)
+      setDisplayNameStatus({ type: 'error', message: error?.body?.error || error.message || 'Unable to update display name.' })
+    } finally {
+      setDisplayNameBusy(false)
+    }
+  }
+
+  const handleSaveSubscriptions = async () => {
+    if (!auth.token) {
+      setMessage({ type: 'error', text: 'Sign in to manage subscriptions.' })
+      return
+    }
+    setMessage(null)
+    setSavingSubs(true)
+    try {
+      const res = await APIService.updateMySubscriptions({ team_ids: selectedTeamIds })
+      const subs = Array.isArray(res?.subscriptions) ? res.subscriptions : []
+      setSubscriptions(subs)
+      setSelectedTeamIds(subs.map((sub) => sub.team_id))
+
+      const parts = []
+      if (res?.created_count) parts.push(`${res.created_count} joined`)
+      if (res?.reactivated_count) parts.push(`${res.reactivated_count} reactivated`)
+      if (res?.deactivated_count) parts.push(`${res.deactivated_count} paused`)
+      const ignored = Array.isArray(res?.ignored_team_ids) ? res.ignored_team_ids.length : 0
+      if (ignored) parts.push(`${ignored} ignored`)
+      const suffix = parts.length ? ` (${parts.join(', ')})` : ''
+
+      setMessage({ type: 'success', text: `Subscription preferences saved${suffix}.` })
+    } catch (error) {
+      console.error('Failed to update subscriptions', error)
+      setMessage({ type: 'error', text: error?.body?.error || error.message || 'Failed to update subscriptions.' })
+    } finally {
+      setSavingSubs(false)
+    }
+  }
+
+  if (!auth.token) {
+    return (
+      <div className="max-w-3xl mx-auto py-12 sm:px-6 lg:px-8">
+        <Card>
+          <CardHeader>
+            <CardTitle>Account Settings</CardTitle>
+            <CardDescription>Sign in with the email you use for newsletters to manage your account.</CardDescription>
+          </CardHeader>
+          <CardContent>
+            <div className="space-y-4 text-sm text-gray-600">
+              <p>To view your settings, please sign in using the one-time code flow.</p>
+              <Button onClick={openLoginModal}>
+                <LogIn className="mr-2 h-4 w-4" /> Sign in
+              </Button>
+            </div>
+          </CardContent>
+        </Card>
+      </div>
+    )
+  }
+
+  return (
+    <div className="max-w-4xl mx-auto py-8 sm:px-6 lg:px-8">
+      <div className="px-4 sm:px-0">
+        <div className="text-center mb-8">
+          <h1 className="text-3xl font-bold text-gray-900 mb-2">Account Settings</h1>
+          <p className="text-lg text-gray-600">Update your profile and choose which teams send you newsletters.</p>
+        </div>
+
+        {message && (
+          <Alert className={`mb-6 ${message.type === 'error' ? 'border-red-500' : 'border-green-500'}`}>
+            <AlertCircle className="h-4 w-4" />
+            <AlertDescription>{message.text}</AlertDescription>
+          </Alert>
+        )}
+
+        {initialError && (
+          <Alert className="mb-6 border-red-500">
+            <AlertCircle className="h-4 w-4" />
+            <AlertDescription>{initialError}</AlertDescription>
+          </Alert>
+        )}
+
+        {loading ? (
+          <div className="text-center py-12">
+            <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-blue-600 mx-auto"></div>
+            <p className="mt-4 text-gray-600">Loading your preferences…</p>
+          </div>
+        ) : (
+          <div className="space-y-6">
+            <Card>
+              <CardHeader>
+                <CardTitle>Profile</CardTitle>
+                <CardDescription>Control the display name shown with your comments and activity.</CardDescription>
+              </CardHeader>
+              <CardContent>
+                <form className="space-y-3" onSubmit={handleDisplayNameSave}>
+                  <div className="space-y-2">
+                    <Label htmlFor="settings-display-name">Display name</Label>
+                    <Input
+                      id="settings-display-name"
+                      value={displayNameInput}
+                      onChange={(e) => setDisplayNameInput(e.target.value)}
+                      maxLength={40}
+                      placeholder="Your public name"
+                    />
+                    {displayNameStatus && (
+                      <p className={`text-xs ${displayNameStatus.type === 'error' ? 'text-red-600' : 'text-emerald-600'}`}>
+                        {displayNameStatus.message}
+                      </p>
+                    )}
+                  </div>
+                  <div className="flex items-center gap-2">
+                    <Button size="sm" type="submit" disabled={displayNameBusy}>
+                      {displayNameBusy && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}Save display name
+                    </Button>
+                    <Button size="sm" variant="ghost" type="button" onClick={() => setDisplayNameInput(auth.displayName || '')}>
+                      Reset
+                    </Button>
+                  </div>
+                </form>
+              </CardContent>
+            </Card>
+
+            <Card>
+              <CardHeader>
+                <CardTitle>Newsletter Subscriptions</CardTitle>
+                <CardDescription>Select the teams you want weekly updates for.</CardDescription>
+              </CardHeader>
+              <CardContent className="space-y-4">
+                <TeamMultiSelect
+                  teams={teams}
+                  value={selectedTeamIds}
+                  onChange={(ids) => setSelectedTeamIds(ids.map((id) => Number(id)))}
+                  placeholder="Choose teams to follow…"
+                />
+
+                <div className="rounded-md border border-dashed bg-muted/40 p-4 text-sm text-gray-700">
+                  {selectedTeamDetails.length === 0 ? (
+                    <p>You are not subscribed to any team newsletters. Select teams above to start receiving updates.</p>
+                  ) : (
+                    <div className="space-y-2">
+                      <p className="font-medium text-gray-900">You will receive newsletters for:</p>
+                      <ul className="space-y-2">
+                        {selectedTeamDetails.map((team) => (
+                          <li key={team.id} className="flex flex-col sm:flex-row sm:items-center sm:justify-between rounded border border-transparent bg-white/60 px-3 py-2">
+                            <div>
+                              <div className="font-semibold text-gray-900">{team.name}</div>
+                              <div className="text-xs text-gray-500">
+                                {[team.league, team.loans != null ? `${team.loans} active loans` : null]
+                                  .filter(Boolean)
+                                  .join(' · ')}
                               </div>
                             </div>
-                          )
-                        }
-                      })()}
+                            <Button
+                              size="sm"
+                              variant="ghost"
+                              className="mt-2 sm:mt-0"
+                              onClick={() => setSelectedTeamIds((prev) => prev.filter((id) => id !== team.id))}
+                            >
+                              <X className="mr-1 h-4 w-4" /> Remove
+                            </Button>
+                          </li>
+                        ))}
+                      </ul>
                     </div>
                   )}
-                </CardContent>
-              </Card>
-            ))}
+                </div>
+              </CardContent>
+              <CardFooter className="flex justify-end">
+                <Button onClick={handleSaveSubscriptions} disabled={savingSubs}>
+                  {savingSubs && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}Save newsletter preferences
+                </Button>
+              </CardFooter>
+            </Card>
           </div>
         )}
       </div>
@@ -2699,7 +6089,8 @@ function ManagePage() {
         const data = await APIService.getManageState(token)
         setSubs(data.subscriptions || [])
         setStatus('ready')
-      } catch (e) {
+      } catch (error) {
+        console.error('Failed to load manage state', error)
         setStatus('error')
         setMessage({ type: 'error', text: 'Invalid or expired link. Request a new manage link from your email.' })
       }
@@ -2722,7 +6113,8 @@ function ManagePage() {
       const teamIds = subs.map((s) => s.team_id)
       await APIService.updateManageState(token, { team_ids: teamIds })
       setMessage({ type: 'success', text: 'Preferences updated.' })
-    } catch (e) {
+    } catch (error) {
+      console.error('Failed to update preferences', error)
       setMessage({ type: 'error', text: 'Failed to update preferences.' })
     }
   }
@@ -2800,7 +6192,8 @@ function UnsubscribePage() {
       try {
         await APIService.tokenUnsubscribe(token)
         setMessage({ type: 'success', text: 'You have been unsubscribed.' })
-      } catch (e) {
+      } catch (error) {
+        console.error('Failed to unsubscribe', error)
         setMessage({ type: 'error', text: 'Invalid or expired unsubscribe link.' })
       }
     }
@@ -2830,10 +6223,25 @@ function VerifyPage() {
         return
       }
       try {
-        await APIService.verifyToken(token)
-        setMessage({ type: 'success', text: 'Email verified. Thank you!' })
-      } catch (e) {
-        setMessage({ type: 'error', text: 'Invalid or expired verification link.' })
+        const res = await APIService.verifyToken(token)
+        if (res?.created_count !== undefined || res?.updated_count !== undefined) {
+          const created = res.created_count ?? 0
+          const updated = res.updated_count ?? 0
+          const parts = []
+          if (created) parts.push(`${created} new`)
+          if (updated) parts.push(`${updated} updated`)
+          const summary = parts.length ? ` (${parts.join(', ')})` : ''
+          setMessage({
+            type: 'success',
+            text: `Subscriptions confirmed for ${res.email || 'your email'}${summary}.`,
+          })
+        } else {
+          setMessage({ type: 'success', text: res?.message || 'Email verified. Thank you!' })
+        }
+      } catch (error) {
+        console.error('Failed to verify email token', error)
+        const detail = error?.body?.error || error.message || 'Invalid or expired verification link.'
+        setMessage({ type: 'error', text: detail })
       }
     }
     run()
@@ -2985,24 +6393,94 @@ function StatsPage() {
 
 // Main App component
 function App() {
+  const [authSnapshot, setAuthSnapshot] = useState(() => buildAuthSnapshot())
+  const [loginModalOpen, setLoginModalOpen] = useState(false)
+
+  const syncAuth = useCallback((detail = {}) => {
+    setAuthSnapshot(buildAuthSnapshot(detail))
+  }, [])
+
+  useEffect(() => {
+    if (typeof window === 'undefined') return undefined
+    const handleAuthChange = (event) => {
+      const detail = (event && event.detail) || {}
+      syncAuth(detail)
+    }
+    handleAuthChange()
+    window.addEventListener(APIService.authEventName, handleAuthChange)
+    window.addEventListener('storage', handleAuthChange)
+    return () => {
+      window.removeEventListener(APIService.authEventName, handleAuthChange)
+      window.removeEventListener('storage', handleAuthChange)
+    }
+  }, [syncAuth])
+
+  useEffect(() => {
+    if (!authSnapshot.token) return
+    APIService.refreshProfile().catch(() => {})
+  }, [authSnapshot.token])
+
+  const openLoginModal = useCallback(() => setLoginModalOpen(true), [])
+  const closeLoginModal = useCallback(() => setLoginModalOpen(false), [])
+  const handleLogout = useCallback(({ clearAdminKey = false } = {}) => {
+    APIService.logout({ clearAdminKey })
+    setLoginModalOpen(false)
+    syncAuth({ token: null, displayName: null, displayNameConfirmed: false })
+  }, [syncAuth])
+
   return (
-    <Router>
-      <div className="min-h-screen bg-gray-50">
-        <Navigation />
-        <main>
-                  <Routes>
-          <Route path="/" element={<HomePage />} />
-          <Route path="/teams" element={<TeamsPage />} />
-          <Route path="/newsletters" element={<NewslettersPage />} />
-          {/* Hidden in nav, used only via email links */}
-          <Route path="/manage" element={<ManagePage />} />
-          <Route path="/unsubscribe" element={<UnsubscribePage />} />
-          <Route path="/verify" element={<VerifyPage />} />
-          <Route path="/admin" element={<AdminPage />} />
-        </Routes>
-        </main>
-      </div>
-    </Router>
+    <AuthContext.Provider value={authSnapshot}>
+      <AuthUIContext.Provider value={{
+        openLoginModal,
+        closeLoginModal,
+        logout: handleLogout,
+        isLoginModalOpen: loginModalOpen,
+      }}>
+        <Router>
+          <div className="min-h-screen bg-gray-50">
+            <Navigation />
+            <main>
+              <Routes>
+                <Route path="/" element={<HomePage />} />
+                <Route path="/teams" element={<TeamsPage />} />
+                <Route path="/newsletters" element={<NewslettersPage />} />
+                <Route path="/newsletters/:newsletterId" element={<NewslettersPage />} />
+                <Route path="/newsletters/historical" element={<HistoricalNewslettersPage />} />
+                <Route
+                  path="/settings"
+                  element={(
+                    <RequireAuth>
+                      <SettingsPage />
+                    </RequireAuth>
+                  )}
+                />
+                {/* Hidden in nav, used only via email links */}
+                <Route path="/manage" element={<ManagePage />} />
+                <Route path="/unsubscribe" element={<UnsubscribePage />} />
+                <Route path="/verify" element={<VerifyPage />} />
+                <Route
+                  path="/admin"
+                  element={(
+                    <RequireAdmin>
+                      <AdminPage />
+                    </RequireAdmin>
+                  )}
+                />
+                <Route
+                  path="/admin/newsletters/:newsletterId"
+                  element={(
+                    <RequireAdmin>
+                      <AdminNewsletterDetailPage />
+                    </RequireAdmin>
+                  )}
+                />
+              </Routes>
+            </main>
+          </div>
+        </Router>
+        <AuthModal />
+      </AuthUIContext.Provider>
+    </AuthContext.Provider>
   )
 }
 
