@@ -828,10 +828,6 @@ class APIFootballClient:
                     if not statistics:
                         continue
                     st = statistics[0]  # first (and usually only) statistics entry
-                    
-                    # 🔍 DEBUG: Log raw API response
-                    logger.info(f"[STATS DEBUG] Player {player_id}, Fixture {fixture_id}: Raw stat block keys: {list(st.keys())}")
-                    
                     games = st.get('games', {}) or {}
                     goals = st.get('goals', {}) or {}
                     cards = st.get('cards', {}) or {}
@@ -844,11 +840,6 @@ class APIFootballClient:
                     dribbles = st.get('dribbles', {}) or {}
                     fouls = st.get('fouls', {}) or {}
                     penalty = st.get('penalty', {}) or {}
-                    
-                    # 🔍 DEBUG: Log what we extracted
-                    logger.info(f"[STATS DEBUG] Player {player_id}: shots={shots}, passes={passes}, tackles={tackles}")
-                    logger.info(f"[STATS DEBUG] Player {player_id}: duels={duels}, dribbles={dribbles}, fouls={fouls}")
-                    logger.info(f"[STATS DEBUG] Player {player_id}: position={games.get('position')}, rating={games.get('rating')}")
 
                     minutes = games.get('minutes') or 0
                     substitute_flag = games.get('substitute')
@@ -856,7 +847,7 @@ class APIFootballClient:
                     role = 'substitutes' if substitute_flag else 'startXI'
                     played_flag = minutes > 0 or substitute_flag is not None
 
-                    result = {
+                    return {
                         "statistics": [{
                             "games": games,      # Pass through full games object
                             "goals": goals,      # Pass through full goals object
@@ -873,11 +864,6 @@ class APIFootballClient:
                         "played": played_flag,
                         "role": role,
                     }
-                    
-                    # 🔍 DEBUG: Log final return structure
-                    logger.info(f"[STATS DEBUG] Player {player_id}: Returning stats structure with shots.total={shots.get('total')}, passes.total={passes.get('total')}")
-                    
-                    return result
         # 2️⃣ Fallback – original line‑ups + events logic
         return self._get_player_stats_from_lineups_and_events(player_id, fixture_id)
 
@@ -1256,11 +1242,6 @@ class APIFootballClient:
                     dribbles = stats_block.get('dribbles', {}) or {}
                     fouls = stats_block.get('fouls', {}) or {}
                     
-                    # 🔍 DEBUG: Log stat categories from API
-                    logger.info(f"[AGG DEBUG] Fixture {fixture_id}, Player {player_id}: Extracted stat categories")
-                    logger.info(f"[AGG DEBUG]   shots={shots}, passes={passes}")
-                    logger.info(f"[AGG DEBUG]   tackles={tackles}, duels={duels}")
-                    
                     minutes = g.get('minutes', 0) or 0
                     if minutes and minutes > 0:
                         played = True
@@ -1289,11 +1270,6 @@ class APIFootballClient:
                             'fouls_committed': fouls.get('committed', 0) or 0,
                             'offsides': stats_block.get('offsides', 0) or 0,
                         })
-                        
-                        # 🔍 DEBUG: Log what we put into player_line
-                        logger.info(f"[AGG DEBUG] Player {player_id} player_line expanded stats:")
-                        logger.info(f"[AGG DEBUG]   shots_total={player_line['shots_total']}, passes_key={player_line['passes_key']}")
-                        logger.info(f"[AGG DEBUG]   tackles_total={player_line['tackles_total']}, rating={player_line['rating']}")
                         
                         # Accumulate ALL totals
                         totals['games_played'] += 1
@@ -1331,11 +1307,6 @@ class APIFootballClient:
                         totals['fouls_drawn'] += player_line['fouls_drawn']
                         totals['fouls_committed'] += player_line['fouls_committed']
                         totals['offsides'] += player_line['offsides']
-                        
-                        # 🔍 DEBUG: Log running totals
-                        logger.info(f"[AGG DEBUG] Player {player_id} running totals after this match:")
-                        logger.info(f"[AGG DEBUG]   shots_total={totals['shots_total']}, passes_key={totals['passes_key']}")
-                        logger.info(f"[AGG DEBUG]   tackles_total={totals['tackles_total']}, position={totals['position']}")
 
             teams = fx.get('teams', {})
             home = teams.get('home', {}) or {}
