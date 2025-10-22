@@ -2,6 +2,8 @@ import os
 from datetime import date
 from src.models.league import db, Team, LoanedPlayer, AdminSetting
 from src.agents.weekly_newsletter_agent import generate_team_weekly_newsletter
+from src.agents.errors import NoActiveLoaneesError
+from src.main import app
 
 def teams_with_active_loans(season: int | None = None) -> list[int]:
     q = db.session.query(Team.id).join(LoanedPlayer, LoanedPlayer.primary_team_id == Team.id)\
@@ -53,6 +55,9 @@ def run_for_date(target_date: date):
                 pass
             out = generate_team_weekly_newsletter(team_db_id, target_date)
             results.append({"team_id": team_db_id, "newsletter_id": out["id"]})
+        except NoActiveLoaneesError as e:
+            results.append({"team_id": team_db_id, "skipped": "no_active_loanees", "message": str(e)})
+            continue
         except Exception as e:
             # Roll back the failed transaction so subsequent iterations can proceed
             try:
@@ -63,6 +68,7 @@ def run_for_date(target_date: date):
     return results
 
 if __name__ == "__main__":
-    # Example: run for the most recent Monday's week
+    # Ensure Flask application context is active for DB/session access
     today = date.today()
-    run_for_date(today)
+    with app.app_context():
+        run_for_date(today)

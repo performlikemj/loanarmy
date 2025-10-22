@@ -1216,8 +1216,11 @@ class APIFootballClient:
                     
                     # Rating: accumulate for averaging
                     if player_line['rating']:
-                        rating_sum += player_line['rating']
-                        rating_count += 1
+                        try:
+                            rating_sum += float(player_line['rating'])
+                            rating_count += 1
+                        except (TypeError, ValueError):
+                            logger.warning(f"Could not convert rating to float: {player_line['rating']}")
                     
                     # Aggregate other stats
                     totals['saves'] += player_line['saves']
@@ -1306,8 +1309,11 @@ class APIFootballClient:
                         
                         # Rating: accumulate for averaging
                         if player_line['rating']:
-                            rating_sum += player_line['rating']
-                            rating_count += 1
+                            try:
+                                rating_sum += float(player_line['rating'])
+                                rating_count += 1
+                            except (TypeError, ValueError):
+                                logger.warning(f"Could not convert rating to float: {player_line['rating']}")
                         
                         # Aggregate expanded stats
                         totals['saves'] += player_line['saves']

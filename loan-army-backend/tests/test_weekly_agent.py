@@ -1,14 +1,38 @@
 import os
 import sys
 import pytest
-from flask import Flask
+from types import SimpleNamespace
 
-os.environ.setdefault('API_USE_STUB_DATA', 'true')
-os.environ.setdefault('OPENAI_API_KEY', 'test')
-sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
+from src.agents.weekly_agent import lint_and_enrich, _display_name, _render_variants
 
-from src.agents.weekly_agent import lint_and_enrich, _display_name, get_league_localization
-from src.models.league import db, LeagueLocalization
+
+@pytest.fixture(autouse=True)
+def stub_api_client(monkeypatch):
+    stub = SimpleNamespace()
+
+    def default_get_player_by_id(player_id, season=None):
+        return {"player": {"id": player_id, "photo": None}}
+
+    def default_get_team_by_id(team_id, season=None):
+        return {
+            "team": {
+                "id": team_id,
+                "name": f"Team {team_id}",
+                "logo": None,
+                "code": None,
+                "country": "",
+                "founded": None,
+                "national": False,
+            },
+            "venue": {},
+        }
+
+    stub.get_player_by_id = default_get_player_by_id
+    stub.get_team_by_id = default_get_team_by_id
+    monkeypatch.setattr("src.agents.weekly_agent.api_client", stub)
+    monkeypatch.setattr("src.agents.weekly_agent._PLAYER_PHOTO_CACHE", {}, raising=False)
+    monkeypatch.setattr("src.agents.weekly_agent._TEAM_LOGO_CACHE", {}, raising=False)
+    return stub
 
 
 def _fake_newsletter():
@@ -69,32 +93,318 @@ def test_lint_rewrites_unused_substitute_and_builds_highlights():
     assert ga_agg["g"] + ga_agg["a"] >= 2
 
 
-def test_get_league_localization_known_league():
-    loc = get_league_localization('Eredivisie')
-    assert loc == {'country': 'NL', 'search_lang': 'nl', 'ui_lang': 'nl-NL'}
+
+def test_render_variants_omits_stats_for_link_only_section():
+    news = {
+        "title": "Rendered",
+        "range": ["2024-08-12", "2024-08-18"],
+        "sections": [
+            {
+                "title": "Active Loans",
+                "items": [
+                    {
+                        "player_name": "A. Example",
+                        "loan_team": "Loan FC",
+                        "week_summary": "Started and scored.",
+                        "stats": {"minutes": 90, "goals": 1, "assists": 0, "yellows": 0, "reds": 0},
+                        "match_notes": ["Opened the scoring."],
+                        "links": ["https://example.com/match-report"],
+                    }
+                ],
+            },
+            {
+                "title": "What the Internet is Saying",
+                "items": [
+                    {
+                        "player_name": "J. Sancho",
+                        "links": ["https://example.com/opinion"],
+                    }
+                ],
+            },
+        ],
+    }
+
+    variants = _render_variants(news, team_name="Manchester United")
+    web_html = variants["web_html"]
+    email_html = variants["email_html"]
+
+    assert web_html.count('class="stats"') == 1
+    assert email_html.count('class="stats"') == 1
+    assert "J. Sancho" in web_html
+    assert "J. Sancho" in email_html
 
 
-def test_get_league_localization_unknown_league():
-    loc = get_league_localization('Made Up League')
-    assert loc == {'country': 'GB', 'search_lang': 'en', 'ui_lang': 'en-GB'}
+def test_lint_and_enrich_populates_player_photos(stub_api_client):
+    def fake_get_player_by_id(player_id, season=None):
+        return {
+            "player": {
+                "id": player_id,
+                "photo": f"https://media.example.com/players/{player_id}.png",
+            }
+        }
+
+    stub_api_client.get_player_by_id = fake_get_player_by_id
+
+    news = {
+        "sections": [
+            {
+                "title": "Active Loans",
+                "items": [
+                    {
+                        "player_id": 101,
+                        "player_name": "A. Example",
+                        "loan_team": "Loan FC",
+                        "stats": {"minutes": 90, "goals": 0, "assists": 0, "yellows": 0, "reds": 0},
+                    }
+                ],
+            }
+        ]
+    }
+
+    enriched = lint_and_enrich(news)
+    item = enriched["sections"][0]["items"][0]
+    assert item["player_photo"] == "https://media.example.com/players/101.png"
 
 
-def test_get_league_localization_from_db():
-    app = Flask(__name__)
-    app.config['SQLALCHEMY_DATABASE_URI'] = 'sqlite:///:memory:'
-    app.config['SQLALCHEMY_TRACK_MODIFICATIONS'] = False
-    db.init_app(app)
+def test_render_variants_renders_player_photos():
+    news = {
+        "title": "Rendered",
+        "range": ["2024-08-12", "2024-08-18"],
+        "sections": [
+            {
+                "title": "Active Loans",
+                "items": [
+                    {
+                        "player_name": "A. Example",
+                        "player_photo": "https://media.example.com/players/101.png",
+                        "loan_team": "Loan FC",
+                        "week_summary": "Started and scored.",
+                        "stats": {"minutes": 90, "goals": 1, "assists": 0, "yellows": 0, "reds": 0},
+                        "match_notes": ["Opened the scoring."],
+                        "links": ["https://example.com/match-report"],
+                    }
+                ],
+            }
+        ],
+    }
 
-    with app.app_context():
-        db.create_all()
-        db.session.add(LeagueLocalization(
-            league_name='A-League',
-            country='AU',
-            search_lang='en',
-            ui_lang='en-AU'
-        ))
-        db.session.commit()
-        loc = get_league_localization('A-League')
-        assert loc == {'country': 'AU', 'search_lang': 'en', 'ui_lang': 'en-AU'}
-        db.session.remove()
-        db.drop_all()
+    variants = _render_variants(news, team_name="Manchester United")
+    assert "https://media.example.com/players/101.png" in variants["web_html"]
+    assert "https://media.example.com/players/101.png" in variants["email_html"]
+
+
+def test_lint_and_enrich_persists_player_profile(app, stub_api_client):
+    from src.models.league import db  # noqa: F401 (ensures model metadata is loaded)
+
+    captured = {}
+
+    def fake_get_player_by_id(player_id, season=None):
+        captured['called'] = True
+        return {
+            "player": {
+                "id": player_id,
+                "name": "A. Example",
+                "firstname": "Alice",
+                "lastname": "Example",
+                "nationality": "Exampleland",
+                "age": 24,
+                "photo": f"https://media.example.com/players/{player_id}.png",
+                "height": "170 cm",
+                "weight": "65 kg",
+                "position": "Midfielder",
+            }
+        }
+
+    stub_api_client.get_player_by_id = fake_get_player_by_id
+
+    news = {
+        "sections": [
+            {
+                "title": "Active Loans",
+                "items": [
+                    {
+                        "player_id": 101,
+                        "player_name": "A. Example",
+                        "loan_team": "Loan FC",
+                        "stats": {"minutes": 90, "goals": 0, "assists": 0, "yellows": 0, "reds": 0},
+                    }
+                ],
+            }
+        ]
+    }
+
+    lint_and_enrich(news)
+
+    from src.models.league import Player  # noqa: E402
+
+    stored = Player.query.filter_by(player_id=101).first()
+    assert stored is not None
+    assert stored.photo_url == "https://media.example.com/players/101.png"
+    assert stored.name == "A. Example"
+
+
+def test_lint_and_enrich_uses_cached_player_profile(app, stub_api_client):
+    from src.models.league import db, Player  # noqa: E402
+
+    player = Player(
+        player_id=202,
+        name="B. Example",
+        firstname="Bob",
+        lastname="Example",
+        nationality="Exampleland",
+        position="Defender",
+        age=26,
+        photo_url="https://media.example.com/players/202.png",
+    )
+    db.session.add(player)
+    db.session.commit()
+
+    def fail_get_player_by_id(*args, **kwargs):
+        raise AssertionError("should use cached profile")
+
+    stub_api_client.get_player_by_id = fail_get_player_by_id
+
+    news = {
+        "sections": [
+            {
+                "title": "Active Loans",
+                "items": [
+                    {
+                        "player_id": 202,
+                        "player_name": "B. Example",
+                        "loan_team": "Loan FC",
+                        "stats": {"minutes": 90, "goals": 0, "assists": 0, "yellows": 0, "reds": 0},
+                    }
+                ],
+            }
+        ]
+    }
+
+    enriched = lint_and_enrich(news)
+    item = enriched["sections"][0]["items"][0]
+    assert item["player_photo"] == "https://media.example.com/players/202.png"
+
+
+def test_lint_and_enrich_persists_team_profile(app, stub_api_client):
+    from src.models.league import db, Team, LoanedPlayer, TeamProfile
+
+    parent_team = Team(team_id=1, name="Parent FC", country="England", season=2024, is_active=True)
+    loan_team = Team(team_id=500, name="Loan FC", country="England", season=2024, is_active=True)
+    db.session.add_all([parent_team, loan_team])
+    db.session.commit()
+
+    loaned = LoanedPlayer(
+        player_id=303,
+        player_name="C. Example",
+        primary_team_id=parent_team.id,
+        primary_team_name=parent_team.name,
+        loan_team_id=loan_team.id,
+        loan_team_name=loan_team.name,
+        is_active=True,
+        window_key="2024-25::FULL",
+    )
+    db.session.add(loaned)
+    db.session.commit()
+
+    def fake_get_team_by_id(team_id, season=None):
+        return {
+            "team": {
+                "id": team_id,
+                "name": "Loan FC",
+                "code": "LFC",
+                "country": "England",
+                "founded": 1900,
+                "national": False,
+                "logo": f"https://media.example.com/teams/{team_id}.png",
+            },
+            "venue": {
+                "id": 900,
+                "name": "Loan Venue",
+                "city": "Loan City",
+                "capacity": 10000,
+                "surface": "grass",
+                "image": f"https://media.example.com/venues/900.png",
+            },
+        }
+
+    stub_api_client.get_team_by_id = fake_get_team_by_id
+
+    news = {
+        "sections": [
+            {
+                "title": "Active Loans",
+                "items": [
+                    {
+                        "player_id": 303,
+                        "player_name": "C. Example",
+                        "loan_team": "Loan FC",
+                        "stats": {"minutes": 90, "goals": 0, "assists": 0, "yellows": 0, "reds": 0},
+                    }
+                ],
+            }
+        ]
+    }
+
+    enriched = lint_and_enrich(news)
+    item = enriched["sections"][0]["items"][0]
+    assert item["loan_team_logo"] == "https://media.example.com/teams/500.png"
+
+    stored = TeamProfile.query.filter_by(team_id=loan_team.team_id).first()
+    assert stored is not None
+    assert stored.logo_url == "https://media.example.com/teams/500.png"
+    assert stored.venue_image == "https://media.example.com/venues/900.png"
+
+
+def test_lint_and_enrich_uses_cached_team_profile(app, stub_api_client):
+    from src.models.league import db, Team, LoanedPlayer, TeamProfile
+
+    parent_team = Team(team_id=2, name="Parent Two", country="England", season=2024, is_active=True)
+    loan_team = Team(team_id=600, name="Loan Cached", country="England", season=2024, is_active=True)
+    db.session.add_all([parent_team, loan_team])
+    db.session.commit()
+
+    loaned = LoanedPlayer(
+        player_id=404,
+        player_name="D. Example",
+        primary_team_id=parent_team.id,
+        primary_team_name=parent_team.name,
+        loan_team_id=loan_team.id,
+        loan_team_name=loan_team.name,
+        is_active=True,
+        window_key="2024-25::FULL",
+    )
+    profile = TeamProfile(
+        team_id=loan_team.team_id,
+        name=loan_team.name,
+        code="LCF",
+        country="England",
+        founded=1901,
+        logo_url="https://media.example.com/teams/600.png",
+    )
+    db.session.add_all([loaned, profile])
+    db.session.commit()
+
+    def fail_get_team_by_id(*args, **kwargs):
+        raise AssertionError("should use cached team profile")
+
+    stub_api_client.get_team_by_id = fail_get_team_by_id
+
+    news = {
+        "sections": [
+            {
+                "title": "Active Loans",
+                "items": [
+                    {
+                        "player_id": 404,
+                        "player_name": "D. Example",
+                        "loan_team": "Loan Cached",
+                        "stats": {"minutes": 90, "goals": 0, "assists": 0, "yellows": 0, "reds": 0},
+                    }
+                ],
+            }
+        ]
+    }
+
+    enriched = lint_and_enrich(news)
+    item = enriched["sections"][0]["items"][0]
+    assert item["loan_team_logo"] == "https://media.example.com/teams/600.png"

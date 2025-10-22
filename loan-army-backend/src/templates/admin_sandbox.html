@@ -1,0 +1,232 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8">
+    <title>Admin Sandbox</title>
+    <style>
+      body {
+        font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+        padding: 2rem;
+        background: #f4f6fb;
+        color: #111;
+      }
+      h1 {
+        margin-bottom: 1.5rem;
+        font-size: 2rem;
+      }
+      .tasks-grid {
+        display: grid;
+        grid-template-columns: repeat(auto-fill, minmax(320px, 1fr));
+        gap: 1.25rem;
+      }
+      .task-card {
+        background: #fff;
+        border-radius: 12px;
+        box-shadow: 0 12px 24px rgba(18, 39, 78, 0.08);
+        padding: 1.5rem;
+        display: flex;
+        flex-direction: column;
+        gap: 1rem;
+      }
+      .task-card h2 {
+        margin: 0;
+        font-size: 1.25rem;
+      }
+      .task-card p {
+        margin: 0;
+        color: #4a5568;
+        line-height: 1.4;
+      }
+      .task-form label {
+        display: block;
+        font-weight: 600;
+        margin-bottom: 0.25rem;
+      }
+      .task-form input[type="text"],
+      .task-form input[type="number"],
+      .task-form input[type="search"],
+      .task-form textarea {
+        width: 100%;
+        padding: 0.5rem 0.75rem;
+        border-radius: 8px;
+        border: 1px solid #cbd5e0;
+        font-size: 0.95rem;
+        box-sizing: border-box;
+      }
+      .task-form .field {
+        margin-bottom: 0.75rem;
+      }
+      .task-form button {
+        background: linear-gradient(135deg, #1a73e8, #0c47a1);
+        color: white;
+        border: none;
+        border-radius: 999px;
+        padding: 0.65rem 1.5rem;
+        font-size: 0.95rem;
+        cursor: pointer;
+        box-shadow: 0 8px 20px rgba(26, 115, 232, 0.3);
+        transition: transform 0.1s ease-in-out, box-shadow 0.1s ease-in-out;
+      }
+      .task-form button:hover {
+        transform: translateY(-1px);
+        box-shadow: 0 10px 24px rgba(26, 115, 232, 0.35);
+      }
+      .task-output {
+        background: #0f172a;
+        color: #e2e8f0;
+        padding: 0.75rem 1rem;
+        border-radius: 10px;
+        font-family: "SFMono-Regular", Consolas, "Liberation Mono", Menlo, monospace;
+        font-size: 0.85rem;
+        max-height: 240px;
+        overflow: auto;
+      }
+      .task-output[data-status="error"] {
+        border: 1px solid #f97316;
+        background: #1f2937;
+      }
+      .task-footer {
+        color: #64748b;
+        font-size: 0.8rem;
+      }
+    </style>
+  </head>
+  <body>
+    <h1>Admin Sandbox</h1>
+    <p class="task-footer">Use these diagnostic tools to validate API-Football data against your current database. Results appear inline and nothing is persisted.</p>
+    <div class="tasks-grid">
+      {% for task in tasks %}
+      <section class="task-card" data-task-id="{{ task.task_id }}">
+        <div>
+          <h2>{{ task.label }}</h2>
+          <p>{{ task.description }}</p>
+        </div>
+        <form class="task-form" data-task-id="{{ task.task_id }}" action="{{ url_for('api.admin_sandbox_run', task_id=task.task_id) }}" method="post">
+          {% for field in task.parameters %}
+          <div class="field">
+            {% if field.type == 'checkbox' %}
+            <label>
+              <input type="checkbox" name="{{ field.name }}">
+              {{ field.label }}
+            </label>
+            {% if field.help %}<div class="task-footer">{{ field.help }}</div>{% endif %}
+            {% elif field.type == 'select' %}
+            <label for="{{ task.task_id }}-{{ field.name }}">{{ field.label }}</label>
+            <select
+              id="{{ task.task_id }}-{{ field.name }}"
+              name="{{ field.name }}"
+              data-role="team-selector"
+              {% if field.required %}required{% endif %}
+            >
+              <option value="">-- Choose --</option>
+              {% for option in field.options or [] %}
+              <option
+                value="{{ option.value }}"
+                data-team-id="{{ option.team_id }}"
+                data-team-db-id="{{ option.team_db_id }}"
+              >{{ option.label }}</option>
+              {% endfor %}
+            </select>
+            {% if field.help %}<div class="task-footer" data-team-summary data-default="{{ field.help }}">{{ field.help }}</div>{% endif %}
+            {% elif field.type == 'hidden' %}
+            <input
+              id="{{ task.task_id }}-{{ field.name }}"
+              name="{{ field.name }}"
+              type="hidden"
+            >
+            {% else %}
+            <label for="{{ task.task_id }}-{{ field.name }}">{{ field.label }}</label>
+            <input
+              id="{{ task.task_id }}-{{ field.name }}"
+              name="{{ field.name }}"
+              type="{{ field.type or 'text' }}"
+              placeholder="{{ field.placeholder or '' }}"
+              {% if field.required %}required{% endif %}
+            >
+            {% if field.help %}<div class="task-footer">{{ field.help }}</div>{% endif %}
+            {% endif %}
+          </div>
+          {% endfor %}
+          <button type="submit">Run</button>
+        </form>
+        <pre class="task-output" data-task-id="{{ task.task_id }}" data-status="idle">Awaiting run…</pre>
+      </section>
+      {% endfor %}
+    </div>
+    <script>
+      const forms = document.querySelectorAll('.task-form');
+      forms.forEach((form) => {
+        const teamSelect = form.querySelector('select[data-role="team-selector"]');
+        if (teamSelect) {
+          const teamDbField = form.querySelector('input[name="team_db_id"]');
+          const apiTeamField = form.querySelector('input[name="api_team_id"]');
+          const summary = form.querySelector('[data-team-summary]');
+
+          const updateTeamFields = () => {
+            const option = teamSelect.options[teamSelect.selectedIndex];
+            const teamDbId = option ? option.dataset.teamDbId || '' : '';
+            const teamApiId = option ? option.dataset.teamId || '' : '';
+            if (teamDbField) {
+              teamDbField.value = teamDbId;
+            }
+            if (apiTeamField) {
+              apiTeamField.value = teamApiId;
+            }
+            if (summary) {
+              const base = summary.dataset.default || '';
+              if (teamDbId || teamApiId) {
+                summary.textContent = `${base} • DB ID: ${teamDbId || '—'}, API ID: ${teamApiId || '—'}`;
+              } else {
+                summary.textContent = base;
+              }
+            }
+          };
+
+          teamSelect.addEventListener('change', updateTeamFields);
+          updateTeamFields();
+        }
+
+        form.addEventListener('submit', async (event) => {
+          event.preventDefault();
+          const taskId = form.dataset.taskId;
+          const output = document.querySelector(`.task-output[data-task-id="${taskId}"]`);
+          const submitButton = form.querySelector('button[type="submit"]');
+          if (!output) {
+            return;
+          }
+          const payload = {};
+          form.querySelectorAll('[name]').forEach((field) => {
+            if (field.type === 'checkbox') {
+              payload[field.name] = field.checked;
+            } else if (field.value !== '') {
+              payload[field.name] = field.value;
+            }
+          });
+
+          output.dataset.status = 'running';
+          output.textContent = 'Running…';
+          submitButton.disabled = true;
+
+          try {
+            const response = await fetch(form.action, {
+              method: 'POST',
+              headers: {
+                'Content-Type': 'application/json',
+                'Accept': 'application/json',
+              },
+              body: JSON.stringify(payload),
+            });
+            const body = await response.json();
+            output.dataset.status = body.status || (response.ok ? 'ok' : 'error');
+            output.textContent = JSON.stringify(body, null, 2);
+          } catch (error) {
+            output.dataset.status = 'error';
+            output.textContent = `Request failed: ${error}`;
+          } finally {
+            submitButton.disabled = false;
+          }
+        });
+      });
+    </script>
+  </body>
+</html>

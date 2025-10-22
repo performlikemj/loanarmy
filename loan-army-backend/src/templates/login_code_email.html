@@ -1,0 +1,44 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Loan Army Login Code</title>
+    <style>
+      body { margin:0; padding:0; background:#040404; color:#ffffff; }
+      .wrapper { width:100%; table-layout:fixed; background:#040404; padding:32px 0; }
+      .main { width:100%; max-width:520px; margin:0 auto; background:#111111; border:1px solid #2f2f2f; border-radius:12px; overflow:hidden; }
+      .content { padding:32px 28px; font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,Helvetica,Arial,sans-serif; color:#f3f3f3; line-height:1.6; }
+      .brand { font-size:12px; letter-spacing:3px; text-transform:uppercase; color:#bdbdbd; }
+      h1 { margin:18px 0 10px; font-size:24px; text-transform:uppercase; letter-spacing:1.5px; }
+      .code-box { margin:24px 0; padding:22px 0; background:#0a0a0a; border:1px solid #2a2a2a; border-radius:10px; text-align:center; }
+      .code-box span { display:inline-block; font-family:'Courier New',Courier,monospace; font-size:24px; letter-spacing:6px; color:#ffffff; }
+      .hint { font-size:13px; color:#cfcfcf; text-transform:uppercase; letter-spacing:1.2px; }
+      .footer { margin-top:28px; font-size:12px; color:#acacac; }
+      a { color:#ffffff; text-decoration:underline; }
+    </style>
+  </head>
+  <body>
+    <table role="presentation" class="wrapper" cellspacing="0" cellpadding="0" border="0">
+      <tr>
+        <td align="center">
+          <table role="presentation" class="main" cellspacing="0" cellpadding="0" border="0">
+            <tr>
+              <td class="content">
+                <div class="brand">GO ON LOAN</div>
+                <h1>Your Access Code</h1>
+                <p>Hello {{ email }},</p>
+                <p>Use the code below to finish signing in. It expires in {{ expires_in }} minutes.</p>
+                <div class="code-box"><span>{{ code }}</span></div>
+                <p class="hint">Paste this code back into the sign-in prompt.</p>
+                <div class="footer">
+                  If you didn&apos;t request this code, you can ignore this message. Need help? Reply to <a href="mailto:goon@goonloan.com">goon@goonloan.com</a>.
+                </div>
+              </td>
+            </tr>
+          </table>
+        </td>
+      </tr>
+    </table>
+  </body>
+</html>

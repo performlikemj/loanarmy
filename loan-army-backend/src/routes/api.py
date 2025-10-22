@@ -1,6 +1,14 @@
 from flask import Blueprint, request, jsonify, make_response, render_template, Response, current_app, g
-from src.models.league import db, League, Team, LoanedPlayer, Newsletter, UserSubscription, EmailToken, LoanFlag, AdminSetting, NewsletterComment, UserAccount, _as_utc
+from src.models.league import db, League, Team, LoanedPlayer, Newsletter, UserSubscription, EmailToken, LoanFlag, AdminSetting, NewsletterComment, UserAccount, SupplementalLoan, NewsletterPlayerYoutubeLink, Player, _as_utc, _dedupe_loans
 from src.api_football_client import APIFootballClient
+from src.admin.sandbox_tasks import (
+    SandboxContext,
+    TaskExecutionError,
+    TaskNotFoundError,
+    TaskValidationError,
+    list_tasks as sandbox_list_tasks,
+    run_task as sandbox_run_task,
+)
 from datetime import datetime, date, timedelta, timezone
 import uuid
 import json
@@ -10,6 +18,8 @@ import io
 import math
 import re
 import os
+import shutil
+from io import BytesIO
 from functools import wraps
 from uuid import uuid4
 from sqlalchemy import or_
@@ -28,8 +38,29 @@ logger = logging.getLogger(__name__)
 
 api_bp = Blueprint('api', __name__)
 
-# Initialize API-Football client
-api_client = APIFootballClient()
+
+class LazyAPIFootballClient:
+    """Instantiate APIFootballClient only when first touched to avoid early network calls."""
+
+    def __init__(self, factory):
+        self._factory = factory
+        self._instance = None
+
+    def _resolve(self):
+        if self._instance is None:
+            self._instance = self._factory()
+        return self._instance
+
+    def __getattr__(self, item: str):
+        return getattr(self._resolve(), item)
+
+    def __repr__(self) -> str:
+        state = "initialized" if self._instance is not None else "uninitialized"
+        return f"<LazyAPIFootballClient {state}>"
+
+
+# Initialize API-Football client lazily to keep migrations/test tools offline-friendly
+api_client = LazyAPIFootballClient(APIFootballClient)
 
 SUBSCRIPTIONS_REQUIRE_VERIFY = os.getenv('SUBSCRIPTIONS_REQUIRE_VERIFY', '1').lower() in ('1', 'true', 'yes', 'on')
 try:
@@ -53,7 +84,17 @@ def require_api_key(f):
     def decorated_function(*args, **kwargs):
         if request.method == 'OPTIONS':
             return make_response('', 204)
+        print(f"[DEBUG require_api_key] method={request.method} path={request.path}", flush=True)
         client_ip = get_client_ip()
+        auth_header = request.headers.get('Authorization') or ''
+        api_key_header = request.headers.get('X-API-Key') or request.headers.get('X-Admin-Key') or ''
+        logger.debug(
+            "Admin auth attempt ip=%s endpoint=%s auth_present=%s key_present=%s",
+            client_ip,
+            request.endpoint,
+            bool(auth_header),
+            bool(api_key_header),
+        )
 
         # Check IP whitelist if configured
         if ALLOWED_ADMIN_IPS and client_ip not in ALLOWED_ADMIN_IPS:
@@ -76,7 +117,6 @@ def require_api_key(f):
             }), 500
         
         # Require admin Bearer token
-        auth_header = request.headers.get('Authorization') or ''
         token_data = None
         if auth_header.startswith('Bearer '):
             token = auth_header.split(' ', 1)[1]
@@ -89,7 +129,12 @@ def require_api_key(f):
                 logger.warning(f"Bearer admin token failed for {client_ip}: {_e}")
 
         if not token_data:
-            logger.warning(f"Admin token missing or invalid for {client_ip}")
+            logger.warning(
+                "Admin token missing or invalid ip=%s endpoint=%s auth_sample=%s",
+                client_ip,
+                request.endpoint,
+                auth_header[:32],
+            )
             return jsonify({'error': 'Admin login required', 'message': 'Provide a valid admin Bearer token'}), 401
 
         # Require API key as a second factor
@@ -108,10 +153,11 @@ def require_api_key(f):
 
         if not provided_key:
             logger.warning(
-                "Admin API key missing ip=%s user=%s endpoint=%s",
+                "Admin API key missing ip=%s user=%s endpoint=%s auth_sample=%s",
                 client_ip,
                 getattr(g, 'user_email', None),
                 request.endpoint,
+                auth_header[:32],
             )
             return jsonify({'error': 'Admin API key required', 'message': 'Send X-API-Key in the request headers'}), 401
 
@@ -153,6 +199,91 @@ def admin_auth_check():
         'status': 'ok',
         'user': getattr(g, 'user_email', None),
     })
+
+
+@api_bp.route('/admin/sandbox', methods=['GET'])
+@require_api_key
+def admin_sandbox_home():
+    """Render the admin sandbox interface with available diagnostic tasks."""
+    teams = Team.query.order_by(Team.name.asc()).all()
+    logger.info("[admin-sandbox] fetched %d teams (pre-dedupe) for dropdown", len(teams))
+    # Deduplicate by lowercase name, keep the latest id
+    dedup: dict[str, Team] = {}
+    for t in teams:
+        key = (t.name or '').strip().lower()
+        if key:
+            dedup[key] = t
+    teams = sorted(dedup.values(), key=lambda t: (t.name or '').lower())
+    logger.info("[admin-sandbox] teams after dedupe: %d", len(teams))
+    if not teams:
+        logger.warning("[admin-sandbox] no teams found in database")
+    else:
+        sample = ", ".join(f"{team.name}#{team.team_id}" for team in teams[:5])
+        logger.debug("[admin-sandbox] sample teams: %s", sample)
+
+    team_options = [
+        {
+            'label': f"{team.name} (API #{team.team_id})",
+            'value': team.name,
+            'team_id': team.team_id,
+            'team_db_id': team.id,
+        }
+        for team in teams
+    ]
+
+    tasks = [
+        {
+            'task_id': task.task_id,
+            'label': task.label,
+            'description': task.description,
+            'parameters': [
+                {
+                    **param,
+                    'options': team_options if param.get('name') == 'team_name' else param.get('options'),
+                }
+                for param in task.parameters
+            ],
+        }
+        for task in sandbox_list_tasks()
+    ]
+    accept_json = request.accept_mimetypes['application/json']
+    accept_html = request.accept_mimetypes['text/html']
+    wants_json = (
+        request.args.get('format') == 'json'
+        or (accept_json > accept_html and accept_json > 0)
+    )
+    if wants_json:
+        return jsonify({'tasks': tasks})
+    return render_template('admin_sandbox.html', tasks=tasks)
+
+
+@api_bp.route('/admin/sandbox/run/<task_id>', methods=['POST'])
+@require_api_key
+def admin_sandbox_run(task_id: str):
+    """Execute a sandbox diagnostic task and return the structured result."""
+
+    payload = request.get_json(silent=True) or {}
+    context = SandboxContext(db_session=db.session, api_client=api_client)
+
+    try:
+        result = sandbox_run_task(task_id, payload, context)
+    except TaskNotFoundError as exc:
+        return (
+            jsonify({'status': 'error', 'summary': str(exc), 'payload': {}, 'task_id': task_id}),
+            404,
+        )
+    except TaskValidationError as exc:
+        return (
+            jsonify({'status': 'error', 'summary': str(exc), 'payload': {}, 'task_id': task_id}),
+            400,
+        )
+    except TaskExecutionError as exc:
+        return (
+            jsonify({'status': 'error', 'summary': str(exc), 'payload': {}, 'task_id': task_id}),
+            500,
+        )
+
+    return jsonify(result)
 
 # --- Lightweight user token auth (for comments/login) ---
 def _user_serializer() -> URLSafeTimedSerializer:
@@ -949,12 +1080,9 @@ def get_team(team_id):
         team = Team.query.get_or_404(team_id)
         team_dict = team.to_dict()
         
-        # Add detailed loan information
-        active_loans = LoanedPlayer.query.filter_by(
-            primary_team_id=team.id, 
-            is_active=True
-        ).all()
-        
+        # Add detailed loan information with duplicates removed
+        active_loans = team.unique_active_loans()
+
         team_dict['active_loans'] = [loan.to_dict() for loan in active_loans]
         
         return jsonify(team_dict)
@@ -966,8 +1094,57 @@ def get_team_loans(team_id):
     """Get loans for a specific team."""
     try:
         team = Team.query.get_or_404(team_id)
-        loans = LoanedPlayer.query.filter_by(primary_team_id=team.id).all()
-        return jsonify([loan.to_dict() for loan in loans])
+        active_only = request.args.get('active_only', 'true').lower() in ('1', 'true', 'yes', 'on', 'y')
+        dedupe = request.args.get('dedupe', 'true').lower() in ('1', 'true', 'yes', 'on', 'y')
+        season_val = request.args.get('season', type=int)
+
+        query = LoanedPlayer.query.filter_by(primary_team_id=team.id)
+        if active_only:
+            query = query.filter(LoanedPlayer.is_active.is_(True))
+        if season_val:
+            slug = f"{season_val}-{str(season_val + 1)[-2:]}"
+            query = query.filter(LoanedPlayer.window_key.like(f"{slug}%"))
+
+        loans = query.order_by(LoanedPlayer.updated_at.desc()).all()
+        if dedupe:
+            loans = _dedupe_loans(loans)
+
+        result = [loan.to_dict() for loan in loans]
+
+        include_supp = request.args.get('include_supplemental', 'false').lower() in ('1', 'true', 'yes', 'on')
+        if include_supp:
+            supp_query = SupplementalLoan.query.filter_by(parent_team_id=team.id)
+            if season_val:
+                supp_query = supp_query.filter_by(season_year=season_val)
+            supp_rows = supp_query.all()
+            for s in supp_rows:
+                try:
+                    item = {
+                        'player_name': s.player_name,
+                        'primary_team_name': s.parent_team_name,
+                        'primary_team_api_id': getattr(s.parent_team, 'team_id', None),
+                        'loan_team_id': s.loan_team_id,
+                        'loan_team_name': s.loan_team_name,
+                        'loan_team_api_id': getattr(s.loan_team, 'team_id', None),
+                        'window_key': f"{s.season_year}-{str(s.season_year + 1)[-2:]}" if s.season_year else None,
+                        'is_active': True,
+                        'appearances': None,
+                        'goals': None,
+                        'assists': None,
+                        'minutes_played': None,
+                        'yellows': None,
+                        'reds': None,
+                        'data_source': s.data_source or 'supplemental',
+                        'can_fetch_stats': False,
+                        'created_at': s.created_at.isoformat() if s.created_at else None,
+                        'updated_at': s.updated_at.isoformat() if s.updated_at else None,
+                        'season_year': s.season_year,
+                        'id': f"supp-{s.id}",
+                    }
+                    result.append(item)
+                except Exception:
+                    continue
+        return jsonify(result)
     except Exception as e:
         return jsonify(_safe_error_payload(e, 'An unexpected error occurred. Please try again later.')), 500
 
@@ -1074,7 +1251,43 @@ def get_loans():
             query = query.filter_by(early_termination=early_termination.lower() == 'true')
         
         loans = query.order_by(LoanedPlayer.updated_at.desc()).all()
-        return jsonify([loan.to_dict() for loan in loans])
+        result = [loan.to_dict() for loan in loans]
+
+        include_supp = request.args.get('include_supplemental', 'false').lower() in ('1','true','yes','on')
+        if include_supp:
+            supp_q = SupplementalLoan.query
+            # Align season filter if present
+            if season_val:
+                supp_q = supp_q.filter(SupplementalLoan.season_year == season_val)
+            supp_rows = supp_q.order_by(SupplementalLoan.updated_at.desc()).all()
+            for s in supp_rows:
+                try:
+                    item = {
+                        'player_name': s.player_name,
+                        'primary_team_name': s.parent_team_name,
+                        'primary_team_api_id': getattr(s.parent_team, 'team_id', None),
+                        'loan_team_id': s.loan_team_id,
+                        'loan_team_name': s.loan_team_name,
+                        'loan_team_api_id': getattr(s.loan_team, 'team_id', None),
+                        'window_key': f"{s.season_year}-{str(s.season_year + 1)[-2:]}",
+                        'is_active': True,
+                        'appearances': None,
+                        'goals': None,
+                        'assists': None,
+                        'minutes_played': None,
+                        'yellows': None,
+                        'reds': None,
+                        'data_source': s.data_source or 'supplemental',
+                        'can_fetch_stats': False,
+                        'created_at': s.created_at.isoformat() if s.created_at else None,
+                        'updated_at': s.updated_at.isoformat() if s.updated_at else None,
+                        'season_year': s.season_year,
+                        'source': 'supplemental',
+                    }
+                    result.append(item)
+                except Exception:
+                    continue
+        return jsonify(result)
     except Exception as e:
         return jsonify(_safe_error_payload(e, 'An unexpected error occurred. Please try again later.')), 500
 
@@ -1585,7 +1798,15 @@ def get_newsletters():
             )
         
         newsletters = query.order_by(Newsletter.generated_date.desc()).all()
-        return jsonify([newsletter.to_dict() for newsletter in newsletters])
+        payload: list[dict] = []
+        for newsletter in newsletters:
+            row = newsletter.to_dict()
+            try:
+                row['enriched_content'] = _load_newsletter_json(newsletter)
+            except Exception:
+                row['enriched_content'] = None
+            payload.append(row)
+        return jsonify(payload)
     except Exception as e:
         return jsonify(_safe_error_payload(e, 'An unexpected error occurred. Please try again later.')), 500
 
@@ -1734,6 +1955,11 @@ def get_newsletter(newsletter_id):
             payload['comments'] = [comment.to_dict() for comment in comments]
         except Exception:
             payload['comments'] = []
+
+        try:
+            payload['enriched_content'] = _load_newsletter_json(newsletter)
+        except Exception:
+            payload['enriched_content'] = None
 
         return jsonify(payload)
     except Exception as e:
@@ -2900,6 +3126,74 @@ def _load_newsletter_json(n: Newsletter) -> dict | None:
                 data = lint_and_enrich(data)
             except Exception:
                 pass
+            
+            # Inject YouTube links from the junction table
+            try:
+                youtube_links = NewsletterPlayerYoutubeLink.query.filter_by(newsletter_id=n.id).all()
+                if youtube_links:
+                    # Create lookup dictionaries for quick access
+                    links_by_player_id = {}
+                    links_by_supplemental_id = {}
+                    
+                    for link in youtube_links:
+                        if link.player_id:
+                            links_by_player_id[link.player_id] = link.youtube_link
+                        if link.supplemental_loan_id:
+                            links_by_supplemental_id[link.supplemental_loan_id] = link.youtube_link
+                    
+                    # Inject links into player items
+                    sections = data.get('sections', [])
+                    if isinstance(sections, list):
+                        for section in sections:
+                            if isinstance(section, dict):
+                                items = section.get('items', [])
+                                if isinstance(items, list):
+                                    for item in items:
+                                        if isinstance(item, dict):
+                                            # Check for tracked player
+                                            player_id = item.get('player_id')
+                                            if player_id and player_id in links_by_player_id:
+                                                youtube_url = links_by_player_id[player_id]
+                                                # Add to links array
+                                                existing_links = item.get('links', [])
+                                                if not isinstance(existing_links, list):
+                                                    existing_links = []
+                                                # Add YouTube link with title
+                                                youtube_link_obj = {
+                                                    'url': youtube_url,
+                                                    'title': 'YouTube Highlights'
+                                                }
+                                                # Check if not already present
+                                                if not any(
+                                                    (isinstance(l, dict) and l.get('url') == youtube_url) or 
+                                                    (isinstance(l, str) and l == youtube_url)
+                                                    for l in existing_links
+                                                ):
+                                                    existing_links.insert(0, youtube_link_obj)
+                                                item['links'] = existing_links
+                                            
+                                            # Check for supplemental loan
+                                            supplemental_loan_id = item.get('supplemental_loan_id')
+                                            if supplemental_loan_id and supplemental_loan_id in links_by_supplemental_id:
+                                                youtube_url = links_by_supplemental_id[supplemental_loan_id]
+                                                existing_links = item.get('links', [])
+                                                if not isinstance(existing_links, list):
+                                                    existing_links = []
+                                                youtube_link_obj = {
+                                                    'url': youtube_url,
+                                                    'title': 'YouTube Highlights'
+                                                }
+                                                if not any(
+                                                    (isinstance(l, dict) and l.get('url') == youtube_url) or 
+                                                    (isinstance(l, str) and l == youtube_url)
+                                                    for l in existing_links
+                                                ):
+                                                    existing_links.insert(0, youtube_link_obj)
+                                                item['links'] = existing_links
+            except Exception as e:
+                logger.exception('Failed to inject YouTube links into newsletter')
+                pass
+            
             return data
         return None
     except Exception:
@@ -2926,6 +3220,8 @@ def _plain_text_from_news(data: dict, meta: Newsletter) -> str:
         for h in highlights:
             lines.append(f"- {h}")
     for sec in (data.get("sections") or []):
+        if not isinstance(sec, dict):
+            continue
         st = sec.get("title") or ""
         items = sec.get("items") or []
         if st:
@@ -2933,6 +3229,8 @@ def _plain_text_from_news(data: dict, meta: Newsletter) -> str:
             lines.append(st)
             lines.append("-" * len(st))
         for it in items:
+            if not isinstance(it, dict):
+                continue
             pname = it.get("player_name") or ""
             loan_team = it.get("loan_team") or it.get("loan_team_name") or ""
             wsum = it.get("week_summary") or ""
@@ -2949,10 +3247,257 @@ def _plain_text_from_news(data: dict, meta: Newsletter) -> str:
                 lines.append(f"  - {n}")
     return "\n".join(lines).strip() + "\n"
 
+
+def _newsletter_issue_slug(n: Newsletter) -> str:
+    if n.week_end_date:
+        return n.week_end_date.isoformat()
+    if n.issue_date:
+        return n.issue_date.isoformat()
+    created = _as_utc(n.created_at) if n.created_at else datetime.now(timezone.utc)
+    return created.date().isoformat()
+
+
+def _public_base_url(default: str | None = None) -> str:
+    base = (os.getenv('PUBLIC_BASE_URL') or os.getenv('PUBLIC_API_BASE_URL') or default or '').strip()
+    if base:
+        return base.rstrip('/')
+    try:
+        return (request.url_root or '').rstrip('/')
+    except RuntimeError:
+        return ''
+
+
+def _absolute_url(path: str) -> str:
+    if not path:
+        return path
+    if path.startswith('http://') or path.startswith('https://'):
+        return path
+    base = _public_base_url()
+    if not base:
+        return path
+    normalized = path if path.startswith('/') else f'/{path}'
+    return f'{base}{normalized}'
+
+
+def _static_url(rel_path: str | None) -> str | None:
+    if not rel_path:
+        return None
+    rel = rel_path.lstrip('/')
+    return _absolute_url(f'/static/{rel}')
+
+
+def _truncate_plain(text: str, limit: int = 200) -> str:
+    clean = sanitize_plain_text(text or '')
+    stripped = clean.strip()
+    if len(stripped) <= limit:
+        return stripped
+    truncated = stripped[:limit - 1].rstrip()
+    return f"{truncated}…"
+
+
+def _brand_logo_source() -> str:
+    override = (os.getenv('GO_ON_LOAN_LOGO_PATH') or '').strip()
+    if override:
+        return override
+    return '/static/assets/loan_army_assets/android-chrome-512x512.png'
+
+
+def _load_logo_image(source: str | None):
+    if not source:
+        return None
+    try:
+        from PIL import Image, ImageFile
+    except ImportError:
+        return None
+
+    ImageFile.LOAD_TRUNCATED_IMAGES = True
+    src = source.strip()
+    if not src:
+        return None
+
+    try:
+        if src.startswith(('http://', 'https://')):
+            resp = requests.get(src, timeout=6)
+            resp.raise_for_status()
+            with BytesIO(resp.content) as buffer:
+                with Image.open(buffer) as img:
+                    return img.convert('RGBA')
+
+        candidate_paths: list[str] = []
+        static_folder = getattr(current_app, 'static_folder', None)
+
+        if src.startswith('/static/') and static_folder:
+            candidate_paths.append(os.path.join(static_folder, src[len('/static/') :]))
+        if src.startswith('/') and static_folder:
+            candidate_paths.append(os.path.join(static_folder, src.lstrip('/')))
+        if os.path.isabs(src):
+            candidate_paths.append(src)
+        if static_folder and not os.path.isabs(src):
+            candidate_paths.append(os.path.join(static_folder, src))
+
+        for path in candidate_paths:
+            if path and os.path.exists(path):
+                with Image.open(path) as img:
+                    return img.convert('RGBA')
+    except Exception as exc:
+        logger.debug('Failed to load logo image from %s: %s', source, exc, exc_info=True)
+    return None
+
+
+def _ensure_newsletter_cover_image(n: Newsletter, *, team_logo: str | None) -> str | None:
+    static_folder = getattr(current_app, 'static_folder', None)
+    if not static_folder:
+        return None
+
+    slug = _newsletter_issue_slug(n)
+    rel_dir = os.path.join('newsletters', slug)
+    target_dir = os.path.join(static_folder, rel_dir)
+    os.makedirs(target_dir, exist_ok=True)
+
+    filename = 'cover.jpg'
+    target_path = os.path.join(target_dir, filename)
+    if os.path.isfile(target_path):
+        return os.path.join(rel_dir, filename)
+
+    try:
+        from PIL import Image, ImageDraw, ImageOps
+    except ImportError:
+        logger.warning('Pillow not installed; falling back to static cover copy')
+        fallback_src = _brand_logo_source()
+        static_folder = getattr(current_app, 'static_folder', None)
+        candidate = None
+        if fallback_src.startswith('/static/') and static_folder:
+            candidate = os.path.join(static_folder, fallback_src[len('/static/'):])
+        elif os.path.isabs(fallback_src):
+            candidate = fallback_src
+        elif static_folder:
+            candidate = os.path.join(static_folder, fallback_src)
+        if candidate and os.path.exists(candidate):
+            try:
+                shutil.copyfile(candidate, target_path)
+                return os.path.join(rel_dir, filename)
+            except Exception as exc:
+                logger.warning('Failed to copy fallback cover %s -> %s: %s', candidate, target_path, exc)
+        return None
+
+    canvas = Image.new('RGB', (1200, 630), '#050A1E')
+    draw = ImageDraw.Draw(canvas)
+
+    brand_logo = _load_logo_image(_brand_logo_source())
+    primary_logo = _load_logo_image(team_logo)
+
+    logos = [logo for logo in (primary_logo, brand_logo) if logo is not None]
+    if not logos:
+        draw.rectangle([(0, 0), (canvas.width, canvas.height)], fill='#101942')
+        draw.rectangle([(80, 120), (canvas.width - 80, canvas.height - 120)], outline='#23306b', width=12)
+    else:
+        processed: list[Image.Image | None] = []
+        for logo in (primary_logo, brand_logo):
+            if logo is None:
+                processed.append(None)
+                continue
+            img = logo.copy()
+            img = ImageOps.contain(img, (420, 420))
+            processed.append(img)
+
+        spacing = 120
+        centre_y = canvas.height // 2
+
+        if processed[0] is not None and len(processed) > 1 and processed[1] is not None:
+            total_width = processed[0].width + processed[1].width + spacing
+            start_x = max((canvas.width - total_width) // 2, 60)
+            positions = [
+                (start_x, centre_y - processed[0].height // 2),
+                (start_x + processed[0].width + spacing, centre_y - processed[1].height // 2),
+            ]
+            active = [processed[0], processed[1]]
+        else:
+            existing = processed[0] or (processed[1] if len(processed) > 1 else None)
+            if existing is None:
+                existing = logos[0]
+            positions = [((canvas.width - existing.width) // 2, centre_y - existing.height // 2)]
+            active = [existing]
+
+        draw.ellipse([(-320, -80), (canvas.width * 0.8, canvas.height + 180)], fill='#0C1544', outline=None)
+        draw.rectangle([(0, canvas.height - 90), (canvas.width, canvas.height)], fill='#131C4E')
+
+        for img, (pos_x, pos_y) in zip(active, positions, strict=False):
+            if img is None:
+                continue
+            rgba = img.convert('RGBA')
+            canvas.paste(rgba, (int(pos_x), int(pos_y)), mask=rgba)
+
+    try:
+        canvas.save(target_path, format='JPEG', quality=92, optimize=True)
+        return os.path.join(rel_dir, filename)
+    except Exception as exc:
+        logger.warning('Failed to write newsletter cover %s: %s', target_path, exc)
+        return None
+
+
+def _format_iso8601(dt: datetime | None) -> str | None:
+    if not dt:
+        return None
+    as_utc = _as_utc(dt)
+    if not as_utc:
+        return None
+    trimmed = as_utc.replace(microsecond=0)
+    iso = trimmed.isoformat()
+    if iso.endswith('+00:00'):
+        iso = iso[:-6] + 'Z'
+    return iso
+
+
+def _compute_newsletter_social_meta(n: Newsletter, context: dict[str, Any]) -> dict[str, Any]:
+    title = context.get('title') or n.title or 'Weekly Loan Update'
+    description = context.get('summary') or ''
+    description = _truncate_plain(description)
+    if not description:
+        team_name = context.get('team_name') or (n.team.name if n.team else 'Go On Loan')
+        description = f'{team_name} weekly loan watch from Go On Loan.'
+
+    canonical_slug = _newsletter_issue_slug(n)
+    canonical_url = _absolute_url(f'/newsletters/{canonical_slug}')
+
+    team_logo = context.get('team_logo')
+    cover_rel = _ensure_newsletter_cover_image(n, team_logo=team_logo)
+    cover_url = _static_url(cover_rel)
+
+    if n.published_date:
+        published = _format_iso8601(n.published_date)
+    elif n.issue_date:
+        published_dt = datetime.combine(n.issue_date, datetime.min.time(), tzinfo=timezone.utc) + timedelta(hours=10)
+        published = _format_iso8601(published_dt)
+    else:
+        published = None
+
+    site_name = (os.getenv('SITE_NAME') or os.getenv('PUBLIC_SITE_NAME') or 'Go On Loan').strip() or 'Go On Loan'
+    author = (os.getenv('ARTICLE_AUTHOR_NAME') or site_name).strip() or site_name
+    twitter_handle = (os.getenv('TWITTER_HANDLE') or '@goonloan').strip()
+
+    return {
+        'title': title,
+        'description': description,
+        'canonical_url': canonical_url,
+        'slug': canonical_slug,
+        'og_url': canonical_url,
+        'og_image': cover_url,
+        'og_image_width': '1200' if cover_url else None,
+        'og_image_height': '630' if cover_url else None,
+        'site_name': site_name,
+        'article_author': author,
+        'published_time': published,
+        'twitter_handle': twitter_handle if twitter_handle else None,
+    }
+
 # --- Newsletter delivery helpers ---
 def _newsletter_render_context(n: Newsletter) -> dict[str, Any]:
     data = _load_newsletter_json(n) or {}
-    return {
+    team_logo = data.get('team_logo')
+    if not team_logo and n.team and getattr(n.team, 'logo', None):
+        team_logo = n.team.logo
+
+    context: dict[str, Any] = {
         'meta': n,
         'team_name': n.team.name if n.team else '',
         'title': data.get('title') or n.title,
@@ -2962,7 +3507,10 @@ def _newsletter_render_context(n: Newsletter) -> dict[str, Any]:
         'sections': data.get('sections') or [],
         'by_numbers': data.get('by_numbers') or {},
         'fan_pulse': data.get('fan_pulse') or [],
+        'team_logo': team_logo,
     }
+    context['social_meta'] = _compute_newsletter_social_meta(n, context)
+    return context
 
 def _deliver_newsletter_via_webhook(
     n: Newsletter,
@@ -3187,21 +3735,7 @@ def render_newsletter(newsletter_id: int, fmt: str):
     try:
         n = Newsletter.query.get_or_404(newsletter_id)
         data = _load_newsletter_json(n) or {}
-        team_logo = data.get('team_logo')
-        if not team_logo and n.team and getattr(n.team, 'logo', None):
-            team_logo = n.team.logo
-        context: dict[str, Any] = {
-            'meta': n,
-            'team_name': n.team.name if n.team else '',
-            'title': data.get('title') or n.title,
-            'range': data.get('range'),
-            'summary': data.get('summary'),
-            'highlights': data.get('highlights') or [],
-            'sections': data.get('sections') or [],
-            'by_numbers': data.get('by_numbers') or {},
-            'fan_pulse': data.get('fan_pulse') or [],
-            'team_logo': team_logo,
-        }
+        context = _newsletter_render_context(n)
         if fmt in ('html', 'web'):
             html = render_template('newsletter_web.html', **context)
             return Response(html, mimetype='text/html')
@@ -3822,6 +4356,8 @@ def admin_update_loan(loan_id: int):
             loan.window_key = (data.get('window_key') or '').strip() or None
         if 'reviewer_notes' in data:
             loan.reviewer_notes = (data.get('reviewer_notes') or '').strip() or None
+        if 'youtube_link' in data:
+            loan.youtube_link = data.get('youtube_link')
 
         db.session.commit()
         return jsonify({'message': 'updated', 'loan': loan.to_dict()})
@@ -4713,66 +5249,148 @@ def admin_update_flag(flag_id: int):
         return jsonify(_safe_error_payload(e, 'An unexpected error occurred. Please try again later.')), 500
 
 # --- Admin: Newsletters management (list/view/update) ---
+
+
+def _normalize_int_list(values) -> list[int]:
+    """Normalize a list of values into unique positive integers."""
+    if not values:
+        return []
+    normalized: list[int] = []
+    seen = set()
+    for value in values:
+        try:
+            num = int(value)
+        except (TypeError, ValueError):
+            continue
+        if num <= 0 or num in seen:
+            continue
+        normalized.append(num)
+        seen.add(num)
+    return normalized
+
+
+def _get_param_value(source, key):
+    if source is None:
+        return None
+    getter = getattr(source, 'get', None)
+    if callable(getter):
+        value = getter(key)
+    else:
+        value = source[key] if isinstance(source, dict) and key in source else None
+    if isinstance(value, (list, tuple)):
+        return value[0] if value else None
+    return value
+
+
+def _apply_admin_newsletter_filters(base_query, params):
+    """Apply shared newsletter filters used by admin endpoints.
+
+    Returns tuple of (query, meta) where meta includes flags about applied filters.
+    """
+    params = params or {}
+    query = base_query
+    meta = {
+        'issue_filter_applied': False,
+    }
+
+    # Team filter
+    team_value = _get_param_value(params, 'team')
+    try:
+        team_id = int(team_value) if team_value not in (None, '') else None
+    except (TypeError, ValueError):
+        team_id = None
+    if team_id:
+        query = query.filter(Newsletter.team_id == team_id)
+        meta['team_id'] = team_id
+
+    # Published toggle
+    published_only_value = _get_param_value(params, 'published_only')
+    if published_only_value is not None:
+        want = str(published_only_value).lower() in ('true', '1', 'yes', 'y')
+        query = query.filter(Newsletter.published.is_(want))
+        meta['published_only'] = want
+
+    # Week range
+    week_start_str = _get_param_value(params, 'week_start')
+    week_end_str = _get_param_value(params, 'week_end')
+    if week_start_str and week_end_str:
+        try:
+            ws = datetime.strptime(week_start_str, '%Y-%m-%d').date()
+            we = datetime.strptime(week_end_str, '%Y-%m-%d').date()
+            query = query.filter(
+                db.and_(
+                    Newsletter.week_start_date <= we,
+                    Newsletter.week_end_date >= ws,
+                )
+            )
+            meta['week_range'] = (week_start_str, week_end_str)
+        except ValueError:
+            meta['week_range'] = None
+
+    # Issue date range (primary)
+    issue_start_str = _get_param_value(params, 'issue_start')
+    issue_end_str = _get_param_value(params, 'issue_end')
+    if issue_start_str and issue_end_str:
+        try:
+            isd = datetime.strptime(issue_start_str, '%Y-%m-%d').date()
+            ied = datetime.strptime(issue_end_str, '%Y-%m-%d').date()
+            query = query.filter(
+                db.and_(
+                    Newsletter.issue_date >= isd,
+                    Newsletter.issue_date <= ied,
+                )
+            )
+            meta['issue_filter_applied'] = True
+            meta['issue_range'] = (issue_start_str, issue_end_str)
+        except ValueError:
+            meta['issue_filter_applied'] = False
+
+    # Created date range
+    created_start_str = _get_param_value(params, 'created_start')
+    created_end_str = _get_param_value(params, 'created_end')
+    if created_start_str and created_end_str:
+        try:
+            cs = datetime.strptime(created_start_str, '%Y-%m-%d').date()
+            ce = datetime.strptime(created_end_str, '%Y-%m-%d').date()
+            cs_dt = datetime.combine(cs, datetime.min.time(), tzinfo=timezone.utc)
+            ce_dt = datetime.combine(ce, datetime.max.time(), tzinfo=timezone.utc)
+            query = query.filter(
+                db.and_(
+                    Newsletter.generated_date >= cs_dt,
+                    Newsletter.generated_date <= ce_dt,
+                )
+            )
+            meta['created_range'] = (created_start_str, created_end_str)
+        except ValueError:
+            meta['created_range'] = None
+
+    return query, meta
+
+
+def _resolve_newsletter_filter_targets(filter_params, exclude_ids):
+    base_query, filter_meta = _apply_admin_newsletter_filters(Newsletter.query, filter_params)
+    matched_rows = base_query.with_entities(Newsletter.id).all()
+    matched_ids = [row.id for row in matched_rows]
+    exclude_set = set(_normalize_int_list(exclude_ids))
+    excluded_in_matched = [nid for nid in matched_ids if nid in exclude_set]
+    exclude_missing = [nid for nid in exclude_set if nid not in matched_ids]
+    selected_ids = [nid for nid in matched_ids if nid not in exclude_set]
+
+    meta = {
+        'mode': 'filters',
+        'total_matched': len(matched_ids),
+        'total_selected': len(selected_ids),
+        'total_excluded': len(excluded_in_matched),
+        'excluded_ids': excluded_in_matched,
+        'exclude_missing': exclude_missing,
+        'filter_info': filter_meta,
+    }
+    return selected_ids, matched_ids, meta
 @api_bp.route('/admin/newsletters', methods=['GET'])
 @require_api_key
 def admin_list_newsletters():
     try:
-        q = Newsletter.query
-        team_id = request.args.get('team', type=int)
-        if team_id:
-            q = q.filter(Newsletter.team_id == team_id)
-        published_only = request.args.get('published_only')
-        if published_only is not None:
-            want = str(published_only).lower() in ('true','1','yes','y')
-            q = q.filter(Newsletter.published.is_(want))
-        # week range filter
-        week_start_str = request.args.get('week_start')
-        week_end_str = request.args.get('week_end')
-        if week_start_str and week_end_str:
-            try:
-                ws = datetime.strptime(week_start_str, '%Y-%m-%d').date()
-                we = datetime.strptime(week_end_str, '%Y-%m-%d').date()
-                q = q.filter(
-                    db.and_(
-                        Newsletter.week_start_date <= we,
-                        Newsletter.week_end_date >= ws,
-                    )
-                )
-            except ValueError:
-                pass
-        # issue_date (date of the newsletter context) range filter – primary filter
-        issue_start_str = request.args.get('issue_start')
-        issue_end_str = request.args.get('issue_end')
-        if issue_start_str and issue_end_str:
-            try:
-                isd = datetime.strptime(issue_start_str, '%Y-%m-%d').date()
-                ied = datetime.strptime(issue_end_str, '%Y-%m-%d').date()
-                q = q.filter(
-                    db.and_(
-                        Newsletter.issue_date >= isd,
-                        Newsletter.issue_date <= ied,
-                    )
-                )
-            except ValueError:
-                pass
-        # created (generated_date) range filter
-        created_start_str = request.args.get('created_start')
-        created_end_str = request.args.get('created_end')
-        if created_start_str and created_end_str:
-            try:
-                cs = datetime.strptime(created_start_str, '%Y-%m-%d').date()
-                ce = datetime.strptime(created_end_str, '%Y-%m-%d').date()
-                # generated_date is a DateTime – compare against start/end of day
-                cs_dt = datetime.combine(cs, datetime.min.time(), tzinfo=timezone.utc)
-                ce_dt = datetime.combine(ce, datetime.max.time(), tzinfo=timezone.utc)
-                q = q.filter(
-                    db.and_(
-                        Newsletter.generated_date >= cs_dt,
-                        Newsletter.generated_date <= ce_dt,
-                    )
-                )
-            except ValueError:
-                pass
+        filtered_query, filter_meta = _apply_admin_newsletter_filters(Newsletter.query, request.args)
         page = request.args.get('page', type=int) or 1
         if page < 1:
             page = 1
@@ -4786,7 +5404,7 @@ def admin_list_newsletters():
             if page_size > 200:
                 page_size = 200
 
-        total = q.order_by(None).count()
+        total = filtered_query.order_by(None).count()
 
         total_pages = 1
         if page_size is not None:
@@ -4797,18 +5415,18 @@ def admin_list_newsletters():
             page = 1
 
         # Ordering: issue date first if provided, otherwise created desc
-        if issue_start_str and issue_end_str:
-            q = q.order_by(Newsletter.issue_date.desc(), Newsletter.generated_date.desc())
+        if filter_meta.get('issue_filter_applied'):
+            ordered_query = filtered_query.order_by(Newsletter.issue_date.desc(), Newsletter.generated_date.desc())
         else:
-            q = q.order_by(Newsletter.generated_date.desc())
+            ordered_query = filtered_query.order_by(Newsletter.generated_date.desc())
 
         if page_size is not None:
             offset = (page - 1) * page_size
             if offset < 0:
                 offset = 0
-            q = q.offset(offset).limit(page_size)
+            ordered_query = ordered_query.offset(offset).limit(page_size)
 
-        rows = q.all()
+        rows = ordered_query.all()
         effective_page_size = page_size if page_size is not None else total
         return jsonify({
             'items': [r.to_dict() for r in rows],
@@ -4816,6 +5434,9 @@ def admin_list_newsletters():
             'page_size': effective_page_size,
             'total': total,
             'total_pages': total_pages,
+            'meta': {
+                'filters': filter_meta,
+            }
         })
     except Exception as e:
         logger.exception('admin_list_newsletters failed')
@@ -4826,7 +5447,12 @@ def admin_list_newsletters():
 def admin_get_newsletter(nid: int):
     try:
         n = Newsletter.query.get_or_404(nid)
-        return jsonify(n.to_dict())
+        payload = n.to_dict()
+        try:
+            payload['enriched_content'] = _load_newsletter_json(n)
+        except Exception:
+            payload['enriched_content'] = None
+        return jsonify(payload)
     except Exception as e:
         return jsonify(_safe_error_payload(e, 'An unexpected error occurred. Please try again later.')), 500
 
@@ -4899,24 +5525,63 @@ def admin_update_newsletter(nid: int):
 def admin_bulk_publish_newsletters():
     try:
         data = request.get_json() or {}
-        raw_ids = data.get('ids') or []
         publish_flag = bool(data.get('publish'))
-        if not isinstance(raw_ids, list) or not raw_ids:
-            return jsonify({'error': 'ids array required'}), 400
+        filter_params = data.get('filter_params') or data.get('filters')
 
-        ids = []
-        for value in raw_ids:
+        meta: dict[str, Any] | None = None
+        missing: list[int] = []
+        unchanged = 0
+
+        if filter_params:
+            if not isinstance(filter_params, dict):
+                return jsonify({'error': 'filter_params must be an object'}), 400
+            expected_total_raw = data.get('expected_total')
             try:
-                ids.append(int(value))
+                expected_total = int(expected_total_raw)
             except (TypeError, ValueError):
-                continue
-        ids = list(dict.fromkeys([i for i in ids if i > 0]))
-        if not ids:
-            return jsonify({'error': 'No valid newsletter ids provided'}), 400
+                expected_total = None
+            if expected_total is None or expected_total < 0:
+                return jsonify({'error': 'expected_total is required when using filter_params', 'field': 'expected_total'}), 400
 
-        rows = Newsletter.query.filter(Newsletter.id.in_(ids)).all()
+            selected_ids, matched_ids, filter_meta = _resolve_newsletter_filter_targets(filter_params, data.get('exclude_ids'))
+            if len(matched_ids) != expected_total:
+                return jsonify({
+                    'error': 'expected_total_mismatch',
+                    'expected_total': expected_total,
+                    'actual_total': len(matched_ids),
+                }), 409
+
+            target_ids = selected_ids
+            meta = dict(filter_meta)
+            meta['expected_total'] = expected_total
+            meta['total_requested'] = len(matched_ids)
+        else:
+            normalized_ids = _normalize_int_list(data.get('ids'))
+            if not normalized_ids:
+                return jsonify({'error': 'ids array required'}), 400
+            target_ids = normalized_ids
+            meta = {
+                'mode': 'ids',
+                'total_requested': len(normalized_ids),
+            }
+
+        if not target_ids:
+            meta.setdefault('total_selected', 0)
+            meta.setdefault('excluded_ids', [])
+            return jsonify({
+                'updated': 0,
+                'unchanged': 0,
+                'missing': [],
+                'publish': publish_flag,
+                'total_requested': meta.get('total_requested', 0),
+                'meta': meta,
+            })
+
+        rows = Newsletter.query.filter(Newsletter.id.in_(target_ids)).all()
         found_ids = {row.id for row in rows}
-        missing = [i for i in ids if i not in found_ids]
+        missing = [i for i in target_ids if i not in found_ids]
+        meta.setdefault('missing_ids', missing)
+        meta.setdefault('total_selected', len(target_ids) - len(missing))
 
         now = datetime.now(timezone.utc)
         updated = 0
@@ -4929,20 +5594,25 @@ def admin_bulk_publish_newsletters():
                     row.published_date = now
                     updated += 1
                     auto_send_targets.append(row)
+                else:
+                    unchanged += 1
             else:
                 if was_published:
                     row.published = False
                     row.published_date = None
                     updated += 1
+                else:
+                    unchanged += 1
         db.session.commit()
 
         logger.info(
-            'Admin bulk publish user=%s publish=%s updated=%s ids=%s missing=%s',
+            'Admin bulk publish user=%s publish=%s updated=%s unchanged=%s selection=%s meta=%s',
             getattr(g, 'user_email', None),
             publish_flag,
             updated,
-            ids,
-            missing,
+            unchanged,
+            target_ids,
+            meta,
         )
 
         if publish_flag and auto_send_targets:
@@ -4953,7 +5623,9 @@ def admin_bulk_publish_newsletters():
             'updated': updated,
             'missing': missing,
             'publish': publish_flag,
-            'total_requested': len(ids),
+            'unchanged': unchanged,
+            'total_requested': meta.get('total_requested', len(target_ids)),
+            'meta': meta,
         })
     except Exception as e:
         logger.exception('admin_bulk_publish_newsletters failed')
@@ -5047,6 +5719,758 @@ def _maybe_auto_send_on_publish(n: Newsletter, auto_send_trigger: bool):
             pass
         return None
 
+
+@api_bp.route('/admin/newsletters/bulk', methods=['DELETE'])
+@require_api_key
+def admin_bulk_delete_newsletters():
+    try:
+        data = request.get_json() or {}
+        filter_params = data.get('filter_params') or data.get('filters')
+
+        meta: dict[str, Any] | None = None
+        missing: list[int] = []
+
+        if filter_params:
+            if not isinstance(filter_params, dict):
+                return jsonify({'error': 'filter_params must be an object'}), 400
+            expected_total_raw = data.get('expected_total')
+            try:
+                expected_total = int(expected_total_raw)
+            except (TypeError, ValueError):
+                expected_total = None
+            if expected_total is None or expected_total < 0:
+                return jsonify({'error': 'expected_total is required when using filter_params', 'field': 'expected_total'}), 400
+
+            selected_ids, matched_ids, filter_meta = _resolve_newsletter_filter_targets(filter_params, data.get('exclude_ids'))
+            if len(matched_ids) != expected_total:
+                return jsonify({
+                    'error': 'expected_total_mismatch',
+                    'expected_total': expected_total,
+                    'actual_total': len(matched_ids),
+                }), 409
+
+            target_ids = selected_ids
+            meta = dict(filter_meta)
+            meta['expected_total'] = expected_total
+            meta['total_requested'] = len(matched_ids)
+        else:
+            normalized_ids = _normalize_int_list(data.get('ids'))
+            if not normalized_ids:
+                return jsonify({'error': 'ids array required'}), 400
+            target_ids = normalized_ids
+            meta = {
+                'mode': 'ids',
+                'total_requested': len(normalized_ids),
+            }
+
+        if not target_ids:
+            meta.setdefault('total_selected', 0)
+            meta.setdefault('excluded_ids', [])
+            return jsonify({
+                'deleted': 0,
+                'missing': [],
+                'meta': meta,
+            })
+
+        existing_rows = Newsletter.query.filter(Newsletter.id.in_(target_ids)).with_entities(Newsletter.id).all()
+        existing_ids = [row.id for row in existing_rows]
+        missing = [i for i in target_ids if i not in existing_ids]
+        meta.setdefault('missing_ids', missing)
+        meta.setdefault('total_selected', len(target_ids) - len(missing))
+
+        deleted_count = 0
+        if existing_ids:
+            NewsletterComment.query.filter(NewsletterComment.newsletter_id.in_(existing_ids)).delete(synchronize_session=False)
+            deleted_count = Newsletter.query.filter(Newsletter.id.in_(existing_ids)).delete(synchronize_session=False)
+            db.session.commit()
+        else:
+            db.session.commit()
+
+        logger.info(
+            'Admin bulk delete user=%s deleted=%s selection=%s meta=%s',
+            getattr(g, 'user_email', None),
+            deleted_count,
+            target_ids,
+            meta,
+        )
+
+        return jsonify({
+            'deleted': deleted_count,
+            'missing': missing,
+            'meta': meta,
+        })
+    except Exception as e:
+        logger.exception('admin_bulk_delete_newsletters failed')
+        db.session.rollback()
+        return jsonify(_safe_error_payload(e, 'Failed to delete newsletters. Please try again later.')), 500
+
+# Newsletter YouTube Links endpoints
+@api_bp.route('/admin/newsletters/<int:newsletter_id>/youtube-links', methods=['GET'])
+@require_api_key
+def admin_get_newsletter_youtube_links(newsletter_id: int):
+    """Get all YouTube links for a specific newsletter."""
+    try:
+        newsletter = Newsletter.query.get_or_404(newsletter_id)
+        links = NewsletterPlayerYoutubeLink.query.filter_by(newsletter_id=newsletter_id).order_by(NewsletterPlayerYoutubeLink.player_name).all()
+        return jsonify([link.to_dict() for link in links])
+    except Exception as e:
+        logger.exception('admin_get_newsletter_youtube_links failed')
+        return jsonify(_safe_error_payload(e, 'An unexpected error occurred. Please try again later.')), 500
+
+@api_bp.route('/admin/newsletters/<int:newsletter_id>/youtube-links', methods=['POST'])
+@require_api_key
+def admin_create_newsletter_youtube_link(newsletter_id: int):
+    """Add a YouTube link for a player in this newsletter."""
+    try:
+        newsletter = Newsletter.query.get_or_404(newsletter_id)
+        data = request.get_json() or {}
+        
+        player_id = data.get('player_id')
+        supplemental_loan_id = data.get('supplemental_loan_id')
+        player_name = (data.get('player_name') or '').strip()
+        youtube_link = (data.get('youtube_link') or '').strip()
+        
+        if not player_name:
+            return jsonify({'error': 'player_name is required'}), 400
+        if not youtube_link:
+            return jsonify({'error': 'youtube_link is required'}), 400
+        
+        # Check for duplicate entries
+        existing = None
+        if player_id:
+            existing = NewsletterPlayerYoutubeLink.query.filter_by(
+                newsletter_id=newsletter_id,
+                player_id=player_id
+            ).first()
+        elif supplemental_loan_id:
+            existing = NewsletterPlayerYoutubeLink.query.filter_by(
+                newsletter_id=newsletter_id,
+                supplemental_loan_id=supplemental_loan_id
+            ).first()
+        
+        if existing:
+            return jsonify({'error': 'YouTube link already exists for this player in this newsletter'}), 409
+        
+        link = NewsletterPlayerYoutubeLink(
+            newsletter_id=newsletter_id,
+            player_id=player_id if player_id else None,
+            supplemental_loan_id=supplemental_loan_id if supplemental_loan_id else None,
+            player_name=player_name,
+            youtube_link=youtube_link
+        )
+        
+        db.session.add(link)
+        db.session.commit()
+        
+        return jsonify({'message': 'created', 'link': link.to_dict()}), 201
+    except Exception as e:
+        logger.exception('admin_create_newsletter_youtube_link failed')
+        db.session.rollback()
+        return jsonify(_safe_error_payload(e, 'An unexpected error occurred. Please try again later.')), 500
+
+@api_bp.route('/admin/newsletters/<int:newsletter_id>/youtube-links/<int:link_id>', methods=['PUT'])
+@require_api_key
+def admin_update_newsletter_youtube_link(newsletter_id: int, link_id: int):
+    """Update a YouTube link."""
+    try:
+        link = NewsletterPlayerYoutubeLink.query.filter_by(id=link_id, newsletter_id=newsletter_id).first_or_404()
+        data = request.get_json() or {}
+        
+        if 'player_name' in data:
+            player_name = (data.get('player_name') or '').strip()
+            if player_name:
+                link.player_name = player_name
+        
+        if 'youtube_link' in data:
+            youtube_link = (data.get('youtube_link') or '').strip()
+            if youtube_link:
+                link.youtube_link = youtube_link
+        
+        if 'player_id' in data:
+            link.player_id = data.get('player_id')
+        
+        if 'supplemental_loan_id' in data:
+            link.supplemental_loan_id = data.get('supplemental_loan_id')
+        
+        link.updated_at = datetime.now(timezone.utc)
+        db.session.commit()
+        
+        return jsonify({'message': 'updated', 'link': link.to_dict()})
+    except Exception as e:
+        logger.exception('admin_update_newsletter_youtube_link failed')
+        db.session.rollback()
+        return jsonify(_safe_error_payload(e, 'An unexpected error occurred. Please try again later.')), 500
+
+@api_bp.route('/admin/newsletters/<int:newsletter_id>/youtube-links/<int:link_id>', methods=['DELETE'])
+@require_api_key
+def admin_delete_newsletter_youtube_link(newsletter_id: int, link_id: int):
+    """Delete a YouTube link."""
+    try:
+        link = NewsletterPlayerYoutubeLink.query.filter_by(id=link_id, newsletter_id=newsletter_id).first_or_404()
+        db.session.delete(link)
+        db.session.commit()
+        
+        return jsonify({'message': 'deleted'})
+    except Exception as e:
+        logger.exception('admin_delete_newsletter_youtube_link failed')
+        db.session.rollback()
+        return jsonify(_safe_error_payload(e, 'An unexpected error occurred. Please try again later.')), 500
+
+# Unified Player Management endpoints
+@api_bp.route('/admin/players', methods=['GET'])
+@require_api_key
+def admin_list_players():
+    """
+    List all players with comprehensive information, team filtering, and pagination.
+    Query params:
+    - team_id: filter by primary or loan team
+    - search: search player names
+    - has_sofascore: filter by sofascore ID presence ('true', 'false', or omit for all)
+    - page: page number (default 1)
+    - page_size: items per page (default 50, max 200)
+    """
+    try:
+        page = request.args.get('page', type=int, default=1)
+        page_size = request.args.get('page_size', type=int, default=50)
+        if page < 1:
+            page = 1
+        if page_size < 1 or page_size > 200:
+            page_size = 50
+        
+        team_id_param = request.args.get('team_id', type=int)
+        search_query = request.args.get('search', '').strip()
+        has_sofascore_param = request.args.get('has_sofascore', '').lower()
+        
+        # Get all loaned players first
+        loan_query = LoanedPlayer.query
+        
+        # Apply team filter
+        if team_id_param:
+            loan_query = loan_query.filter(
+                or_(
+                    LoanedPlayer.primary_team_id == team_id_param,
+                    LoanedPlayer.loan_team_id == team_id_param
+                )
+            )
+        
+        # Apply search filter
+        if search_query:
+            loan_query = loan_query.filter(LoanedPlayer.player_name.ilike(f'%{search_query}%'))
+        
+        # Get all loans
+        all_loans = loan_query.all()
+        
+        # Group by player_id
+        player_map = {}
+        for loan in all_loans:
+            if loan.player_id not in player_map:
+                player_map[loan.player_id] = {
+                    'player_id': loan.player_id,
+                    'player_name': loan.player_name,
+                    'primary_team_name': loan.primary_team_name,
+                    'loan_team_name': loan.loan_team_name,
+                    'primary_team_id': loan.primary_team_id,
+                    'loan_team_id': loan.loan_team_id,
+                    'is_active': loan.is_active,
+                    'loan_count': 0,
+                    'loan_id': loan.id  # ID of the first/primary loan record for team editing
+                }
+            player_map[loan.player_id]['loan_count'] += 1
+        
+        # Get Player records with sofascore IDs
+        player_ids = list(player_map.keys())
+        player_records = {}
+        if player_ids:
+            try:
+                players = Player.query.filter(Player.player_id.in_(player_ids)).all()
+                player_records = {p.player_id: p for p in players}
+            except Exception as player_error:
+                logger.warning(f'Could not fetch Player records: {player_error}')
+                # Continue without player records if table doesn't exist yet
+                player_records = {}
+        
+        # Build comprehensive player list
+        players_data = []
+        for player_id, player_info in player_map.items():
+            player_record = player_records.get(player_id)
+            sofascore_id = player_record.sofascore_id if player_record else None
+            display_name = ''
+            if player_record and player_record.name:
+                display_name = player_record.name.strip()
+            if not display_name:
+                display_name = (player_info.get('player_name') or '').strip()
+            if not display_name:
+                display_name = f'Player {player_id}'
+            
+            # Apply sofascore filter
+            if has_sofascore_param == 'true' and not sofascore_id:
+                continue
+            if has_sofascore_param == 'false' and sofascore_id:
+                continue
+            
+            player_data = {
+                'player_id': player_info['player_id'],
+                'player_name': display_name,
+                'primary_team_name': player_info['primary_team_name'],
+                'loan_team_name': player_info['loan_team_name'],
+                'primary_team_id': player_info['primary_team_id'],
+                'loan_team_id': player_info['loan_team_id'],
+                'is_active': player_info['is_active'],
+                'loan_count': player_info['loan_count'],
+                'loan_id': player_info['loan_id'],  # Primary loan record ID for team updates
+                'sofascore_id': sofascore_id,
+                'has_sofascore_id': bool(sofascore_id),
+                'photo_url': player_record.photo_url if player_record else None,
+                'position': player_record.position if player_record else None,
+                'nationality': player_record.nationality if player_record else None,
+                'age': player_record.age if player_record else None,
+            }
+            players_data.append(player_data)
+        
+        # Sort by name
+        players_data.sort(key=lambda x: x['player_name'].lower())
+        
+        # Paginate
+        total = len(players_data)
+        total_pages = max(1, math.ceil(total / page_size)) if total > 0 else 1
+        start = (page - 1) * page_size
+        end = start + page_size
+        paginated_data = players_data[start:end]
+        
+        return jsonify({
+            'items': paginated_data,
+            'page': page,
+            'page_size': page_size,
+            'total': total,
+            'total_pages': total_pages
+        })
+    except Exception as e:
+        logger.exception('admin_list_players failed')
+        return jsonify(_safe_error_payload(e, 'An unexpected error occurred. Please try again later.')), 500
+
+@api_bp.route('/admin/players/<player_id>', methods=['GET'])
+@require_api_key
+def admin_get_player(player_id):
+    """Get detailed player information."""
+    try:
+        # Convert player_id to int (supports negative IDs for manual players)
+        try:
+            player_id = int(player_id)
+        except ValueError:
+            return jsonify({'error': 'Invalid player ID'}), 400
+        # Get Player record
+        player_record = Player.query.filter_by(player_id=player_id).first()
+        
+        # Get all loans for this player
+        loans = LoanedPlayer.query.filter_by(player_id=player_id).order_by(LoanedPlayer.created_at.desc()).all()
+        
+        # Get supplemental loans if any
+        supplemental = SupplementalLoan.query.filter_by(api_player_id=player_id).order_by(SupplementalLoan.created_at.desc()).all()
+        
+        player_data = {
+            'player_id': player_id,
+            'name': player_record.name if player_record else (loans[0].player_name if loans else f"Player {player_id}"),
+            'sofascore_id': player_record.sofascore_id if player_record else None,
+            'photo_url': player_record.photo_url if player_record else None,
+            'position': player_record.position if player_record else None,
+            'nationality': player_record.nationality if player_record else None,
+            'age': player_record.age if player_record else None,
+            'height': player_record.height if player_record else None,
+            'weight': player_record.weight if player_record else None,
+            'firstname': player_record.firstname if player_record else None,
+            'lastname': player_record.lastname if player_record else None,
+            'loans': [l.to_dict() for l in loans],
+            'supplemental_loans': [s.to_dict() for s in supplemental],
+            'total_loans': len(loans) + len(supplemental),
+            'created_at': player_record.created_at.isoformat() if player_record and player_record.created_at else None,
+            'updated_at': player_record.updated_at.isoformat() if player_record and player_record.updated_at else None,
+        }
+        
+        return jsonify(player_data)
+    except Exception as e:
+        logger.exception('admin_get_player failed')
+        return jsonify(_safe_error_payload(e, 'An unexpected error occurred. Please try again later.')), 500
+
+@api_bp.route('/admin/players/<player_id>', methods=['PUT'])
+@require_api_key
+def admin_update_player(player_id):
+    """Update player information including sofascore_id."""
+    try:
+        # Convert player_id to int (supports negative IDs for manual players)
+        try:
+            player_id = int(player_id)
+        except ValueError:
+            return jsonify({'error': 'Invalid player ID'}), 400
+        data = request.get_json() or {}
+        
+        # Get or create Player record
+        player_record = Player.query.filter_by(player_id=player_id).first()
+        if not player_record:
+            player_record = Player(player_id=player_id)
+            player_record.created_at = datetime.now(timezone.utc)
+            db.session.add(player_record)
+        
+        # Update fields
+        propagated_name = None
+        if 'name' in data:
+            name = (data.get('name') or '').strip()
+            if name:
+                player_record.name = name
+                propagated_name = name
+        
+        if 'sofascore_id' in data:
+            sofascore_id = data.get('sofascore_id')
+            # Check for duplicates
+            if sofascore_id:
+                existing = Player.query.filter(
+                    Player.sofascore_id == sofascore_id,
+                    Player.player_id != player_id
+                ).first()
+                if existing:
+                    return jsonify({
+                        'error': f'Sofascore ID {sofascore_id} is already assigned to player #{existing.player_id}'
+                    }), 409
+            player_record.sofascore_id = sofascore_id
+        
+        if 'position' in data:
+            player_record.position = data.get('position')
+        
+        if 'nationality' in data:
+            player_record.nationality = data.get('nationality')
+        
+        if 'age' in data:
+            player_record.age = data.get('age')
+        
+        if 'height' in data:
+            player_record.height = data.get('height')
+        
+        if 'weight' in data:
+            player_record.weight = data.get('weight')
+        
+        if 'firstname' in data:
+            player_record.firstname = data.get('firstname')
+        
+        if 'lastname' in data:
+            player_record.lastname = data.get('lastname')
+        
+        if 'photo_url' in data:
+            player_record.photo_url = data.get('photo_url')
+        
+        player_record.updated_at = datetime.now(timezone.utc)
+        if propagated_name:
+            updated_rows = LoanedPlayer.query.filter_by(player_id=player_id).update(
+                {
+                    'player_name': propagated_name,
+                    'updated_at': datetime.now(timezone.utc),
+                },
+                synchronize_session=False,
+            )
+            if updated_rows:
+                logger.info('Propagated name update to %d loan rows for player_id=%s', updated_rows, player_id)
+
+        db.session.commit()
+        
+        return jsonify({'message': 'updated', 'player': player_record.to_dict()})
+    except Exception as e:
+        logger.exception('admin_update_player failed')
+        db.session.rollback()
+        return jsonify(_safe_error_payload(e, 'An unexpected error occurred. Please try again later.')), 500
+
+@api_bp.route('/admin/players/bulk-update-sofascore', methods=['POST'])
+@require_api_key
+def admin_bulk_update_sofascore():
+    """Bulk update Sofascore IDs for multiple players."""
+    try:
+        data = request.get_json() or {}
+        updates = data.get('updates', [])
+        
+        if not isinstance(updates, list):
+            return jsonify({'error': 'updates must be an array'}), 400
+        
+        results = {
+            'updated': [],
+            'failed': [],
+            'skipped': []
+        }
+        
+        for update in updates:
+            player_id = update.get('player_id')
+            sofascore_id = update.get('sofascore_id')
+            
+            if not player_id:
+                results['failed'].append({'error': 'missing player_id', 'update': update})
+                continue
+            
+            try:
+                # Get or create player record
+                player_record = Player.query.filter_by(player_id=player_id).first()
+                if not player_record:
+                    player_record = Player(player_id=player_id)
+                    player_record.name = update.get('player_name', f'Player {player_id}')
+                    player_record.created_at = datetime.now(timezone.utc)
+                    db.session.add(player_record)
+                
+                # Check for duplicate sofascore_id
+                if sofascore_id:
+                    existing = Player.query.filter(
+                        Player.sofascore_id == sofascore_id,
+                        Player.player_id != player_id
+                    ).first()
+                    if existing:
+                        results['failed'].append({
+                            'player_id': player_id,
+                            'error': f'Sofascore ID already assigned to player #{existing.player_id}'
+                        })
+                        continue
+                
+                player_record.sofascore_id = sofascore_id
+                player_record.updated_at = datetime.now(timezone.utc)
+                
+                results['updated'].append({
+                    'player_id': player_id,
+                    'sofascore_id': sofascore_id
+                })
+            except Exception as e:
+                results['failed'].append({
+                    'player_id': player_id,
+                    'error': str(e)
+                })
+        
+        db.session.commit()
+        
+        return jsonify({
+            'message': 'bulk update completed',
+            'results': results
+        })
+    except Exception as e:
+        logger.exception('admin_bulk_update_sofascore failed')
+        db.session.rollback()
+        return jsonify(_safe_error_payload(e, 'An unexpected error occurred. Please try again later.')), 500
+
+@api_bp.route('/admin/players/field-options', methods=['GET'])
+@require_api_key
+def admin_get_player_field_options():
+    """
+    Get existing values for player fields (positions, nationalities) for dropdown population.
+    This helps normalize data entry by providing existing values.
+    """
+    try:
+        # Get unique positions from Player table
+        positions_query = db.session.query(Player.position).filter(
+            Player.position.isnot(None),
+            Player.position != ''
+        ).distinct().all()
+        positions = sorted([p[0] for p in positions_query if p[0]])
+        
+        # Get unique nationalities from Player table
+        nationalities_query = db.session.query(Player.nationality).filter(
+            Player.nationality.isnot(None),
+            Player.nationality != ''
+        ).distinct().all()
+        nationalities = sorted([n[0] for n in nationalities_query if n[0]])
+        
+        return jsonify({
+            'positions': positions,
+            'nationalities': nationalities
+        })
+    except Exception as e:
+        logger.exception('admin_get_player_field_options failed')
+        return jsonify(_safe_error_payload(e, 'An unexpected error occurred. Please try again later.')), 500
+
+
+@api_bp.route('/admin/players', methods=['POST'])
+@require_api_key
+def admin_create_player():
+    """
+    Create a new manual player with loan association.
+    
+    This creates both a Player record and a LoanedPlayer record to properly
+    track the player's loan status and team associations.
+    """
+    try:
+        data = request.get_json() or {}
+        
+        # Validate required fields
+        name = (data.get('name') or '').strip()
+        if not name:
+            return jsonify({'error': 'Player name is required'}), 400
+        
+        window_key = data.get('window_key')
+        if not window_key:
+            return jsonify({'error': 'Season/window is required'}), 400
+        
+        # Handle primary team (either from database or custom)
+        primary_team_id = data.get('primary_team_id')
+        custom_primary_team_name = (data.get('custom_primary_team_name') or '').strip()
+        
+        if primary_team_id:
+            # Using team from database
+            primary_team = Team.query.get(primary_team_id)
+            if not primary_team:
+                return jsonify({'error': f'Primary team ID {primary_team_id} not found'}), 404
+            primary_team_name = primary_team.name
+            primary_team_api_id = primary_team.team_id
+        elif custom_primary_team_name:
+            # Using custom team name
+            primary_team = None
+            primary_team_id = None
+            primary_team_name = custom_primary_team_name
+            primary_team_api_id = None
+        else:
+            return jsonify({'error': 'Primary team or custom primary team name is required'}), 400
+        
+        # Handle loan team (either from database or custom)
+        loan_team_id = data.get('loan_team_id')
+        custom_loan_team_name = (data.get('custom_loan_team_name') or '').strip()
+        
+        if loan_team_id:
+            # Using team from database
+            loan_team = Team.query.get(loan_team_id)
+            if not loan_team:
+                return jsonify({'error': f'Loan team ID {loan_team_id} not found'}), 404
+            loan_team_name = loan_team.name
+            loan_team_api_id = loan_team.team_id
+        elif custom_loan_team_name:
+            # Using custom team name
+            loan_team = None
+            loan_team_id = None
+            loan_team_name = custom_loan_team_name
+            loan_team_api_id = None
+        else:
+            return jsonify({'error': 'Loan team or custom loan team name is required'}), 400
+        
+        # Generate a unique player_id for manual players (negative IDs to avoid conflicts with API-Football)
+        existing_manual_players = Player.query.filter(Player.player_id < 0).order_by(Player.player_id.asc()).all()
+        if existing_manual_players:
+            new_player_id = existing_manual_players[0].player_id - 1
+        else:
+            new_player_id = -1
+        
+        # Create player record
+        player_record = Player(player_id=new_player_id)
+        player_record.name = name
+        player_record.firstname = data.get('firstname')
+        player_record.lastname = data.get('lastname')
+        player_record.position = data.get('position')
+        player_record.nationality = data.get('nationality')
+        player_record.age = data.get('age')
+        player_record.height = data.get('height')
+        player_record.weight = data.get('weight')
+        player_record.photo_url = data.get('photo_url')
+        player_record.created_at = datetime.now(timezone.utc)
+        player_record.updated_at = datetime.now(timezone.utc)
+        
+        # Handle sofascore_id with duplicate check
+        sofascore_id = data.get('sofascore_id')
+        if sofascore_id:
+            existing = Player.query.filter_by(sofascore_id=sofascore_id).first()
+            if existing:
+                return jsonify({
+                    'error': f'Sofascore ID {sofascore_id} is already assigned to player #{existing.player_id}'
+                }), 409
+            player_record.sofascore_id = sofascore_id
+        
+        db.session.add(player_record)
+        db.session.flush()  # Get player_id before creating loan record
+        
+        # Create LoanedPlayer record to track the loan
+        # Build team_ids string (comma-separated API IDs, if available)
+        team_ids_parts = []
+        if primary_team_api_id:
+            team_ids_parts.append(str(primary_team_api_id))
+        if loan_team_api_id:
+            team_ids_parts.append(str(loan_team_api_id))
+        team_ids_str = ','.join(team_ids_parts) if team_ids_parts else None
+        
+        loaned_player = LoanedPlayer(
+            player_id=new_player_id,
+            player_name=name,
+            age=data.get('age'),
+            nationality=data.get('nationality'),
+            primary_team_id=primary_team_id,  # Will be None for custom teams
+            primary_team_name=primary_team_name,
+            loan_team_id=loan_team_id,  # Will be None for custom teams
+            loan_team_name=loan_team_name,
+            team_ids=team_ids_str,
+            window_key=window_key,
+            is_active=True,
+            data_source='manual',
+            can_fetch_stats=False,  # Manual players can't auto-fetch stats
+            created_at=datetime.now(timezone.utc),
+            updated_at=datetime.now(timezone.utc)
+        )
+        
+        db.session.add(loaned_player)
+        db.session.commit()
+        
+        return jsonify({
+            'message': f'Player "{name}" created successfully with loan from {primary_team_name} to {loan_team_name}',
+            'player': player_record.to_dict(),
+            'loan': loaned_player.to_dict()
+        }), 201
+    except Exception as e:
+        logger.exception('admin_create_player failed')
+        db.session.rollback()
+        return jsonify(_safe_error_payload(e, 'An unexpected error occurred. Please try again later.')), 500
+
+@api_bp.route('/admin/players/<player_id>', methods=['DELETE'])
+@require_api_key
+def admin_delete_player(player_id):
+    """
+    Delete a player from the system.
+    This removes the player from tracking and cleans up associated data.
+    Useful for removing false positives from API-Football.
+    """
+    try:
+        # Convert player_id to int (supports negative IDs for manual players)
+        try:
+            player_id = int(player_id)
+        except ValueError:
+            return jsonify({'error': 'Invalid player ID'}), 400
+        print(f"[DEBUG admin_delete_player] invoked with player_id={player_id}", flush=True)
+        # Check for loaned player records
+        loaned_records = LoanedPlayer.query.filter_by(player_id=player_id).all()
+        loaned_count = len(loaned_records)
+        
+        # Check for YouTube links
+        youtube_links = NewsletterPlayerYoutubeLink.query.filter_by(player_id=player_id).all()
+        youtube_count = len(youtube_links)
+        
+        # Get player record if it exists
+        player_record = Player.query.filter_by(player_id=player_id).first()
+        
+        # If no data exists anywhere, player not found
+        if not player_record and loaned_count == 0 and youtube_count == 0:
+            return jsonify({'error': 'Player not found'}), 404
+        
+        # Delete all associated data
+        # 1. Delete YouTube links
+        for link in youtube_links:
+            db.session.delete(link)
+        
+        # 2. Delete loaned player records
+        for loan in loaned_records:
+            db.session.delete(loan)
+        
+        # 3. Delete player record if it exists
+        if player_record:
+            db.session.delete(player_record)
+        
+        db.session.commit()
+        
+        return jsonify({
+            'message': 'Player deleted successfully',
+            'deleted': {
+                'loaned_records': loaned_count,
+                'youtube_links': youtube_count,
+                'player_record': player_record is not None
+            }
+        })
+    except Exception as e:
+        logger.exception('admin_delete_player failed')
+        db.session.rollback()
+        return jsonify(_safe_error_payload(e, 'An unexpected error occurred. Please try again later.')), 500
+
 @api_bp.route('/admin/runs/history', methods=['GET', 'POST'])
 @require_api_key
 def admin_runs_history():
@@ -5065,4 +6489,165 @@ def admin_runs_history_clear():
         _save_run_history_list([])
         return jsonify({'message': 'cleared'})
     except Exception as e:
+        return jsonify(_safe_error_payload(e, 'An unexpected error occurred. Please try again later.')), 500
+
+# --- Admin: Supplemental Loans management ---
+@api_bp.route('/admin/supplemental-loans', methods=['GET'])
+@require_api_key
+def admin_list_supplemental_loans():
+    """List supplemental loans with optional filters."""
+    try:
+        parent_team_api_id = request.args.get('parent_team_api_id', type=int)
+        parent_team_db_id = request.args.get('parent_team_db_id', type=int)
+        season = request.args.get('season', type=int)
+        player_name = request.args.get('player_name')
+
+        q = SupplementalLoan.query
+
+        # Filter by parent team
+        if parent_team_db_id:
+            q = q.filter(SupplementalLoan.parent_team_id == parent_team_db_id)
+        elif parent_team_api_id and season:
+            row = Team.query.filter_by(team_id=parent_team_api_id, season=season).first()
+            if row:
+                q = q.filter(SupplementalLoan.parent_team_id == row.id)
+
+        # Filter by season
+        if season:
+            q = q.filter(SupplementalLoan.season_year == season)
+
+        # Filter by player name
+        if player_name:
+            q = q.filter(SupplementalLoan.player_name.ilike(f"%{player_name}%"))
+
+        loans = q.order_by(SupplementalLoan.updated_at.desc()).all()
+        return jsonify([l.to_dict() for l in loans])
+    except Exception as e:
+        logger.exception('admin_list_supplemental_loans failed')
+        return jsonify(_safe_error_payload(e, 'An unexpected error occurred. Please try again later.')), 500
+
+@api_bp.route('/admin/supplemental-loans', methods=['POST'])
+@require_api_key
+def admin_create_supplemental_loan():
+    """Create a new supplemental loan entry."""
+    try:
+        data = request.get_json() or {}
+        
+        player_name = (data.get('player_name') or '').strip()
+        if not player_name:
+            return jsonify({'error': 'player_name is required'}), 400
+
+        parent_team_name = (data.get('parent_team_name') or '').strip()
+        loan_team_name = (data.get('loan_team_name') or '').strip()
+        if not parent_team_name or not loan_team_name:
+            return jsonify({'error': 'parent_team_name and loan_team_name are required'}), 400
+
+        season_year = data.get('season_year', type=int)
+        if not season_year:
+            return jsonify({'error': 'season_year is required'}), 400
+
+        # Optional team IDs for linking
+        parent_team_db_id = data.get('parent_team_db_id', type=int)
+        loan_team_db_id = data.get('loan_team_db_id', type=int)
+        parent_team_api_id = data.get('parent_team_api_id', type=int)
+        loan_team_api_id = data.get('loan_team_api_id', type=int)
+
+        # Resolve parent team
+        parent_team = None
+        if parent_team_db_id:
+            parent_team = Team.query.get(parent_team_db_id)
+        elif parent_team_api_id:
+            parent_team = Team.query.filter_by(team_id=parent_team_api_id, season=season_year).first()
+
+        # Resolve loan team
+        loan_team = None
+        if loan_team_db_id:
+            loan_team = Team.query.get(loan_team_db_id)
+        elif loan_team_api_id:
+            loan_team = Team.query.filter_by(team_id=loan_team_api_id, season=season_year).first()
+
+        # Create supplemental loan
+        supp_loan = SupplementalLoan(
+            player_name=player_name,
+            parent_team_id=parent_team.id if parent_team else None,
+            parent_team_name=parent_team_name,
+            loan_team_id=loan_team.id if loan_team else None,
+            loan_team_name=loan_team_name,
+            season_year=season_year,
+            data_source=data.get('data_source', 'manual'),
+            can_fetch_stats=data.get('can_fetch_stats', False),
+            source_url=data.get('source_url'),
+            wiki_title=data.get('wiki_title'),
+            is_verified=data.get('is_verified', False),
+            youtube_link=data.get('youtube_link'),
+        )
+
+        db.session.add(supp_loan)
+        db.session.commit()
+
+        return jsonify({'message': 'created', 'loan': supp_loan.to_dict()}), 201
+    except Exception as e:
+        logger.exception('admin_create_supplemental_loan failed')
+        db.session.rollback()
+        return jsonify(_safe_error_payload(e, 'An unexpected error occurred. Please try again later.')), 500
+
+@api_bp.route('/admin/supplemental-loans/<int:loan_id>', methods=['PUT'])
+@require_api_key
+def admin_update_supplemental_loan(loan_id: int):
+    """Update an existing supplemental loan entry."""
+    try:
+        loan = SupplementalLoan.query.get_or_404(loan_id)
+        data = request.get_json() or {}
+
+        # Update basic fields
+        if 'player_name' in data:
+            loan.player_name = (data.get('player_name') or '').strip() or loan.player_name
+        if 'parent_team_name' in data:
+            loan.parent_team_name = (data.get('parent_team_name') or '').strip() or loan.parent_team_name
+        if 'loan_team_name' in data:
+            loan.loan_team_name = (data.get('loan_team_name') or '').strip() or loan.loan_team_name
+        if 'season_year' in data:
+            loan.season_year = int(data.get('season_year'))
+        if 'data_source' in data:
+            loan.data_source = data.get('data_source')
+        if 'can_fetch_stats' in data:
+            loan.can_fetch_stats = bool(data.get('can_fetch_stats'))
+        if 'source_url' in data:
+            loan.source_url = data.get('source_url')
+        if 'wiki_title' in data:
+            loan.wiki_title = data.get('wiki_title')
+        if 'is_verified' in data:
+            loan.is_verified = bool(data.get('is_verified'))
+        if 'youtube_link' in data:
+            loan.youtube_link = data.get('youtube_link')
+
+        # Update team relationships if provided
+        if 'parent_team_db_id' in data:
+            team = Team.query.get(data.get('parent_team_db_id'))
+            if team:
+                loan.parent_team_id = team.id
+        if 'loan_team_db_id' in data:
+            team = Team.query.get(data.get('loan_team_db_id'))
+            if team:
+                loan.loan_team_id = team.id
+
+        db.session.commit()
+        return jsonify({'message': 'updated', 'loan': loan.to_dict()})
+    except Exception as e:
+        logger.exception('admin_update_supplemental_loan failed')
+        db.session.rollback()
+        return jsonify(_safe_error_payload(e, 'An unexpected error occurred. Please try again later.')), 500
+
+@api_bp.route('/admin/supplemental-loans/<int:loan_id>', methods=['DELETE'])
+@require_api_key
+def admin_delete_supplemental_loan(loan_id: int):
+    """Delete a supplemental loan entry."""
+    try:
+        loan = SupplementalLoan.query.get_or_404(loan_id)
+        db.session.delete(loan)
+        db.session.commit()
+        return jsonify({'message': 'deleted', 'id': loan_id})
+    except Exception as e:
+        logger.exception('admin_delete_supplemental_loan failed')
+        db.session.rollback()
         return jsonify(_safe_error_payload(e, 'An unexpected error occurred. Please try again later.')), 500

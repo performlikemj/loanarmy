@@ -10,7 +10,7 @@ import logging
 import re
 import unicodedata
 from urllib.parse import urlparse
-from datetime import date, timedelta
+from datetime import date, timedelta, datetime, timezone
 from typing import Any, Dict, Annotated
 import dataclasses
 from collections.abc import Mapping
@@ -25,7 +25,9 @@ from agents import (Agent,
                     )
 from agents.run_context import RunContextWrapper
 
-from src.models.league import db, Team, LoanedPlayer, Newsletter, LeagueLocalization
+from src.models.league import db, Team, LoanedPlayer, Newsletter, Player, TeamProfile
+from sqlalchemy import func
+from src.agents.errors import NoActiveLoaneesError
 from jinja2 import Environment, FileSystemLoader, select_autoescape
 from src.api_football_client import APIFootballClient
 import dotenv
@@ -41,6 +43,7 @@ except Exception:
 # Freshness policy flags
 STRICT_FRESHNESS = (os.getenv("MCP_STRICT_FRESHNESS", "1").lower() in ("1", "true", "yes"))
 ALLOW_WIDE_FRESHNESS = (os.getenv("MCP_ALLOW_WIDE_FRESHNESS", "0").lower() in ("1", "true", "yes"))
+ENABLE_SOFA_NAME_FALLBACK = (os.getenv("ENABLE_SOFA_NAME_FALLBACK", "0").lower() in ("1", "true", "yes", "on"))
 
 def _log_sample(tag: str, pid: str, query: str, results: list[dict]):
     if not DEBUG_MCP:
@@ -65,6 +68,7 @@ def _log_sample(tag: str, pid: str, query: str, results: list[dict]):
 
 # Module-level cache to make search_context available to persist tool when the agent omits it
 _LATEST_SEARCH_CONTEXT: dict[str, dict] | None = None
+_LATEST_PLAYER_LOOKUP: dict[str, list[dict[str, Any]]] = {}
 
 # --- String sanitization helpers (remove ASCII control chars except \t, \n, \r) ---
 import re
@@ -84,6 +88,98 @@ def _sanitize(obj):
     if isinstance(obj, dict):
         return {k: _sanitize(v) for k, v in obj.items()}
     return obj
+
+
+def _normalize_player_key(name: str) -> str:
+    if not name:
+        return ''
+    cleaned = to_initial_last(name)
+    cleaned = strip_diacritics(cleaned)
+    cleaned = ''.join(ch for ch in cleaned.lower() if ch.isalnum())
+    return cleaned
+
+
+def _set_latest_player_lookup(mapping: dict[str, list[dict[str, Any]]] | None) -> None:
+    global _LATEST_PLAYER_LOOKUP
+    if not mapping:
+        _LATEST_PLAYER_LOOKUP = {}
+        return
+    normalized: dict[str, list[dict[str, Any]]] = {}
+    for key, values in mapping.items():
+        if not key or not isinstance(values, list):
+            continue
+        normalized[key] = [v for v in values if isinstance(v, dict)]
+    _LATEST_PLAYER_LOOKUP = normalized
+
+
+def _apply_player_lookup(content_json: dict, lookup: dict[str, list[dict[str, Any]]] | None = None) -> tuple[dict, bool]:
+    if not isinstance(content_json, dict):
+        return content_json, False
+    active_lookup = lookup or _LATEST_PLAYER_LOOKUP or {}
+    if not active_lookup:
+        return content_json, False
+
+    changed = False
+    sections = content_json.get('sections') or []
+    for sec in sections:
+        items = sec.get('items') if isinstance(sec, dict) else None
+        if not isinstance(items, list):
+            continue
+        for item in items:
+            if not isinstance(item, dict):
+                continue
+            if item.get('skip_lookup'):
+                continue
+            if item.get('player_id'):
+                continue
+            name = item.get('player_name') or item.get('player') or ''
+            if not name:
+                continue
+            keys = []
+            keys.append(_normalize_player_key(name))
+            alt = to_initial_last(name)
+            if alt and alt != name:
+                keys.append(_normalize_player_key(alt))
+            full = item.get('full_name')
+            if isinstance(full, str):
+                keys.append(_normalize_player_key(full))
+
+            candidate = None
+            for key in keys:
+                if not key:
+                    continue
+                matches = active_lookup.get(key)
+                if not matches:
+                    continue
+                if len(matches) == 1:
+                    candidate = matches[0]
+                else:
+                    loan_team = (item.get('loan_team') or item.get('loan_team_name') or '').strip().lower()
+                    for match in matches:
+                        lt_name = (match.get('loan_team_name') or '').strip().lower()
+                        if loan_team and lt_name and loan_team == lt_name:
+                            candidate = match
+                            break
+                    if candidate is None:
+                        candidate = matches[0]
+                if candidate:
+                    break
+
+            if candidate and candidate.get('player_id'):
+                item['player_id'] = candidate['player_id']
+                if candidate.get('loan_team_api_id') and not item.get('loan_team_api_id'):
+                    item['loan_team_api_id'] = candidate['loan_team_api_id']
+                if candidate.get('loan_team_id') and not item.get('loan_team_id'):
+                    item['loan_team_id'] = candidate['loan_team_id']
+                if candidate.get('loan_team_name') and not item.get('loan_team'):
+                    item['loan_team'] = candidate['loan_team_name']
+                if candidate.get('loan_team_name') and not item.get('loan_team_name'):
+                    item['loan_team_name'] = candidate['loan_team_name']
+                changed = True
+
+    if changed:
+        content_json['sections'] = sections
+    return content_json, changed
 
 # ---------- Utilities ----------
 def monday_range(target: date) -> tuple[date, date]:
@@ -396,6 +492,11 @@ def _filter_hits_for_player(cat: dict, player_name: str, loan_team: str, week_st
         return cat
 
 api_client = APIFootballClient()
+
+# Cache player photo lookups keyed by API-Football player id
+_PLAYER_PHOTO_CACHE: dict[int, str | None] = {}
+# Cache team logo lookups keyed by API-Football team id
+_TEAM_LOGO_CACHE: dict[int, str | None] = {}
 # aio_client = AsyncOpenAI(
 #     base_url="https://openrouter.ai/api/v1",
 #     api_key=os.getenv("OPENROUTER_API_KEY")
@@ -492,6 +593,7 @@ class PersistNewsletterArgs(BaseModel):
     team_db_id: int = Field(..., description="DB PK of the parent team")
     content_json: Json[Any] = Field(..., description="Structured newsletter payload")
     issue_date: DateStr = Field(..., description="YYYY-MM-DD ISO date")
+    player_lookup: Json[Any] | None = Field(None, description="Optional mapping of player aliases to metadata")
 
 SYSTEM_INSTRUCTIONS = """
 You are a football newsletter editor. Tools available: Python tools. The search context is precomputed using the Brave Search API.
@@ -598,6 +700,7 @@ async def persist_newsletter(ctx, args) -> Dict[str, Any]:
     # Robustly parse content_json which may be JSON text or already a dict.
     raw_content = args.get("content_json")
     search_context = args.get("search_context") if isinstance(args, dict) else None
+    player_lookup_payload = args.get("player_lookup") if isinstance(args, dict) else None
     if search_context is None:
         # fallback to latest captured context from orchestrator
         try:
@@ -606,6 +709,15 @@ async def persist_newsletter(ctx, args) -> Dict[str, Any]:
                 search_context = _LATEST_SEARCH_CONTEXT
         except Exception:
             pass
+    if isinstance(player_lookup_payload, str):
+        try:
+            player_lookup_payload = json.loads(player_lookup_payload)
+        except Exception:
+            player_lookup_payload = None
+    if isinstance(player_lookup_payload, dict):
+        _set_latest_player_lookup(player_lookup_payload)
+    else:
+        player_lookup_payload = None
     if isinstance(raw_content, str):
         try:
             content_json = json.loads(raw_content)
@@ -649,6 +761,11 @@ async def persist_newsletter(ctx, args) -> Dict[str, Any]:
 
     # Sanitize all strings to strip control characters (e.g., \u0000)
     content_json = _sanitize(content_json)
+
+    try:
+        content_json, _ = _apply_player_lookup(content_json, player_lookup_payload)
+    except Exception:
+        pass
 
     t = Team.query.get(team_db_id)
     if not t:
@@ -705,6 +822,13 @@ async def persist_newsletter(ctx, args) -> Dict[str, Any]:
         content_json = lint_and_enrich(content_json)
     except Exception:
         # Non-fatal; continue with original
+        pass
+
+    try:
+        team_logo_url = _team_logo_for_team(t.team_id if t else None, fallback_name=(t.name if t else None))
+        if team_logo_url:
+            content_json["team_logo"] = team_logo_url
+    except Exception:
         pass
 
     # Sanitize again before serializing
@@ -894,7 +1018,10 @@ async def generate_weekly_newsletter(team_db_id: int, target_date: date) -> Dict
     search_context: dict[str, dict[str, list[dict]]] = {}
     search_context_by_id: dict[str, dict[str, list[dict]]] = {}
     loanees = (report.get("loanees") or []) if isinstance(report, dict) else []
+    if len(loanees) == 0:
+        raise NoActiveLoaneesError(team_db_id, week_start, week_end)
     full_name_cache: dict[str, str] = {}
+    player_lookup: dict[str, list[dict[str, Any]]] = {}
 
     # Get team info for localization
     team = Team.query.get(team_db_id)
@@ -923,6 +1050,28 @@ async def generate_weekly_newsletter(team_db_id: int, target_date: date) -> Dict
         loan_team = loanee.get("loan_team_name") or loanee.get("loan_team") or ""
         if not player:
             continue
+        try:
+            player_id_entry = int(pid) if pid else None
+        except Exception:
+            player_id_entry = None
+
+        if player_id_entry is not None:
+            entry = {
+                'player_id': player_id_entry,
+                'loan_team_api_id': loanee.get('loan_team_api_id') or loanee.get('loan_team_id'),
+                'loan_team_id': loanee.get('loan_team_db_id') or loanee.get('loan_team_id'),
+                'loan_team_name': loan_team,
+            }
+
+            def _register_alias(alias: str | None) -> None:
+                key = _normalize_player_key(alias or '')
+                if key:
+                    player_lookup.setdefault(key, []).append(entry)
+
+            _register_alias(player)
+            _register_alias(full_name)
+            _register_alias(to_initial_last(player))
+            _register_alias(to_initial_last(full_name or player))
         items_web: list[dict] = []
         items_news: list[dict] = []
 
@@ -1034,6 +1183,7 @@ async def generate_weekly_newsletter(team_db_id: int, target_date: date) -> Dict
         _LATEST_SEARCH_CONTEXT = search_context
     except Exception:
         pass
+    _set_latest_player_lookup(player_lookup)
 
     # High-level instruction payload (add What the Internet is Saying section seed)
     user_msg = {
@@ -1120,6 +1270,7 @@ async def generate_weekly_newsletter(team_db_id: int, target_date: date) -> Dict
                 "content_json": content_json,
                 "issue_date": target_date.isoformat(),
                 "search_context": search_context,
+                "player_lookup": player_lookup,
             }
             persisted_row = await persist_newsletter(ctx=None, args=args)
         except Exception:
@@ -1147,6 +1298,291 @@ def generate_weekly_newsletter_with_mcp_sync(team_db_id: int, target_date: date)
 def _display_name(name: str) -> str:
     """Return first-initial + last-name when possible, preserving diacritics."""
     return to_initial_last(name)
+
+
+def _player_profile_store() -> tuple[Any | None, type[Player] | None]:
+    try:
+        return db.session, Player
+    except Exception:
+        return None, Player
+
+
+def _team_profile_store() -> tuple[Any | None, type[TeamProfile] | None]:
+    try:
+        return db.session, TeamProfile
+    except Exception:
+        return None, TeamProfile
+
+
+def _persist_player_profile(payload: dict | None) -> None:
+    if not isinstance(payload, dict):
+        return
+    player_block = payload.get('player') or {}
+    player_id = player_block.get('id')
+    if not player_id:
+        return
+    session, player_model = _player_profile_store()
+    if session is None or player_model is None:
+        return
+
+    try:
+        record = session.query(player_model).filter_by(player_id=player_id).one_or_none()
+        if record is None:
+            record = player_model(player_id=player_id)
+            session.add(record)
+
+        def _set(attr: str, value):
+            if value is not None and value != '':
+                setattr(record, attr, value)
+
+        _set('name', player_block.get('name'))
+        _set('firstname', player_block.get('firstname'))
+        _set('lastname', player_block.get('lastname'))
+        _set('nationality', player_block.get('nationality'))
+        _set('age', player_block.get('age'))
+        _set('height', player_block.get('height'))
+        _set('weight', player_block.get('weight'))
+        _set('photo_url', player_block.get('photo'))
+
+        stats = payload.get('statistics') or []
+        if stats:
+            games = (stats[0] or {}).get('games') or {}
+            _set('position', games.get('position'))
+
+        if record.created_at is None:
+            record.created_at = datetime.now(timezone.utc)
+
+        session.commit()
+    except Exception:
+        try:
+            session.rollback()
+        except Exception:
+            pass
+
+
+def _player_photo_for(player_id: Any) -> str | None:
+    """Lookup and cache a player's headshot URL by API-Football id."""
+    if player_id is None:
+        return None
+    try:
+        key = int(player_id)
+    except (TypeError, ValueError):
+        return None
+
+    if key in _PLAYER_PHOTO_CACHE:
+        return _PLAYER_PHOTO_CACHE[key]
+
+    session, player_model = _player_profile_store()
+    if session is not None and player_model is not None:
+        try:
+            existing = session.query(player_model).filter_by(player_id=key).one_or_none()
+        except Exception:
+            existing = None
+        if existing and existing.photo_url:
+            _PLAYER_PHOTO_CACHE[key] = existing.photo_url
+            return existing.photo_url
+
+    payload = None
+    photo_url = None
+    try:
+        payload = api_client.get_player_by_id(key)
+        photo_url = ((payload or {}).get('player') or {}).get('photo')
+    except Exception:
+        photo_url = None
+
+    if payload:
+        _persist_player_profile(payload)
+        if photo_url is None:
+            session, player_model = _player_profile_store()
+            if session is not None and player_model is not None:
+                try:
+                    refreshed = session.query(player_model).filter_by(player_id=key).one_or_none()
+                except Exception:
+                    refreshed = None
+                if refreshed and refreshed.photo_url:
+                    photo_url = refreshed.photo_url
+
+    _PLAYER_PHOTO_CACHE[key] = photo_url
+    return photo_url
+
+
+def _persist_team_profile(payload: dict | None) -> TeamProfile | None:
+    if not isinstance(payload, dict):
+        return None
+    team_block = payload.get('team') or {}
+    team_id = team_block.get('id')
+    if not team_id:
+        return None
+    session, profile_model = _team_profile_store()
+    if session is None or profile_model is None:
+        return None
+
+    try:
+        record = session.query(profile_model).filter_by(team_id=team_id).one_or_none()
+        if record is None:
+            record = profile_model(team_id=team_id, created_at=datetime.now(timezone.utc))
+            session.add(record)
+
+        def _set(attr: str, value):
+            if value is not None and value != '':
+                setattr(record, attr, value)
+
+        _set('name', team_block.get('name'))
+        _set('code', team_block.get('code'))
+        _set('country', team_block.get('country'))
+        _set('founded', team_block.get('founded'))
+        _set('is_national', team_block.get('national'))
+        _set('logo_url', team_block.get('logo'))
+
+        venue_block = payload.get('venue') or {}
+        _set('venue_id', venue_block.get('id'))
+        _set('venue_name', venue_block.get('name'))
+        _set('venue_address', venue_block.get('address'))
+        _set('venue_city', venue_block.get('city'))
+        _set('venue_capacity', venue_block.get('capacity'))
+        _set('venue_surface', venue_block.get('surface'))
+        _set('venue_image', venue_block.get('image'))
+
+        record.updated_at = datetime.now(timezone.utc)
+
+        session.commit()
+
+        # Also keep Team table in sync when possible
+        try:
+            team_row = session.query(Team).filter_by(team_id=team_id).one_or_none()
+            if team_row and team_block.get('logo') and not team_row.logo:
+                team_row.logo = team_block.get('logo')
+                session.commit()
+        except Exception:
+            try:
+                session.rollback()
+            except Exception:
+                pass
+
+        _TEAM_LOGO_CACHE[team_id] = record.logo_url
+        return record
+    except Exception:
+        try:
+            session.rollback()
+        except Exception:
+            pass
+    return None
+
+
+def _team_logo_for_team(team_api_id: Any, *, fallback_name: str | None = None) -> str | None:
+    if team_api_id is None:
+        return None
+    try:
+        key = int(team_api_id)
+    except (TypeError, ValueError):
+        return None
+
+    if key in _TEAM_LOGO_CACHE:
+        return _TEAM_LOGO_CACHE[key]
+
+    session, profile_model = _team_profile_store()
+    if session is not None and profile_model is not None:
+        try:
+            existing = session.query(profile_model).filter_by(team_id=key).one_or_none()
+        except Exception:
+            existing = None
+        if existing and existing.logo_url:
+            _TEAM_LOGO_CACHE[key] = existing.logo_url
+            return existing.logo_url
+
+    # If Team row already has a logo, use it (and persist profile if missing)
+    try:
+        team_row = db.session.query(Team).filter_by(team_id=key).one_or_none()
+    except Exception:
+        team_row = None
+    if team_row and team_row.logo:
+        if session is not None and profile_model is not None:
+            existing = session.query(profile_model).filter_by(team_id=key).one_or_none()
+            if existing is None:
+                try:
+                    record = profile_model(
+                        team_id=key,
+                        name=team_row.name or fallback_name or f"Team {key}",
+                        code=team_row.code,
+                        country=team_row.country,
+                        founded=team_row.founded,
+                        is_national=team_row.national,
+                        logo_url=team_row.logo,
+                        venue_name=team_row.venue_name,
+                        venue_address=team_row.venue_address,
+                        venue_city=team_row.venue_city,
+                        venue_capacity=team_row.venue_capacity,
+                        created_at=datetime.now(timezone.utc),
+                        updated_at=datetime.now(timezone.utc),
+                    )
+                    session.add(record)
+                    session.commit()
+                except Exception:
+                    try:
+                        session.rollback()
+                    except Exception:
+                        pass
+        _TEAM_LOGO_CACHE[key] = team_row.logo
+        return team_row.logo
+
+    payload = None
+    try:
+        payload = api_client.get_team_by_id(key)
+    except Exception:
+        payload = None
+
+    logo = None
+    if payload:
+        record = _persist_team_profile(payload)
+        if record and record.logo_url:
+            logo = record.logo_url
+
+    _TEAM_LOGO_CACHE[key] = logo
+    return logo
+
+
+def _team_logo_for_player(player_id: Any, loan_team_name: str | None = None) -> str | None:
+    if player_id is None:
+        return None
+    try:
+        pid = int(player_id)
+    except (TypeError, ValueError):
+        return None
+
+    lp: LoanedPlayer | None = None
+    try:
+        lp = (
+            db.session.query(LoanedPlayer)
+            .filter(LoanedPlayer.player_id == pid)
+            .order_by(LoanedPlayer.updated_at.desc())
+            .first()
+        )
+    except Exception:
+        lp = None
+
+    team_api_id = None
+    if lp and lp.loan_team_id:
+        try:
+            team_row = db.session.get(Team, lp.loan_team_id)
+        except Exception:
+            team_row = None
+        if team_row and team_row.team_id:
+            team_api_id = team_row.team_id
+
+    if team_api_id is None and loan_team_name:
+        try:
+            team_row = (
+                db.session.query(Team)
+                .filter(Team.name == loan_team_name)
+                .order_by(Team.updated_at.desc())
+                .first()
+            )
+            if team_row and team_row.team_id:
+                team_api_id = team_row.team_id
+        except Exception:
+            pass
+
+    return _team_logo_for_team(team_api_id, fallback_name=loan_team_name)
 
 def _fix_minutes_language(item: dict) -> None:
     """Normalize phrasing based on minutes to avoid contradictions."""
@@ -1262,6 +1698,8 @@ def lint_and_enrich(news: dict) -> dict:
     if not isinstance(news, dict):
         return news
 
+    player_ids: set[int] = set()
+
     # normalize display names and de-dupe within each section by stable identity
     for sec in news.get("sections", []) or []:
         seen: set[str] = set()
@@ -1291,6 +1729,18 @@ def lint_and_enrich(news: dict) -> dict:
                 pass
             _fix_minutes_language(it)
             pid = it.get("player_id")
+            if pid is not None:
+                try:
+                    player_ids.add(int(pid))
+                except (TypeError, ValueError):
+                    pass
+            if not it.get("player_photo"):
+                photo_url = _player_photo_for(pid)
+                if photo_url:
+                    it["player_photo"] = photo_url
+            team_logo = _team_logo_for_player(pid, loan_team_name=it.get("loan_team") or it.get("loan_team_name"))
+            if team_logo:
+                it["loan_team_logo"] = team_logo
             name_key = strip_diacritics(to_initial_last(it.get("player_name", ""))).lower().replace(' ', '')
             key = f"pid:{pid}" if pid else f"name:{name_key}"
             if key in seen:
@@ -1298,6 +1748,72 @@ def lint_and_enrich(news: dict) -> dict:
             seen.add(key)
             items.append(it)
         sec["items"] = items
+
+    sofascore_lookup: dict[int, int] = {}
+    if player_ids:
+        try:
+            records = Player.query.filter(Player.player_id.in_(player_ids)).all()
+            sofascore_lookup = {
+                int(rec.player_id): int(rec.sofascore_id)
+                for rec in records
+                if getattr(rec, "sofascore_id", None)
+            }
+        except Exception:
+            sofascore_lookup = {}
+
+    if sofascore_lookup:
+        for sec in news.get("sections", []) or []:
+            for it in sec.get("items", []) or []:
+                pid = it.get("player_id")
+                if pid is None or it.get("sofascore_player_id"):
+                    continue
+                try:
+                    pid_int = int(pid)
+                except (TypeError, ValueError):
+                    continue
+                sofascore_value = sofascore_lookup.get(pid_int)
+                if sofascore_value:
+                    it["sofascore_player_id"] = sofascore_value
+
+    # Fallback (opt-in): attach Sofascore via exact name match when player_id is missing
+    if ENABLE_SOFA_NAME_FALLBACK:
+        try:
+            names_needed: set[str] = set()
+            for sec in news.get("sections", []) or []:
+                for it in sec.get("items", []) or []:
+                    if it.get("sofascore_player_id"):
+                        continue
+                    if it.get("player_id") is not None:
+                        continue
+                    name = (it.get("player_name") or "").strip()
+                    if name:
+                        names_needed.add(name)
+            name_map: dict[str, int] = {}
+            for nm in names_needed:
+                try:
+                    rec = (
+                        db.session.query(Player)
+                        .filter(func.lower(Player.name) == nm.lower())
+                        .filter(Player.sofascore_id.isnot(None))
+                        .first()
+                    )
+                except Exception:
+                    rec = None
+                if rec and getattr(rec, "sofascore_id", None):
+                    name_map[nm] = int(rec.sofascore_id)
+            if name_map:
+                for sec in news.get("sections", []) or []:
+                    for it in sec.get("items", []) or []:
+                        if it.get("sofascore_player_id"):
+                            continue
+                        if it.get("player_id") is not None:
+                            continue
+                        nm = (it.get("player_name") or "").strip()
+                        sv = name_map.get(nm)
+                        if sv:
+                            it["sofascore_player_id"] = sv
+        except Exception:
+            pass
 
     # recompute highlights from actual stats
     items = [it for sec in news.get("sections", []) or [] for it in sec.get("items", []) or []]
@@ -1371,9 +1887,18 @@ def _render_env() -> Environment:
     )
     return env
 
+def _default_manage_url() -> str | None:
+    base = os.getenv('PUBLIC_BASE_URL', '').rstrip('/')
+    if not base:
+        return None
+    manage_path = os.getenv('PUBLIC_MANAGE_PATH', '/manage')
+    return f"{base}{manage_path}"
+
+
 def _build_template_context(news: dict, team_name: str | None) -> dict:
     return {
         'team_name': team_name or '',
+        'team_logo': news.get('team_logo'),
         'title': news.get('title'),
         'range': news.get('range'),
         'summary': news.get('summary'),
@@ -1381,6 +1906,8 @@ def _build_template_context(news: dict, team_name: str | None) -> dict:
         'sections': news.get('sections') or [],
         'by_numbers': news.get('by_numbers') or {},
         'fan_pulse': news.get('fan_pulse') or [],
+        'sofascore_image_template': os.getenv('SOFASCORE_IMAGE_TEMPLATE') or '',
+        'manage_url': _default_manage_url(),
         'meta': {},
     }
 

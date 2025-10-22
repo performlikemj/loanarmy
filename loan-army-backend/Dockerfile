@@ -1,5 +1,5 @@
-# Production Dockerfile for Loan Army Backend - Azure Container App Ready
-FROM python:3.9-slim
+# Production Dockerfile for Go On Loan Backend - Azure Container App Ready
+FROM python:3.11-slim
 
 # Set working directory
 WORKDIR /app
@@ -18,10 +18,7 @@ RUN pip install --no-cache-dir -r requirements.txt
 
 # Copy application source code
 COPY src/ src/
-
-# Copy documentation (optional)
-COPY API_SECURITY.md .
-COPY AZURE_DEPLOYMENT.md .
+COPY migrations/ migrations/
 
 # Create non-root user for security (Azure Container Apps recommendation)
 RUN useradd --create-home --shell /bin/bash app \
@@ -35,8 +32,8 @@ EXPOSE 5001
 HEALTHCHECK --interval=30s --timeout=10s --start-period=5s --retries=3 \
     CMD curl -f http://localhost:5001/api/auth/status || exit 1
 
-# Run the application
-CMD ["python", "src/main.py"]
+# Run the application with Gunicorn (production-grade WSGI server)
+CMD ["gunicorn", "-w", "4", "--threads", "4", "-b", "0.0.0.0:5001", "--access-logfile", "-", "--error-logfile", "-", "src.main:app"]
 
 # Environment variables will be set by Azure Container Apps:
 # ADMIN_API_KEY - Your secure admin API key

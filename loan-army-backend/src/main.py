@@ -1,13 +1,18 @@
+import json
 import os
 import sys
-from urllib.parse import quote_plus
 sys.path.insert(0, os.path.dirname(os.path.dirname(__file__)))
 from flask import Flask, send_from_directory, jsonify
 from src.models.league import db, League, Team, LoanedPlayer, Newsletter, UserSubscription
 from src.routes.api import api_bp
 import logging
+from sqlalchemy.engine.url import make_url, URL
 from flask_migrate import Migrate
 import dotenv
+from flask_cors import CORS
+from flask_talisman import Talisman
+from werkzeug.exceptions import HTTPException
+from src.extensions import limiter
 dotenv.load_dotenv(dotenv.find_dotenv())
 # Configure logging
 logging.basicConfig(
@@ -19,7 +24,29 @@ logger = logging.getLogger(__name__)
 logger.info("🚀 Starting Flask application...")
 
 app = Flask(__name__, static_folder=os.path.join(os.path.dirname(__file__), 'static'))
+cors_origins_env = os.getenv("CORS_ALLOW_ORIGINS", "")
+allowed_origins = [o.strip() for o in cors_origins_env.split(",") if o.strip()]
+
+if allowed_origins:
+    CORS(app, resources={r"/api/*": {"origins": allowed_origins}})
+else:
+    # Safe default if not set; you can remove this to force explicit config
+    CORS(app, resources={r"/api/*": {"origins": "*"}})
 app.config['SECRET_KEY'] = os.getenv('SECRET_KEY')
+
+env_mode = os.getenv("FLASK_ENV") or "development"
+is_prod = env_mode.lower() in ("prod", "production", "stage", "staging")
+
+app.config.update(
+    SESSION_COOKIE_HTTPONLY=True,
+    SESSION_COOKIE_SAMESITE='Strict' if is_prod else 'Lax',
+    SESSION_COOKIE_SECURE=is_prod,
+    REMEMBER_COOKIE_HTTPONLY=True,
+    REMEMBER_COOKIE_SECURE=is_prod,
+    PREFERRED_URL_SCHEME='https' if is_prod else 'http',
+    JSONIFY_PRETTYPRINT_REGULAR=False,
+    PROPAGATE_EXCEPTIONS=False,
+)
 
 logger.info(f"📁 Static folder: {app.static_folder}")
 logger.info(f"🔑 Secret key configured: {'Yes' if app.config['SECRET_KEY'] else 'No'}")
@@ -43,29 +70,94 @@ for name in ("mcp", "agents.mcp", "mcp.shared.session", "mcp.client"):
 
 app.register_blueprint(api_bp, url_prefix='/api')
 
-# Database setup
-# Check for DATABASE_URL first (for testing with SQLite), then fall back to PostgreSQL components
-password = quote_plus(os.getenv("DB_PASSWORD"))
-database_url = f"postgresql+psycopg://{os.getenv('DB_USER')}:{password}@{os.getenv('DB_HOST')}:{os.getenv('DB_PORT')}/{os.getenv('DB_NAME')}"
+csp = {
+    'default-src': ["'self'"],
+    'img-src': ["'self'", "data:", "https:"],
+    'script-src': ["'self'"],
+    'style-src': ["'self'", "'unsafe-inline'", "https:"],
+    'font-src': ["'self'", "data:", "https:"],
+    'connect-src': ["'self'", "https:"],
+    'frame-ancestors': ["'none'"],
+}
 
-if database_url:
-    # Use DATABASE_URL directly (e.g., SQLite for testing)
-    db_uri = database_url
-    logger.info(f"🗄️ Using DATABASE_URL: {db_uri}")
+Talisman(
+    app,
+    content_security_policy=csp,
+    force_https=is_prod,
+    strict_transport_security=is_prod,
+    session_cookie_secure=is_prod,
+    session_cookie_http_only=True,
+    referrer_policy='strict-origin-when-cross-origin',
+)
+
+limiter.init_app(app)
+
+
+def _env_value(key: str, *, allow_inline_comment: bool = False) -> str | None:
+    raw = os.getenv(key)
+    if raw is None:
+        return None
+    value = raw.strip()
+    if allow_inline_comment and "#" in value:
+        for idx, ch in enumerate(value):
+            if ch == "#" and (idx == 0 or value[idx - 1].isspace()):
+                value = value[:idx].rstrip()
+                break
+    return value or None
+
+
+def _build_db_uri_from_components() -> str:
+    """Assemble a Postgres SQLAlchemy URI from DB_* environment variables."""
+    port_raw = _env_value("DB_PORT", allow_inline_comment=True) or ""
+    port_value = None
+    if port_raw:
+        try:
+            port_value = int(port_raw)
+        except ValueError:
+            logger.warning("⚠️ DB_PORT value '%s' is invalid; ignoring port", port_raw)
+    url = URL.create(
+        drivername="postgresql+psycopg",
+        username=_env_value("DB_USER"),
+        password=_env_value("DB_PASSWORD"),
+        host=_env_value("DB_HOST", allow_inline_comment=True),
+        port=port_value,
+        database=_env_value("DB_NAME", allow_inline_comment=True),
+        query={"sslmode": _env_value("DB_SSLMODE") or "require"},
+    )
+    return url.render_as_string(hide_password=False)
+
+# Database setup
+if is_prod and os.getenv("SQLALCHEMY_DATABASE_URI"):
+    raw_uri = os.getenv("SQLALCHEMY_DATABASE_URI", "")
+    # Sanitize accidental quotes/whitespace
+    candidate = raw_uri.strip().strip('"').strip("'")
+    try:
+        # Validate it parses; raises on bad format
+        make_url(candidate)
+        db_uri = candidate
+        logger.info("🗄️ Using SQLALCHEMY_DATABASE_URI from environment (production)")
+    except Exception:
+        logger.warning("⚠️ SQLALCHEMY_DATABASE_URI is invalid; falling back to DB_* components")
+        db_uri = _build_db_uri_from_components()
+        logger.info("🗄️ Using PostgreSQL components from DB_* environment variables (dev/default)")
 else:
-    # Fall back to PostgreSQL components
-    pwd     = quote_plus(os.getenv("DB_PASSWORD"))   # encodes @, !, :, / …
-    user    = os.getenv("DB_USER")
-    host    = os.getenv("DB_HOST")
-    port    = os.getenv("DB_PORT")
-    db_name = os.getenv("DB_NAME")
-    
-    db_uri = f"postgresql+psycopg://{user}:{pwd}@{host}:{port}/{db_name}"
-    logger.info(f"🗄️ Using PostgreSQL components: {db_uri}")
+    db_uri = _build_db_uri_from_components()
+    logger.info("🗄️ Using PostgreSQL components from DB_* environment variables (dev/default)")
 
 app.config["SQLALCHEMY_DATABASE_URI"] = db_uri
 app.config['SQLALCHEMY_TRACK_MODIFICATIONS'] = False
 db.init_app(app)
+
+@app.errorhandler(HTTPException)
+def handle_http_exception(exc: HTTPException):
+    response = exc.get_response()
+    payload = {
+        'error': exc.description or exc.name,
+        'code': exc.code,
+    }
+    response.data = json.dumps(payload)
+    response.content_type = 'application/json'
+    return response
 
 # Add debug endpoint
 @app.route('/api/debug/database', methods=['GET'])
@@ -118,4 +210,11 @@ if __name__ == "__main__":
         total_teams   = Team.query.count()
         logger.info(f"📊 DB has {total_teams} teams, {total_leagues} leagues")
 
-    app.run(host="0.0.0.0", port=5001, debug=True)
+    debug_env = os.getenv("FLASK_DEBUG")
+    if debug_env is None:
+        debug_enabled = not is_prod
+    else:
+        debug_enabled = debug_env.lower() in {"1", "true", "yes", "on"}
+
+    logger.info("Starting local Flask server (debug=%s)", debug_enabled)
+    app.run(host="0.0.0.0", port=5001, debug=debug_enabled)

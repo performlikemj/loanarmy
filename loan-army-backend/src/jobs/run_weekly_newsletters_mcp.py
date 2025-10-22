@@ -1,6 +1,7 @@
 from datetime import date
 from src.models.league import db, Team, LoanedPlayer
 from src.agents.weekly_agent import generate_weekly_newsletter_with_mcp_sync
+from src.agents.errors import NoActiveLoaneesError
 
 def teams_with_active_loans() -> list[int]:
     q = db.session.query(Team.id)\
@@ -16,6 +17,9 @@ def run_for_date(target: date, max_failures: int = 0):
         try:
             out = generate_weekly_newsletter_with_mcp_sync(team_db_id, target)
             results.append({"team_id": team_db_id, "status": "ok", "run": out})
+        except NoActiveLoaneesError as e:
+            results.append({"team_id": team_db_id, "status": "skipped", "reason": "no_active_loanees", "message": str(e)})
+            continue
         except Exception as e:
             failures += 1
             results.append({"team_id": team_db_id, "status": "error", "error": str(e)})

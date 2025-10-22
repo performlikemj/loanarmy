@@ -385,24 +385,24 @@ def test_enforce_metadata_handles_core_supplemental_and_internet():
     }
 
     updated = _enforce_loanee_metadata(content, meta_pid, meta_key)
+    assert [sec['title'] for sec in updated['sections']] == ['Active Loans', 'Supplemental Loans']
     active = updated['sections'][0]['items'][0]
-    supplemental = updated['sections'][0]['items'][1]
-    internet = updated['sections'][2]['items'][0]
+    supplemental = updated['sections'][1]['items'][0]
 
     # Core players retain stats and sofascore ids
     assert active.get('can_fetch_stats') is True
     assert 'stats' in active
     assert active.get('sofascore_player_id') == 555
 
-    # Supplemental players drop stats, keep sofascore, and are marked non-trackable
+    # Supplemental players move to separate section, drop stats, keep sofascore
     assert supplemental.get('can_fetch_stats') is False
     assert 'stats' not in supplemental
     assert supplemental.get('sofascore_player_id') == 222
+    assert supplemental.get('week_summary') == "We can’t track detailed stats for this player yet."
 
-    # Internet section strips stats/cards and marks skip_lookup
-    assert internet.get('skip_lookup') is True
-    assert 'stats' not in internet
-    assert 'sofascore_player_id' not in internet
+    # Links from internet context merged onto supplemental item
+    internet_links = supplemental.get('links')
+    assert internet_links and internet_links[0] == 'https://example.com'
 
 
 def _write_png(path: str) -> None:

@@ -17,7 +17,26 @@ import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, D
 import { Drawer, DrawerTrigger, DrawerContent, DrawerHeader, DrawerFooter, DrawerTitle, DrawerDescription, DrawerClose } from '@/components/ui/drawer.jsx'
 import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover.jsx'
 import { useIsMobile } from '@/hooks/use-mobile.js'
-import { normalizeNewsletterIds, formatSendPreviewSummary, formatDeleteSummary } from '@/lib/newsletter-admin.js'
+import { 
+  normalizeNewsletterIds,
+  formatSendPreviewSummary,
+  formatDeleteSummary,
+  resolveBulkActionPayload,
+  formatBulkSelectionToast,
+  computeReviewProgress,
+  getReviewModalSizing,
+} from '@/lib/newsletter-admin.js'
+import { getAdminQuickLinks } from '@/lib/admin-quick-links.js'
+import {
+  buildSelectUpdates,
+  mergeCollapseState,
+  toggleCollapseState,
+  sandboxCardHeaderClasses,
+  sofascoreRowKey,
+  buildSofascoreUpdatePayload,
+} from '@/lib/admin-sandbox.js'
+import { buildPlayerNameUpdatePayload } from '@/lib/admin-players.js'
+import { buildSofascoreEmbedUrl } from '@/lib/sofascore.js'
 import { 
   Users, 
   Mail, 
@@ -44,7 +63,9 @@ import {
   MessageCircle,
   UserCog,
   X,
-  Copy
+  Copy,
+  ChevronDown,
+  ChevronRight
 } from 'lucide-react'
 import './App.css'
 
@@ -384,7 +405,6 @@ class APIService {
   }
 
   static async request(endpoint, options = {}, extra = {}) {
-    console.log(`🌐 Making API request to: ${API_BASE_URL}${endpoint}`, options)
     try {
       const admin = extra && extra.admin
       const headers = {
@@ -408,9 +428,8 @@ class APIService {
       } else if (this.userToken) {
         headers['Authorization'] = `Bearer ${this.userToken}`
       }
-      const response = await fetch(`${API_BASE_URL}${endpoint}`, { headers, ...options })
+      const response = await fetch(`${API_BASE_URL}${endpoint}`, { ...options, headers })
 
-      console.log(`📡 Response status: ${response.status} ${response.statusText}`)
 
       if (!response.ok) {
         const contentType = response.headers.get('content-type') || ''
@@ -440,7 +459,6 @@ class APIService {
       if (response.status === 204) return null
 
       const data = await response.json()
-      console.log(`✅ API response data:`, data)
       return data
     } catch (error) {
       console.error('❌ API request failed:', error)
@@ -459,8 +477,16 @@ class APIService {
     return this.request(`/teams?${params}`)
   }
 
-  static async getTeamLoans(teamId) {
-    return this.request(`/teams/${teamId}/loans`)
+  static async getTeamLoans(teamId, params = {}) {
+    const merged = { active_only: 'true', dedupe: 'true', ...params }
+    const search = new URLSearchParams()
+    for (const [key, value] of Object.entries(merged)) {
+      if (value === undefined || value === null) continue
+      search.append(key, String(value))
+    }
+    const query = search.toString()
+    const suffix = query ? `?${query}` : ''
+    return this.request(`/teams/${teamId}/loans${suffix}`)
   }
 
   static async getNewsletters(filters = {}) {
@@ -672,16 +698,57 @@ class APIService {
   static async adminBackfillNames(payload = {}) {
     return this.request(`/admin/loans/backfill-names`, { method: 'POST', body: JSON.stringify(payload) }, { admin: true })
   }
+  static async adminSandboxTasks() {
+    return this.request('/admin/sandbox?format=json', { headers: { Accept: 'application/json' } }, { admin: true })
+  }
+  static async adminSandboxRun(taskId, payload = {}) {
+    if (!taskId) {
+      throw new Error('taskId is required')
+    }
+    return this.request(`/admin/sandbox/run/${encodeURIComponent(taskId)}`, {
+      method: 'POST',
+      body: JSON.stringify(payload || {}),
+    }, { admin: true })
+  }
+  static async adminSupplementalLoansList(params = {}) {
+    const q = new URLSearchParams(params)
+    return this.request(`/admin/supplemental-loans?${q}`, {}, { admin: true })
+  }
+  static async adminSupplementalLoanCreate(payload) {
+    return this.request('/admin/supplemental-loans', { method: 'POST', body: JSON.stringify(payload) }, { admin: true })
+  }
+  static async adminSupplementalLoanUpdate(loanId, payload) {
+    return this.request(`/admin/supplemental-loans/${loanId}`, { method: 'PUT', body: JSON.stringify(payload) }, { admin: true })
+  }
+  static async adminSupplementalLoanDelete(loanId) {
+    return this.request(`/admin/supplemental-loans/${loanId}`, { method: 'DELETE' }, { admin: true })
+  }
   static async adminNewslettersList(params = {}) {
     const q = new URLSearchParams(params)
     const query = q.toString()
     const url = query ? `/admin/newsletters?${query}` : '/admin/newsletters'
     const data = await this.request(url, {}, { admin: true })
-    if (!data) return []
-    if (Array.isArray(data)) return data
-    if (Array.isArray(data.items)) return data.items
-    if (Array.isArray(data.results)) return data.results
-    return []
+    if (!data) {
+      return { items: [], total: 0, page: 1, page_size: 0, total_pages: 1, meta: {} }
+    }
+    if (Array.isArray(data)) {
+      return { items: data, total: data.length, page: 1, page_size: data.length, total_pages: 1, meta: {} }
+    }
+    const items = Array.isArray(data.items)
+      ? data.items
+      : Array.isArray(data.results)
+        ? data.results
+        : []
+    const total = Number(data.total) || items.length
+    const meta = (data.meta && typeof data.meta === 'object') ? data.meta : {}
+    return {
+      items,
+      total,
+      page: Number(data.page) || 1,
+      page_size: Number(data.page_size) || items.length,
+      total_pages: Number(data.total_pages) || 1,
+      meta,
+    }
   }
   static async adminNewsletterGet(id) {
     return this.request(`/admin/newsletters/${id}`, {}, { admin: true })
@@ -689,13 +756,116 @@ class APIService {
   static async adminNewsletterUpdate(id, payload) {
     return this.request(`/admin/newsletters/${id}`, { method: 'PUT', body: JSON.stringify(payload) }, { admin: true })
   }
-  static async adminNewsletterBulkPublish(ids = [], publish = true) {
-    const uniqueIds = Array.from(new Set((Array.isArray(ids) ? ids : []).map(Number))).filter((id) => Number.isInteger(id) && id > 0)
-    if (uniqueIds.length === 0) {
-      throw new Error('No newsletter ids provided')
+  static async adminNewsletterBulkPublish(selection, publish = true) {
+    const payload = { publish: !!publish }
+    if (selection && typeof selection === 'object' && !Array.isArray(selection)) {
+      const filterParams = selection.filter_params || selection.filterParams
+      if (filterParams) payload.filter_params = filterParams
+      if (selection.exclude_ids || selection.excludeIds) {
+        const ids = normalizeNewsletterIds(selection.exclude_ids || selection.excludeIds)
+        if (ids.length > 0) payload.exclude_ids = ids
+      }
+      if (typeof selection.expected_total !== 'undefined') {
+        payload.expected_total = Number(selection.expected_total)
+      }
+      if (Array.isArray(selection.ids)) {
+        const ids = normalizeNewsletterIds(selection.ids)
+        if (ids.length > 0) payload.ids = ids
+      }
+    } else {
+      const ids = normalizeNewsletterIds(selection)
+      if (ids.length === 0) {
+        throw new Error('No newsletter ids provided')
+      }
+      payload.ids = ids
     }
-    const body = JSON.stringify({ ids: uniqueIds, publish: !!publish })
+    const body = JSON.stringify(payload)
     return this.request('/admin/newsletters/bulk-publish', { method: 'POST', body }, { admin: true })
+  }
+
+  static async adminNewsletterYoutubeLinksList(newsletterId) {
+    return this.request(`/admin/newsletters/${newsletterId}/youtube-links`, {}, { admin: true })
+  }
+  static async adminNewsletterYoutubeLinkCreate(newsletterId, payload) {
+    return this.request(`/admin/newsletters/${newsletterId}/youtube-links`, { method: 'POST', body: JSON.stringify(payload) }, { admin: true })
+  }
+  static async adminNewsletterYoutubeLinkUpdate(newsletterId, linkId, payload) {
+    return this.request(`/admin/newsletters/${newsletterId}/youtube-links/${linkId}`, { method: 'PUT', body: JSON.stringify(payload) }, { admin: true })
+  }
+  static async adminNewsletterYoutubeLinkDelete(newsletterId, linkId) {
+    return this.request(`/admin/newsletters/${newsletterId}/youtube-links/${linkId}`, { method: 'DELETE' }, { admin: true })
+  }
+  
+  // Player Management API methods
+  static async adminPlayersList(params = {}) {
+    const q = new URLSearchParams(params)
+    const query = q.toString()
+    const url = query ? `/admin/players?${query}` : '/admin/players'
+    const data = await this.request(url, {}, { admin: true })
+    if (!data) {
+      return { items: [], total: 0, page: 1, page_size: 50, total_pages: 1 }
+    }
+    return {
+      items: Array.isArray(data.items) ? data.items : [],
+      total: Number(data.total) || 0,
+      page: Number(data.page) || 1,
+      page_size: Number(data.page_size) || 50,
+      total_pages: Number(data.total_pages) || 1,
+    }
+  }
+  static async adminPlayerGet(playerId) {
+    return this.request(`/admin/players/${playerId}`, {}, { admin: true })
+  }
+  static async adminPlayerUpdate(playerId, payload) {
+    return this.request(`/admin/players/${playerId}`, { method: 'PUT', body: JSON.stringify(payload) }, { admin: true })
+  }
+  static async adminPlayerBulkUpdateSofascore(updates) {
+    return this.request('/admin/players/bulk-update-sofascore', {
+      method: 'POST',
+      body: JSON.stringify({ updates })
+    }, { admin: true })
+  }
+  static async adminPlayerCreate(payload) {
+    return this.request('/admin/players', {
+      method: 'POST',
+      body: JSON.stringify(payload)
+    }, { admin: true })
+  }
+  static async adminPlayerDelete(playerId) {
+    return this.request(`/admin/players/${playerId}`, { method: 'DELETE' }, { admin: true })
+  }
+  static async adminPlayerFieldOptions() {
+    return this.request('/admin/players/field-options', {}, { admin: true })
+  }
+
+  static async adminNewsletterBulkDelete(selection = {}) {
+    const payload = {}
+    if (selection && typeof selection === 'object' && !Array.isArray(selection)) {
+      if (selection.filter_params || selection.filterParams) {
+        payload.filter_params = selection.filter_params || selection.filterParams
+      }
+      if (selection.exclude_ids || selection.excludeIds) {
+        const ids = normalizeNewsletterIds(selection.exclude_ids || selection.excludeIds)
+        if (ids.length > 0) payload.exclude_ids = ids
+      }
+      if (typeof selection.expected_total !== 'undefined') {
+        payload.expected_total = Number(selection.expected_total)
+      }
+      if (Array.isArray(selection.ids)) {
+        const ids = normalizeNewsletterIds(selection.ids)
+        if (ids.length > 0) payload.ids = ids
+      }
+    } else if (Array.isArray(selection)) {
+      const ids = normalizeNewsletterIds(selection)
+      if (ids.length > 0) payload.ids = ids
+    }
+
+    if (!payload.filter_params && (!payload.ids || payload.ids.length === 0)) {
+      throw new Error('Provide ids or filter_params for bulk delete')
+    }
+
+    const body = JSON.stringify(payload)
+    return this.request('/admin/newsletters/bulk', { method: 'DELETE', body }, { admin: true })
   }
   static async adminNewsletterSendPreview(id, overrides = {}) {
     const normalized = Number(id)
@@ -1226,9 +1396,22 @@ function AdminNewsletterDetailPage() {
   }, [renderHtml])
 
   const fallbackContent = useMemo(() => {
-    if (!newsletter?.content) return null
+    let obj = null
+    if (newsletter?.enriched_content && typeof newsletter.enriched_content === 'object') {
+      obj = newsletter.enriched_content
+    } else if (newsletter?.content) {
+      try {
+        obj = typeof newsletter.content === 'string' ? JSON.parse(newsletter.content) : (newsletter.content || {})
+      } catch (error) {
+        obj = null
+      }
+    }
+
+    if (!obj || typeof obj !== 'object') {
+      return null
+    }
+
     try {
-      const obj = typeof newsletter.content === 'string' ? JSON.parse(newsletter.content) : (newsletter.content || {})
       const highlights = Array.isArray(obj.highlights) ? obj.highlights : []
       const sections = Array.isArray(obj.sections) ? obj.sections : []
       return (
@@ -1300,6 +1483,32 @@ function AdminNewsletterDetailPage() {
                           ))}
                         </ul>
                       )}
+                      {(() => {
+                        const embedUrl = buildSofascoreEmbedUrl(item.sofascore_player_id ?? item.sofascoreId)
+                        if (!embedUrl) return null
+                        return (
+                          <div className="mt-4">
+                            <iframe
+                              title={`Sofascore profile for ${item.player_name || item.player_id}`}
+                              src={embedUrl}
+                              frameBorder="0"
+                              scrolling="no"
+                              className="h-[568px] w-full max-w-xs rounded-md border"
+                            />
+                            <p className="mt-2 text-xs text-gray-500">
+                              Player stats provided by{' '}
+                              <a
+                                href="https://sofascore.com/"
+                                className="text-blue-600 hover:underline"
+                                target="_blank"
+                                rel="noopener"
+                              >
+                                Sofascore
+                              </a>
+                            </p>
+                          </div>
+                        )
+                      })()}
                     </div>
                   ))}
                 </div>
@@ -1466,6 +1675,9 @@ function AdminPage() {
   const [loans, setLoans] = useState([])
   const [loanFilters, setLoanFilters] = useState({ active_only: 'true', player_name: '', season: '' })
   const [loanForm, setLoanForm] = useState({ player_id: '', player_name: '', primary_team_api_id: '', loan_team_api_id: '', season: '' })
+  const [supplementalLoans, setSupplementalLoans] = useState([])
+  const [supplementalFilters, setSupplementalFilters] = useState({ player_name: '', season: '' })
+  const [supplementalForm, setSupplementalForm] = useState({ player_name: '', parent_team_name: '', loan_team_name: '', season_year: '' })
   const [missingNames, setMissingNames] = useState([])
   const [mnTeamApiId, setMnTeamApiId] = useState('')
   const [mnTeamDbId, setMnTeamDbId] = useState(null)
@@ -1473,13 +1685,19 @@ function AdminPage() {
   const [message, setMessage] = useState(null)
   const [nlFilters, setNlFilters] = useState({ published_only: '', week_start: '', week_end: '', issue_start: '', issue_end: '', created_start: '', created_end: '' })
   const [newslettersAdmin, setNewslettersAdmin] = useState([])
+  const [newslettersAdminMeta, setNewslettersAdminMeta] = useState({ total: 0, meta: {} })
   const [selectedNewsletterIds, setSelectedNewsletterIds] = useState([])
+  const [allFilteredSelected, setAllFilteredSelected] = useState(false)
+  const [appliedNlFilters, setAppliedNlFilters] = useState({})
   const [bulkPublishBusy, setBulkPublishBusy] = useState(false)
   const [sendPreviewBusyIds, setSendPreviewBusyIds] = useState([])
   const [sendSelectedBusy, setSendSelectedBusy] = useState(false)
   const [bulkDeleteBusy, setBulkDeleteBusy] = useState(false)
   const [deleteBusyIds, setDeleteBusyIds] = useState([])
   const [editingNl, setEditingNl] = useState(null)
+  const [nlYoutubeLinks, setNlYoutubeLinks] = useState([])
+  const [nlYoutubeLinkForm, setNlYoutubeLinkForm] = useState({ player_name: '', youtube_link: '', player_id: null, supplemental_loan_id: null })
+  const [editingNlYoutubeLink, setEditingNlYoutubeLink] = useState(null)
   const [previewHtml, setPreviewHtml] = useState('')
   const [previewError, setPreviewError] = useState('')
   const [previewFormat, setPreviewFormat] = useState('web')
@@ -1489,7 +1707,72 @@ function AdminPage() {
   const [teamRunBusy, setTeamRunBusy] = useState(false)
   const [teamRunMsg, setTeamRunMsg] = useState(null)
   const [adminNewsPage, setAdminNewsPage] = useState(1)
+  const [reviewModalOpen, setReviewModalOpen] = useState(false)
+  const [reviewQueue, setReviewQueue] = useState([])
+  const [reviewIndex, setReviewIndex] = useState(0)
+  const [reviewMode, setReviewMode] = useState('manual')
+  const [reviewDetail, setReviewDetail] = useState(null)
+  const [reviewPreviewFormat, setReviewPreviewFormat] = useState('web')
+  const [reviewRenderedContent, setReviewRenderedContent] = useState({ web: '', email: '', webError: null, emailError: null })
+  const [reviewLoadingDetail, setReviewLoadingDetail] = useState(false)
+  const [reviewBatchExclude, setReviewBatchExclude] = useState([])
+  const [reviewBatchDelete, setReviewBatchDelete] = useState([])
+  const [reviewFinalizeBusy, setReviewFinalizeBusy] = useState(false)
+  const [reviewTotalMatched, setReviewTotalMatched] = useState(0)
+  const [playersHubData, setPlayersHubData] = useState({ items: [], total: 0, page: 1, page_size: 50, total_pages: 1 })
+  const [playersHubFilters, setPlayersHubFilters] = useState({ team_id: '', search: '', has_sofascore: '' })
+  const [playersHubPage, setPlayersHubPage] = useState(1)
+  const [playersHubLoading, setPlayersHubLoading] = useState(false)
+  const [editingPlayerSofascore, setEditingPlayerSofascore] = useState({})
+  const [inlinePlayerNameEdits, setInlinePlayerNameEdits] = useState({})
+  const [inlinePlayerNameSaving, setInlinePlayerNameSaving] = useState({})
+  const [selectedPlayersForBulk, setSelectedPlayersForBulk] = useState([])
+  const [bulkSofascoreMode, setBulkSofascoreMode] = useState(false)
+  // Add Player form state
+  const [showAddPlayerForm, setShowAddPlayerForm] = useState(false)
+  const [addPlayerForm, setAddPlayerForm] = useState({
+    name: '',
+    firstname: '',
+    lastname: '',
+    position: '',
+    nationality: '',
+    age: '',
+    sofascore_id: '',
+    primary_team_id: '',
+    loan_team_id: '',
+    window_key: '',
+    use_custom_primary_team: false,
+    custom_primary_team_name: '',
+    use_custom_loan_team: false,
+    custom_loan_team_name: ''
+  })
+  const [playerFieldOptions, setPlayerFieldOptions] = useState({
+    positions: [],
+    nationalities: []
+  })
+  // Edit Player Dialog state
+  const [editingPlayerDialog, setEditingPlayerDialog] = useState(null) // {player, loan}
+  const [editPlayerForm, setEditPlayerForm] = useState({
+    name: '',
+    position: '',
+    nationality: '',
+    age: '',
+    sofascore_id: '',
+    primary_team_id: '',
+    loan_team_id: '',
+    use_custom_primary_team: false,
+    custom_primary_team_name: '',
+    use_custom_loan_team: false,
+    custom_loan_team_name: '',
+    window_key: ''
+  })
+  // Enhanced Newsletter Editor state
+  const [enhancedEditorMode, setEnhancedEditorMode] = useState('visual') // 'visual' or 'json'
+  const [editingPlayerCard, setEditingPlayerCard] = useState(null) // {sectionIndex, itemIndex, data}
   const pageSelectRef = useRef(null)
+  const selectionToastRef = useRef({ total: null, excluded: null, active: false })
+  const reviewDirtyRef = useRef(false)
+  const adminQuickLinks = useMemo(() => getAdminQuickLinks(), [])
   const adminTotalPages = useMemo(() => {
     const total = Math.ceil(newslettersAdmin.length / ADMIN_NEWSLETTER_PAGE_SIZE)
     return total > 0 ? total : 1
@@ -1502,9 +1785,34 @@ function AdminPage() {
   }, [newslettersAdmin, adminNewsPage])
   const selectedNewsletterIdsSet = useMemo(() => new Set(selectedNewsletterIds), [selectedNewsletterIds])
   const currentPageNewsletterIds = useMemo(() => paginatedNewslettersAdmin.map((n) => n.id), [paginatedNewslettersAdmin])
-  const allPageSelected = currentPageNewsletterIds.length > 0 && currentPageNewsletterIds.every((id) => selectedNewsletterIdsSet.has(id))
-  const somePageSelected = currentPageNewsletterIds.some((id) => selectedNewsletterIdsSet.has(id))
-  const selectedNewsletterCount = selectedNewsletterIds.length
+  const pageSelectionState = useMemo(() => {
+    if (currentPageNewsletterIds.length === 0) {
+      return { all: false, some: false }
+    }
+    const flags = currentPageNewsletterIds.map((id) => {
+      const numericId = Number(id)
+      if (!Number.isInteger(numericId) || numericId <= 0) return false
+      if (allFilteredSelected) return !selectedNewsletterIdsSet.has(numericId)
+      return selectedNewsletterIdsSet.has(numericId)
+    })
+    const all = flags.every(Boolean)
+    const some = flags.some(Boolean)
+    return { all, some: some && !all }
+  }, [currentPageNewsletterIds, selectedNewsletterIdsSet, allFilteredSelected])
+  const allPageSelected = pageSelectionState.all
+  const somePageSelected = pageSelectionState.some
+  const totalFilteredCount = useMemo(() => {
+    const metaTotal = Number(newslettersAdminMeta.total)
+    if (Number.isFinite(metaTotal) && metaTotal >= 0) return metaTotal
+    return newslettersAdmin.length
+  }, [newslettersAdminMeta.total, newslettersAdmin.length])
+  const selectionExcludedCount = allFilteredSelected ? selectedNewsletterIds.length : 0
+  const selectedNewsletterCount = allFilteredSelected
+    ? Math.max(totalFilteredCount - selectionExcludedCount, 0)
+    : selectedNewsletterIds.length
+  const reviewProgressLabel = useMemo(() => computeReviewProgress({ index: reviewIndex, total: reviewQueue.length }), [reviewIndex, reviewQueue.length])
+  const currentReviewItem = reviewQueue[reviewIndex] || null
+  const reviewModalSizing = useMemo(() => getReviewModalSizing({ minWidth: 760, minHeight: 520, maxWidth: 1280, maxHeight: 960 }), [])
 
   const buildTeamOptionsForLoan = useCallback((loanRecords = []) => {
     const map = new Map()
@@ -1641,7 +1949,7 @@ function AdminPage() {
   useEffect(() => {
     (async () => {
       try {
-        const filters = { european_only: 'true' }
+        const filters = {}  // Fetch ALL teams, not just European
         const seasonYear = parseInt((loanFilters.season || '').trim(), 10)
         if (!isNaN(seasonYear)) filters.season = seasonYear
         const teams = await APIService.getTeams(filters)
@@ -1683,6 +1991,30 @@ function AdminPage() {
       pageSelectRef.current.indeterminate = somePageSelected && !allPageSelected
     }
   }, [somePageSelected, allPageSelected])
+  useEffect(() => {
+    if (!allFilteredSelected) {
+      selectionToastRef.current = { total: null, excluded: null, active: false }
+      return
+    }
+    const total = totalFilteredCount
+    const excluded = selectedNewsletterIds.length
+    const prev = selectionToastRef.current
+    if (prev.total === total && prev.excluded === excluded && prev.active) {
+      return
+    }
+    selectionToastRef.current = { total, excluded, active: true }
+    if (total <= 0) {
+      setMessage((current) => {
+        if (current && current.type && current.type !== 'info') return current
+        return { type: 'info', text: 'No newsletters match your filters.' }
+      })
+      return
+    }
+    setMessage((current) => {
+      if (current && current.type && current.type !== 'info') return current
+      return { type: 'info', text: formatBulkSelectionToast({ totalMatched: total, totalExcluded: excluded }) }
+    })
+  }, [allFilteredSelected, selectedNewsletterIds.length, totalFilteredCount])
 
   useEffect(() => {
     if (!hasAdminToken) {
@@ -2039,7 +2371,7 @@ function AdminPage() {
       const res = await APIService.adminBackfillTeamLeagues(seasonYear)
       setMessage({ type: 'success', text: `Backfilled leagues for ${seasonYear} (updated ${res.updated_teams} teams)` })
       // Reload teams list for this season
-      const teams = await APIService.getTeams({ european_only: 'true', season: seasonYear })
+      const teams = await APIService.getTeams({ season: seasonYear })  // All teams, not just European
       const { teams: filtered } = filterLatestSeasonTeams(Array.isArray(teams) ? teams : [])
       setRunTeams(filtered)
     } catch (error) {
@@ -2054,7 +2386,7 @@ function AdminPage() {
       setMessage({ type: 'success', text: `Backfilled all seasons (${seasons}), updated ${updated} teams` })
       // Reload current filter's teams if any
       const seasonYear = parseInt((loanFilters.season || '').trim(), 10)
-      const filters = { european_only: 'true' }
+      const filters = {}  // All teams, not just European
       if (!isNaN(seasonYear)) filters.season = seasonYear
       const teams = await APIService.getTeams(filters)
       setRunTeams(Array.isArray(teams) ? teams : [])
@@ -2127,6 +2459,7 @@ function AdminPage() {
       else payload.loan_team_db_id = parseInt(dbId, 10)
       await APIService.adminLoanUpdate(loan.id, payload)
       await refreshLoans()
+      await loadPlayersHub()  // Also refresh Players & Loans Manager
     } catch (error) {
       setMessage({ type: 'error', text: `Update failed: ${error?.body?.error || error.message}` })
     }
@@ -2137,6 +2470,42 @@ function AdminPage() {
       await refreshLoans()
     } catch (error) {
       setMessage({ type: 'error', text: `Deactivate failed: ${error?.body?.error || error.message}` })
+    }
+  }
+  const refreshSupplementalLoans = async () => {
+    const params = { ...supplementalFilters }
+    if (params.player_name && params.player_name.trim() === '') delete params.player_name
+    const ls = await APIService.adminSupplementalLoansList(params)
+    setSupplementalLoans(ls)
+  }
+  const createSupplementalLoan = async () => {
+    try {
+      const payload = {
+        player_name: supplementalForm.player_name.trim(),
+        parent_team_name: supplementalForm.parent_team_name.trim(),
+        loan_team_name: supplementalForm.loan_team_name.trim(),
+        season_year: parseInt(supplementalForm.season_year, 10),
+      }
+      if (!payload.player_name || !payload.parent_team_name || !payload.loan_team_name || !payload.season_year) {
+        setMessage({ type: 'error', text: 'All fields are required' })
+        return
+      }
+      await APIService.adminSupplementalLoanCreate(payload)
+      setMessage({ type: 'success', text: 'Supplemental loan created' })
+      setSupplementalForm({ player_name: '', parent_team_name: '', loan_team_name: '', season_year: '' })
+      await refreshSupplementalLoans()
+    } catch (error) {
+      setMessage({ type: 'error', text: `Create failed: ${error?.body?.error || error.message}` })
+    }
+  }
+  const deleteSupplementalLoan = async (loan) => {
+    try {
+      if (!window.confirm(`Delete supplemental loan for ${loan.player_name}?`)) return
+      await APIService.adminSupplementalLoanDelete(loan.id)
+      setMessage({ type: 'success', text: 'Supplemental loan deleted' })
+      await refreshSupplementalLoans()
+    } catch (error) {
+      setMessage({ type: 'error', text: `Delete failed: ${error?.body?.error || error.message}` })
     }
   }
   const teamIdToTeam = useMemo(() => {
@@ -2192,27 +2561,55 @@ function AdminPage() {
       params.created_start = nlFilters.created_start
       params.created_end = nlFilters.created_end
     }
-    const rows = await APIService.adminNewslettersList(params)
-    const normalizedRows = Array.isArray(rows) ? rows : []
+    const result = await APIService.adminNewslettersList(params)
+    const normalizedRows = Array.isArray(result?.items)
+      ? result.items
+      : Array.isArray(result)
+        ? result
+        : []
     const allowedIds = new Set(normalizedRows.map((row) => row.id))
     setSelectedNewsletterIds((prev) => prev.filter((id) => allowedIds.has(id)))
     setNewslettersAdmin(normalizedRows)
+    setNewslettersAdminMeta({ total: Number(result?.total) || normalizedRows.length, meta: result?.meta || {} })
+    setAppliedNlFilters(params)
     setAdminNewsPage(1)
   }
   const resetNewsletterFilters = () => setNlFilters({ published_only: '', week_start: '', week_end: '', issue_start: '', issue_end: '', created_start: '', created_end: '' })
   const toggleNewsletterSelection = (id) => {
     const numericId = Number(id)
     if (!Number.isInteger(numericId) || numericId <= 0) return
-    setSelectedNewsletterIds((prev) =>
-      prev.includes(numericId)
-        ? prev.filter((value) => value !== numericId)
-        : [...prev, numericId]
-    )
+    setSelectedNewsletterIds((prev) => {
+      const set = new Set(prev)
+      if (allFilteredSelected) {
+        if (set.has(numericId)) {
+          set.delete(numericId)
+        } else {
+          set.add(numericId)
+        }
+      } else {
+        if (set.has(numericId)) {
+          set.delete(numericId)
+        } else {
+          set.add(numericId)
+        }
+      }
+      return Array.from(set)
+    })
   }
   const togglePageSelection = (checked) => {
     const ids = currentPageNewsletterIds
     if (ids.length === 0) return
-    if (checked) {
+    if (allFilteredSelected) {
+      if (checked) {
+        setSelectedNewsletterIds((prev) => prev.filter((value) => !ids.includes(value)))
+      } else {
+        setSelectedNewsletterIds((prev) => {
+          const merged = new Set(prev)
+          for (const value of ids) merged.add(value)
+          return Array.from(merged)
+        })
+      }
+    } else if (checked) {
       setSelectedNewsletterIds((prev) => {
         const merged = new Set(prev)
         for (const value of ids) merged.add(value)
@@ -2222,7 +2619,15 @@ function AdminPage() {
       setSelectedNewsletterIds((prev) => prev.filter((value) => !ids.includes(value)))
     }
   }
-  const clearNewsletterSelection = () => setSelectedNewsletterIds([])
+  const handleToggleAllFiltered = (checked) => {
+    setAllFilteredSelected(!!checked)
+    setSelectedNewsletterIds([])
+    selectionToastRef.current = { total: null, excluded: null, active: false }
+  }
+  const clearNewsletterSelection = () => {
+    setSelectedNewsletterIds([])
+    setAllFilteredSelected(false)
+  }
   const addSendingIds = useCallback((ids) => {
     const normalized = normalizeNewsletterIds(ids)
     if (normalized.length === 0) return
@@ -2325,25 +2730,353 @@ function AdminPage() {
     setMessage({ type, text: formatSendPreviewSummary({ successIds, failureDetails }) })
     return { successIds, failureDetails }
   }, [addSendingIds, removeSendingIds, setMessage])
-  const sendAdminPreviewSelected = useCallback(() => sendAdminPreview(selectedNewsletterIds, { trackBulk: true }), [sendAdminPreview, selectedNewsletterIds])
-  const deleteSelectedNewsletters = useCallback(() => deleteNewsletters(selectedNewsletterIds, { confirmPrompt: true, trackBulk: true }), [deleteNewsletters, selectedNewsletterIds])
+  const sendAdminPreviewSelected = useCallback(async () => {
+    if (allFilteredSelected) {
+      setMessage({ type: 'warning', text: 'Disable “Select all filtered” to send previews for specific newsletters.' })
+      return { successIds: [], failureDetails: [] }
+    }
+    return sendAdminPreview(selectedNewsletterIds, { trackBulk: true })
+  }, [allFilteredSelected, sendAdminPreview, selectedNewsletterIds])
+  const deleteSelectedNewsletters = useCallback(async () => {
+    if (allFilteredSelected) {
+      const total = totalFilteredCount
+      if (total === 0) {
+        setMessage({ type: 'error', text: 'No newsletters match your filters.' })
+        return { successIds: [], failureDetails: [] }
+      }
+      let confirmed = true
+      if (typeof window !== 'undefined') {
+        confirmed = window.confirm(`Delete ${total - selectedNewsletterIds.length} newsletters? This cannot be undone.`)
+      }
+      if (!confirmed) {
+        return { successIds: [], failureDetails: [] }
+      }
+      setBulkDeleteBusy(true)
+      try {
+        const payload = resolveBulkActionPayload({
+          useFilters: true,
+          filterParams: appliedNlFilters,
+          totalMatched: total,
+          excludedIds: selectedNewsletterIds,
+          explicitIds: [],
+        })
+        const res = await APIService.adminNewsletterBulkDelete({ ...payload.body })
+        setMessage({
+          type: 'success',
+          text: `Deleted ${res?.deleted || 0} newsletter${(res?.deleted || 0) === 1 ? '' : 's'}.`,
+        })
+        setSelectedNewsletterIds([])
+        await refreshNewsletters()
+        return { successIds: [], failureDetails: [] }
+      } catch (error) {
+        setMessage({ type: 'error', text: `Bulk delete failed: ${error?.body?.error || error.message}` })
+        return { successIds: [], failureDetails: [] }
+      } finally {
+        setBulkDeleteBusy(false)
+      }
+    }
+    return deleteNewsletters(selectedNewsletterIds, { confirmPrompt: true, trackBulk: true })
+  }, [allFilteredSelected, deleteNewsletters, selectedNewsletterIds, appliedNlFilters, totalFilteredCount, refreshNewsletters])
   const bulkPublishSelected = async (publishFlag) => {
-    if (selectedNewsletterIds.length === 0) {
+    const payloadInfo = resolveBulkActionPayload({
+      useFilters: allFilteredSelected,
+      filterParams: appliedNlFilters,
+      totalMatched: totalFilteredCount,
+      excludedIds: allFilteredSelected ? selectedNewsletterIds : [],
+      explicitIds: allFilteredSelected ? [] : selectedNewsletterIds,
+    })
+    if (payloadInfo.mode === 'ids' && (!payloadInfo.body.ids || payloadInfo.body.ids.length === 0)) {
       setMessage({ type: 'error', text: 'Select at least one newsletter first.' })
       return
     }
+    if (payloadInfo.mode === 'filters' && totalFilteredCount === 0) {
+      setMessage({ type: 'error', text: 'No newsletters match your filters.' })
+      return
+    }
     setBulkPublishBusy(true)
+    const previousExcluded = selectedNewsletterIds.length
     try {
-      await APIService.adminNewsletterBulkPublish(selectedNewsletterIds, publishFlag)
+      const response = await APIService.adminNewsletterBulkPublish({ ...payloadInfo.body }, publishFlag)
       setSelectedNewsletterIds([])
       await refreshNewsletters()
-      setMessage({ type: 'success', text: publishFlag ? 'Published selected newsletters.' : 'Unpublished selected newsletters.' })
+      const updatedCount = Number(response?.updated) || 0
+      const excludedCount = payloadInfo.mode === 'filters'
+        ? Number(response?.meta?.total_excluded ?? previousExcluded)
+        : 0
+      const verb = publishFlag ? 'Published' : 'Unpublished'
+      const suffix = updatedCount === 1 ? '' : 's'
+      const excludedText = excludedCount > 0 ? ` (${excludedCount} excluded)` : ''
+      setMessage({ type: 'success', text: `${verb} ${updatedCount} newsletter${suffix}.${excludedText}`.trim() })
     } catch (error) {
       setMessage({ type: 'error', text: `Bulk update failed: ${error?.body?.error || error.message}` })
     } finally {
       setBulkPublishBusy(false)
     }
   }
+
+  const openReviewModal = useCallback((mode = 'manual') => {
+    if (!newslettersAdmin.length) {
+      setMessage({ type: 'info', text: 'No newsletters match your filters.' })
+      return
+    }
+    const queue = [...newslettersAdmin].sort((a, b) => {
+      const dateFor = (row) => row.generated_date || row.published_date || row.issue_date || row.created_at || ''
+      return new Date(dateFor(b)) - new Date(dateFor(a))
+    })
+    setReviewQueue(queue)
+    setReviewIndex(0)
+    setReviewMode(mode === 'auto' ? 'auto' : 'manual')
+    setReviewDetail(null)
+    setReviewRenderedContent({ web: '', email: '', webError: null, emailError: null })
+    setReviewBatchExclude([])
+    setReviewBatchDelete([])
+    setReviewPreviewFormat('web')
+    setReviewTotalMatched(newslettersAdminMeta.total || newslettersAdmin.length)
+    setReviewLoadingDetail(false)
+    setReviewFinalizeBusy(false)
+    setReviewModalOpen(true)
+  }, [newslettersAdmin, newslettersAdminMeta.total, setMessage])
+
+  const closeReviewModal = useCallback(async () => {
+    setReviewModalOpen(false)
+    setReviewQueue([])
+    setReviewIndex(0)
+    setReviewDetail(null)
+    setReviewRenderedContent({ web: '', email: '', webError: null, emailError: null })
+    setReviewBatchExclude([])
+    setReviewBatchDelete([])
+    setReviewPreviewFormat('web')
+    setReviewLoadingDetail(false)
+    setReviewFinalizeBusy(false)
+    if (reviewDirtyRef.current) {
+      try {
+        await refreshNewsletters()
+      } catch (error) {
+        console.error('Failed to refresh newsletters after review', error)
+      }
+      reviewDirtyRef.current = false
+    }
+  }, [refreshNewsletters])
+
+  const finalizeAutoReview = useCallback(async () => {
+    setReviewFinalizeBusy(true)
+    try {
+      const total = reviewTotalMatched
+      const excludeSet = new Set(reviewBatchExclude)
+      for (const id of reviewBatchDelete) excludeSet.add(id)
+      const excludeIds = Array.from(excludeSet)
+      if (total > 0 && (total - excludeIds.length) >= 0) {
+        const payload = resolveBulkActionPayload({
+          useFilters: true,
+          filterParams: appliedNlFilters,
+          totalMatched: total,
+          excludedIds: excludeIds,
+          explicitIds: [],
+        })
+        await APIService.adminNewsletterBulkPublish({ ...payload.body }, true)
+      }
+      if (reviewBatchDelete.length > 0) {
+        await APIService.adminNewsletterBulkDelete({ ids: reviewBatchDelete })
+      }
+      reviewDirtyRef.current = true
+      const publishedCount = Math.max(reviewTotalMatched - excludeIds.length, 0)
+      const deleteCount = reviewBatchDelete.length
+      const summaryParts = []
+      summaryParts.push(`Published ${publishedCount} newsletter${publishedCount === 1 ? '' : 's'}.`)
+      if (deleteCount > 0) {
+        summaryParts.push(`Deleted ${deleteCount}.`)
+      }
+      setMessage({ type: 'success', text: summaryParts.join(' ') })
+    } catch (error) {
+      setMessage({ type: 'error', text: `Review flow failed: ${error?.body?.error || error.message}` })
+    } finally {
+      setReviewFinalizeBusy(false)
+      await closeReviewModal()
+    }
+  }, [reviewBatchDelete, reviewBatchExclude, reviewTotalMatched, appliedNlFilters, closeReviewModal])
+
+  const goToNextReview = useCallback(() => {
+    if (reviewQueue.length === 0) return
+    if (reviewIndex >= reviewQueue.length - 1) {
+      if (reviewMode === 'auto') {
+        finalizeAutoReview()
+      } else {
+        closeReviewModal()
+      }
+      return
+    }
+    setReviewIndex((idx) => Math.min(idx + 1, reviewQueue.length - 1))
+    setReviewPreviewFormat('web')
+  }, [reviewIndex, reviewQueue.length, reviewMode, finalizeAutoReview, closeReviewModal])
+
+  const goToPrevReview = useCallback(() => {
+    if (reviewQueue.length === 0) return
+    if (reviewIndex === 0) return
+    setReviewIndex((idx) => Math.max(idx - 1, 0))
+    setReviewPreviewFormat('web')
+  }, [reviewIndex, reviewQueue.length])
+
+  const ensureEmailPreview = useCallback(async (newsletterId) => {
+    if (!newsletterId) return
+    if (reviewRenderedContent.email) return
+    try {
+      const html = await APIService.adminNewsletterRender(newsletterId, 'email')
+      setReviewRenderedContent((prev) => ({ ...prev, email: html, emailError: null }))
+    } catch (error) {
+      setReviewRenderedContent((prev) => ({ ...prev, email: '', emailError: error?.body || error.message || 'Failed to load email preview.' }))
+    }
+  }, [reviewRenderedContent.email])
+
+  const queueExcludeId = useCallback((id) => {
+    setReviewBatchExclude((prev) => (prev.includes(id) ? prev : [...prev, id]))
+  }, [])
+
+  const queueDeleteId = useCallback((id) => {
+    setReviewBatchDelete((prev) => (prev.includes(id) ? prev : [...prev, id]))
+  }, [])
+
+
+
+  const changeReviewFormat = useCallback(async (format) => {
+    const nextFormat = format === 'email' ? 'email' : 'web'
+    setReviewPreviewFormat(nextFormat)
+    const current = reviewQueue[reviewIndex]
+    if (nextFormat === 'email' && current) {
+      await ensureEmailPreview(current.id)
+    }
+  }, [ensureEmailPreview, reviewIndex, reviewQueue])
+
+  const handlePublishReview = useCallback(async () => {
+    const current = reviewQueue[reviewIndex]
+    if (!current) return
+    if (reviewMode === 'auto') {
+      goToNextReview()
+      return
+    }
+    try {
+      setReviewLoadingDetail(true)
+      await APIService.adminNewsletterUpdate(current.id, { published: true })
+      reviewDirtyRef.current = true
+      setMessage({ type: 'success', text: `Published newsletter #${current.id}.` })
+      setReviewDetail((prev) => (prev && prev.id === current.id ? { ...prev, published: true } : prev))
+      goToNextReview()
+    } catch (error) {
+      setMessage({ type: 'error', text: `Publish failed: ${error?.body?.error || error.message}` })
+    } finally {
+      setReviewLoadingDetail(false)
+    }
+  }, [reviewQueue, reviewIndex, reviewMode, goToNextReview, setMessage])
+
+  const handleSkipReview = useCallback(() => {
+    const current = reviewQueue[reviewIndex]
+    if (!current) return
+    if (reviewMode === 'auto') {
+      queueExcludeId(current.id)
+    }
+    goToNextReview()
+  }, [reviewQueue, reviewIndex, reviewMode, queueExcludeId, goToNextReview])
+
+  const handleDeleteReview = useCallback(async () => {
+    const current = reviewQueue[reviewIndex]
+    if (!current) return
+    if (reviewMode === 'auto') {
+      queueDeleteId(current.id)
+      queueExcludeId(current.id)
+      goToNextReview()
+      return
+    }
+    let confirmed = true
+    if (typeof window !== 'undefined') {
+      confirmed = window.confirm(`Delete newsletter #${current.id}? This cannot be undone.`)
+    }
+    if (!confirmed) return
+    try {
+      setReviewLoadingDetail(true)
+      await APIService.adminNewsletterDelete(current.id)
+      reviewDirtyRef.current = true
+      setMessage({ type: 'success', text: `Deleted newsletter #${current.id}.` })
+      setReviewQueue((prev) => prev.filter((item) => item.id !== current.id))
+      setReviewIndex((idx) => {
+        const nextLength = reviewQueue.length - 1
+        if (nextLength <= 0) return 0
+        return Math.min(idx, nextLength - 1)
+      })
+      if (reviewQueue.length <= 1) {
+        await closeReviewModal()
+      }
+    } catch (error) {
+      setMessage({ type: 'error', text: `Delete failed: ${error?.body?.error || error.message}` })
+    } finally {
+      setReviewLoadingDetail(false)
+    }
+  }, [reviewQueue, reviewIndex, reviewMode, queueDeleteId, queueExcludeId, closeReviewModal, setMessage])
+
+  const handleApproveAndNext = useCallback(() => {
+    const current = reviewQueue[reviewIndex]
+    if (!current) return
+    goToNextReview()
+  }, [reviewQueue, reviewIndex, goToNextReview])
+
+  useEffect(() => {
+    if (!reviewModalOpen) return
+    const current = reviewQueue[reviewIndex]
+    if (!current) return
+    let cancelled = false
+    const load = async () => {
+      setReviewLoadingDetail(true)
+      try {
+        const detail = await APIService.adminNewsletterGet(current.id)
+        if (cancelled) return
+        setReviewDetail(detail)
+      } catch (error) {
+        if (cancelled) return
+        setReviewDetail(null)
+        setReviewRenderedContent({ web: '', email: '', webError: error?.body || error.message || 'Failed to load detail.', emailError: null })
+        setReviewLoadingDetail(false)
+        return
+      }
+      try {
+        const html = await APIService.adminNewsletterRender(current.id, 'web')
+        if (cancelled) return
+        setReviewRenderedContent({ web: html, email: '', webError: null, emailError: null })
+      } catch (error) {
+        if (cancelled) return
+        setReviewRenderedContent({ web: '', email: '', webError: error?.body || error.message || 'Failed to load preview.', emailError: null })
+      } finally {
+        if (!cancelled) setReviewLoadingDetail(false)
+      }
+    }
+    load()
+    return () => {
+      cancelled = true
+    }
+  }, [reviewModalOpen, reviewIndex, reviewQueue])
+
+  useEffect(() => {
+    if (!reviewModalOpen) return
+    const handler = (event) => {
+      if (reviewFinalizeBusy || reviewLoadingDetail) return
+      if (['ArrowRight', 'ArrowLeft', 'j', 'k', ' '].includes(event.key)) {
+        event.preventDefault()
+      }
+      if (event.key === 'ArrowRight' || event.key.toLowerCase() === 'j') {
+        goToNextReview()
+      } else if (event.key === 'ArrowLeft' || event.key.toLowerCase() === 'k') {
+        goToPrevReview()
+      } else if (event.key === ' ') {
+        if (reviewMode === 'auto') {
+          goToNextReview()
+        } else {
+          handlePublishReview()
+        }
+      }
+    }
+    window.addEventListener('keydown', handler)
+    return () => {
+      window.removeEventListener('keydown', handler)
+    }
+  }, [reviewModalOpen, reviewMode, reviewFinalizeBusy, reviewLoadingDetail, goToNextReview, goToPrevReview, handlePublishReview])
+
   const startEditNewsletter = async (row) => {
     const full = await APIService.adminNewsletterGet(row.id)
     setEditingNl(full)
@@ -2389,6 +3122,579 @@ function AdminPage() {
       refreshPreview()
     }
   }, [editingNl, previewFormat, refreshPreview])
+
+  const loadNewsletterYoutubeLinks = async (newsletterId) => {
+    try {
+      const links = await APIService.adminNewsletterYoutubeLinksList(newsletterId)
+      setNlYoutubeLinks(Array.isArray(links) ? links : [])
+    } catch (error) {
+      console.error('Failed to load YouTube links:', error)
+      setNlYoutubeLinks([])
+    }
+  }
+
+  const createNewsletterYoutubeLink = async () => {
+    if (!editingNl || !nlYoutubeLinkForm.player_name || !nlYoutubeLinkForm.youtube_link) {
+      setMessage({ type: 'error', text: 'Player name and YouTube link are required' })
+      return
+    }
+    try {
+      await APIService.adminNewsletterYoutubeLinkCreate(editingNl.id, {
+        player_name: nlYoutubeLinkForm.player_name,
+        youtube_link: nlYoutubeLinkForm.youtube_link,
+        player_id: nlYoutubeLinkForm.player_id,
+        supplemental_loan_id: nlYoutubeLinkForm.supplemental_loan_id
+      })
+      setMessage({ type: 'success', text: 'YouTube link added' })
+      setNlYoutubeLinkForm({ player_name: '', youtube_link: '', player_id: null, supplemental_loan_id: null })
+      await loadNewsletterYoutubeLinks(editingNl.id)
+    } catch (error) {
+      setMessage({ type: 'error', text: `Failed to add YouTube link: ${error?.body?.error || error.message}` })
+    }
+  }
+
+  const updateNewsletterYoutubeLink = async (linkId) => {
+    if (!editingNl || !editingNlYoutubeLink || !editingNlYoutubeLink.youtube_link) {
+      setMessage({ type: 'error', text: 'YouTube link is required' })
+      return
+    }
+    try {
+      await APIService.adminNewsletterYoutubeLinkUpdate(editingNl.id, linkId, {
+        youtube_link: editingNlYoutubeLink.youtube_link
+      })
+      setMessage({ type: 'success', text: 'YouTube link updated' })
+      setEditingNlYoutubeLink(null)
+      await loadNewsletterYoutubeLinks(editingNl.id)
+    } catch (error) {
+      setMessage({ type: 'error', text: `Failed to update YouTube link: ${error?.body?.error || error.message}` })
+    }
+  }
+
+  const deleteNewsletterYoutubeLink = async (linkId) => {
+    if (!editingNl) return
+    try {
+      await APIService.adminNewsletterYoutubeLinkDelete(editingNl.id, linkId)
+      setMessage({ type: 'success', text: 'YouTube link deleted' })
+      await loadNewsletterYoutubeLinks(editingNl.id)
+    } catch (error) {
+      setMessage({ type: 'error', text: `Failed to delete YouTube link: ${error?.body?.error || error.message}` })
+    }
+  }
+
+  const extractPlayersFromNewsletter = (newsletter) => {
+    if (!newsletter) return []
+    try {
+      const content = typeof newsletter.content === 'string' ? JSON.parse(newsletter.content) : newsletter.content
+      const enrichedContent = newsletter.enriched_content || content
+      const players = []
+      const sections = enrichedContent?.sections || []
+      for (const section of sections) {
+        const items = section?.items || []
+        for (const item of items) {
+          if (item.player_name) {
+            players.push({
+              player_name: item.player_name,
+              player_id: item.player_id || null,
+              supplemental_loan_id: item.supplemental_loan_id || null,
+              loan_team: item.loan_team || item.loan_team_name || ''
+            })
+          }
+        }
+      }
+      return players
+    } catch (error) {
+      return []
+    }
+  }
+
+  // Enhanced Newsletter Editor functions
+  const updatePlayerInNewsletter = (sectionIndex, itemIndex, updatedItem) => {
+    if (!editingNl) return
+    try {
+      const content = typeof editingNl.content === 'string' ? JSON.parse(editingNl.content) : editingNl.content
+      const sections = content?.sections || []
+      if (sections[sectionIndex] && sections[sectionIndex].items && sections[sectionIndex].items[itemIndex]) {
+        sections[sectionIndex].items[itemIndex] = { ...sections[sectionIndex].items[itemIndex], ...updatedItem }
+        setEditingNl({ ...editingNl, content: JSON.stringify(content, null, 2) })
+        setEditingPlayerCard(null)
+        setMessage({ type: 'success', text: 'Player updated' })
+      }
+    } catch (error) {
+      console.error('Failed to update player:', error)
+      setMessage({ type: 'error', text: 'Failed to update player' })
+    }
+  }
+
+  const movePlayerInNewsletter = (fromSectionIdx, fromItemIdx, toSectionIdx, direction) => {
+    if (!editingNl) return
+    try {
+      const content = typeof editingNl.content === 'string' ? JSON.parse(editingNl.content) : editingNl.content
+      const sections = content?.sections || []
+      
+      if (!sections[fromSectionIdx] || !sections[fromSectionIdx].items || !sections[fromSectionIdx].items[fromItemIdx]) {
+        setMessage({ type: 'error', text: 'Invalid source position' })
+        return
+      }
+
+      const player = sections[fromSectionIdx].items[fromItemIdx]
+      
+      // Moving within same section
+      if (fromSectionIdx === toSectionIdx) {
+        const items = sections[fromSectionIdx].items
+        const newIndex = direction === 'up' ? Math.max(0, fromItemIdx - 1) : Math.min(items.length - 1, fromItemIdx + 1)
+        if (newIndex !== fromItemIdx) {
+          items.splice(fromItemIdx, 1)
+          items.splice(newIndex, 0, player)
+          setEditingNl({ ...editingNl, content: JSON.stringify(content, null, 2) })
+          setMessage({ type: 'success', text: 'Player moved' })
+        }
+      } else {
+        // Moving to different section
+        if (!sections[toSectionIdx] || !sections[toSectionIdx].items) {
+          setMessage({ type: 'error', text: 'Invalid destination section' })
+          return
+        }
+        sections[fromSectionIdx].items.splice(fromItemIdx, 1)
+        sections[toSectionIdx].items.push(player)
+        setEditingNl({ ...editingNl, content: JSON.stringify(content, null, 2) })
+        setMessage({ type: 'success', text: `Player moved to ${sections[toSectionIdx].title || 'section'}` })
+      }
+    } catch (error) {
+      console.error('Failed to move player:', error)
+      setMessage({ type: 'error', text: 'Failed to move player' })
+    }
+  }
+
+  const deletePlayerFromNewsletter = (sectionIndex, itemIndex) => {
+    if (!editingNl) return
+    if (!confirm('Remove this player from the newsletter?')) return
+    try {
+      const content = typeof editingNl.content === 'string' ? JSON.parse(editingNl.content) : editingNl.content
+      const sections = content?.sections || []
+      if (sections[sectionIndex] && sections[sectionIndex].items) {
+        sections[sectionIndex].items.splice(itemIndex, 1)
+        setEditingNl({ ...editingNl, content: JSON.stringify(content, null, 2) })
+        setMessage({ type: 'success', text: 'Player removed from newsletter' })
+      }
+    } catch (error) {
+      console.error('Failed to delete player:', error)
+      setMessage({ type: 'error', text: 'Failed to delete player' })
+    }
+  }
+
+  useEffect(() => {
+    if (editingNl && editingNl.id) {
+      loadNewsletterYoutubeLinks(editingNl.id)
+    } else {
+      setNlYoutubeLinks([])
+    }
+  }, [editingNl?.id])
+
+  // Players Hub functions
+  const loadPlayersHub = async () => {
+    if (!adminReady) return
+    setPlayersHubLoading(true)
+    try {
+      const params = {
+        page: playersHubPage,
+        page_size: 50,
+      }
+      if (playersHubFilters.team_id) params.team_id = playersHubFilters.team_id
+      if (playersHubFilters.search) params.search = playersHubFilters.search
+      if (playersHubFilters.has_sofascore) params.has_sofascore = playersHubFilters.has_sofascore
+      
+      const data = await APIService.adminPlayersList(params)
+      setPlayersHubData(data)
+      
+      // Load field options for the add player form
+      try {
+        const options = await APIService.adminPlayerFieldOptions()
+        setPlayerFieldOptions({
+          positions: options.positions || [],
+          nationalities: options.nationalities || []
+        })
+      } catch (optionsError) {
+        console.warn('Failed to load player field options:', optionsError)
+        // Non-critical error, continue without options
+      }
+    } catch (error) {
+      console.error('Failed to load players:', error)
+      setMessage({ type: 'error', text: `Failed to load players: ${error?.body?.error || error.message}` })
+    } finally {
+      setPlayersHubLoading(false)
+    }
+  }
+
+  const applyPlayersHubFilters = () => {
+    setPlayersHubPage(1)
+    loadPlayersHub()
+  }
+
+  const resetPlayersHubFilters = () => {
+    setPlayersHubFilters({ team_id: '', search: '', has_sofascore: '' })
+    setPlayersHubPage(1)
+  }
+
+  const updatePlayerSofascoreId = async (playerId, sofascoreId) => {
+    try {
+      const payload = { sofascore_id: sofascoreId || null }
+      await APIService.adminPlayerUpdate(playerId, payload)
+      setMessage({ type: 'success', text: 'Sofascore ID updated' })
+      setEditingPlayerSofascore((prev) => {
+        const next = { ...prev }
+        delete next[playerId]
+        return next
+      })
+      await loadPlayersHub()
+    } catch (error) {
+      setMessage({ type: 'error', text: `Update failed: ${error?.body?.error || error.message}` })
+    }
+  }
+
+  const startInlinePlayerNameEdit = (player) => {
+    setInlinePlayerNameEdits((prev) => ({
+      ...prev,
+      [player.player_id]: player.player_name || '',
+    }))
+  }
+
+  const cancelInlinePlayerNameEdit = (playerId) => {
+    setInlinePlayerNameEdits((prev) => {
+      const next = { ...prev }
+      delete next[playerId]
+      return next
+    })
+    setInlinePlayerNameSaving((prev) => {
+      if (!prev[playerId]) {
+        return prev
+      }
+      const next = { ...prev }
+      delete next[playerId]
+      return next
+    })
+  }
+
+  const saveInlinePlayerNameEdit = async (playerId) => {
+    const draft = inlinePlayerNameEdits[playerId] ?? ''
+    const playerRecord = playersHubData.items.find((p) => p.player_id === playerId)
+    const currentName = playerRecord?.player_name || ''
+    const trimmedDraft = typeof draft === 'string' ? draft.trim() : ''
+
+    if (!trimmedDraft) {
+      setMessage({ type: 'error', text: 'Player name cannot be empty' })
+      return
+    }
+
+    const payloadInfo = buildPlayerNameUpdatePayload(playerId, draft, currentName)
+    if (!payloadInfo) {
+      setMessage({ type: 'warning', text: 'No changes to save' })
+      cancelInlinePlayerNameEdit(playerId)
+      return
+    }
+
+    setInlinePlayerNameSaving((prev) => ({ ...prev, [playerId]: true }))
+    try {
+      await APIService.adminPlayerUpdate(playerId, payloadInfo.payload)
+      setMessage({ type: 'success', text: `Updated player name to "${payloadInfo.payload.name}"` })
+      cancelInlinePlayerNameEdit(playerId)
+      await loadPlayersHub()
+    } catch (error) {
+      setMessage({ type: 'error', text: `Failed to update player: ${error?.body?.error || error.message}` })
+    } finally {
+      setInlinePlayerNameSaving((prev) => {
+        const next = { ...prev }
+        delete next[playerId]
+        return next
+      })
+    }
+  }
+
+  const togglePlayerSelection = (playerId) => {
+    setSelectedPlayersForBulk((prev) => {
+      if (prev.includes(playerId)) {
+        return prev.filter((id) => id !== playerId)
+      } else {
+        return [...prev, playerId]
+      }
+    })
+  }
+
+  const toggleAllPlayersSelection = () => {
+    if (selectedPlayersForBulk.length === playersHubData.items.length) {
+      setSelectedPlayersForBulk([])
+    } else {
+      setSelectedPlayersForBulk(playersHubData.items.map((p) => p.player_id))
+    }
+  }
+
+  const bulkUpdateSofascoreIds = async () => {
+    if (selectedPlayersForBulk.length === 0) {
+      setMessage({ type: 'error', text: 'No players selected' })
+      return
+    }
+
+    const updates = selectedPlayersForBulk.map((playerId) => {
+      const player = playersHubData.items.find((p) => p.player_id === playerId)
+      const sofascoreValue = editingPlayerSofascore[playerId]
+      return {
+        player_id: playerId,
+        player_name: player?.player_name,
+        sofascore_id: sofascoreValue !== undefined ? (sofascoreValue || null) : player?.sofascore_id
+      }
+    })
+
+    try {
+      const result = await APIService.adminPlayerBulkUpdateSofascore(updates)
+      const successCount = result.results?.updated?.length || 0
+      const failCount = result.results?.failed?.length || 0
+      
+      if (failCount > 0) {
+        setMessage({ 
+          type: 'warning', 
+          text: `Bulk update: ${successCount} succeeded, ${failCount} failed. Check console for details.` 
+        })
+        console.log('Bulk update failures:', result.results.failed)
+      } else {
+        setMessage({ type: 'success', text: `Bulk updated ${successCount} players` })
+      }
+      
+      setSelectedPlayersForBulk([])
+      setEditingPlayerSofascore({})
+      setBulkSofascoreMode(false)
+      await loadPlayersHub()
+    } catch (error) {
+      setMessage({ type: 'error', text: `Bulk update failed: ${error?.body?.error || error.message}` })
+    }
+  }
+
+  const generateSeasonOptions = () => {
+    const currentYear = new Date().getFullYear()
+    const options = []
+    // Generate last 3 seasons + current + next 2
+    for (let i = -3; i <= 2; i++) {
+      const startYear = currentYear + i
+      const endYear = startYear + 1
+      const endYearShort = String(endYear).slice(-2)
+      options.push({
+        value: `${startYear}-${endYearShort}::FULL`,
+        label: `${startYear}-${endYear} (Full Season)`
+      })
+      options.push({
+        value: `${startYear}-${endYearShort}::SUMMER`,
+        label: `${startYear}-${endYear} (Summer Window)`
+      })
+      options.push({
+        value: `${startYear}-${endYearShort}::WINTER`,
+        label: `${startYear}-${endYear} (Winter Window)`
+      })
+    }
+    return options
+  }
+
+  const createManualPlayer = async () => {
+    if (!addPlayerForm.name.trim()) {
+      setMessage({ type: 'error', text: 'Player name is required' })
+      return
+    }
+    
+    // Validate primary team
+    if (!addPlayerForm.use_custom_primary_team && !addPlayerForm.primary_team_id) {
+      setMessage({ type: 'error', text: 'Primary team is required (or check "Custom team")' })
+      return
+    }
+    if (addPlayerForm.use_custom_primary_team && !addPlayerForm.custom_primary_team_name.trim()) {
+      setMessage({ type: 'error', text: 'Custom primary team name is required' })
+      return
+    }
+    
+    // Validate loan team
+    if (!addPlayerForm.use_custom_loan_team && !addPlayerForm.loan_team_id) {
+      setMessage({ type: 'error', text: 'Loan team is required (or check "Custom team")' })
+      return
+    }
+    if (addPlayerForm.use_custom_loan_team && !addPlayerForm.custom_loan_team_name.trim()) {
+      setMessage({ type: 'error', text: 'Custom loan team name is required' })
+      return
+    }
+    
+    if (!addPlayerForm.window_key) {
+      setMessage({ type: 'error', text: 'Season/window is required' })
+      return
+    }
+
+    try {
+      const payload = {
+        name: addPlayerForm.name.trim(),
+        firstname: addPlayerForm.firstname.trim() || null,
+        lastname: addPlayerForm.lastname.trim() || null,
+        position: addPlayerForm.position.trim() || null,
+        nationality: addPlayerForm.nationality.trim() || null,
+        age: addPlayerForm.age ? parseInt(addPlayerForm.age) : null,
+        sofascore_id: addPlayerForm.sofascore_id ? parseInt(addPlayerForm.sofascore_id) : null,
+        window_key: addPlayerForm.window_key
+      }
+      
+      // Add primary team (either ID or custom name)
+      if (addPlayerForm.use_custom_primary_team) {
+        payload.custom_primary_team_name = addPlayerForm.custom_primary_team_name.trim()
+      } else {
+        payload.primary_team_id = parseInt(addPlayerForm.primary_team_id)
+      }
+      
+      // Add loan team (either ID or custom name)
+      if (addPlayerForm.use_custom_loan_team) {
+        payload.custom_loan_team_name = addPlayerForm.custom_loan_team_name.trim()
+      } else {
+        payload.loan_team_id = parseInt(addPlayerForm.loan_team_id)
+      }
+
+      const result = await APIService.adminPlayerCreate(payload)
+      setMessage({ type: 'success', text: result.message || `Player "${payload.name}" created successfully` })
+      setShowAddPlayerForm(false)
+      setAddPlayerForm({
+        name: '',
+        firstname: '',
+        lastname: '',
+        position: '',
+        nationality: '',
+        age: '',
+        sofascore_id: '',
+        primary_team_id: '',
+        loan_team_id: '',
+        window_key: '',
+        use_custom_primary_team: false,
+        custom_primary_team_name: '',
+        use_custom_loan_team: false,
+        custom_loan_team_name: ''
+      })
+      // Reload both players and field options
+      await loadPlayersHub()
+    } catch (error) {
+      setMessage({ type: 'error', text: `Failed to create player: ${error?.body?.error || error.message}` })
+    }
+  }
+
+  const openEditPlayerDialog = async (playerId) => {
+    try {
+      // Fetch full player details
+      const playerData = await APIService.adminPlayerGet(playerId)
+      
+      // Get the first/primary loan record
+      const primaryLoan = playerData.loans && playerData.loans.length > 0 ? playerData.loans[0] : null
+      
+      if (!primaryLoan) {
+        setMessage({ type: 'error', text: 'No loan record found for this player' })
+        return
+      }
+      
+      // Populate form
+      const isCustomPrimaryTeam = !primaryLoan.primary_team_id
+      const isCustomLoanTeam = !primaryLoan.loan_team_id
+      
+      setEditPlayerForm({
+        name: playerData.name || '',
+        position: playerData.position || '',
+        nationality: playerData.nationality || '',
+        age: playerData.age || '',
+        sofascore_id: playerData.sofascore_id || '',
+        primary_team_id: primaryLoan.primary_team_id || '',
+        loan_team_id: primaryLoan.loan_team_id || '',
+        use_custom_primary_team: isCustomPrimaryTeam,
+        custom_primary_team_name: isCustomPrimaryTeam ? primaryLoan.primary_team_name : '',
+        use_custom_loan_team: isCustomLoanTeam,
+        custom_loan_team_name: isCustomLoanTeam ? primaryLoan.loan_team_name : '',
+        window_key: primaryLoan.window_key || ''
+      })
+      
+      setEditingPlayerDialog({ player: playerData, loan: primaryLoan })
+    } catch (error) {
+      setMessage({ type: 'error', text: `Failed to load player: ${error?.body?.error || error.message}` })
+    }
+  }
+
+  const savePlayerEdit = async () => {
+    if (!editingPlayerDialog) return
+    
+    try {
+      const { player, loan } = editingPlayerDialog
+      
+      // Update Player record
+      const playerPayload = {
+        name: editPlayerForm.name.trim(),
+        position: editPlayerForm.position.trim() || null,
+        nationality: editPlayerForm.nationality.trim() || null,
+        age: editPlayerForm.age ? parseInt(editPlayerForm.age) : null,
+        sofascore_id: editPlayerForm.sofascore_id ? parseInt(editPlayerForm.sofascore_id) : null
+      }
+      
+      await APIService.adminPlayerUpdate(player.player_id, playerPayload)
+      
+      // Update LoanedPlayer record (teams)
+      const loanPayload = {
+        player_name: editPlayerForm.name.trim(),
+        window_key: editPlayerForm.window_key
+      }
+      
+      // Handle primary team
+      if (editPlayerForm.use_custom_primary_team) {
+        loanPayload.primary_team_name = editPlayerForm.custom_primary_team_name.trim()
+        // Set team_id to null for custom teams
+        loanPayload.primary_team_db_id = null
+      } else if (editPlayerForm.primary_team_id) {
+        loanPayload.primary_team_db_id = parseInt(editPlayerForm.primary_team_id)
+      }
+      
+      // Handle loan team
+      if (editPlayerForm.use_custom_loan_team) {
+        loanPayload.loan_team_name = editPlayerForm.custom_loan_team_name.trim()
+        // Set team_id to null for custom teams
+        loanPayload.loan_team_db_id = null
+      } else if (editPlayerForm.loan_team_id) {
+        loanPayload.loan_team_db_id = parseInt(editPlayerForm.loan_team_id)
+      }
+      
+      await APIService.adminLoanUpdate(loan.id, loanPayload)
+      
+      setMessage({ type: 'success', text: `Player "${editPlayerForm.name}" updated successfully` })
+      setEditingPlayerDialog(null)
+      await loadPlayersHub()
+    } catch (error) {
+      setMessage({ type: 'error', text: `Failed to update player: ${error?.body?.error || error.message}` })
+    }
+  }
+
+  const deletePlayer = async (playerId, playerName, loanCount) => {
+    const isManual = playerId < 0
+    const playerType = isManual ? 'manual player' : 'player'
+    const warningMessage = loanCount > 0 
+      ? `Are you sure you want to delete "${playerName}"?\n\nThis will remove:\n- ${loanCount} loan record(s)\n- Any associated YouTube links\n- Player from all tracking\n\nThis action cannot be undone.`
+      : `Are you sure you want to delete "${playerName}"?\n\nThis ${playerType} will be permanently removed from tracking.\n\nThis action cannot be undone.`
+    
+    if (!confirm(warningMessage)) {
+      return
+    }
+
+    try {
+      const result = await APIService.adminPlayerDelete(playerId)
+      const deletedInfo = result.deleted || {}
+      const details = []
+      if (deletedInfo.loaned_records > 0) details.push(`${deletedInfo.loaned_records} loan record(s)`)
+      if (deletedInfo.youtube_links > 0) details.push(`${deletedInfo.youtube_links} YouTube link(s)`)
+      if (deletedInfo.player_record) details.push('player record')
+      
+      const detailsText = details.length > 0 ? ` (removed: ${details.join(', ')})` : ''
+      setMessage({ type: 'success', text: `Player "${playerName}" deleted successfully${detailsText}` })
+      await loadPlayersHub()
+    } catch (error) {
+      setMessage({ type: 'error', text: `Failed to delete player: ${error?.body?.error || error.message}` })
+    }
+  }
+
+  useEffect(() => {
+    if (adminReady && playersHubPage) {
+      loadPlayersHub()
+    }
+  }, [adminReady, playersHubPage])
 
   return (
     <div className="max-w-6xl mx-auto py-6 sm:px-6 lg:px-8">
@@ -2560,11 +3866,30 @@ function AdminPage() {
         {hasAdminAccess ? (
           <>
           <div className="sticky top-2 z-10 bg-white/80 backdrop-blur border rounded p-2 flex flex-wrap gap-2">
-            <a href="#admin-api"><Button size="sm" variant="outline">API Key</Button></a>
-            <a href="#admin-runs"><Button size="sm" variant="outline">Runs</Button></a>
-            <a href="#admin-seed"><Button size="sm" variant="outline">Seed Top-5</Button></a>
-            <a href="#admin-loans"><Button size="sm" variant="outline">Loans Manager</Button></a>
-            <a href="#admin-newsletters"><Button size="sm" variant="outline">Newsletters</Button></a>
+            {adminQuickLinks.map((link) => {
+              const button = (
+                <Button size="sm" variant="outline">{link.label}</Button>
+              )
+              if (link.spa) {
+                return (
+                  <Link key={link.label} to={link.href}>
+                    {button}
+                  </Link>
+                )
+              }
+              if (link.external) {
+                return (
+                  <a key={link.label} href={link.href} target="_blank" rel="noreferrer">
+                    {button}
+                  </a>
+                )
+              }
+              return (
+                <a key={link.label} href={link.href}>
+                  {button}
+                </a>
+              )
+            })}
           </div>
           <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
           <div id="admin-runs" className="border rounded p-4">
@@ -2765,66 +4090,383 @@ function AdminPage() {
               <Button variant={runStatus? 'default':'outline'} onClick={toggleRun} disabled={running}>{runStatus? 'Resume':'Pause'}</Button>
             </div>
           </div>
-          <div id="admin-loans" className="border rounded p-4 md:col-span-2">
-            <h2 className="font-semibold mb-3">Loans Manager</h2>
-            <div className="grid grid-cols-1 lg:grid-cols-3 gap-4">
-              <div className="space-y-2">
-                <div className="font-medium">Filters</div>
-                <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-2 items-end">
-                  <label className="text-sm flex items-center gap-2">
-                    <input type="checkbox" checked={loanFilters.active_only === 'true'} onChange={e=>setLoanFilters({...loanFilters, active_only: e.target.checked ? 'true' : 'false'})} />
-                    <span>Active only</span>
+          <div id="admin-players-loans" className="md:col-span-2">
+            <Accordion type="single" collapsible className="border rounded-lg">
+              <AccordionItem value="players-loans">
+                <AccordionTrigger className="px-4 py-3 hover:no-underline">
+                  <div className="flex items-center justify-between w-full pr-4">
+                    <h2 className="font-semibold text-lg">Players & Loans Manager</h2>
+                    <div className="text-sm text-gray-600">
+                      {playersHubData.items.length} player{playersHubData.items.length !== 1 ? 's' : ''}
+                    </div>
+                  </div>
+                </AccordionTrigger>
+                <AccordionContent className="px-4 pb-4">
+                  <div className="mb-4 flex justify-end">
+                    <Button size="sm" onClick={() => setShowAddPlayerForm(!showAddPlayerForm)}>
+                      {showAddPlayerForm ? 'Cancel' : '+ Add Player'}
+                    </Button>
+                  </div>
+
+                  {/* Add Player Form */}
+                  {showAddPlayerForm && (
+                    <div className="bg-gradient-to-r from-green-50 to-blue-50 border border-green-200 rounded-lg p-4 mb-4">
+                <h3 className="text-sm font-semibold mb-3">Create New Player</h3>
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+                  <div className="md:col-span-2">
+                    <label className="text-xs font-medium text-gray-700 block mb-1">Player Name *</label>
+                    <input
+                      type="text"
+                      className="border rounded p-2 text-sm w-full"
+                      placeholder="Full name"
+                      value={addPlayerForm.name}
+                      onChange={(e) => setAddPlayerForm({...addPlayerForm, name: e.target.value})}
+                    />
+                  </div>
+                  <div>
+                    <div className="flex items-center justify-between mb-1">
+                      <label className="text-xs font-medium text-gray-700">Primary Team (Parent Club) *</label>
+                      <label className="flex items-center gap-1 text-xs text-gray-600 cursor-pointer">
+                        <input
+                          type="checkbox"
+                          checked={addPlayerForm.use_custom_primary_team}
+                          onChange={(e) => setAddPlayerForm({
+                            ...addPlayerForm, 
+                            use_custom_primary_team: e.target.checked,
+                            primary_team_id: '',
+                            custom_primary_team_name: ''
+                          })}
+                        />
+                        Custom team
                   </label>
-                  <div className="flex flex-col">
-                    <span className="text-xs text-muted-foreground">Player name</span>
-                    <input className="border rounded p-2 text-sm w-full" placeholder="e.g., Smith" value={loanFilters.player_name} onChange={e=>setLoanFilters({...loanFilters, player_name: e.target.value})} />
                   </div>
-                  <div className="flex flex-col">
-                    <span className="text-xs text-muted-foreground">Season (YYYY)</span>
-                    <input type="number" inputMode="numeric" pattern="[0-9]*" className="border rounded p-2 text-sm w-full" placeholder="2025" value={loanFilters.season} onChange={e=>setLoanFilters({...loanFilters, season: e.target.value})} />
+                    {addPlayerForm.use_custom_primary_team ? (
+                      <input
+                        type="text"
+                        className="border rounded p-2 text-sm w-full"
+                        placeholder="e.g. Portsmouth, Sunderland"
+                        value={addPlayerForm.custom_primary_team_name}
+                        onChange={(e) => setAddPlayerForm({...addPlayerForm, custom_primary_team_name: e.target.value})}
+                      />
+                    ) : (
+                      <TeamSelect
+                        teams={runTeams}
+                        value={addPlayerForm.primary_team_id}
+                        onChange={(id) => setAddPlayerForm({...addPlayerForm, primary_team_id: id})}
+                        placeholder="Select primary team..."
+                      />
+                    )}
                   </div>
-                  <div className="flex sm:justify-end">
-                    <Button size="sm" variant="outline" className="w-full sm:w-auto" onClick={refreshLoans}>Apply</Button>
+                  <div>
+                    <div className="flex items-center justify-between mb-1">
+                      <label className="text-xs font-medium text-gray-700">Loan Team (Current Club) *</label>
+                      <label className="flex items-center gap-1 text-xs text-gray-600 cursor-pointer">
+                        <input
+                          type="checkbox"
+                          checked={addPlayerForm.use_custom_loan_team}
+                          onChange={(e) => setAddPlayerForm({
+                            ...addPlayerForm, 
+                            use_custom_loan_team: e.target.checked,
+                            loan_team_id: '',
+                            custom_loan_team_name: ''
+                          })}
+                        />
+                        Custom team
+                      </label>
+                  </div>
+                    {addPlayerForm.use_custom_loan_team ? (
+                      <input
+                        type="text"
+                        className="border rounded p-2 text-sm w-full"
+                        placeholder="e.g. Sheffield Wednesday, Hull City"
+                        value={addPlayerForm.custom_loan_team_name}
+                        onChange={(e) => setAddPlayerForm({...addPlayerForm, custom_loan_team_name: e.target.value})}
+                      />
+                    ) : (
+                      <TeamSelect
+                        teams={runTeams}
+                        value={addPlayerForm.loan_team_id}
+                        onChange={(id) => setAddPlayerForm({...addPlayerForm, loan_team_id: id})}
+                        placeholder="Select loan team..."
+                      />
+                    )}
+                </div>
+                  <div className="md:col-span-2">
+                    <label className="text-xs font-medium text-gray-700 block mb-1">Season / Window *</label>
+                    <select
+                      className="border rounded p-2 text-sm w-full"
+                      value={addPlayerForm.window_key}
+                      onChange={(e) => setAddPlayerForm({...addPlayerForm, window_key: e.target.value})}
+                    >
+                      <option value="">Select season...</option>
+                      {generateSeasonOptions().map(opt => (
+                        <option key={opt.value} value={opt.value}>{opt.label}</option>
+                      ))}
+                    </select>
+                  </div>
+                  <div>
+                    <label className="text-xs font-medium text-gray-700 block mb-1">Position</label>
+                    <select
+                      className="border rounded p-2 text-sm w-full"
+                      value={addPlayerForm.position}
+                      onChange={(e) => setAddPlayerForm({...addPlayerForm, position: e.target.value})}
+                    >
+                      <option value="">Select position...</option>
+                      {playerFieldOptions.positions.map(pos => (
+                        <option key={pos} value={pos}>{pos}</option>
+                      ))}
+                      <option value="__custom__">+ Add custom position</option>
+                    </select>
+                    {addPlayerForm.position === '__custom__' && (
+                      <input
+                        type="text"
+                        className="border rounded p-2 text-sm w-full mt-2"
+                        placeholder="Enter custom position"
+                        onChange={(e) => setAddPlayerForm({...addPlayerForm, position: e.target.value})}
+                        autoFocus
+                      />
+                    )}
+                  </div>
+                  <div>
+                    <label className="text-xs font-medium text-gray-700 block mb-1">Nationality</label>
+                    <select
+                      className="border rounded p-2 text-sm w-full"
+                      value={addPlayerForm.nationality}
+                      onChange={(e) => setAddPlayerForm({...addPlayerForm, nationality: e.target.value})}
+                    >
+                      <option value="">Select nationality...</option>
+                      {playerFieldOptions.nationalities.map(nat => (
+                        <option key={nat} value={nat}>{nat}</option>
+                      ))}
+                      <option value="__custom__">+ Add custom nationality</option>
+                    </select>
+                    {addPlayerForm.nationality === '__custom__' && (
+                      <input
+                        type="text"
+                        className="border rounded p-2 text-sm w-full mt-2"
+                        placeholder="Enter custom nationality"
+                        onChange={(e) => setAddPlayerForm({...addPlayerForm, nationality: e.target.value})}
+                        autoFocus
+                      />
+                    )}
+                  </div>
+                  <div>
+                    <label className="text-xs font-medium text-gray-700 block mb-1">Age</label>
+                    <input
+                      type="number"
+                      className="border rounded p-2 text-sm w-full"
+                      placeholder="Age"
+                      value={addPlayerForm.age}
+                      onChange={(e) => setAddPlayerForm({...addPlayerForm, age: e.target.value})}
+                    />
+                  </div>
+                  <div>
+                    <label className="text-xs font-medium text-gray-700 block mb-1">Sofascore ID</label>
+                    <input
+                      type="number"
+                      className="border rounded p-2 text-sm w-full"
+                      placeholder="Optional Sofascore ID"
+                      value={addPlayerForm.sofascore_id}
+                      onChange={(e) => setAddPlayerForm({...addPlayerForm, sofascore_id: e.target.value})}
+                    />
                   </div>
                 </div>
-                <div className="text-xs text-gray-500">Backfill helpers</div>
-                <div className="flex flex-wrap items-center gap-2 mt-2">
-                  <Button size="sm" variant="outline" onClick={backfillTeamLeagues}>Backfill team leagues for season</Button>
-                  <Button size="sm" variant="ghost" onClick={backfillAllSeasons}>Backfill all seasons</Button>
-                  <div className="flex items-center gap-2">
+                <div className="mt-3 flex gap-2">
+                  <Button size="sm" onClick={createManualPlayer}>
+                    Create Player
+                  </Button>
+                  <Button size="sm" variant="outline" onClick={() => {
+                    setShowAddPlayerForm(false)
+                    setAddPlayerForm({ 
+                      name: '', 
+                      firstname: '', 
+                      lastname: '', 
+                      position: '', 
+                      nationality: '', 
+                      age: '', 
+                      sofascore_id: '',
+                      primary_team_id: '',
+                      loan_team_id: '',
+                      window_key: '',
+                      use_custom_primary_team: false,
+                      custom_primary_team_name: '',
+                      use_custom_loan_team: false,
+                      custom_loan_team_name: ''
+                    })
+                  }}>
+                    Cancel
+                  </Button>
+                </div>
+              </div>
+            )}
+
+            {/* Filters Section */}
+            <div className="bg-gray-50 border rounded-lg p-4 mb-4">
+              <div className="flex items-center justify-between mb-3">
+                <h3 className="font-medium text-sm">Filters</h3>
+                <div className="flex gap-2">
+                  <Button size="sm" variant="outline" onClick={applyPlayersHubFilters}>
+                    Apply Filters
+                  </Button>
+                  <Button size="sm" variant="ghost" onClick={resetPlayersHubFilters}>
+                    Reset
+                  </Button>
+                </div>
+              </div>
+              <div className="grid grid-cols-1 md:grid-cols-5 gap-3">
+                <div>
+                  <label className="text-xs font-medium text-gray-700 block mb-1">Team</label>
+                  <TeamSelect
+                    teams={runTeams}
+                    value={playersHubFilters.team_id}
+                    onChange={(id) => setPlayersHubFilters({...playersHubFilters, team_id: id})}
+                    placeholder="Filter by team..."
+                  />
+                </div>
+                <div>
+                  <label className="text-xs font-medium text-gray-700 block mb-1">Player Name</label>
+                  <input
+                    className="border rounded p-2 text-sm w-full"
+                    placeholder="Search by name..."
+                    value={playersHubFilters.search}
+                    onChange={e=>setPlayersHubFilters({...playersHubFilters, search: e.target.value})}
+                    onKeyPress={(e) => e.key === 'Enter' && applyPlayersHubFilters()}
+                  />
+                </div>
+                <div>
+                  <label className="text-xs font-medium text-gray-700 block mb-1">Position</label>
+                  <select
+                    className="border rounded p-2 text-sm w-full"
+                    value={playersHubFilters.position || ''}
+                    onChange={e=>setPlayersHubFilters({...playersHubFilters, position: e.target.value})}
+                  >
+                    <option value="">All positions</option>
+                    {playerFieldOptions.positions.map(pos => (
+                      <option key={pos} value={pos}>{pos}</option>
+                    ))}
+                  </select>
+                </div>
+                <div>
+                  <label className="text-xs font-medium text-gray-700 block mb-1">Sofascore ID</label>
+                  <select
+                    className="border rounded p-2 text-sm w-full"
+                    value={playersHubFilters.has_sofascore}
+                    onChange={e=>setPlayersHubFilters({...playersHubFilters, has_sofascore: e.target.value})}
+                  >
+                    <option value="">All players</option>
+                    <option value="true">Has Sofascore ID</option>
+                    <option value="false">Missing Sofascore ID</option>
+                  </select>
+                </div>
+                <div>
+                  <label className="text-xs font-medium text-gray-700 block mb-1">Status</label>
+                  <select
+                    className="border rounded p-2 text-sm w-full"
+                    value={playersHubFilters.is_active || ''}
+                    onChange={e=>setPlayersHubFilters({...playersHubFilters, is_active: e.target.value})}
+                  >
+                    <option value="">All</option>
+                    <option value="true">Active only</option>
+                    <option value="false">Inactive</option>
+                  </select>
+                </div>
+              </div>
+            </div>
+
+            {/* Bulk Actions */}
+            {selectedPlayersForBulk.length > 0 && (
+              <div className="bg-blue-50 border border-blue-200 rounded-lg p-3 mb-4">
+                <div className="flex items-center justify-between">
+                  <span className="text-sm font-medium">{selectedPlayersForBulk.length} player(s) selected</span>
+                  <div className="flex gap-2">
+                    <Button size="sm" onClick={() => setBulkSofascoreMode(!bulkSofascoreMode)}>
+                      {bulkSofascoreMode ? 'Cancel Bulk Edit' : 'Bulk Edit Sofascore'}
+                    </Button>
+                    {bulkSofascoreMode && (
+                      <Button size="sm" variant="default" onClick={bulkUpdateSofascoreIds}>
+                        Save Bulk Updates
+                      </Button>
+                    )}
+                    <Button size="sm" variant="ghost" onClick={() => setSelectedPlayersForBulk([])}>
+                      Clear Selection
+                    </Button>
+                  </div>
+                </div>
+              </div>
+            )}
+
+            {/* Advanced Tools (Collapsed) */}
+            <Accordion type="single" collapsible className="mb-4">
+              <AccordionItem value="advanced" className="border rounded-lg">
+                <AccordionTrigger className="px-4 py-2 hover:no-underline">
+                  <span className="text-sm font-medium text-gray-700">🔧 Advanced Tools & Backfill Helpers</span>
+                </AccordionTrigger>
+                <AccordionContent className="px-4 pb-4">
+                  <div className="space-y-3">
+                    <div>
+                      <div className="text-xs font-medium text-gray-700 mb-2">Backfill Operations</div>
+                      <div className="flex flex-wrap gap-2">
+                        <Button size="sm" variant="outline" onClick={backfillTeamLeagues}>
+                          Backfill Team Leagues
+                        </Button>
+                        <Button size="sm" variant="outline" onClick={backfillAllSeasons}>
+                          Backfill All Seasons
+                        </Button>
+                      </div>
+                    </div>
+                    
+                    <div>
+                      <div className="text-xs font-medium text-gray-700 mb-2">Missing Names Checker</div>
+                      <div className="flex flex-wrap gap-2 items-end">
+                        <div className="flex-1 min-w-[200px]">
+                          <label className="text-xs text-gray-600 block mb-1">Team (optional)</label>
                     <TeamSelect
                       teams={runTeams}
                       value={mnTeamDbId}
                       onChange={setMnTeamDbId}
-                      placeholder="Select team (optional)…"
+                            placeholder="Select team..."
                     />
-                    <span className="text-xs text-gray-500">or API ID:</span>
-                    <input className="border rounded p-2 text-sm w-36" placeholder="Team API ID (opt)" value={mnTeamApiId} onChange={e=>setMnTeamApiId(e.target.value)} />
                   </div>
-                  <Button size="sm" variant="outline" onClick={listMissingNames} disabled={mnBusy}>{mnBusy? 'Checking…':'Find missing names (season)'}</Button>
-                  <Button size="sm" onClick={backfillMissingNames} disabled={mnBusy}>Backfill missing names (season)</Button>
+                        <div className="w-32">
+                          <label className="text-xs text-gray-600 block mb-1">Team API ID</label>
+                          <input
+                            className="border rounded p-2 text-sm w-full"
+                            placeholder="API ID"
+                            value={mnTeamApiId}
+                            onChange={e=>setMnTeamApiId(e.target.value)}
+                          />
                 </div>
+                        <Button size="sm" variant="outline" onClick={listMissingNames} disabled={mnBusy}>
+                          {mnBusy ? 'Checking...' : 'Find Missing Names'}
+                        </Button>
+                        <Button size="sm" onClick={backfillMissingNames} disabled={mnBusy || !missingNames?.length}>
+                          Backfill Names
+                        </Button>
+                      </div>
+                      
                 {missingNames && missingNames.length > 0 && (
-                  <div className="mt-3">
-                    <div className="text-xs font-semibold mb-1">Missing names ({missingNames.length})</div>
-                    <div className="max-h-56 overflow-auto border rounded">
+                        <div className="mt-3 border rounded-lg overflow-hidden">
+                          <div className="bg-yellow-50 px-3 py-2 text-xs font-medium text-yellow-800">
+                            Found {missingNames.length} loans with missing names
+                          </div>
+                          <div className="max-h-48 overflow-auto">
                       <table className="min-w-full text-xs">
-                        <thead className="bg-gray-50">
+                              <thead className="bg-gray-50 sticky top-0">
                           <tr className="text-left">
                             <th className="p-2">Loan ID</th>
                             <th className="p-2">Player ID</th>
-                            <th className="p-2">Player name</th>
-                            <th className="p-2">Primary</th>
-                            <th className="p-2">Loan team</th>
+                                  <th className="p-2">Name</th>
+                                  <th className="p-2">Primary Team</th>
+                                  <th className="p-2">Loan Team</th>
                             <th className="p-2">Window</th>
                           </tr>
                         </thead>
                         <tbody>
                           {missingNames.map(m => (
-                            <tr key={m.id} className="border-t">
+                                  <tr key={m.id} className="border-t hover:bg-gray-50">
                               <td className="p-2 whitespace-nowrap">{m.id}</td>
                               <td className="p-2 whitespace-nowrap">{m.player_id}</td>
-                              <td className="p-2">{m.player_name || ''}</td>
+                                    <td className="p-2 text-gray-500 italic">{m.player_name || '(empty)'}</td>
                               <td className="p-2 whitespace-nowrap">{m.primary_team_name}</td>
                               <td className="p-2 whitespace-nowrap">{m.loan_team_name}</td>
                               <td className="p-2 whitespace-nowrap">{m.window_key}</td>
@@ -2836,106 +4478,340 @@ function AdminPage() {
                   </div>
                 )}
               </div>
-              <div className="space-y-2 lg:col-span-2">
-                <div className="font-medium">Add Loan</div>
-                <div className="grid grid-cols-2 md:grid-cols-5 gap-2">
-                  <input className="border rounded p-2 text-sm" placeholder="Player ID" value={loanForm.player_id} onChange={e=>setLoanForm({...loanForm, player_id: e.target.value})} />
-                  <input className="border rounded p-2 text-sm" placeholder="Player name (opt)" value={loanForm.player_name} onChange={e=>setLoanForm({...loanForm, player_name: e.target.value})} />
-                  <input className="border rounded p-2 text-sm" placeholder="Primary Team API ID" value={loanForm.primary_team_api_id} onChange={e=>setLoanForm({...loanForm, primary_team_api_id: e.target.value})} />
-                  <input className="border rounded p-2 text-sm" placeholder="Loan Team API ID" value={loanForm.loan_team_api_id} onChange={e=>setLoanForm({...loanForm, loan_team_api_id: e.target.value})} />
-                  <input className="border rounded p-2 text-sm" placeholder="Season (YYYY)" value={loanForm.season} onChange={e=>setLoanForm({...loanForm, season: e.target.value})} />
                 </div>
-                <Button size="sm" onClick={createLoan} disabled={!loanForm.player_id || !(loanForm.primary_team_api_id && loanForm.loan_team_api_id)}>Create</Button>
+                </AccordionContent>
+              </AccordionItem>
+            </Accordion>
+
+            {/* Players Table */}
+            {playersHubLoading ? (
+              <div className="text-center py-8 text-gray-500">
+                <Loader2 className="h-6 w-6 animate-spin mx-auto mb-2" />
+                Loading players...
               </div>
+            ) : playersHubData.items.length === 0 ? (
+              <div className="text-center py-8 text-gray-500 border rounded-lg bg-gray-50">
+                <div className="text-sm font-medium mb-1">No players found</div>
+                <div className="text-xs">Try adjusting your filters or add a new player</div>
             </div>
-            <div className="mt-4">
-              {loans.length === 0 ? (
-                <div className="text-sm text-gray-600">No loans found with current filters.</div>
-              ) : (
-                <Accordion type="multiple" className="rounded-md border">
-                  {Object.entries(loansByLeague).map(([league, teamsMap]) => {
-                    const teamsArr = Object.values(teamsMap)
-                    const loanCount = teamsArr.reduce((sum, t) => sum + t.loans.length, 0)
-                    return (
-                      <AccordionItem key={league} value={league} className="border-b last:border-b-0">
-                        <AccordionTrigger className="px-4">
-                          <div className="flex items-center justify-between w-full">
-                            <div className="font-semibold">{league}</div>
-                            <div className="text-xs text-muted-foreground">{teamsArr.length} teams • {loanCount} loans</div>
-                          </div>
-                        </AccordionTrigger>
-                        <AccordionContent>
-                          <div className="px-4 pb-4">
-                            <Accordion type="multiple" className="rounded-md border">
-                              {teamsArr.map((t) => (
-                                <AccordionItem key={t.teamId} value={String(t.teamId)} className="border-b last:border-b-0">
-                                  <AccordionTrigger className="px-4">
-                                    <div className="flex items-center justify-between w-full">
-                                      <div className="font-medium">{t.teamName}</div>
-                                      <div className="text-xs text-muted-foreground">{t.loans.length} loans</div>
-                                    </div>
-                                  </AccordionTrigger>
-                                  <AccordionContent>
+            ) : (
+              <>
+                <div className="border rounded-lg overflow-hidden mb-4">
                                     <div className="overflow-x-auto">
                                       <table className="min-w-full text-sm">
-                                        <thead>
-                                          <tr className="text-left border-b">
-                                            <th className="p-2">Player</th>
-                                            <th className="p-2">Primary → Loan</th>
-                                            <th className="p-2">Active</th>
-                                            <th className="p-2">Actions</th>
+                      <thead className="bg-gray-50 border-b">
+                        <tr className="text-left">
+                          <th className="p-3">
+                            <input
+                              type="checkbox"
+                              checked={selectedPlayersForBulk.length === playersHubData.items.length && playersHubData.items.length > 0}
+                              onChange={toggleAllPlayersSelection}
+                            />
+                          </th>
+                          <th className="p-3 font-medium">Player</th>
+                          <th className="p-3 font-medium">Teams</th>
+                          <th className="p-3 font-medium">Sofascore ID</th>
+                          <th className="p-3 font-medium text-center">Status</th>
+                          <th className="p-3 font-medium text-center">Loans</th>
+                          <th className="p-3 font-medium">Actions</th>
                                           </tr>
                                         </thead>
-                                        <tbody>
-                                          {t.loans.map((l) => (
-                                            <tr key={l.id} className="border-b">
-                                              <td className="p-2 whitespace-nowrap">
-                                                <div className="font-medium">{l.player_name}</div>
-                                                <div className="text-gray-500">#{l.player_id}</div>
+                      <tbody className="divide-y">
+                        {playersHubData.items.map((player) => {
+                          const isEditingName = Object.prototype.hasOwnProperty.call(inlinePlayerNameEdits, player.player_id)
+                          const draftName = isEditingName ? inlinePlayerNameEdits[player.player_id] : ''
+                          const isSavingName = !!inlinePlayerNameSaving[player.player_id]
+                          return (
+                            <tr key={player.player_id} className="hover:bg-gray-50">
+                            <td className="p-3">
+                              <input
+                                type="checkbox"
+                                checked={selectedPlayersForBulk.includes(player.player_id)}
+                                onChange={() => togglePlayerSelection(player.player_id)}
+                              />
                                               </td>
-                                              <td className="p-2">
-                                                <div className="flex gap-2 items-center">
-                                                  <span className="text-gray-700">{l.primary_team_name}</span>
-                                                  <span>→</span>
-                                                  <span className="text-gray-700">{l.loan_team_name}</span>
-                                                </div>
-                                                <div className="mt-2 grid grid-cols-1 md:grid-cols-2 gap-2">
+                            <td className="p-3">
+                              <div className="flex items-start gap-2">
+                                <div className="flex-1 min-w-[200px]">
+                                  {isEditingName ? (
+                                    <>
+                                      <input
+                                        type="text"
+                                        className="border rounded p-1 text-sm w-full max-w-xs"
+                                        placeholder="Player name"
+                                        value={draftName}
+                                        onChange={(e) => setInlinePlayerNameEdits((prev) => ({ ...prev, [player.player_id]: e.target.value }))}
+                                        disabled={isSavingName}
+                                      />
+                                      <div className="mt-2 flex gap-2">
+                                        <Button
+                                          size="sm"
+                                          onClick={() => saveInlinePlayerNameEdit(player.player_id)}
+                                          disabled={isSavingName}
+                                        >
+                                          {isSavingName && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}Save
+                                        </Button>
+                                        <Button
+                                          size="sm"
+                                          variant="ghost"
+                                          onClick={() => cancelInlinePlayerNameEdit(player.player_id)}
+                                          disabled={isSavingName}
+                                        >
+                                          Cancel
+                                        </Button>
+                                      </div>
+                                    </>
+                                  ) : (
+                                    <div className="flex items-center gap-2">
+                                      <div className="font-medium">{player.player_name}</div>
+                                      <Button
+                                        size="sm"
+                                        variant="ghost"
+                                        onClick={() => startInlinePlayerNameEdit(player)}
+                                      >
+                                        Rename
+                                      </Button>
+                                    </div>
+                                  )}
+                                  <div className="text-xs text-gray-500 mt-1">ID: {player.player_id}</div>
+                                  {player.position && (
+                                    <div className="text-xs text-gray-500">{player.position}</div>
+                                  )}
+                                </div>
+                                {player.player_id < 0 && (
+                                  <span className="inline-flex items-center px-1.5 py-0.5 rounded text-xs font-medium bg-green-100 text-green-800" title="Manual Player">
+                                    M
+                                  </span>
+                                )}
+                              </div>
+                            </td>
+                            <td className="p-3">
+                              <div className="space-y-2">
+                                <div>
+                                  <div className="text-xs text-gray-600 mb-1">Parent Club</div>
+                                  <div className="text-sm font-medium mb-1">{player.primary_team_name}</div>
                                                   <TeamSelect
                                                     teams={runTeams}
-                                                    value={l.primary_team_id}
-                                                    onChange={(id)=> moveLoanDb(l, 'primary', id)}
-                                                    placeholder="Change primary team…"
-                                                  />
+                                    value={player.primary_team_id}
+                                    onChange={(id) => moveLoanDb({ id: player.loan_id }, 'primary', id)}
+                                    placeholder="Change parent..."
+                                    className="text-xs"
+                                  />
+                                </div>
+                                <div>
+                                  <div className="text-xs text-gray-600 mb-1">Loan Club</div>
+                                  <div className="text-sm font-medium mb-1">{player.loan_team_name}</div>
                                                   <TeamSelect
                                                     teams={runTeams}
-                                                    value={l.loan_team_id}
-                                                    onChange={(id)=> moveLoanDb(l, 'loan', id)}
-                                                    placeholder="Change loan team…"
-                                                  />
+                                    value={player.loan_team_id}
+                                    onChange={(id) => moveLoanDb({ id: player.loan_id }, 'loan', id)}
+                                    placeholder="Change loan..."
+                                    className="text-xs"
+                                  />
+                                </div>
                                                 </div>
                                               </td>
-                                              <td className="p-2">{l.is_active ? 'Yes' : 'No'}</td>
-                                              <td className="p-2">
-                                                <div className="flex gap-2">
-                                                  {l.is_active && (<Button size="sm" variant="outline" onClick={()=>deactivateLoan(l)}>Deactivate</Button>)}
+                            <td className="p-3">
+                              {editingPlayerSofascore[player.player_id] !== undefined || bulkSofascoreMode && selectedPlayersForBulk.includes(player.player_id) ? (
+                                                  <div className="flex gap-2 items-center">
+                                                    <input
+                                    type="number"
+                                    className="border rounded p-1 text-sm w-32"
+                                    placeholder="Sofascore ID"
+                                    value={editingPlayerSofascore[player.player_id] ?? player.sofascore_id ?? ''}
+                                    onChange={(e) => setEditingPlayerSofascore({
+                                      ...editingPlayerSofascore,
+                                      [player.player_id]: e.target.value
+                                    })}
+                                  />
+                                  {!bulkSofascoreMode && (
+                                    <>
+                                      <Button
+                                        size="sm"
+                                        variant="outline"
+                                        onClick={() => updatePlayerSofascoreId(player.player_id, editingPlayerSofascore[player.player_id])}
+                                      >
+                                        Save
+                                      </Button>
+                                      <Button
+                                        size="sm"
+                                        variant="ghost"
+                                        onClick={() => setEditingPlayerSofascore((prev) => {
+                                          const next = {...prev}
+                                          delete next[player.player_id]
+                                          return next
+                                        })}
+                                      >
+                                        Cancel
+                                      </Button>
+                                    </>
+                                  )}
+                                                  </div>
+                                                ) : (
+                                                  <div className="flex gap-2 items-center">
+                                  {player.sofascore_id ? (
+                                    <a
+                                      href={`https://www.sofascore.com/player/_/${player.sofascore_id}`}
+                                      target="_blank"
+                                      rel="noopener noreferrer"
+                                      className="text-blue-600 hover:underline text-sm"
+                                    >
+                                      {player.sofascore_id}
+                                    </a>
+                                  ) : (
+                                    <span className="text-gray-400 text-sm">—</span>
+                                  )}
+                                  <Button
+                                    size="sm"
+                                    variant="outline"
+                                    onClick={() => setEditingPlayerSofascore({
+                                      ...editingPlayerSofascore,
+                                      [player.player_id]: player.sofascore_id || ''
+                                    })}
+                                  >
+                                    Edit
+                                  </Button>
+                                                  </div>
+                                                )}
+                                              </td>
+                            <td className="p-3 text-center">
+                              {player.has_sofascore_id ? (
+                                <span className="inline-flex items-center px-2 py-1 rounded-full text-xs font-medium bg-green-100 text-green-800">
+                                  ✓ Has ID
+                                </span>
+                              ) : (
+                                <span className="inline-flex items-center px-2 py-1 rounded-full text-xs font-medium bg-yellow-100 text-yellow-800">
+                                  ⚠ Missing
+                                </span>
+                              )}
+                            </td>
+                            <td className="p-3 text-center">
+                              <span className="text-sm font-medium">{player.loan_count}</span>
+                            </td>
+                            <td className="p-3">
+                              <div className="flex gap-1">
+                                <Button
+                                  size="sm"
+                                  variant="outline"
+                                  onClick={() => openEditPlayerDialog(player.player_id)}
+                                  title="Edit player details"
+                                >
+                                  Edit
+                                </Button>
+                                <Button
+                                  size="sm"
+                                  variant="destructive"
+                                  onClick={() => deletePlayer(player.player_id, player.player_name, player.loan_count)}
+                                  title="Delete player"
+                                >
+                                  Delete
+                                </Button>
                                                 </div>
                                               </td>
-                                            </tr>
-                                          ))}
+                            </tr>
+                          )
+                        })}
                                         </tbody>
                                       </table>
                                     </div>
-                                  </AccordionContent>
-                                </AccordionItem>
-                              ))}
-                            </Accordion>
                           </div>
+
+                {/* Pagination */}
+                {playersHubData.total_pages > 1 && (
+                  <div className="flex items-center justify-between border-t border-gray-200 pt-3">
+                    <span className="text-sm text-gray-600">
+                      Page {playersHubData.page} of {playersHubData.total_pages}
+                    </span>
+                    <div className="flex gap-2">
+                      <Button
+                        size="sm"
+                        variant="outline"
+                        onClick={() => setPlayersHubPage(Math.max(1, playersHubPage - 1))}
+                        disabled={playersHubPage === 1 || playersHubLoading}
+                      >
+                        Previous
+                      </Button>
+                      <Button
+                        size="sm"
+                        variant="outline"
+                        onClick={() => setPlayersHubPage(Math.min(playersHubData.total_pages, playersHubPage + 1))}
+                        disabled={playersHubPage === playersHubData.total_pages || playersHubLoading}
+                      >
+                        Next
+                      </Button>
+                    </div>
+                  </div>
+                )}
+              </>
+            )}
                         </AccordionContent>
                       </AccordionItem>
-                    )
-                  })}
                 </Accordion>
-              )}
+          </div>
+          <div id="admin-supplemental-loans" className="border rounded p-4 md:col-span-2">
+            <h2 className="font-semibold mb-3">Supplemental Players Manager</h2>
+            <div className="space-y-4">
+              <div className="grid grid-cols-1 lg:grid-cols-3 gap-4">
+                <div className="space-y-2">
+                  <div className="font-medium">Filters</div>
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+                    <div className="flex flex-col">
+                      <span className="text-xs text-muted-foreground">Player name</span>
+                      <input className="border rounded p-2 text-sm w-full" placeholder="e.g., Smith" value={supplementalFilters.player_name} onChange={e=>setSupplementalFilters({...supplementalFilters, player_name: e.target.value})} />
+                    </div>
+                    <div className="flex flex-col">
+                      <span className="text-xs text-muted-foreground">Season (YYYY)</span>
+                      <input type="number" inputMode="numeric" pattern="[0-9]*" className="border rounded p-2 text-sm w-full" placeholder="2025" value={supplementalFilters.season} onChange={e=>setSupplementalFilters({...supplementalFilters, season: e.target.value})} />
+                    </div>
+                  </div>
+                  <Button size="sm" variant="outline" className="w-full" onClick={refreshSupplementalLoans}>Apply Filters</Button>
+                </div>
+                <div className="space-y-2 lg:col-span-2">
+                  <div className="font-medium">Add Supplemental Player</div>
+                  <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-4 gap-2">
+                    <input className="border rounded p-2 text-sm" placeholder="Player name" value={supplementalForm.player_name} onChange={e=>setSupplementalForm({...supplementalForm, player_name: e.target.value})} />
+                    <input className="border rounded p-2 text-sm" placeholder="Parent team name" value={supplementalForm.parent_team_name} onChange={e=>setSupplementalForm({...supplementalForm, parent_team_name: e.target.value})} />
+                    <input className="border rounded p-2 text-sm" placeholder="Loan team name" value={supplementalForm.loan_team_name} onChange={e=>setSupplementalForm({...supplementalForm, loan_team_name: e.target.value})} />
+                    <input className="border rounded p-2 text-sm" placeholder="Season (YYYY)" value={supplementalForm.season_year} onChange={e=>setSupplementalForm({...supplementalForm, season_year: e.target.value})} />
+                  </div>
+                  <Button size="sm" onClick={createSupplementalLoan} disabled={!supplementalForm.player_name || !supplementalForm.parent_team_name || !supplementalForm.loan_team_name || !supplementalForm.season_year}>Create Supplemental Player</Button>
+                </div>
+              </div>
+              <div className="mt-4">
+                {supplementalLoans.length === 0 ? (
+                  <div className="text-sm text-gray-600">No supplemental players found. Click "Apply Filters" to load or add a new one above.</div>
+                ) : (
+                  <div className="overflow-x-auto">
+                    <table className="min-w-full text-sm border">
+                      <thead className="bg-gray-50">
+                        <tr className="text-left border-b">
+                          <th className="p-2">Player</th>
+                          <th className="p-2">Parent Team</th>
+                          <th className="p-2">Loan Team</th>
+                          <th className="p-2">Season</th>
+                          <th className="p-2">Actions</th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {supplementalLoans.map((sl) => (
+                          <tr key={sl.id} className="border-b">
+                            <td className="p-2 whitespace-nowrap">
+                              <div className="font-medium">{sl.player_name}</div>
+                              <div className="text-gray-500 text-xs">ID: {sl.id}</div>
+                            </td>
+                            <td className="p-2">{sl.parent_team_name}</td>
+                            <td className="p-2">{sl.loan_team_name}</td>
+                            <td className="p-2">{sl.season_year}</td>
+                            <td className="p-2">
+                              <Button size="sm" variant="destructive" onClick={() => deleteSupplementalLoan(sl)}>Delete</Button>
+                            </td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  </div>
+                )}
+              </div>
             </div>
           </div>
           <div id="admin-newsletters" className="border rounded p-4 md:col-span-2">
@@ -2981,11 +4857,24 @@ function AdminPage() {
               ) : (
                 <>
                 <div className="flex flex-wrap items-center gap-2 mb-2">
+                  <label className="flex items-center gap-2 text-xs text-gray-600">
+                    <input
+                      type="checkbox"
+                      checked={allFilteredSelected}
+                      onChange={(e) => handleToggleAllFiltered(e.target.checked)}
+                    />
+                    <span>Select all filtered</span>
+                  </label>
+                  <span className="text-xs text-gray-500">Total {totalFilteredCount}</span>
+                  {allFilteredSelected && (
+                    <span className="text-xs text-gray-500">Excluding {selectedNewsletterIds.length}</span>
+                  )}
                   <span className="text-xs text-gray-600">Selected {selectedNewsletterCount}</span>
                   <Button
                     size="sm"
                     onClick={sendAdminPreviewSelected}
-                    disabled={selectedNewsletterCount === 0 || sendSelectedBusy || bulkDeleteBusy}
+                    disabled={allFilteredSelected || selectedNewsletterCount === 0 || sendSelectedBusy || bulkDeleteBusy}
+                    title={allFilteredSelected ? 'Disable “Select all filtered” to send previews.' : undefined}
                   >
                     {sendSelectedBusy && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}Send admin preview
                   </Button>
@@ -3027,6 +4916,22 @@ function AdminPage() {
                   >
                     Clear selection
                   </Button>
+                  <Button
+                    size="sm"
+                    variant="outline"
+                    onClick={() => openReviewModal('manual')}
+                    disabled={newslettersAdmin.length === 0}
+                  >
+                    Review queue
+                  </Button>
+                  <Button
+                    size="sm"
+                    variant="secondary"
+                    onClick={() => openReviewModal('auto')}
+                    disabled={newslettersAdmin.length === 0}
+                  >
+                    Review & publish filtered
+                  </Button>
                 </div>
                 <div className="overflow-x-auto">
                   <table className="min-w-full text-sm">
@@ -3055,7 +4960,7 @@ function AdminPage() {
                           <td className="p-2 align-top">
                             <input
                               type="checkbox"
-                              checked={selectedNewsletterIdsSet.has(n.id)}
+                              checked={allFilteredSelected ? !selectedNewsletterIdsSet.has(n.id) : selectedNewsletterIdsSet.has(n.id)}
                               onChange={() => toggleNewsletterSelection(n.id)}
                               aria-label={`Select newsletter ${n.id}`}
                             />
@@ -3128,27 +5033,609 @@ function AdminPage() {
                 </>
               )}
             </div>
+            <Dialog open={reviewModalOpen} onOpenChange={(open) => { if (!open) closeReviewModal() }}>
+              <DialogContent
+                className="w-full max-w-none p-0 lg:p-6"
+                style={{ ...reviewModalSizing, overflow: 'auto' }}
+              >
+                <div className="flex h-full flex-col gap-4 p-4 lg:p-0">
+                  <DialogHeader className="px-0">
+                    <div className="flex items-center justify-between gap-3">
+                      <div>
+                        <DialogTitle>{reviewMode === 'auto' ? 'Review & publish filtered newsletters' : 'Review newsletters'}</DialogTitle>
+                        <DialogDescription>{reviewProgressLabel}</DialogDescription>
+                      </div>
+                      {reviewMode === 'auto' ? (
+                        <Badge variant="secondary">Auto publish</Badge>
+                      ) : (
+                        <Badge variant="secondary">Manual</Badge>
+                      )}
+                    </div>
+                  </DialogHeader>
+                  <div className="flex-1 overflow-auto">
+                    {reviewFinalizeBusy ? (
+                      <div className="flex h-full flex-col items-center justify-center gap-3 text-sm text-gray-600">
+                        <Loader2 className="h-6 w-6 animate-spin" />
+                        Finalizing bulk actions…
+                      </div>
+                    ) : (
+                      <div className="grid h-full grid-cols-1 gap-4 lg:grid-cols-5">
+                        <div className="flex h-full flex-col gap-3 rounded-md border bg-gray-50 p-4 lg:col-span-2">
+                          <div className="space-y-1 overflow-y-auto">
+                            <div className="text-sm font-semibold text-gray-800">{currentReviewItem?.title || 'Untitled newsletter'}</div>
+                            <div className="text-xs text-gray-500">Team: {reviewDetail?.team_name || currentReviewItem?.team_name || '—'}</div>
+                            <div className="text-xs text-gray-500">Issue date: {reviewDetail?.issue_date || currentReviewItem?.issue_date || '—'}</div>
+                            <div className="text-xs text-gray-500">Week: {reviewDetail?.week_start_date && reviewDetail?.week_end_date ? `${reviewDetail.week_start_date} → ${reviewDetail.week_end_date}` : (currentReviewItem?.week_start_date ? `${currentReviewItem.week_start_date} → ${currentReviewItem.week_end_date}` : '—')}</div>
+                            <div className="text-xs text-gray-500">Published: {reviewDetail?.published ? `Yes (${reviewDetail?.published_date?.slice(0,10) || ''})` : 'No'}</div>
+                            {reviewMode === 'auto' && (
+                              <div className="text-xs text-gray-500">Queued skips: {reviewBatchExclude.length} • Queued deletes: {reviewBatchDelete.length}</div>
+                            )}
+                            <div className="text-xs text-gray-500">
+                              Keyboard: Arrow keys or j/k to navigate, space to {reviewMode === 'auto' ? 'approve & move next' : 'publish'}.
+                            </div>
+                          </div>
+                        </div>
+                        <div className="flex h-full flex-col gap-3 lg:col-span-3">
+                          <Tabs value={reviewPreviewFormat} onValueChange={changeReviewFormat} className="w-full">
+                            <TabsList className="w-fit">
+                              <TabsTrigger value="web">Web preview</TabsTrigger>
+                              <TabsTrigger value="email">Email preview</TabsTrigger>
+                            </TabsList>
+                          </Tabs>
+                          <div className="flex-1 overflow-auto rounded-md border bg-white p-4">
+                            {reviewLoadingDetail ? (
+                              <div className="flex h-full items-center justify-center gap-2 text-sm text-gray-500">
+                                <Loader2 className="h-4 w-4 animate-spin" />
+                                Loading newsletter…
+                              </div>
+                            ) : reviewPreviewFormat === 'email' ? (
+                              reviewRenderedContent.email ? (
+                                <div className="prose max-w-none" dangerouslySetInnerHTML={{ __html: reviewRenderedContent.email }} />
+                              ) : reviewRenderedContent.emailError ? (
+                                <div className="text-sm text-red-600">{reviewRenderedContent.emailError}</div>
+                              ) : (
+                                <div className="text-xs text-gray-500">Email preview not loaded yet.</div>
+                              )
+                            ) : reviewRenderedContent.web ? (
+                              <div className="prose max-w-none" dangerouslySetInnerHTML={{ __html: reviewRenderedContent.web }} />
+                            ) : reviewRenderedContent.webError ? (
+                              <div className="text-sm text-red-600">{reviewRenderedContent.webError}</div>
+                            ) : (
+                              <div className="text-xs text-gray-500">Preview not available.</div>
+                            )}
+                          </div>
+                        </div>
+                      </div>
+                    )}
+                  </div>
+                  <DialogFooter className="flex flex-wrap items-center justify-between gap-3 px-0">
+                    <div className="text-xs text-muted-foreground">
+                      {currentReviewItem ? `#${currentReviewItem.id} • ${currentReviewItem.team_name || 'Unknown team'}` : 'Queue complete'}
+                    </div>
+                    <div className="flex flex-wrap gap-2">
+                      {reviewMode === 'auto' ? (
+                        <>
+                          <Button onClick={handleApproveAndNext} disabled={reviewFinalizeBusy || reviewLoadingDetail || !currentReviewItem}>
+                            Approve & Next
+                          </Button>
+                          <Button variant="outline" onClick={handleSkipReview} disabled={reviewFinalizeBusy || reviewLoadingDetail || !currentReviewItem}>
+                            Skip
+                          </Button>
+                          <Button variant="destructive" onClick={handleDeleteReview} disabled={reviewFinalizeBusy || reviewLoadingDetail || !currentReviewItem}>
+                            Delete
+                          </Button>
+                          <Button variant="ghost" onClick={finalizeAutoReview} disabled={reviewFinalizeBusy}>
+                            Finish review
+                          </Button>
+                        </>
+                      ) : (
+                        <>
+                          <Button onClick={handlePublishReview} disabled={reviewLoadingDetail || !currentReviewItem}>
+                            Publish
+                          </Button>
+                          <Button variant="outline" onClick={goToNextReview} disabled={!currentReviewItem}>
+                            Next
+                          </Button>
+                          <Button variant="destructive" onClick={handleDeleteReview} disabled={reviewLoadingDetail || !currentReviewItem}>
+                            Delete
+                          </Button>
+                        </>
+                      )}
+                      <Button variant="ghost" onClick={closeReviewModal} disabled={reviewFinalizeBusy}>
+                        Close
+                      </Button>
+                    </div>
+                  </DialogFooter>
+                </div>
+              </DialogContent>
+            </Dialog>
             {editingNl && (
               <div className="mt-4 border-t pt-4">
-                <div className="font-medium mb-2">Editing: {editingNl.title}</div>
-                <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
-                  <input className="border rounded p-2 text-sm" value={editingNl.title || ''} onChange={e=>setEditingNl({...editingNl, title: e.target.value})} />
-                  <label className="text-sm flex items-center gap-2">
-                    <input type="checkbox" checked={!!editingNl.published} onChange={e=>setEditingNl({...editingNl, published: e.target.checked})} /> Published
-                  </label>
-                  <input type="date" className="border rounded p-2 text-sm" value={editingNl.issue_date?.slice(0,10) || ''} onChange={e=>setEditingNl({...editingNl, issue_date: e.target.value})} />
+                <div className="flex items-center justify-between mb-4">
+                  <div className="font-medium">Editing: {editingNl.title}</div>
                   <div className="flex gap-2">
-                    <input type="date" className="border rounded p-2 text-sm" value={editingNl.week_start_date?.slice(0,10) || ''} onChange={e=>setEditingNl({...editingNl, week_start_date: e.target.value})} />
-                    <input type="date" className="border rounded p-2 text-sm" value={editingNl.week_end_date?.slice(0,10) || ''} onChange={e=>setEditingNl({...editingNl, week_end_date: e.target.value})} />
+                    <Button 
+                      size="sm" 
+                      variant={enhancedEditorMode === 'visual' ? 'default' : 'outline'}
+                      onClick={() => setEnhancedEditorMode('visual')}
+                    >
+                      Visual Editor
+                    </Button>
+                    <Button 
+                      size="sm" 
+                      variant={enhancedEditorMode === 'json' ? 'default' : 'outline'}
+                      onClick={() => setEnhancedEditorMode('json')}
+                    >
+                      JSON Editor
+                    </Button>
                   </div>
-                  <div className="md:col-span-2 grid grid-cols-1 lg:grid-cols-2 gap-3">
+                </div>
+
+                {enhancedEditorMode === 'visual' ? (
+                  <div className="space-y-4">
+                    {/* Metadata Section */}
+                    <div className="bg-gradient-to-r from-blue-50 to-gray-50 p-4 rounded-lg border border-blue-200">
+                      <h3 className="text-sm font-semibold mb-3 text-gray-900">Newsletter Metadata</h3>
+                      <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+                        <div>
+                          <label className="text-xs text-gray-600 mb-1 block">Title</label>
+                          <input 
+                            className="border rounded p-2 text-sm w-full" 
+                            value={editingNl.title || ''} 
+                            onChange={e=>setEditingNl({...editingNl, title: e.target.value})} 
+                          />
+                        </div>
+                        <div>
+                          <label className="text-xs text-gray-600 mb-1 block">Issue Date</label>
+                          <input 
+                            type="date" 
+                            className="border rounded p-2 text-sm w-full" 
+                            value={editingNl.issue_date?.slice(0,10) || ''} 
+                            onChange={e=>setEditingNl({...editingNl, issue_date: e.target.value})} 
+                          />
+                        </div>
+                        <div>
+                          <label className="text-xs text-gray-600 mb-1 block">Week Start</label>
+                          <input 
+                            type="date" 
+                            className="border rounded p-2 text-sm w-full" 
+                            value={editingNl.week_start_date?.slice(0,10) || ''} 
+                            onChange={e=>setEditingNl({...editingNl, week_start_date: e.target.value})} 
+                          />
+                        </div>
+                        <div>
+                          <label className="text-xs text-gray-600 mb-1 block">Week End</label>
+                          <input 
+                            type="date" 
+                            className="border rounded p-2 text-sm w-full" 
+                            value={editingNl.week_end_date?.slice(0,10) || ''} 
+                            onChange={e=>setEditingNl({...editingNl, week_end_date: e.target.value})} 
+                          />
+                        </div>
+                        <div className="flex items-center gap-2">
+                          <input 
+                            type="checkbox" 
+                            id="published-checkbox" 
+                            checked={!!editingNl.published} 
+                            onChange={e=>setEditingNl({...editingNl, published: e.target.checked})} 
+                          />
+                          <label htmlFor="published-checkbox" className="text-sm font-medium">Published</label>
+                        </div>
+                      </div>
+                    </div>
+
+                    {/* Player Cards by Section */}
+                    {(() => {
+                      try {
+                        const content = typeof editingNl.content === 'string' ? JSON.parse(editingNl.content) : (editingNl.content || {})
+                        const sections = content?.sections || []
+                        const filteredSections = sections.filter(s => 
+                          (s?.title || '').trim().toLowerCase() !== 'what the internet is saying'
+                        )
+                        
+                        return (
+                          <div className="space-y-4">
+                            {/* Newsletter Summary */}
+                            {content.summary && (
+                              <div className="bg-yellow-50 p-4 rounded-lg border border-yellow-200">
+                                <div className="text-sm font-semibold mb-2 text-gray-900">Newsletter Summary</div>
+                                <textarea
+                                  className="w-full border rounded p-2 text-sm"
+                                  rows="3"
+                                  value={content.summary}
+                                  onChange={(e) => {
+                                    content.summary = e.target.value
+                                    setEditingNl({...editingNl, content: JSON.stringify(content, null, 2)})
+                                  }}
+                                />
+                              </div>
+                            )}
+
+                            {/* Highlights */}
+                            {content.highlights && Array.isArray(content.highlights) && (
+                              <div className="bg-amber-50 p-4 rounded-lg border border-amber-200">
+                                <div className="text-sm font-semibold mb-2 text-gray-900">Key Highlights</div>
+                                <div className="space-y-2">
+                                  {content.highlights.map((h, idx) => (
+                                    <div key={idx} className="flex gap-2">
+                                      <input
+                                        className="flex-1 border rounded p-2 text-sm"
+                                        value={h}
+                                        onChange={(e) => {
+                                          content.highlights[idx] = e.target.value
+                                          setEditingNl({...editingNl, content: JSON.stringify(content, null, 2)})
+                                        }}
+                                      />
+                                      <Button
+                                        size="sm"
+                                        variant="ghost"
+                                        onClick={() => {
+                                          content.highlights.splice(idx, 1)
+                                          setEditingNl({...editingNl, content: JSON.stringify(content, null, 2)})
+                                        }}
+                                      >
+                                        ✕
+                                      </Button>
+                                    </div>
+                                  ))}
+                                </div>
+                              </div>
+                            )}
+
+                            {/* Player Sections */}
+                            {filteredSections.map((section, sectionIdx) => {
+                              const originalSectionIdx = sections.findIndex(s => s === section)
+                              return (
+                                <div key={sectionIdx} className="bg-white border-2 border-gray-200 rounded-lg overflow-hidden">
+                                  <div className="bg-gradient-to-r from-gray-100 to-gray-50 px-4 py-3 border-b border-gray-200">
+                                    <div className="flex items-center justify-between">
+                                      <h3 className="font-semibold text-gray-900">{section.title || 'Untitled Section'}</h3>
+                                      <div className="text-xs text-gray-600">{section.items?.length || 0} players</div>
+                                    </div>
+                                  </div>
+                                  <div className="p-4 space-y-3">
+                                    {section.items && section.items.length > 0 ? (
+                                      section.items.map((item, itemIdx) => {
+                                        const isEditing = editingPlayerCard?.sectionIndex === originalSectionIdx && editingPlayerCard?.itemIndex === itemIdx
+                                        const playerYoutubeLink = nlYoutubeLinks.find(
+                                          link => link.player_name === item.player_name || 
+                                          (link.player_id && item.player_id && link.player_id === item.player_id)
+                                        )
+                                        
+                                        return (
+                                          <div key={itemIdx} className={`border rounded-lg p-3 ${isEditing ? 'border-blue-500 bg-blue-50' : 'border-gray-200 bg-gray-50 hover:bg-white'} transition-colors`}>
+                                            {isEditing ? (
+                                              <div className="space-y-3">
+                                                <div className="grid grid-cols-2 gap-2">
+                                                  <div>
+                                                    <label className="text-xs font-medium text-gray-700">Player Name</label>
+                                                    <input
+                                                      className="w-full border rounded p-2 text-sm mt-1"
+                                                      value={editingPlayerCard.data.player_name || ''}
+                                                      onChange={(e) => setEditingPlayerCard({
+                                                        ...editingPlayerCard,
+                                                        data: {...editingPlayerCard.data, player_name: e.target.value}
+                                                      })}
+                                                    />
+                                                  </div>
+                                                  <div>
+                                                    <label className="text-xs font-medium text-gray-700">Loan Team</label>
+                                                    <input
+                                                      className="w-full border rounded p-2 text-sm mt-1"
+                                                      value={editingPlayerCard.data.loan_team || ''}
+                                                      onChange={(e) => setEditingPlayerCard({
+                                                        ...editingPlayerCard,
+                                                        data: {...editingPlayerCard.data, loan_team: e.target.value}
+                                                      })}
+                                                    />
+                                                  </div>
+                                                </div>
+                                                <div className="grid grid-cols-3 gap-2">
+                                                  <div>
+                                                    <label className="text-xs font-medium text-gray-700">Goals</label>
+                                                    <input
+                                                      type="number"
+                                                      className="w-full border rounded p-2 text-sm mt-1"
+                                                      value={editingPlayerCard.data.stats?.goals || 0}
+                                                      onChange={(e) => setEditingPlayerCard({
+                                                        ...editingPlayerCard,
+                                                        data: {
+                                                          ...editingPlayerCard.data,
+                                                          stats: {...(editingPlayerCard.data.stats || {}), goals: parseInt(e.target.value) || 0}
+                                                        }
+                                                      })}
+                                                    />
+                                                  </div>
+                                                  <div>
+                                                    <label className="text-xs font-medium text-gray-700">Assists</label>
+                                                    <input
+                                                      type="number"
+                                                      className="w-full border rounded p-2 text-sm mt-1"
+                                                      value={editingPlayerCard.data.stats?.assists || 0}
+                                                      onChange={(e) => setEditingPlayerCard({
+                                                        ...editingPlayerCard,
+                                                        data: {
+                                                          ...editingPlayerCard.data,
+                                                          stats: {...(editingPlayerCard.data.stats || {}), assists: parseInt(e.target.value) || 0}
+                                                        }
+                                                      })}
+                                                    />
+                                                  </div>
+                                                  <div>
+                                                    <label className="text-xs font-medium text-gray-700">Minutes</label>
+                                                    <input
+                                                      type="number"
+                                                      className="w-full border rounded p-2 text-sm mt-1"
+                                                      value={editingPlayerCard.data.stats?.minutes || 0}
+                                                      onChange={(e) => setEditingPlayerCard({
+                                                        ...editingPlayerCard,
+                                                        data: {
+                                                          ...editingPlayerCard.data,
+                                                          stats: {...(editingPlayerCard.data.stats || {}), minutes: parseInt(e.target.value) || 0}
+                                                        }
+                                                      })}
+                                                    />
+                                                  </div>
+                                                </div>
+                                                <div>
+                                                  <label className="text-xs font-medium text-gray-700">Week Summary</label>
+                                                  <textarea
+                                                    className="w-full border rounded p-2 text-sm mt-1"
+                                                    rows="3"
+                                                    value={editingPlayerCard.data.week_summary || ''}
+                                                    onChange={(e) => setEditingPlayerCard({
+                                                      ...editingPlayerCard,
+                                                      data: {...editingPlayerCard.data, week_summary: e.target.value}
+                                                    })}
+                                                  />
+                                                </div>
+                                                <div className="flex gap-2 pt-2">
+                                                  <Button
+                                                    size="sm"
+                                                    onClick={() => updatePlayerInNewsletter(originalSectionIdx, itemIdx, editingPlayerCard.data)}
+                                                  >
+                                                    Save Changes
+                                                  </Button>
+                                                  <Button
+                                                    size="sm"
+                                                    variant="outline"
+                                                    onClick={() => setEditingPlayerCard(null)}
+                                                  >
+                                                    Cancel
+                                                  </Button>
+                                                </div>
+                                              </div>
+                                            ) : (
+                                              <>
+                                                <div className="flex items-start justify-between mb-2">
+                                                  <div className="flex-1">
+                                                    <div className="flex items-center gap-2 flex-wrap">
+                                                      <span className="font-semibold text-gray-900">{item.player_name}</span>
+                                                      {item.loan_team && (
+                                                        <span className="bg-blue-100 text-blue-800 px-2 py-0.5 rounded text-xs font-medium">
+                                                          → {item.loan_team}
+                                                        </span>
+                                                      )}
+                                                      {item.stats && (
+                                                        <div className="flex gap-1">
+                                                          {item.stats.goals > 0 && (
+                                                            <span className="bg-green-100 text-green-800 px-2 py-0.5 rounded text-xs font-medium">
+                                                              {item.stats.goals}G
+                                                            </span>
+                                                          )}
+                                                          {item.stats.assists > 0 && (
+                                                            <span className="bg-purple-100 text-purple-800 px-2 py-0.5 rounded text-xs font-medium">
+                                                              {item.stats.assists}A
+                                                            </span>
+                                                          )}
+                                                          {item.stats.minutes > 0 && (
+                                                            <span className="bg-blue-100 text-blue-800 px-2 py-0.5 rounded text-xs font-medium">
+                                                              {item.stats.minutes}'
+                                                            </span>
+                                                          )}
+                                                        </div>
+                                                      )}
+                                                      {playerYoutubeLink && (
+                                                        <a 
+                                                          href={playerYoutubeLink.youtube_link} 
+                                                          target="_blank" 
+                                                          rel="noopener noreferrer"
+                                                          className="bg-red-100 text-red-800 px-2 py-0.5 rounded text-xs font-medium hover:bg-red-200"
+                                                        >
+                                                          🎬 Highlights
+                                                        </a>
+                                                      )}
+                                                    </div>
+                                                    {item.week_summary && (
+                                                      <p className="text-sm text-gray-700 mt-2 leading-relaxed">{item.week_summary}</p>
+                                                    )}
+                                                  </div>
+                                                  <div className="flex gap-1 ml-2">
+                                                    <Button
+                                                      size="sm"
+                                                      variant="ghost"
+                                                      onClick={() => setEditingPlayerCard({
+                                                        sectionIndex: originalSectionIdx,
+                                                        itemIndex: itemIdx,
+                                                        data: {...item}
+                                                      })}
+                                                      title="Edit player"
+                                                    >
+                                                      ✏️
+                                                    </Button>
+                                                    <Button
+                                                      size="sm"
+                                                      variant="ghost"
+                                                      onClick={() => movePlayerInNewsletter(originalSectionIdx, itemIdx, originalSectionIdx, 'up')}
+                                                      disabled={itemIdx === 0}
+                                                      title="Move up"
+                                                    >
+                                                      ↑
+                                                    </Button>
+                                                    <Button
+                                                      size="sm"
+                                                      variant="ghost"
+                                                      onClick={() => movePlayerInNewsletter(originalSectionIdx, itemIdx, originalSectionIdx, 'down')}
+                                                      disabled={itemIdx === section.items.length - 1}
+                                                      title="Move down"
+                                                    >
+                                                      ↓
+                                                    </Button>
+                                                    <Button
+                                                      size="sm"
+                                                      variant="ghost"
+                                                      onClick={() => deletePlayerFromNewsletter(originalSectionIdx, itemIdx)}
+                                                      title="Remove player"
+                                                    >
+                                                      🗑️
+                                                    </Button>
+                                                  </div>
+                                                </div>
+                                              </>
+                                            )}
+                                          </div>
+                                        )
+                                      })
+                                    ) : (
+                                      <div className="text-center py-4 text-sm text-gray-500">
+                                        No players in this section
+                                      </div>
+                                    )}
+                                  </div>
+                                </div>
+                              )
+                            })}
+                          </div>
+                        )
+                      } catch (error) {
+                        return (
+                          <div className="bg-red-50 border border-red-200 rounded p-4 text-sm text-red-700">
+                            Unable to parse newsletter content. Switch to JSON Editor to fix.
+                          </div>
+                        )
+                      }
+                    })()}
+
+                    {/* YouTube Links Section */}
+                    <div className="border rounded-lg p-4 bg-gradient-to-r from-red-50 to-pink-50">
+                      <h3 className="text-sm font-semibold mb-3 flex items-center gap-2">
+                        🎬 YouTube Links for Players
+                      </h3>
+                      <div className="mb-3 space-y-2">
+                        <div className="text-xs text-gray-600">Add YouTube highlight links to players in this newsletter</div>
+                        <div className="grid grid-cols-1 sm:grid-cols-3 gap-2">
+                          <select 
+                            className="border rounded p-2 text-sm" 
+                            value={nlYoutubeLinkForm.player_name}
+                            onChange={(e) => {
+                              const selectedPlayer = extractPlayersFromNewsletter(editingNl).find(p => p.player_name === e.target.value)
+                              setNlYoutubeLinkForm({
+                                player_name: e.target.value,
+                                youtube_link: nlYoutubeLinkForm.youtube_link,
+                                player_id: selectedPlayer?.player_id || null,
+                                supplemental_loan_id: selectedPlayer?.supplemental_loan_id || null
+                              })
+                            }}
+                          >
+                            <option value="">Select player...</option>
+                            {extractPlayersFromNewsletter(editingNl).map((player, idx) => (
+                              <option key={idx} value={player.player_name}>
+                                {player.player_name} ({player.loan_team})
+                              </option>
+                            ))}
+                          </select>
+                          <input 
+                            className="border rounded p-2 text-sm" 
+                            placeholder="YouTube URL"
+                            value={nlYoutubeLinkForm.youtube_link}
+                            onChange={(e) => setNlYoutubeLinkForm({...nlYoutubeLinkForm, youtube_link: e.target.value})}
+                          />
+                          <Button size="sm" onClick={createNewsletterYoutubeLink}>Add Link</Button>
+                        </div>
+                      </div>
+                      <div className="space-y-2">
+                        {nlYoutubeLinks.length === 0 ? (
+                          <div className="text-xs text-gray-500">No YouTube links added yet</div>
+                        ) : (
+                          nlYoutubeLinks.map((link) => (
+                            <div key={link.id} className="bg-white border rounded p-2 flex items-center gap-2">
+                              <div className="flex-1">
+                                <div className="text-sm font-medium">{link.player_name}</div>
+                                {editingNlYoutubeLink?.id === link.id ? (
+                                  <input 
+                                    className="border rounded p-1 text-xs w-full mt-1"
+                                    value={editingNlYoutubeLink.youtube_link}
+                                    onChange={(e) => setEditingNlYoutubeLink({...editingNlYoutubeLink, youtube_link: e.target.value})}
+                                  />
+                                ) : (
+                                  <a href={link.youtube_link} target="_blank" rel="noopener noreferrer" className="text-xs text-blue-600 hover:underline truncate block">
+                                    {link.youtube_link}
+                                  </a>
+                                )}
+                              </div>
+                              <div className="flex gap-1">
+                                {editingNlYoutubeLink?.id === link.id ? (
+                                  <>
+                                    <Button size="sm" variant="outline" onClick={() => updateNewsletterYoutubeLink(link.id)}>Save</Button>
+                                    <Button size="sm" variant="ghost" onClick={() => setEditingNlYoutubeLink(null)}>Cancel</Button>
+                                  </>
+                                ) : (
+                                  <>
+                                    <Button size="sm" variant="outline" onClick={() => setEditingNlYoutubeLink(link)}>Edit</Button>
+                                    <Button size="sm" variant="destructive" onClick={() => deleteNewsletterYoutubeLink(link.id)}>Delete</Button>
+                                  </>
+                                )}
+                              </div>
+                            </div>
+                          ))
+                        )}
+                      </div>
+                    </div>
+
+                    {/* Preview Section */}
+                    <div className="border rounded-lg overflow-hidden">
+                      <div className="bg-gray-100 px-4 py-2 border-b flex items-center justify-between">
+                        <span className="text-sm font-semibold">Live Preview</span>
+                        <div className="flex items-center gap-2">
+                          <Button size="sm" variant={previewFormat==='web'?'default':'outline'} onClick={()=>setPreviewFormat('web')}>Web</Button>
+                          <Button size="sm" variant={previewFormat==='email'?'default':'outline'} onClick={()=>setPreviewFormat('email')}>Email</Button>
+                          <Button size="sm" variant="ghost" onClick={refreshPreview}>Reload</Button>
+                        </div>
+                      </div>
+                      <div className="bg-white max-h-[520px] overflow-auto p-4">
+                        {previewError ? (
+                          <div className="p-3 text-sm text-red-700 bg-red-50 border border-red-200 rounded">
+                            {previewError}
+                          </div>
+                        ) : previewHtml ? (
+                          <div dangerouslySetInnerHTML={{ __html: previewHtml }} />
+                        ) : (
+                          <div className="p-3 text-sm text-gray-500">No preview loaded yet. Click "Reload" to generate.</div>
+                        )}
+                      </div>
+                    </div>
+                  </div>
+                ) : (
+                  /* JSON Editor Mode */
+                  <div className="grid grid-cols-1 lg:grid-cols-2 gap-3">
                     <div className="flex flex-col gap-2">
                       <div className="text-sm font-medium">Content JSON</div>
-                      <textarea className="border rounded p-2 text-sm" rows="16" value={(() => { try { return typeof editingNl.content === 'string' ? editingNl.content : JSON.stringify(editingNl.content || {}, null, 2) } catch { return String(editingNl.content || '') } })()} onChange={e=>setEditingNl({...editingNl, content: e.target.value})} />
+                      <textarea 
+                        className="border rounded p-2 text-sm font-mono" 
+                        rows="24" 
+                        value={(() => { 
+                          try { 
+                            return typeof editingNl.content === 'string' ? editingNl.content : JSON.stringify(editingNl.content || {}, null, 2) 
+                          } catch { 
+                            return String(editingNl.content || '') 
+                          } 
+                        })()} 
+                        onChange={e=>setEditingNl({...editingNl, content: e.target.value})} 
+                      />
                     </div>
                     <div className="flex flex-col gap-2">
                       <div className="text-sm font-medium">Preview</div>
-                      <div className="border rounded bg-white p-4 max-h-[520px] overflow-auto">
+                      <div className="border rounded bg-white p-4 max-h-[600px] overflow-auto">
                         {(() => {
                           try {
                             const obj = (() => { try { return typeof editingNl.content === 'string' ? JSON.parse(editingNl.content) : (editingNl.content || {}) } catch { return {} } })()
@@ -3206,37 +5693,17 @@ function AdminPage() {
                               </div>
                             )
                           } catch {
-                            return <div className="text-sm text-gray-600">Unable to render preview.</div>
+                            return <div className="text-sm text-gray-600">Unable to render preview. Check JSON syntax.</div>
                           }
                         })()}
                       </div>
                     </div>
-                    <div className="flex flex-col gap-2">
-                      <div className="text-sm font-medium flex items-center gap-2">
-                        Full Render
-                        <div className="ml-auto flex items-center gap-2">
-                          <Button size="sm" variant={previewFormat==='web'?'default':'outline'} onClick={()=>setPreviewFormat('web')}>Web</Button>
-                          <Button size="sm" variant={previewFormat==='email'?'default':'outline'} onClick={()=>setPreviewFormat('email')}>Email</Button>
-                          <Button size="sm" variant="ghost" onClick={refreshPreview}>Reload</Button>
                         </div>
-                      </div>
-                      <div className="border rounded bg-white max-h-[520px] overflow-auto">
-                        {previewError ? (
-                          <div className="p-3 text-sm text-red-700 bg-red-50 border border-red-200">
-                            {previewError}
-                          </div>
-                        ) : previewHtml ? (
-                          <div dangerouslySetInnerHTML={{ __html: previewHtml }} />
-                        ) : (
-                          <div className="p-3 text-sm text-gray-500">No preview loaded yet.</div>
-                        )}
-                      </div>
-                    </div>
-                  </div>
-                </div>
-                <div className="mt-3 flex gap-2">
-                  <Button size="sm" onClick={saveNewsletter}>Save</Button>
-                  <Button size="sm" variant="outline" onClick={()=>setEditingNl(null)}>Cancel</Button>
+                )}
+
+                <div className="mt-4 flex gap-2 border-t pt-4">
+                  <Button size="sm" onClick={saveNewsletter}>Save Newsletter</Button>
+                  <Button size="sm" variant="outline" onClick={()=>{setEditingNl(null); setEditingPlayerCard(null); setEnhancedEditorMode('visual')}}>Cancel</Button>
                 </div>
               </div>
             )}
@@ -3394,6 +5861,181 @@ function AdminPage() {
           </div>
         </div>
       )}
+      
+      {/* Edit Player Dialog */}
+      {editingPlayerDialog && (
+        <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center p-4 z-50" onClick={() => setEditingPlayerDialog(null)}>
+          <div className="bg-white rounded-lg p-6 max-w-2xl w-full max-h-[90vh] overflow-y-auto" onClick={(e) => e.stopPropagation()}>
+            <h2 className="text-xl font-semibold mb-4">Edit Player</h2>
+            
+            <div className="space-y-4">
+              {/* Player Name */}
+              <div>
+                <label className="text-sm font-medium text-gray-700 block mb-1">Player Name *</label>
+                <input
+                  type="text"
+                  className="border rounded p-2 text-sm w-full"
+                  value={editPlayerForm.name}
+                  onChange={(e) => setEditPlayerForm({...editPlayerForm, name: e.target.value})}
+                />
+              </div>
+              
+              <div className="grid grid-cols-2 gap-4">
+                {/* Position */}
+                <div>
+                  <label className="text-sm font-medium text-gray-700 block mb-1">Position</label>
+                  <select
+                    className="border rounded p-2 text-sm w-full"
+                    value={editPlayerForm.position}
+                    onChange={(e) => setEditPlayerForm({...editPlayerForm, position: e.target.value})}
+                  >
+                    <option value="">Select position...</option>
+                    {playerFieldOptions.positions.map(pos => (
+                      <option key={pos} value={pos}>{pos}</option>
+                    ))}
+                  </select>
+                </div>
+                
+                {/* Nationality */}
+                <div>
+                  <label className="text-sm font-medium text-gray-700 block mb-1">Nationality</label>
+                  <select
+                    className="border rounded p-2 text-sm w-full"
+                    value={editPlayerForm.nationality}
+                    onChange={(e) => setEditPlayerForm({...editPlayerForm, nationality: e.target.value})}
+                  >
+                    <option value="">Select nationality...</option>
+                    {playerFieldOptions.nationalities.map(nat => (
+                      <option key={nat} value={nat}>{nat}</option>
+                    ))}
+                  </select>
+                </div>
+              </div>
+              
+              <div className="grid grid-cols-2 gap-4">
+                {/* Age */}
+                <div>
+                  <label className="text-sm font-medium text-gray-700 block mb-1">Age</label>
+                  <input
+                    type="number"
+                    className="border rounded p-2 text-sm w-full"
+                    value={editPlayerForm.age}
+                    onChange={(e) => setEditPlayerForm({...editPlayerForm, age: e.target.value})}
+                  />
+                </div>
+                
+                {/* Sofascore ID */}
+                <div>
+                  <label className="text-sm font-medium text-gray-700 block mb-1">Sofascore ID</label>
+                  <input
+                    type="number"
+                    className="border rounded p-2 text-sm w-full"
+                    value={editPlayerForm.sofascore_id}
+                    onChange={(e) => setEditPlayerForm({...editPlayerForm, sofascore_id: e.target.value})}
+                  />
+                </div>
+              </div>
+              
+              {/* Primary Team */}
+              <div>
+                <div className="flex items-center justify-between mb-1">
+                  <label className="text-sm font-medium text-gray-700">Primary Team (Parent Club) *</label>
+                  <label className="flex items-center gap-1 text-xs text-gray-600 cursor-pointer">
+                    <input
+                      type="checkbox"
+                      checked={editPlayerForm.use_custom_primary_team}
+                      onChange={(e) => setEditPlayerForm({
+                        ...editPlayerForm,
+                        use_custom_primary_team: e.target.checked,
+                        primary_team_id: '',
+                        custom_primary_team_name: ''
+                      })}
+                    />
+                    Custom team
+                  </label>
+                </div>
+                {editPlayerForm.use_custom_primary_team ? (
+                  <input
+                    type="text"
+                    className="border rounded p-2 text-sm w-full"
+                    placeholder="e.g. Portsmouth, Sunderland"
+                    value={editPlayerForm.custom_primary_team_name}
+                    onChange={(e) => setEditPlayerForm({...editPlayerForm, custom_primary_team_name: e.target.value})}
+                  />
+                ) : (
+                  <TeamSelect
+                    teams={runTeams}
+                    value={editPlayerForm.primary_team_id}
+                    onChange={(id) => setEditPlayerForm({...editPlayerForm, primary_team_id: id})}
+                    placeholder="Select primary team..."
+                  />
+                )}
+              </div>
+              
+              {/* Loan Team */}
+              <div>
+                <div className="flex items-center justify-between mb-1">
+                  <label className="text-sm font-medium text-gray-700">Loan Team (Current Club) *</label>
+                  <label className="flex items-center gap-1 text-xs text-gray-600 cursor-pointer">
+                    <input
+                      type="checkbox"
+                      checked={editPlayerForm.use_custom_loan_team}
+                      onChange={(e) => setEditPlayerForm({
+                        ...editPlayerForm,
+                        use_custom_loan_team: e.target.checked,
+                        loan_team_id: '',
+                        custom_loan_team_name: ''
+                      })}
+                    />
+                    Custom team
+                  </label>
+                </div>
+                {editPlayerForm.use_custom_loan_team ? (
+                  <input
+                    type="text"
+                    className="border rounded p-2 text-sm w-full"
+                    placeholder="e.g. Sheffield Wednesday, Hull City"
+                    value={editPlayerForm.custom_loan_team_name}
+                    onChange={(e) => setEditPlayerForm({...editPlayerForm, custom_loan_team_name: e.target.value})}
+                  />
+                ) : (
+                  <TeamSelect
+                    teams={runTeams}
+                    value={editPlayerForm.loan_team_id}
+                    onChange={(id) => setEditPlayerForm({...editPlayerForm, loan_team_id: id})}
+                    placeholder="Select loan team..."
+                  />
+                )}
+              </div>
+              
+              {/* Season/Window */}
+              <div>
+                <label className="text-sm font-medium text-gray-700 block mb-1">Season / Window</label>
+                <select
+                  className="border rounded p-2 text-sm w-full"
+                  value={editPlayerForm.window_key}
+                  onChange={(e) => setEditPlayerForm({...editPlayerForm, window_key: e.target.value})}
+                >
+                  <option value="">Select season...</option>
+                  {generateSeasonOptions().map(opt => (
+                    <option key={opt.value} value={opt.value}>{opt.label}</option>
+                  ))}
+                </select>
+              </div>
+            </div>
+            
+            {/* Actions */}
+            <div className="mt-6 flex gap-3 justify-end">
+              <Button variant="outline" onClick={() => setEditingPlayerDialog(null)}>
+                Cancel
+              </Button>
+              <Button onClick={savePlayerEdit}>
+                Save Changes
+              </Button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   </div>
   )
@@ -3419,6 +6061,554 @@ function SoccerBallToggleIcon({ spinning }) {
       <path d="M28 46L25 56" stroke="currentColor" strokeWidth="3" strokeLinecap="round" />
       <path d="M36 46L39 56" stroke="currentColor" strokeWidth="3" strokeLinecap="round" />
     </svg>
+  )
+}
+
+function AdminSandboxPage() {
+  const [tasks, setTasks] = useState([])
+  const [collapsedTasks, setCollapsedTasks] = useState({})
+  const [formValues, setFormValues] = useState({})
+  const [results, setResults] = useState({})
+  const [loading, setLoading] = useState(true)
+  const [error, setError] = useState('')
+  const [runningTaskId, setRunningTaskId] = useState(null)
+  const [sofascorePlayers, setSofascorePlayers] = useState([])
+  const [sofascoreInputs, setSofascoreInputs] = useState({})
+  const [sofascoreUpdatingKey, setSofascoreUpdatingKey] = useState(null)
+  const [sofascoreStatus, setSofascoreStatus] = useState(null)
+  const navigate = useNavigate()
+  const { token, hasApiKey } = useAuth()
+
+  useEffect(() => {
+    if (token && APIService.userToken !== token) {
+      APIService.setUserToken(token)
+    }
+  }, [token])
+
+  const buildDefaults = useCallback((taskList) => {
+    const defaults = {}
+    for (const task of taskList) {
+      const params = task?.parameters || []
+      defaults[task.task_id] = params.reduce((acc, param) => {
+        if (param.type === 'checkbox') {
+          acc[param.name] = false
+        } else {
+          acc[param.name] = ''
+        }
+        return acc
+      }, {})
+    }
+    return defaults
+  }, [])
+
+  const ensureAdminSession = useCallback(() => {
+    const storedToken = APIService.userToken || (typeof localStorage !== 'undefined' ? localStorage.getItem('loan_army_user_token') : null)
+    if (storedToken && !APIService.userToken) {
+      APIService.setUserToken(storedToken)
+    }
+    if (!storedToken) {
+      const err = new Error('Admin login required. Sign in with an admin email to continue.')
+      err.code = 'missing_token'
+      throw err
+    }
+    const storedKey = APIService.adminKey || (typeof localStorage !== 'undefined' ? localStorage.getItem('loan_army_admin_key') : null)
+    if (storedKey && !APIService.adminKey) {
+      APIService.setAdminKey(storedKey)
+    }
+    if (!storedKey) {
+      const err = new Error('Admin API key required. Add your key in the admin dashboard.')
+      err.code = 'missing_key'
+      throw err
+    }
+  }, [])
+
+  const loadTasks = useCallback(async () => {
+    setLoading(true)
+    setError('')
+    try {
+      ensureAdminSession()
+
+      let payload
+      try {
+        payload = await APIService.adminSandboxTasks()
+      } catch (err) {
+        if (err?.status === 401) {
+          await APIService.refreshProfile()
+          ensureAdminSession()
+          payload = await APIService.adminSandboxTasks()
+        } else {
+          throw err
+        }
+      }
+      const taskList = Array.isArray(payload?.tasks) ? payload.tasks : []
+      setTasks(taskList)
+      setCollapsedTasks((prev) => mergeCollapseState(prev, taskList))
+      setFormValues((prev) => ({ ...buildDefaults(taskList), ...prev }))
+    } catch (err) {
+      setError(err?.message || 'Failed to load sandbox tasks')
+    } finally {
+      setLoading(false)
+    }
+  }, [buildDefaults, ensureAdminSession])
+
+  useEffect(() => {
+    if (!token) {
+      setLoading(false)
+      setError('Admin login required. Sign in with an admin email to continue.')
+      return
+    }
+    if (!hasApiKey) {
+      setLoading(false)
+      setError('Admin API key required. Add your key in the admin dashboard.')
+      return
+    }
+    loadTasks()
+  }, [token, hasApiKey, loadTasks])
+
+  const toggleTaskCollapsed = useCallback((taskId) => {
+    setCollapsedTasks((prev) => toggleCollapseState(prev, taskId))
+  }, [])
+
+  const handleInputChange = useCallback((taskId, fieldName, fieldType) => (event) => {
+    const value = fieldType === 'checkbox' ? event.target.checked : event.target.value
+    setFormValues((prev) => ({
+      ...prev,
+      [taskId]: {
+        ...(prev[taskId] || {}),
+        [fieldName]: value,
+      },
+    }))
+  }, [])
+
+  const handleSelectChange = useCallback((taskId, param, option, params) => {
+    setFormValues((prev) => {
+      const updates = buildSelectUpdates(param, option, params)
+      if (!updates || Object.keys(updates).length === 0) {
+        return prev
+      }
+      const nextTaskValues = { ...(prev[taskId] || {}) }
+      for (const [key, value] of Object.entries(updates)) {
+        nextTaskValues[key] = value
+      }
+      return { ...prev, [taskId]: nextTaskValues }
+    })
+  }, [])
+
+  const buildPayload = useCallback((task) => {
+    const params = task?.parameters || []
+    const currentValues = formValues[task.task_id] || {}
+    const payload = {}
+    for (const param of params) {
+      const rawValue = currentValues[param.name]
+      if (param.type === 'checkbox') {
+        payload[param.name] = !!rawValue
+        continue
+      }
+      if (rawValue === '' || typeof rawValue === 'undefined' || rawValue === null) {
+        continue
+      }
+      if (param.type === 'number') {
+        const numeric = Number(rawValue)
+        if (!Number.isNaN(numeric)) {
+          payload[param.name] = numeric
+        }
+      } else {
+        payload[param.name] = rawValue
+      }
+    }
+    return payload
+  }, [formValues])
+
+  const runTask = useCallback(async (task) => {
+    if (!task?.task_id) return
+    setRunningTaskId(task.task_id)
+    try {
+      const payload = buildPayload(task)
+      ensureAdminSession()
+      let result
+      try {
+        result = await APIService.adminSandboxRun(task.task_id, payload)
+      } catch (err) {
+        if (err?.status === 401) {
+          await APIService.refreshProfile()
+          ensureAdminSession()
+          result = await APIService.adminSandboxRun(task.task_id, payload)
+        } else {
+          throw err
+        }
+      }
+      if (task.task_id === 'list-missing-sofascore-ids') {
+        const players = Array.isArray(result?.payload?.players) ? result.payload.players : []
+        const enriched = players.map((player, index) => ({
+          ...player,
+          __row_key: sofascoreRowKey(player, index),
+        }))
+        const inputDefaults = {}
+        for (const player of enriched) {
+          const rowKey = player.__row_key
+          inputDefaults[rowKey] = player?.sofascore_id ? String(player.sofascore_id) : ''
+        }
+        setSofascorePlayers(enriched)
+        setSofascoreInputs(inputDefaults)
+        setSofascoreStatus(null)
+        setSofascoreUpdatingKey(null)
+      }
+      if (task.task_id === 'update-player-sofascore-id') {
+        setSofascoreStatus({ type: 'success', message: result?.summary || 'Sofascore id updated.' })
+      }
+      setResults((prev) => ({
+        ...prev,
+        [task.task_id]: { status: 'ok', result },
+      }))
+    } catch (err) {
+      if (task?.task_id === 'update-player-sofascore-id') {
+        setSofascoreStatus({ type: 'error', message: err?.message || 'Failed to update Sofascore id.' })
+      }
+      setResults((prev) => ({
+        ...prev,
+        [task.task_id]: {
+          status: 'error',
+          message: err?.message || 'Task execution failed',
+          detail: err?.body,
+        },
+      }))
+    } finally {
+      setRunningTaskId(null)
+    }
+  }, [buildPayload, ensureAdminSession])
+
+  const handleSofascoreAssign = useCallback(async (row, inputValue) => {
+    const payload = buildSofascoreUpdatePayload(row, typeof inputValue === 'string' ? inputValue.trim() : inputValue)
+    if (!payload) {
+      setSofascoreStatus({ type: 'error', message: 'Unable to update Sofascore id for this row.' })
+      return
+    }
+
+    const rowKey = row?.__row_key || sofascoreRowKey(row)
+    setSofascoreStatus(null)
+    setSofascoreUpdatingKey(rowKey)
+    try {
+      ensureAdminSession()
+      const result = await APIService.adminSandboxRun('update-player-sofascore-id', payload)
+      setSofascoreStatus({ type: 'success', message: result?.summary || 'Sofascore id updated.' })
+      setSofascorePlayers((prev) => prev.filter((item) => (item.__row_key || sofascoreRowKey(item)) !== rowKey))
+      setSofascoreInputs((prev) => {
+        const next = { ...prev }
+        delete next[rowKey]
+        return next
+      })
+    } catch (err) {
+      setSofascoreStatus({ type: 'error', message: err?.message || 'Failed to update Sofascore id.' })
+    } finally {
+      setSofascoreUpdatingKey(null)
+    }
+  }, [ensureAdminSession])
+
+  const handleSupplementalDelete = useCallback(async (row) => {
+    if (!row?.supplemental_id) return
+    const rowKey = row?.__row_key || sofascoreRowKey(row)
+    setSofascoreStatus(null)
+    setSofascoreUpdatingKey(rowKey)
+    try {
+      ensureAdminSession()
+      const result = await APIService.adminSandboxRun('delete-supplemental-loan', {
+        supplemental_id: row.supplemental_id,
+        confirm: true,
+      })
+      setSofascoreStatus({ type: 'success', message: result?.summary || 'Supplemental row deleted.' })
+      setSofascorePlayers((prev) => prev.filter((item) => (item.__row_key || sofascoreRowKey(item)) !== rowKey))
+      setSofascoreInputs((prev) => {
+        const next = { ...prev }
+        delete next[rowKey]
+        return next
+      })
+    } catch (err) {
+      setSofascoreStatus({ type: 'error', message: err?.message || 'Failed to delete supplemental loan.' })
+    } finally {
+      setSofascoreUpdatingKey(null)
+    }
+  }, [ensureAdminSession])
+
+  return (
+    <div className="max-w-5xl mx-auto px-4 py-8 space-y-6">
+      <div className="flex items-center justify-between gap-2">
+        <div className="flex items-center gap-2">
+          <Button variant="ghost" size="sm" onClick={() => navigate('/admin')}>
+            ← Back to admin dashboard
+          </Button>
+          <h1 className="text-2xl font-semibold">Admin Sandbox</h1>
+        </div>
+        <Button variant="outline" size="sm" onClick={loadTasks} disabled={loading}>
+          {loading ? 'Refreshing…' : 'Refresh tasks'}
+        </Button>
+      </div>
+
+      {error && (
+        <Alert variant="destructive">
+          <AlertDescription>{error}</AlertDescription>
+        </Alert>
+      )}
+
+      {loading && !tasks.length ? (
+        <div className="rounded-lg border bg-white p-6 text-sm text-gray-600">
+          Loading sandbox tasks…
+        </div>
+      ) : null}
+
+      {!loading && !tasks.length && !error ? (
+        <div className="rounded-lg border bg-white p-6 text-sm text-gray-600">
+          No sandbox tasks are currently registered.
+        </div>
+      ) : null}
+
+      <div className="grid gap-4">
+        {tasks.map((task) => {
+          const params = task?.parameters || []
+          const values = formValues[task.task_id] || {}
+          const outcome = results[task.task_id]
+          const isRunning = runningTaskId === task.task_id
+          const isCollapsed = (collapsedTasks && Object.prototype.hasOwnProperty.call(collapsedTasks, task.task_id))
+            ? !!collapsedTasks[task.task_id]
+            : true
+          const ToggleIcon = isCollapsed ? ChevronRight : ChevronDown
+
+          return (
+            <div key={task.task_id} className="rounded-xl border bg-white shadow-sm">
+              <div className={sandboxCardHeaderClasses('shadow-sm')}>
+                <div className="space-y-1">
+                  <h2 className="text-lg font-semibold">{task.label}</h2>
+                  <p className="text-sm text-gray-600">{task.description}</p>
+                </div>
+                <div className="flex items-center gap-2">
+                  {outcome?.status === 'ok' ? (
+                    <span className="text-xs font-medium text-green-600">Success</span>
+                  ) : null}
+                  {outcome?.status === 'error' ? (
+                    <span
+                      className="max-w-[12rem] truncate text-xs font-medium text-red-600"
+                      title={outcome.message}
+                    >
+                      {outcome.message}
+                    </span>
+                  ) : null}
+                  <button
+                    type="button"
+                    onClick={() => toggleTaskCollapsed(task.task_id)}
+                    aria-expanded={!isCollapsed}
+                    className="inline-flex items-center gap-1 rounded-md border border-gray-200 bg-gray-100 px-2 py-1 text-xs font-medium text-gray-700 transition hover:bg-gray-200"
+                  >
+                    <ToggleIcon className="h-4 w-4" />
+                    {isCollapsed ? 'Expand' : 'Collapse'}
+                  </button>
+                </div>
+              </div>
+              {!isCollapsed && (
+                <>
+                  <form
+                    className="px-4 py-4 space-y-4"
+                    onSubmit={(event) => {
+                      event.preventDefault()
+                      runTask(task)
+                    }}
+                  >
+                    {params.length > 0 ? (
+                      <div className="grid gap-3 md:grid-cols-2">
+                        {params.map((param) => {
+                          const selectOptions = Array.isArray(param.options) ? param.options : []
+                          const hasSelect = param.type === 'select' && selectOptions.length > 0
+                          const currentValue = values[param.name] ?? ''
+                          const selectValue = hasSelect ? String(currentValue ?? '') : ''
+                          const selectLookup = hasSelect
+                            ? new Map(selectOptions.map((option, index) => {
+                                const optValue = option?.value ?? option?.label ?? index
+                                return [String(optValue), option]
+                              }))
+                            : null
+
+                          return (
+                            <label key={param.name} className="flex flex-col gap-2 text-sm font-medium text-gray-700">
+                              <span>{param.label}</span>
+                              {param.type === 'checkbox' ? (
+                                <div className="flex items-center gap-2 text-sm font-normal">
+                                  <input
+                                    type="checkbox"
+                                    checked={!!values[param.name]}
+                                    onChange={handleInputChange(task.task_id, param.name, param.type)}
+                                  />
+                                  {param.help ? <span className="text-gray-600">{param.help}</span> : null}
+                                </div>
+                              ) : hasSelect ? (
+                                <Select
+                                  value={selectValue}
+                                  onValueChange={(newValue) => {
+                                    if (!selectLookup) {
+                                      handleSelectChange(task.task_id, param, newValue ? { value: newValue } : null, params)
+                                      return
+                                    }
+                                    const option = selectLookup.get(newValue)
+                                    handleSelectChange(
+                                      task.task_id,
+                                      param,
+                                      option || (newValue ? { value: newValue } : null),
+                                      params
+                                    )
+                                  }}
+                                >
+                                  <SelectTrigger>
+                                    <SelectValue placeholder={param.placeholder || 'Select option…'} />
+                                  </SelectTrigger>
+                                  <SelectContent>
+                                    {selectOptions.map((option, index) => {
+                                      const optionValue = String(option?.value ?? option?.label ?? index)
+                                      const optionLabel = option?.label ?? option?.value ?? optionValue
+                                      return (
+                                        <SelectItem key={`${optionValue}-${index}`} value={optionValue}>
+                                          {optionLabel}
+                                        </SelectItem>
+                                      )
+                                    })}
+                                  </SelectContent>
+                                </Select>
+                              ) : (
+                                <Input
+                                  type={param.type || 'text'}
+                                  value={values[param.name] ?? ''}
+                                  placeholder={param.placeholder || ''}
+                                  onChange={handleInputChange(task.task_id, param.name, param.type)}
+                                />
+                              )}
+                              {param.type !== 'checkbox' && param.help ? (
+                                <span className="text-xs font-normal text-gray-500">{param.help}</span>
+                              ) : null}
+                            </label>
+                          )
+                        })}
+                      </div>
+                    ) : (
+                      <p className="text-sm text-gray-600">No parameters required.</p>
+                    )}
+                    <div className="flex items-center gap-3">
+                      <Button type="submit" size="sm" disabled={isRunning}>
+                        {isRunning ? 'Running…' : 'Run task'}
+                      </Button>
+                      {outcome?.status === 'ok' && (
+                        <span className="text-sm text-green-600">Success</span>
+                      )}
+                      {outcome?.status === 'error' && (
+                        <span className="text-sm text-red-600">{outcome.message}</span>
+                      )}
+                    </div>
+                    {task.task_id !== 'list-missing-sofascore-ids' && outcome?.status === 'ok' && outcome.result && (
+                      <pre className="mt-3 max-h-64 overflow-auto rounded-md bg-gray-900 p-3 text-xs text-gray-100">
+                        {JSON.stringify(outcome.result, null, 2)}
+                      </pre>
+                    )}
+                    {outcome?.status === 'error' && outcome.detail && (
+                      <pre className="mt-3 max-h-64 overflow-auto rounded-md bg-red-900/80 p-3 text-xs text-red-100">
+                        {typeof outcome.detail === 'string'
+                          ? outcome.detail
+                          : JSON.stringify(outcome.detail, null, 2)}
+                      </pre>
+                    )}
+                  </form>
+                  {task.task_id === 'list-missing-sofascore-ids' && (
+                    <div className="border-t px-4 py-4 space-y-4">
+                      {sofascoreStatus && (
+                        <Alert variant={sofascoreStatus.type === 'error' ? 'destructive' : 'default'}>
+                          <AlertDescription>{sofascoreStatus.message}</AlertDescription>
+                        </Alert>
+                      )}
+                      {sofascorePlayers.length === 0 ? (
+                        <p className="text-sm text-gray-600">
+                          Run the task to load players missing Sofascore ids.
+                        </p>
+                      ) : (
+                        <div className="overflow-auto">
+                          <table className="min-w-full text-sm">
+                            <thead>
+                              <tr className="text-left text-xs uppercase tracking-wide text-gray-500">
+                                <th className="pb-2 pr-4">Player</th>
+                                <th className="pb-2 pr-4">Parent Club</th>
+                                <th className="pb-2 pr-4">Loan Club</th>
+                                <th className="pb-2 pr-4">Sofascore ID</th>
+                                <th className="pb-2 pr-4">Actions</th>
+                              </tr>
+                            </thead>
+                            <tbody>
+                              {sofascorePlayers.map((player, index) => {
+                                const rowKey = player?.__row_key || sofascoreRowKey(player, index)
+                                const isSupplemental = Boolean(player?.is_supplemental)
+                                const apiLabel = player?.player_id
+                                  ? `API #${player.player_id}`
+                                  : isSupplemental && player?.supplemental_id
+                                    ? `Supp #${player.supplemental_id}`
+                                    : '—'
+                                const value = sofascoreInputs[rowKey] ?? (player?.sofascore_id ? String(player.sofascore_id) : '')
+                                return (
+                                  <tr key={rowKey} className="border-t border-gray-100 last:border-b">
+                                    <td className="py-2 pr-4 align-top">
+                                      <div className="font-medium text-gray-900">{player?.player_name || (player?.player_id ? `Player #${player.player_id}` : 'Supplemental player')}</div>
+                                      <div className="text-xs text-gray-500">{apiLabel}</div>
+                                    </td>
+                                    <td className="py-2 pr-4 align-top text-gray-600">{player?.primary_team || '—'}</td>
+                                    <td className="py-2 pr-4 align-top text-gray-600">{player?.loan_team || '—'}</td>
+                                    <td className="py-2 pr-4 align-top">
+                                      <Input
+                                        aria-label={`Sofascore id for ${player?.player_name || apiLabel}`}
+                                        value={value}
+                                        placeholder="e.g. 1101989"
+                                        onChange={(event) => {
+                                          const next = event.target.value
+                                          setSofascoreInputs((prev) => ({ ...prev, [rowKey]: next }))
+                                        }}
+                                        className="w-36"
+                                      />
+                                    </td>
+                                    <td className="py-2 pr-4 align-top">
+                                      <div className="flex flex-wrap gap-2">
+                                        <Button
+                                          size="sm"
+                                          disabled={sofascoreUpdatingKey === rowKey || !(value && value.trim())}
+                                          onClick={() => handleSofascoreAssign(player, (value || '').trim())}
+                                        >
+                                          {sofascoreUpdatingKey === rowKey ? 'Saving…' : 'Save'}
+                                        </Button>
+                                        <Button
+                                          size="sm"
+                                          variant="outline"
+                                          disabled={sofascoreUpdatingKey === rowKey}
+                                          onClick={() => handleSofascoreAssign(player, '')}
+                                        >
+                                          Clear
+                                        </Button>
+                                        {isSupplemental && (
+                                          <Button
+                                            size="sm"
+                                            variant="destructive"
+                                            disabled={sofascoreUpdatingKey === rowKey}
+                                            onClick={() => handleSupplementalDelete(player)}
+                                          >
+                                            Delete
+                                          </Button>
+                                        )}
+                                      </div>
+                                    </td>
+                                  </tr>
+                                )
+                              })}
+                            </tbody>
+                          </table>
+                        </div>
+                      )}
+                    </div>
+                  )}
+                </>
+              )}
+            </div>
+          )
+        })}
+      </div>
+    </div>
   )
 }
 
@@ -4311,7 +7501,12 @@ function TeamsPage() {
     setExpandedTeamId(prev => (prev === teamId ? null : teamId))
     if (!teamLoans[teamId]) {
       try {
-        const loans = await APIService.getTeamLoans(teamId)
+        const teamMeta = teams.find((row) => row.id === teamId)
+        const params = {}
+        if (teamMeta && typeof teamMeta.season !== 'undefined' && teamMeta.season !== null) {
+          params.season = teamMeta.season
+        }
+        const loans = await APIService.getTeamLoans(teamId, params)
         setTeamLoans(prev => ({ ...prev, [teamId]: loans }))
       } catch (error) {
         console.error('❌ Failed to load loans for team', teamId, error)
@@ -5259,7 +8454,9 @@ function NewslettersPage() {
                       ) : (
                         (() => {
                           try {
-                            const obj = JSON.parse(newsletter.content)
+                            const obj = (newsletter.enriched_content && typeof newsletter.enriched_content === 'object')
+                              ? newsletter.enriched_content
+                              : JSON.parse(newsletter.content)
                             const detailedSections = Array.isArray(obj.sections)
                               ? obj.sections.filter((section) => ((section?.title || '').trim().toLowerCase()) !== 'what the internet is saying')
                               : []
@@ -5412,6 +8609,32 @@ function NewslettersPage() {
                                                         ))}
                                                       </ul>
                                                     )}
+                                                    {(() => {
+                                                      const embedUrl = buildSofascoreEmbedUrl(it.sofascore_player_id ?? it.sofascoreId)
+                                                      if (!embedUrl) return null
+                                                      return (
+                                                        <div className="mt-3">
+                                                          <iframe
+                                                            title={`Sofascore profile for ${it.player_name || it.player_id}`}
+                                                            src={embedUrl}
+                                                            frameBorder="0"
+                                                            scrolling="no"
+                                                            className="h-[568px] w-full max-w-xs rounded-md border"
+                                                          />
+                                                          <p className="mt-2 text-xs text-gray-500">
+                                                            Player stats provided by{' '}
+                                                            <a
+                                                              href="https://sofascore.com/"
+                                                              target="_blank"
+                                                              rel="noopener"
+                                                              className="text-blue-600 hover:underline"
+                                                            >
+                                                              Sofascore
+                                                            </a>
+                                                          </p>
+                                                        </div>
+                                                      )
+                                                    })()}
                                                     {it.links && Array.isArray(it.links) && it.links.length > 0 && (
                                                       <div className="mt-3 space-y-2">
                                                         <div className="text-xs font-semibold uppercase tracking-wide text-gray-500">Further reading</div>
@@ -6463,6 +9686,14 @@ function App() {
                   element={(
                     <RequireAdmin>
                       <AdminPage />
+                    </RequireAdmin>
+                  )}
+                />
+                <Route
+                  path="/admin/sandbox"
+                  element={(
+                    <RequireAdmin>
+                      <AdminSandboxPage />
                     </RequireAdmin>
                   )}
                 />
