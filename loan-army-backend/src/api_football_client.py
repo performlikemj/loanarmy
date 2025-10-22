@@ -831,6 +831,15 @@ class APIFootballClient:
                     games = st.get('games', {}) or {}
                     goals = st.get('goals', {}) or {}
                     cards = st.get('cards', {}) or {}
+                    
+                    # Extract ALL available stats from API response
+                    shots = st.get('shots', {}) or {}
+                    passes = st.get('passes', {}) or {}
+                    tackles = st.get('tackles', {}) or {}
+                    duels = st.get('duels', {}) or {}
+                    dribbles = st.get('dribbles', {}) or {}
+                    fouls = st.get('fouls', {}) or {}
+                    penalty = st.get('penalty', {}) or {}
 
                     minutes = games.get('minutes') or 0
                     substitute_flag = games.get('substitute')
@@ -840,15 +849,17 @@ class APIFootballClient:
 
                     return {
                         "statistics": [{
-                            "games":   {"minutes": minutes},
-                            "goals":   {"total": goals.get('total') or 0,
-                                        "assists": goals.get('assists') or 0},
-                            "cards":   {"yellow": cards.get('yellow') or 0,
-                                        "red": cards.get('red') or 0},
-                            # Pass through extra fields that may be useful downstream
-                            "rating": games.get('rating'),
-                            "position": games.get('position'),
-                            "number": games.get('number'),
+                            "games": games,      # Pass through full games object
+                            "goals": goals,      # Pass through full goals object
+                            "cards": cards,      # Pass through full cards object
+                            "shots": shots,      # NEW: shots stats
+                            "passes": passes,    # NEW: passing stats
+                            "tackles": tackles,  # NEW: defensive stats
+                            "duels": duels,      # NEW: duel stats
+                            "dribbles": dribbles, # NEW: dribbling stats
+                            "fouls": fouls,      # NEW: fouls drawn/committed
+                            "penalty": penalty,  # NEW: penalty stats
+                            "offsides": st.get('offsides'),  # NEW: offsides
                         }],
                         "played": played_flag,
                         "role": role,
@@ -1215,9 +1226,19 @@ class APIFootballClient:
             elif pstats:
                 stats = pstats.get('statistics', [])
                 if stats:
-                    g = stats[0].get('games', {}) or {}
-                    goals = stats[0].get('goals', {}) or {}
-                    cards = stats[0].get('cards', {}) or {}
+                    stats_block = stats[0]
+                    g = stats_block.get('games', {}) or {}
+                    goals = stats_block.get('goals', {}) or {}
+                    cards = stats_block.get('cards', {}) or {}
+                    
+                    # Extract ALL stat categories from API response
+                    shots = stats_block.get('shots', {}) or {}
+                    passes = stats_block.get('passes', {}) or {}
+                    tackles = stats_block.get('tackles', {}) or {}
+                    duels = stats_block.get('duels', {}) or {}
+                    dribbles = stats_block.get('dribbles', {}) or {}
+                    fouls = stats_block.get('fouls', {}) or {}
+                    
                     minutes = g.get('minutes', 0) or 0
                     if minutes and minutes > 0:
                         played = True
@@ -1226,15 +1247,59 @@ class APIFootballClient:
                             'goals': goals.get('total', 0) or 0,
                             'assists': goals.get('assists', 0) or 0,
                             'yellows': cards.get('yellow', 0) or 0,
-                            'reds': cards.get('red', 0) or 0
+                            'reds': cards.get('red', 0) or 0,
+                            # Add expanded stats
+                            'position': g.get('position'),
+                            'rating': g.get('rating'),
+                            'saves': goals.get('saves', 0) or 0,
+                            'goals_conceded': goals.get('conceded', 0) or 0,
+                            'shots_total': shots.get('total', 0) or 0,
+                            'shots_on': shots.get('on', 0) or 0,
+                            'passes_total': passes.get('total', 0) or 0,
+                            'passes_key': passes.get('key', 0) or 0,
+                            'tackles_total': tackles.get('total', 0) or 0,
+                            'tackles_interceptions': tackles.get('interceptions', 0) or 0,
+                            'duels_total': duels.get('total', 0) or 0,
+                            'duels_won': duels.get('won', 0) or 0,
+                            'dribbles_attempts': dribbles.get('attempts', 0) or 0,
+                            'dribbles_success': dribbles.get('success', 0) or 0,
+                            'fouls_drawn': fouls.get('drawn', 0) or 0,
+                            'fouls_committed': fouls.get('committed', 0) or 0,
+                            'offsides': stats_block.get('offsides', 0) or 0,
                         })
-                        # Accumulate totals
+                        # Accumulate ALL totals
                         totals['games_played'] += 1
                         totals['minutes'] += player_line['minutes']
                         totals['goals'] += player_line['goals']
                         totals['assists'] += player_line['assists']
                         totals['yellows'] += player_line['yellows']
                         totals['reds'] += player_line['reds']
+                        
+                        # Position: use most recent
+                        if player_line['position']:
+                            totals['position'] = player_line['position']
+                        
+                        # Rating: accumulate for averaging
+                        if player_line['rating']:
+                            rating_sum += player_line['rating']
+                            rating_count += 1
+                        
+                        # Aggregate expanded stats
+                        totals['saves'] += player_line['saves']
+                        totals['goals_conceded'] += player_line['goals_conceded']
+                        totals['shots_total'] += player_line['shots_total']
+                        totals['shots_on'] += player_line['shots_on']
+                        totals['passes_total'] += player_line['passes_total']
+                        totals['passes_key'] += player_line['passes_key']
+                        totals['tackles_total'] += player_line['tackles_total']
+                        totals['tackles_interceptions'] += player_line['tackles_interceptions']
+                        totals['duels_total'] += player_line['duels_total']
+                        totals['duels_won'] += player_line['duels_won']
+                        totals['dribbles_attempts'] += player_line['dribbles_attempts']
+                        totals['dribbles_success'] += player_line['dribbles_success']
+                        totals['fouls_drawn'] += player_line['fouls_drawn']
+                        totals['fouls_committed'] += player_line['fouls_committed']
+                        totals['offsides'] += player_line['offsides']
 
             teams = fx.get('teams', {})
             home = teams.get('home', {}) or {}
