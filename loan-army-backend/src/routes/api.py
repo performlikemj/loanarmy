@@ -1802,6 +1802,18 @@ def get_newsletters():
         for newsletter in newsletters:
             row = newsletter.to_dict()
             try:
+                raw_structured = newsletter.structured_content or newsletter.content or "{}"
+                raw_obj = json.loads(raw_structured)
+            except Exception:
+                raw_obj = None
+            if isinstance(raw_obj, dict):
+                rendered = raw_obj.get('rendered')
+                if isinstance(rendered, dict):
+                    row['rendered'] = {
+                        key: value if isinstance(value, str) else ''
+                        for key, value in rendered.items()
+                    }
+            try:
                 row['enriched_content'] = _load_newsletter_json(newsletter)
             except Exception:
                 row['enriched_content'] = None
@@ -1934,6 +1946,9 @@ def get_newsletter(newsletter_id):
     try:
         newsletter = Newsletter.query.get_or_404(newsletter_id)
         payload = newsletter.to_dict()
+        
+        logger.info(f"📰 [get_newsletter] Serving newsletter ID: {newsletter_id}")
+        
         # Extract embedded rendered variants if present
         try:
             obj = json.loads(payload.get('structured_content') or payload.get('content') or '{}')
@@ -1942,7 +1957,34 @@ def get_newsletter(newsletter_id):
                 payload['rendered'] = {
                     k: (v if isinstance(v, str) else '') for k, v in rendered.items()
                 }
-        except Exception:
+                logger.info(f"✅ [get_newsletter] Found rendered variants - web_html: {len(payload['rendered'].get('web_html', ''))} chars")
+                
+                # Check if web_html has expanded stats
+                web_html = payload['rendered'].get('web_html', '')
+                if 'Shots' in web_html or 'Saves' in web_html or 'Key Passes' in web_html:
+                    logger.info(f"✅ [get_newsletter] Rendered HTML contains expanded stats!")
+                else:
+                    logger.warning(f"⚠️  [get_newsletter] Rendered HTML might not contain expanded stats")
+            else:
+                logger.warning(f"⚠️  [get_newsletter] No rendered variants found in newsletter content")
+                
+            # Log sample stats from the JSON
+            sections = obj.get('sections', [])
+            if sections:
+                first_section = sections[0]
+                items = first_section.get('items', [])
+                if items:
+                    first_item = items[0]
+                    stats = first_item.get('stats', {})
+                    logger.info(f"📊 [get_newsletter] Sample item stats from JSON:")
+                    logger.info(f"   Player: {first_item.get('player_name')}")
+                    logger.info(f"   Stats keys: {list(stats.keys())}")
+                    logger.info(f"   Position: {stats.get('position')}")
+                    logger.info(f"   Rating: {stats.get('rating')}")
+                    logger.info(f"   Shots: {stats.get('shots_total')}")
+                    logger.info(f"   Passes: {stats.get('passes_total')}")
+        except Exception as e:
+            logger.error(f"❌ [get_newsletter] Error extracting rendered variants: {e}")
             pass
 
         try:

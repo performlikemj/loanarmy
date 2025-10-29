@@ -38,3 +38,5 @@ loan-army-backend/newsletter_*.json
 loan-army-backend/report.json
 loan-army-backend/newsletter*
 .loan/
+.venv/
+.venv-test/

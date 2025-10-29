@@ -7,8 +7,8 @@ from flask import render_template
 
 from src.models.league import db, Team, Newsletter, NewsletterComment, UserSubscription, Player, SupplementalLoan
 from src.routes.api import _deliver_newsletter_via_webhook, issue_user_token, render_newsletter
-from src.agents import weekly_agent
-from src.agents.weekly_newsletter_agent import _enforce_loanee_metadata
+from src.agents import weekly_agent, weekly_newsletter_agent as weekly_nl_agent
+from src.agents.weekly_newsletter_agent import _enforce_loanee_metadata, compose_team_weekly_newsletter
 from src.api_football_client import APIFootballClient
 
 
@@ -403,6 +403,355 @@ def test_enforce_metadata_handles_core_supplemental_and_internet():
     # Links from internet context merged onto supplemental item
     internet_links = supplemental.get('links')
     assert internet_links and internet_links[0] == 'https://example.com'
+
+
+def test_newsletter_list_includes_rendered_variants(app, client):
+    with app.app_context():
+        team = Team(team_id=3030, name='Rendered FC', country='England', season=2025)
+        db.session.add(team)
+        db.session.commit()
+
+        rendered_payload = {
+            'title': 'Rendered FC Weekly',
+            'summary': 'Summary placeholder',
+            'sections': [],
+            'rendered': {
+                'web_html': '<div class="player-stats-grid"><div class="stat-group"><span>Shots</span></div></div>',
+                'email_html': '<div>Email content</div>',
+                'text': 'Shots: 3',
+            },
+        }
+
+        newsletter = Newsletter(
+            team_id=team.id,
+            title='Rendered FC Weekly',
+            content=json.dumps({'title': 'Rendered FC Weekly'}),
+            structured_content=json.dumps(rendered_payload),
+            published=True,
+        )
+        db.session.add(newsletter)
+        db.session.commit()
+
+    response = client.get('/newsletters?published_only=true')
+    assert response.status_code == 200
+    data = response.get_json()
+    assert isinstance(data, list) and len(data) == 1
+    row = data[0]
+    assert 'rendered' in row, 'Expected rendered variants to be included in newsletter payload'
+    assert isinstance(row['rendered'], dict)
+    assert 'web_html' in row['rendered']
+    assert 'Shots' in row['rendered']['web_html']
+
+
+def test_compose_weekly_summary_uses_stats_and_news(app, monkeypatch):
+    from datetime import date
+
+    with app.app_context():
+        team = Team(team_id=9001, name='Manchester United', country='England', season=2025)
+        db.session.add(team)
+        db.session.commit()
+
+        week_range = ("2025-10-13", "2025-10-19")
+        report = {
+            "season": "2025-26",
+            "range": list(week_range),
+            "parent_team": {"name": "Manchester United"},
+            "loanees": [
+                {
+                    "player_name": "Marcus Rashford",
+                    "player_full_name": "Marcus Rashford",
+                    "player_api_id": 909,
+                    "loan_team_name": "Barcelona",
+                    "loan_team_api_id": 529,
+                    "loan_team_id": 529,
+                    "can_fetch_stats": True,
+                    "sofascore_player_id": 814590,
+                    "matches": [
+                        {
+                            "played": True,
+                            "opponent": "Girona",
+                            "result": "W",
+                            "score": "2-1",
+                            "competition": "La Liga",
+                        }
+                    ],
+                    "totals": {
+                        "minutes": 90,
+                        "goals": 0,
+                        "assists": 0,
+                        "rating": 6.3,
+                        "shots_total": 6,
+                        "shots_on": 3,
+                        "passes_total": 29,
+                        "passes_key": 1,
+                        "tackles_total": 2,
+                        "duels_total": 6,
+                        "duels_won": 4,
+                    },
+                },
+                {
+                    "player_name": "Toby Collyer",
+                    "player_full_name": "Toby Collyer",
+                    "player_api_id": 284400,
+                    "loan_team_name": "West Brom",
+                    "loan_team_api_id": 60,
+                    "loan_team_id": 60,
+                    "can_fetch_stats": True,
+                    "sofascore_player_id": 1084356,
+                    "matches": [
+                        {
+                            "played": True,
+                            "opponent": "Preston",
+                            "result": "W",
+                            "score": "2-1",
+                            "competition": "Championship",
+                        }
+                    ],
+                    "totals": {
+                        "minutes": 55,
+                        "goals": 0,
+                        "assists": 1,
+                        "rating": 6.9,
+                        "passes_total": 34,
+                        "passes_key": 2,
+                        "tackles_total": 2,
+                        "duels_total": 4,
+                        "duels_won": 2,
+                    },
+                },
+            ],
+        }
+
+        brave_ctx = {
+            '"Marcus Rashford" "Barcelona" match report': [
+                {
+                    "title": "Rashford fires six shots in narrow win",
+                    "url": "https://goal.com/rashford",
+                }
+            ],
+            '"Toby Collyer" "West Brom" performance': [
+                {
+                    "title": "Collyer shines with assist for West Brom",
+                    "url": "https://expressandstar.com/collyer",
+                }
+            ],
+        }
+
+        llm_payload = {
+            "title": "Manchester United Loan Watch",
+            "summary": "Placeholder summary.",
+            "season": "2025-26",
+            "range": list(week_range),
+            "sections": [
+                {
+                    "title": "Active Loans",
+                    "items": [
+                        {
+                            "player_name": "M. Rashford",
+                            "loan_team": "Barcelona",
+                            "stats": {"minutes": 90, "goals": 0, "assists": 0, "yellows": 0, "reds": 0},
+                            "links": [],
+                        },
+                        {
+                            "player_name": "T. Collyer",
+                            "loan_team": "West Brom",
+                            "stats": {"minutes": 55, "goals": 0, "assists": 1, "yellows": 0, "reds": 0},
+                            "links": [],
+                        },
+                    ],
+                }
+            ],
+        }
+
+        class _DummyResponse:
+            def __init__(self, payload: dict):
+                self.output_text = json.dumps(payload)
+
+        class _DummyClient:
+            def __init__(self, payload: dict):
+                self._payload = payload
+                self.responses = type(
+                    "RespNS",
+                    (),
+                    {
+                        "create": lambda _self, *args, **kwargs: _DummyResponse(self._payload)
+                    },
+                )()
+
+        dummy_client = _DummyClient(llm_payload)
+
+        monkeypatch.setattr(
+            weekly_agent, "_set_latest_player_lookup", lambda *_args, **_kwargs: None
+        )
+        monkeypatch.setattr(
+            weekly_agent, "_apply_player_lookup", lambda payload, _lookup: (payload, False)
+        )
+        monkeypatch.setattr(
+            weekly_agent, "lint_and_enrich", lambda payload: payload
+        )
+        monkeypatch.setattr(
+            weekly_nl_agent, "_apply_player_lookup", lambda payload, _lookup: (payload, False)
+        )
+        monkeypatch.setattr(
+            weekly_nl_agent, "legacy_lint_and_enrich", lambda payload: payload
+        )
+
+        monkeypatch.setattr(
+            weekly_nl_agent, "fetch_weekly_report_tool", lambda *_args, **_kwargs: report
+        )
+        monkeypatch.setattr(
+            weekly_nl_agent,
+            "brave_context_for_team_and_loans",
+            lambda *_args, **_kwargs: brave_ctx,
+        )
+        monkeypatch.setattr(weekly_nl_agent, "client", dummy_client)
+        monkeypatch.setattr(
+            weekly_nl_agent,
+            "api_client",
+            type(
+                "DummyAPI",
+                (),
+                {
+                    "set_season_year": lambda self, *_a, **_k: None,
+                    "_prime_team_cache": lambda self, *_a, **_k: None,
+                },
+            )(),
+        )
+
+        output = compose_team_weekly_newsletter(team.id, date(2025, 10, 19))
+        content = json.loads(output["content_json"])
+
+    summary = content["summary"]
+    assert "6 shots" in summary
+    assert "Rashford fires six shots in narrow win" in summary
+    active_items = content["sections"][0]["items"]
+    rashford = next(item for item in active_items if item["player_name"].startswith("M. Rashford"))
+    collyer = next(item for item in active_items if item["player_name"].startswith("T. Collyer"))
+    assert "6 shots" in rashford["week_summary"]
+    assert "Rashford fires six shots in narrow win" in rashford["week_summary"]
+    assert "assist" in collyer["week_summary"]
+    assert "Collyer shines with assist for West Brom" in collyer["week_summary"]
+
+
+def test_compose_weekly_summary_handles_supplemental_player(app, monkeypatch):
+    from datetime import date
+
+    with app.app_context():
+        team = Team(team_id=9100, name='Manchester United', country='England', season=2025)
+        db.session.add(team)
+        db.session.commit()
+
+        week_range = ("2025-10-13", "2025-10-19")
+        supplemental_loanee = {
+            "player_name": "E. Kana-Biyik",
+            "player_full_name": "Eloge Kana-Biyik",
+            "loan_team_name": "Lausanne",
+            "loan_team_api_id": 2020718,
+            "loan_team_id": 2020718,
+            "can_fetch_stats": False,
+            "source": "supplemental",
+            "totals": {
+                "minutes": 0,
+                "goals": 0,
+                "assists": 0,
+                "rating": None,
+                "shots_total": 0,
+                "shots_on": 0,
+                "passes_total": 0,
+                "passes_key": 0,
+                "tackles_total": 0,
+                "duels_total": 0,
+                "duels_won": 0,
+            },
+            "matches": [],
+        }
+
+        report = {
+            "season": "2025-26",
+            "range": list(week_range),
+            "parent_team": {"name": "Manchester United"},
+            "loanees": [supplemental_loanee],
+        }
+
+        brave_ctx = {
+            '"E. Kana-Biyik" "Lausanne" match report': [
+                {
+                    "title": "Kana-Biyik impresses local media despite limited data",
+                    "url": "https://example.com/kana-biyik",
+                }
+            ],
+        }
+        llm_payload = {
+            "title": "Manchester United Loan Watch",
+            "summary": "Placeholder summary.",
+            "season": "2025-26",
+            "range": list(week_range),
+            "sections": [
+                {
+                    "title": "Active Loans",
+                    "items": [
+                        {
+                            "player_name": "E. Kana-Biyik",
+                            "loan_team": "Lausanne",
+                            "can_fetch_stats": False,
+                            "stats": {"minutes": 0, "goals": 0, "assists": 0, "yellows": 0, "reds": 0},
+                            "links": [],
+                        }
+                    ],
+                }
+            ],
+        }
+
+        class _DummyResponse:
+            def __init__(self, payload: dict):
+                self.output_text = json.dumps(payload)
+
+        class _DummyClient:
+            def __init__(self, payload: dict):
+                self._payload = payload
+                self.responses = type(
+                    "RespNS",
+                    (),
+                    {
+                        "create": lambda _self, *args, **kwargs: _DummyResponse(self._payload)
+                    },
+                )()
+
+        dummy_client = _DummyClient(llm_payload)
+
+        monkeypatch.setattr(weekly_agent, "_set_latest_player_lookup", lambda *_args, **_kwargs: None)
+        monkeypatch.setattr(weekly_agent, "_apply_player_lookup", lambda payload, _lookup: (payload, False))
+        monkeypatch.setattr(weekly_agent, "lint_and_enrich", lambda payload: payload)
+        monkeypatch.setattr(weekly_nl_agent, "_apply_player_lookup", lambda payload, _lookup: (payload, False))
+        monkeypatch.setattr(weekly_nl_agent, "legacy_lint_and_enrich", lambda payload: payload)
+        monkeypatch.setattr(weekly_nl_agent, "fetch_weekly_report_tool", lambda *_args, **_kwargs: report)
+        monkeypatch.setattr(weekly_nl_agent, "brave_context_for_team_and_loans", lambda *_args, **_kwargs: brave_ctx)
+        monkeypatch.setattr(weekly_nl_agent, "client", dummy_client)
+        monkeypatch.setattr(weekly_nl_agent, "ENV_VALIDATE_FINAL_LINKS", False)
+        monkeypatch.setattr(weekly_nl_agent, "ENV_CHECK_LINKS", False)
+        monkeypatch.setattr(
+            weekly_nl_agent,
+            "api_client",
+            type(
+                "DummyAPI",
+                (),
+                {
+                    "set_season_year": lambda self, *_a, **_k: None,
+                    "_prime_team_cache": lambda self, *_a, **_k: None,
+                },
+            )(),
+        )
+
+        output = compose_team_weekly_newsletter(team.id, date(2025, 10, 19))
+        content = json.loads(output["content_json"])
+
+    supplemental_section = next(sec for sec in content["sections"] if sec["title"] == "Supplemental Loans")
+    item = supplemental_section["items"][0]
+    week_summary = item["week_summary"]
+    assert "We can’t track detailed stats for this player yet." in week_summary
+    assert "Kana-Biyik impresses local media despite limited data" in week_summary
+    assert item["links"][0]["url"] == "https://example.com/kana-biyik"
+    assert item["links"][0]["title"] == "Kana-Biyik impresses local media despite limited data"
 
 
 def _write_png(path: str) -> None:

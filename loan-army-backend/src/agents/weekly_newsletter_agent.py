@@ -354,6 +354,373 @@ def _gentle_filter(hit: dict, player_last: str, team_l: str) -> bool:
         return True
     return False
 
+
+def _pluralize(value: int | float, singular: str, plural: str | None = None) -> str:
+    plural_form = plural or f"{singular}s"
+    return singular if abs(int(value)) == 1 else plural_form
+
+
+def _to_int(value: Any) -> int:
+    try:
+        if value is None:
+            return 0
+        if isinstance(value, bool):
+            return int(value)
+        return int(float(value))
+    except (TypeError, ValueError):
+        return 0
+
+
+def _safe_float(value: Any) -> float | None:
+    try:
+        f = float(value)
+        if f != f:  # NaN check
+            return None
+        return f
+    except (TypeError, ValueError):
+        return None
+
+
+def _combine_phrases(parts: list[str]) -> str:
+    cleaned = [p.strip() for p in parts if p and p.strip()]
+    if not cleaned:
+        return ""
+    if len(cleaned) == 1:
+        return cleaned[0]
+    return ", ".join(cleaned[:-1]) + f" and {cleaned[-1]}"
+
+
+def _stat_highlights(stats: dict) -> list[str]:
+    phrases: list[str] = []
+    goals = _to_int(stats.get("goals"))
+    assists = _to_int(stats.get("assists"))
+    shots_total = _to_int(stats.get("shots_total"))
+    shots_on = _to_int(stats.get("shots_on"))
+    passes_total = _to_int(stats.get("passes_total"))
+    passes_key = _to_int(stats.get("passes_key"))
+    tackles_total = _to_int(stats.get("tackles_total"))
+    duels_won = _to_int(stats.get("duels_won"))
+    duels_total = _to_int(stats.get("duels_total"))
+    saves = _to_int(stats.get("saves"))
+    rating = _safe_float(stats.get("rating"))
+
+    if goals:
+        phrases.append(f"{goals} {_pluralize(goals, 'goal')}")
+    if assists:
+        phrases.append(f"{assists} {_pluralize(assists, 'assist')}")
+    if shots_total:
+        shot_phrase = f"{shots_total} {_pluralize(shots_total, 'shot')}"
+        if shots_on:
+            shot_phrase += f" ({shots_on} on target)"
+        phrases.append(shot_phrase)
+    if passes_total and passes_total >= 20:
+        phrases.append(f"{passes_total} completed {_pluralize(passes_total, 'pass')}")
+    if passes_key:
+        phrases.append(f"{passes_key} key {_pluralize(passes_key, 'pass')}")
+    if tackles_total:
+        phrases.append(f"{tackles_total} {_pluralize(tackles_total, 'tackle')}")
+    if duels_won and duels_total:
+        phrases.append(f"{duels_won}/{duels_total} duels won")
+    if saves:
+        phrases.append(f"{saves} {_pluralize(saves, 'save')}")
+    if rating and rating > 0:
+        phrases.append(f"a {rating:.1f} rating")
+    return phrases[:4]
+
+
+def _match_result_phrase(loanee: dict | None) -> str | None:
+    if not isinstance(loanee, dict):
+        return None
+    matches = loanee.get("matches")
+    if not isinstance(matches, list) or not matches:
+        return None
+    chosen = None
+    for match in matches:
+        if isinstance(match, dict) and match.get("played") is not False:
+            chosen = match
+            break
+    if chosen is None:
+        chosen = matches[0] if isinstance(matches[0], dict) else None
+    if not isinstance(chosen, dict):
+        return None
+    opponent = (chosen.get("opponent") or "").strip()
+    score = (chosen.get("score") or chosen.get("scoreline") or "").strip()
+    competition = (chosen.get("competition") or "").strip()
+    result_code = (chosen.get("result") or "").strip().upper()
+    result_word = {"W": "win", "D": "draw", "L": "defeat"}.get(result_code)
+
+    parts: list[str] = []
+    if result_word and opponent:
+        if score:
+            parts.append(f"{result_word} {score} over {opponent}")
+        else:
+            parts.append(f"{result_word} against {opponent}")
+    elif opponent and score:
+        parts.append(f"{score} against {opponent}")
+    elif opponent:
+        parts.append(f"against {opponent}")
+
+    if competition:
+        if parts:
+            parts[-1] = f"{parts[-1]} in {competition}"
+        else:
+            parts.append(f"in {competition}")
+
+    return parts[0] if parts else None
+
+
+def _hits_by_player(brave_ctx: dict) -> dict[str, list[dict[str, Any]]]:
+    mapping: dict[str, list[dict[str, Any]]] = {}
+    if not isinstance(brave_ctx, dict):
+        return mapping
+    for query, hits in brave_ctx.items():
+        if not isinstance(query, str):
+            continue
+        names = re.findall(r'"([^"]+)"', query)
+        player_name = names[0] if names else None
+        if not player_name:
+            continue
+        key = _normalize_player_key(player_name)
+        if not key:
+            continue
+        bucket = mapping.setdefault(key, [])
+        if isinstance(hits, list):
+            for hit in hits:
+                if isinstance(hit, dict):
+                    bucket.append(hit)
+    return mapping
+
+
+def _merge_links_from_hits(item: dict, hits: list[dict[str, Any]]) -> None:
+    if not isinstance(item, dict):
+        return
+    if not isinstance(hits, list):
+        return
+    existing_links = item.get("links")
+    if not isinstance(existing_links, list):
+        existing_links = []
+    seen_urls: set[str] = set()
+    for link in existing_links:
+        if isinstance(link, str):
+            seen_urls.add(link.strip())
+        elif isinstance(link, dict):
+            url = (link.get("url") or "").strip()
+            if url:
+                seen_urls.add(url)
+    for hit in hits:
+        if not isinstance(hit, dict):
+            continue
+        url = (hit.get("url") or "").strip()
+        if not url or url in seen_urls:
+            continue
+        title = (hit.get("title") or "").strip() or url
+        existing_links.append({"title": title, "url": url})
+        seen_urls.add(url)
+        if len(existing_links) >= LINKS_MAX_PER_ITEM:
+            break
+    item["links"] = existing_links
+
+
+def _ensure_period(text: str) -> str:
+    if not text:
+        return text
+    stripped = text.strip()
+    if not stripped:
+        return stripped
+    if stripped[-1] in ".!?":
+        return stripped
+    return stripped + "."
+
+
+def _build_player_summary(item: dict, loanee: dict | None, stats: dict, match_phrase: str | None, hits: list[dict[str, Any]]) -> tuple[str, str, str | None]:
+    player_display = item.get("player_name") or (loanee.get("player_name") if isinstance(loanee, dict) else "")
+    minutes = _to_int(stats.get("minutes"))
+    team_label = item.get("loan_team") or (loanee.get("loan_team_name") if isinstance(loanee, dict) else None) or "his loan side"
+    can_track = bool(item.get("can_fetch_stats", loanee.get("can_fetch_stats", True) if isinstance(loanee, dict) else True))
+
+    if not can_track:
+        base = "We can’t track detailed stats for this player yet."
+        if player_display and team_label:
+            base += f" {player_display} remains on loan with {team_label}."
+    else:
+        if minutes > 0:
+            base = f"Played {minutes}’ for {team_label}"
+        elif minutes == 0:
+            base = f"Was an unused substitute for {team_label}"
+        else:
+            base = f"Featured for {team_label}"
+
+        if match_phrase:
+            connector = " in " if minutes > 0 else " during "
+            base += connector + match_phrase
+
+    stat_phrases = _stat_highlights(stats) if can_track else []
+    if stat_phrases:
+        if minutes > 0:
+            base += f", finishing with {_combine_phrases(stat_phrases)}"
+        else:
+            base += f"; notable numbers: {_combine_phrases(stat_phrases)}"
+
+    base_sentence = _ensure_period(base.rstrip(", "))
+
+    first_title = None
+    if isinstance(hits, list):
+        for hit in hits:
+            title = (hit.get("title") or "").strip()
+            if title:
+                first_title = title
+                break
+
+    if not first_title:
+        existing_links = item.get("links")
+        if isinstance(existing_links, list):
+            for link in existing_links:
+                if isinstance(link, dict):
+                    title = (link.get("title") or "").strip()
+                    if title:
+                        first_title = title
+                        break
+                elif isinstance(link, str):
+                    url_title = link.strip()
+                    if url_title:
+                        first_title = url_title
+                        break
+
+    if first_title:
+        if can_track:
+            article_sentence = f"Latest coverage: {first_title}."
+        else:
+            article_sentence = f"Here’s what the internet is saying: {first_title}."
+    else:
+        article_sentence = ""
+
+    summary_parts = [base_sentence]
+    if article_sentence:
+        summary_parts.append(article_sentence)
+    summary_text = " ".join(p for p in summary_parts if p)
+
+    headline_fragments: list[str] = []
+    if can_track:
+        if minutes > 0:
+            headline_fragments.append(f"logged {minutes}’ for {team_label}")
+        elif minutes == 0:
+            headline_fragments.append(f"was unused for {team_label}")
+        if stat_phrases:
+            headline_fragments.append(_combine_phrases(stat_phrases))
+        if match_phrase:
+            headline_fragments.append(match_phrase)
+    else:
+        headline_fragments.append("stats unavailable; monitoring media chatter")
+    headline_text = _combine_phrases(headline_fragments) or ""
+
+    return summary_text, headline_text, first_title
+
+
+def _merge_stats_into_item(item: dict, totals: dict | None) -> dict:
+    base = dict(totals or {})
+    existing = item.get("stats") if isinstance(item.get("stats"), dict) else {}
+    base.update(existing)
+    item["stats"] = base
+    return base
+
+
+def _impact_score(stats: dict) -> float:
+    return (
+        _to_int(stats.get("goals")) * 6
+        + _to_int(stats.get("assists")) * 4
+        + _to_int(stats.get("shots_on")) * 2
+        + _to_int(stats.get("shots_total"))
+        + _to_int(stats.get("passes_key")) * 2
+        + _to_int(stats.get("tackles_total")) * 1.5
+        + _to_int(stats.get("duels_won"))
+        + (_safe_float(stats.get("rating")) or 0.0)
+    )
+
+
+def _apply_stat_driven_summaries(content: dict, report: dict, brave_ctx: dict) -> dict:
+    if not isinstance(content, dict):
+        return content
+    sections = content.get("sections")
+    if not isinstance(sections, list):
+        return content
+
+    loanee_lookup: dict[str, dict[str, Any]] = {}
+    for loanee in report.get("loanees") or []:
+        if not isinstance(loanee, dict):
+            continue
+        aliases = [
+            loanee.get("player_name"),
+            loanee.get("player_full_name"),
+            to_initial_last(loanee.get("player_full_name") or ""),
+            to_initial_last(loanee.get("player_name") or ""),
+        ]
+        for alias in filter(None, aliases):
+            key = _normalize_player_key(alias)
+            if key:
+                loanee_lookup.setdefault(key, loanee)
+
+    hits_by_player = _hits_by_player(brave_ctx)
+    player_entries: list[dict[str, Any]] = []
+
+    for sec in sections:
+        if not isinstance(sec, dict):
+            continue
+        title = (sec.get("title") or "").strip().lower()
+        if title not in ("active loans", "supplemental loans"):
+            continue
+        is_supplemental_section = title == "supplemental loans"
+        items = sec.get("items")
+        if not isinstance(items, list):
+            continue
+        for item in items:
+            if not isinstance(item, dict):
+                continue
+            player_name = item.get("player_name") or ""
+            key = _normalize_player_key(player_name)
+            loanee = loanee_lookup.get(key)
+            stats = item.get("stats") if isinstance(item.get("stats"), dict) else {}
+            totals = loanee.get("totals") if isinstance(loanee, dict) else None
+            if totals:
+                stats = _merge_stats_into_item(item, totals)
+            else:
+                item["stats"] = stats
+            hits = hits_by_player.get(key, [])
+            if hits:
+                _merge_links_from_hits(item, hits)
+            summary_text, headline_text, article_title = _build_player_summary(
+                item,
+                loanee,
+                stats,
+                None if is_supplemental_section else _match_result_phrase(loanee),
+                hits,
+            )
+            if summary_text:
+                item["week_summary"] = summary_text
+            player_entries.append(
+                {
+                    "player": player_name or (loanee.get("player_name") if isinstance(loanee, dict) else ""),
+                    "headline": headline_text,
+                    "score": _impact_score(stats),
+                    "article_title": article_title,
+                }
+            )
+
+    if player_entries:
+        player_entries.sort(key=lambda entry: entry["score"], reverse=True)
+        summary_bits: list[str] = []
+        for entry in player_entries[:2]:
+            phrase = f"{entry['player']} {entry['headline']}".strip()
+            if phrase:
+                summary_bits.append(_ensure_period(phrase))
+        article_title = next((entry["article_title"] for entry in player_entries if entry.get("article_title")), None)
+        if article_title:
+            summary_bits.append(f"Coverage spotlight: {article_title}.")
+        if summary_bits:
+            content["summary"] = " ".join(summary_bits)
+
+    return content
+
+
 SYSTEM_PROMPT = """You are an editorial assistant for a football club newsletter.
 - Input: a weekly loan report JSON (player + loan team context for the exact week) and a search context (articles/notes). The report.loanees[*] include per‑match data (result, home/away, opponent, minutes, goals, assists, cards) and comprehensive statistics (position, rating, saves, tackles, passes, shots, dribbles, duels, fouls), plus team_statistics when present.
 - Output: a concise, fan-friendly newsletter as JSON. Keep it factual, readable, with short paragraphs and bullet lists where helpful. Base all stats and match details strictly on the provided weekly report; only use search_context for quotes/links and external color, never for stats.
@@ -876,13 +1243,45 @@ def persist_newsletter(team_db_id: int, content_json_str: str, week_start: date,
     team = Team.query.get(team_db_id)
     team_name = team.name if team else None
 
+    # Log sample stats before rendering
+    try:
+        sections = parsed.get('sections', [])
+        if sections:
+            first_section = sections[0]
+            items = first_section.get('items', [])
+            if items:
+                first_item = items[0]
+                print(f"📊 [persist_newsletter] Sample item stats BEFORE rendering:")
+                print(f"   Player: {first_item.get('player_name')}")
+                print(f"   Stats keys: {list(first_item.get('stats', {}).keys())}")
+                print(f"   Position: {first_item.get('stats', {}).get('position')}")
+                print(f"   Rating: {first_item.get('stats', {}).get('rating')}")
+                print(f"   Shots: {first_item.get('stats', {}).get('shots_total')}")
+                print(f"   Passes: {first_item.get('stats', {}).get('passes_total')}")
+    except Exception as e:
+        print(f"⚠️  Error logging sample stats: {e}")
+
     # Render and embed variants (web_html, email_html, text) for convenience
     try:
+        print(f"🎨 [persist_newsletter] Calling _render_variants for team: {team_name}")
         variants = _render_variants(parsed, team_name)
+        print(f"✅ [persist_newsletter] Generated variants - web_html length: {len(variants.get('web_html', ''))}, email_html length: {len(variants.get('email_html', ''))}")
+        
+        # Check if rendered HTML contains position-specific stats
+        web_html = variants.get('web_html', '')
+        if 'Shots' in web_html or 'Saves' in web_html or 'Key Passes' in web_html:
+            print(f"✅ [persist_newsletter] Rendered HTML contains expanded stats!")
+        else:
+            print(f"⚠️  [persist_newsletter] Rendered HTML might not contain expanded stats")
+        
         parsed['rendered'] = variants
         content_json_str = json.dumps(parsed, ensure_ascii=False)
-    except Exception:
+        print(f"✅ [persist_newsletter] Updated content_json_str with rendered variants")
+    except Exception as e:
         # Non-fatal; continue without rendered variants
+        print(f"❌ [persist_newsletter] Error generating rendered variants: {e}")
+        import traceback
+        traceback.print_exc()
         pass
 
     now = datetime.now(timezone.utc)
@@ -1102,6 +1501,7 @@ def compose_team_weekly_newsletter(team_db_id: int, target_date: date) -> dict:
             parsed, _ = _apply_player_lookup(parsed, player_lookup)
             parsed = legacy_lint_and_enrich(parsed)
             parsed = _enforce_loanee_metadata(parsed, loanee_meta_by_pid, loanee_meta_by_key)
+            parsed = _apply_stat_driven_summaries(parsed, report, brave_ctx)
     except Exception as enrich_error:
         _nl_dbg("lint-and-enrich failed:", str(enrich_error))
 
