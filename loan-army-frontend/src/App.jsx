@@ -1,5 +1,5 @@
 import { useState, useEffect, useMemo, useCallback, useContext, createContext, useRef } from 'react'
-import { BrowserRouter as Router, Routes, Route, Link, Navigate, useLocation, useParams, useNavigate } from 'react-router-dom'
+import { BrowserRouter as Router, Routes, Route, Link, Navigate, useLocation, useParams, useNavigate, useSearchParams } from 'react-router-dom'
 import { Button } from '@/components/ui/button.jsx'
 import { Card, CardContent, CardDescription, CardFooter, CardHeader, CardTitle } from '@/components/ui/card.jsx'
 import { Badge } from '@/components/ui/badge.jsx'
@@ -10,15 +10,19 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs.jsx'
 import TeamMultiSelect from '@/components/ui/TeamMultiSelect.jsx'
 import TeamSelect from '@/components/ui/TeamSelect.jsx'
+import { JournalistList } from '@/components/JournalistList.jsx'
 import { BuyMeCoffeeButton } from '@/components/BuyMeCoffeeButton.jsx'
+import { CommentaryManager } from '@/components/CommentaryManager.jsx'
 import { Accordion, AccordionContent, AccordionItem, AccordionTrigger } from '@/components/ui/accordion.jsx'
 import { Alert, AlertDescription } from '@/components/ui/alert.jsx'
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from '@/components/ui/dialog.jsx'
 import { Drawer, DrawerTrigger, DrawerContent, DrawerHeader, DrawerFooter, DrawerTitle, DrawerDescription, DrawerClose } from '@/components/ui/drawer.jsx'
 import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover.jsx'
+import { Avatar, AvatarImage, AvatarFallback } from '@/components/ui/avatar.jsx'
 import { useIsMobile } from '@/hooks/use-mobile.js'
-import { 
+import {
   normalizeNewsletterIds,
+  parseNewsletterId,
   formatSendPreviewSummary,
   formatDeleteSummary,
   resolveBulkActionPayload,
@@ -35,15 +39,16 @@ import {
   sofascoreRowKey,
   buildSofascoreUpdatePayload,
 } from '@/lib/admin-sandbox.js'
+import { resolveAdminTab, getAdminTabs } from '@/lib/admin-tabs.js'
 import { buildPlayerNameUpdatePayload } from '@/lib/admin-players.js'
 import { buildSofascoreEmbedUrl } from '@/lib/sofascore.js'
-import { 
-  Users, 
-  Mail, 
-  Calendar, 
-  Trophy, 
-  TrendingUp, 
-  Globe, 
+import {
+  Users,
+  Mail,
+  Calendar,
+  Trophy,
+  TrendingUp,
+  Globe,
   Star,
   ArrowLeft,
   ArrowRight,
@@ -67,888 +72,41 @@ import {
   ChevronDown,
   ChevronRight
 } from 'lucide-react'
+import { AdminLayout } from '@/components/layouts/AdminLayout'
+import { AdminDashboard } from '@/pages/admin/AdminDashboard'
+import { AdminNewsletters } from '@/pages/admin/AdminNewsletters'
+import { AdminLoans } from '@/pages/admin/AdminLoans'
+import { AdminPlayers } from '@/pages/admin/AdminPlayers'
+import { AdminSettings } from '@/pages/admin/AdminSettings'
+import { AdminUsers } from '@/pages/admin/AdminUsers'
+import { WriterLogin } from '@/pages/writer/WriterLogin'
+import { WriterDashboard } from '@/pages/writer/WriterDashboard'
+import { WriteupEditor } from '@/pages/writer/WriteupEditor'
+import { WriteupPage } from '@/pages/WriteupPage'
+import { JournalistProfile } from '@/pages/JournalistProfile'
+import { JournalistNewsletterView } from '@/components/JournalistNewsletterView'
+import { 
+  NewsletterWriterOverlay, 
+  WriterDiscoveryBar, 
+  WriterSummarySection, 
+  PlayerWriterCommentary,
+  useNewsletterWriters,
+  getPlayerCommentaries 
+} from '@/components/NewsletterWriterOverlay'
+import JournalistStripeSetup from '@/pages/JournalistStripeSetup'
+import JournalistPricing from '@/pages/JournalistPricing'
+import MySubscriptions from '@/pages/MySubscriptions'
+import AdminRevenueDashboard from '@/pages/admin/AdminRevenueDashboard'
+import { StripeProvider } from '@/context/StripeContext'
+
+import { APIService } from '@/lib/api'
+import { UniversalDatePicker } from '@/components/ui/UniversalDatePicker'
+import { AuthContext, AuthUIContext, useAuth, useAuthUI, buildAuthSnapshot } from '@/context/AuthContext'
+import { AuthModal } from '@/components/auth/AuthModal'
 import './App.css'
-
-// API configuration
-const API_BASE_URL = (typeof import.meta !== 'undefined' && import.meta.env && import.meta.env.VITE_API_BASE) || '/api'
-
-// Universal Date Picker Component
-function UniversalDatePicker({ onDateChange, className = "" }) {
-  const [startDate, setStartDate] = useState('')
-  const [endDate, setEndDate] = useState('')
-  const [isCustomRange, setIsCustomRange] = useState(false)
-
-  const handlePresetChange = useCallback((preset) => {
-    const today = new Date()
-    let start, end
-
-    switch (preset) {
-      case 'today':
-        start = end = today.toISOString().split('T')[0]
-        break
-      case 'this_week':
-        {
-          const monday = new Date(today)
-          monday.setDate(today.getDate() - today.getDay() + 1)
-          start = monday.toISOString().split('T')[0]
-          end = new Date(monday.getTime() + 6 * 24 * 60 * 60 * 1000).toISOString().split('T')[0]
-        }
-        break
-      case 'this_month':
-        start = new Date(today.getFullYear(), today.getMonth(), 1).toISOString().split('T')[0]
-        end = new Date(today.getFullYear(), today.getMonth() + 1, 0).toISOString().split('T')[0]
-        break
-      case 'last_30_days':
-        start = new Date(today.getTime() - 30 * 24 * 60 * 60 * 1000).toISOString().split('T')[0]
-        end = today.toISOString().split('T')[0]
-        break
-      case 'last_90_days':
-        start = new Date(today.getTime() - 90 * 24 * 60 * 60 * 1000).toISOString().split('T')[0]
-        end = today.toISOString().split('T')[0]
-        break
-      case 'last_year':
-        start = new Date(today.getFullYear() - 1, today.getMonth(), today.getDate()).toISOString().split('T')[0]
-        end = today.toISOString().split('T')[0]
-        break
-      case 'all_time':
-        start = '2020-01-01' // Reasonable start date for football data
-        end = today.toISOString().split('T')[0]
-        break
-      case 'custom':
-        setIsCustomRange(true)
-        return
-      default:
-        return
-    }
-
-    setStartDate(start)
-    setEndDate(end)
-    setIsCustomRange(false)
-    onDateChange({ startDate: start, endDate: end, preset })
-  }, [onDateChange])
-
-  const handleCustomDateChange = () => {
-    if (startDate && endDate) {
-      onDateChange({ startDate, endDate, preset: 'custom' })
-    }
-  }
-
-  useEffect(() => {
-    // Set default to last 30 days
-    handlePresetChange('last_30_days')
-  }, [handlePresetChange])
-
-  return (
-    <div className={`space-y-4 ${className}`}>
-      <div className="flex flex-wrap gap-2">
-        <Button 
-          variant="outline" 
-          size="sm" 
-          onClick={() => handlePresetChange('today')}
-        >
-          Today
-        </Button>
-        <Button 
-          variant="outline" 
-          size="sm" 
-          onClick={() => handlePresetChange('this_week')}
-        >
-          This Week
-        </Button>
-        <Button 
-          variant="outline" 
-          size="sm" 
-          onClick={() => handlePresetChange('this_month')}
-        >
-          This Month
-        </Button>
-        <Button 
-          variant="outline" 
-          size="sm" 
-          onClick={() => handlePresetChange('last_30_days')}
-        >
-          Last 30 Days
-        </Button>
-        <Button 
-          variant="outline" 
-          size="sm" 
-          onClick={() => handlePresetChange('last_90_days')}
-        >
-          Last 90 Days
-        </Button>
-        <Button 
-          variant="outline" 
-          size="sm" 
-          onClick={() => handlePresetChange('last_year')}
-        >
-          Last Year
-        </Button>
-        <Button 
-          variant="outline" 
-          size="sm" 
-          onClick={() => handlePresetChange('all_time')}
-        >
-          All Time
-        </Button>
-        <Button 
-          variant="outline" 
-          size="sm" 
-          onClick={() => handlePresetChange('custom')}
-        >
-          Custom Range
-        </Button>
-      </div>
-
-      {isCustomRange && (
-        <div className="flex items-center space-x-4 p-4 border rounded-lg bg-gray-50">
-          <div className="flex items-center space-x-2">
-            <Label htmlFor="start-date">Start Date:</Label>
-            <Input
-              id="start-date"
-              type="date"
-              value={startDate}
-              onChange={(e) => setStartDate(e.target.value)}
-              className="w-40"
-            />
-          </div>
-          <div className="flex items-center space-x-2">
-            <Label htmlFor="end-date">End Date:</Label>
-            <Input
-              id="end-date"
-              type="date"
-              value={endDate}
-              onChange={(e) => setEndDate(e.target.value)}
-              className="w-40"
-            />
-          </div>
-          <Button 
-            size="sm" 
-            onClick={handleCustomDateChange}
-            disabled={!startDate || !endDate}
-          >
-            Apply
-          </Button>
-        </div>
-      )}
-
-      {(startDate && endDate) && (
-        <div className="text-sm text-gray-600 bg-blue-50 p-2 rounded">
-          Showing data from <strong>{new Date(startDate).toLocaleDateString()}</strong> to <strong>{new Date(endDate).toLocaleDateString()}</strong>
-        </div>
-      )}
-    </div>
-  )
-}
-
-// API service
-class APIService {
-  static adminKey = (typeof localStorage !== 'undefined' && localStorage.getItem('loan_army_admin_key')) || null
-  static userToken = (typeof localStorage !== 'undefined' && localStorage.getItem('loan_army_user_token')) || null
-  static isAdminFlag = (typeof localStorage !== 'undefined' && localStorage.getItem('loan_army_is_admin') === 'true') || false
-  static displayName = (typeof localStorage !== 'undefined' && localStorage.getItem('loan_army_display_name')) || null
-  static displayNameConfirmedFlag = (typeof localStorage !== 'undefined' && localStorage.getItem('loan_army_display_name_confirmed') === 'true') || false
-  static authEventName = 'loan_auth_changed'
-
-  static _emitAuthChanged(extra = {}) {
-    if (typeof window === 'undefined' || typeof window.dispatchEvent !== 'function') return
-    const detail = {
-      token: this.userToken,
-      isAdmin: this.isAdmin(),
-      hasApiKey: !!this.adminKey,
-      displayName: this.displayName,
-      displayNameConfirmed: this.displayNameConfirmed(),
-      ...extra,
-    }
-    try {
-      window.dispatchEvent(new CustomEvent(this.authEventName, { detail }))
-    } catch (err) {
-      console.warn('Failed to dispatch auth event', err)
-    }
-  }
-
-  static displayNameConfirmed() {
-    if (typeof window === 'undefined') return !!this.displayNameConfirmedFlag
-    if (!this.displayNameConfirmedFlag && typeof localStorage !== 'undefined') {
-      try {
-        this.displayNameConfirmedFlag = localStorage.getItem('loan_army_display_name_confirmed') === 'true'
-      } catch (err) {
-        console.warn('Failed to read display name confirmation flag', err)
-      }
-    }
-    return !!this.displayNameConfirmedFlag
-  }
-
-  static setDisplayNameConfirmed(value, { silent = false } = {}) {
-    this.displayNameConfirmedFlag = !!value
-    try {
-      if (this.displayNameConfirmedFlag) {
-        localStorage.setItem('loan_army_display_name_confirmed', 'true')
-      } else {
-        localStorage.removeItem('loan_army_display_name_confirmed')
-      }
-    } catch (err) {
-      console.warn('Failed to persist display name confirmation flag', err)
-    }
-    if (!silent) {
-      this._emitAuthChanged({ displayNameConfirmed: this.displayNameConfirmedFlag })
-    }
-  }
-
-  static setAdminKey(key) {
-    const trimmed = (key || '').trim()
-    this.adminKey = trimmed || null
-    try {
-      if (trimmed) {
-        localStorage.setItem('loan_army_admin_key', trimmed)
-      } else {
-        localStorage.removeItem('loan_army_admin_key')
-      }
-    } catch (err) {
-      console.warn('Failed to persist admin key', err)
-    }
-    this._emitAuthChanged()
-  }
-
-  static setUserToken(token) {
-    this.userToken = token || null
-    try {
-      if (token) {
-        localStorage.setItem('loan_army_user_token', token)
-      } else {
-        localStorage.removeItem('loan_army_user_token')
-      }
-    } catch (err) {
-      console.warn('Failed to persist user token', err)
-    }
-    if (!token) {
-      this.setDisplayName(null)
-      this.setIsAdmin(false)
-    } else {
-      this._emitAuthChanged()
-    }
-  }
-
-  static setIsAdmin(isAdmin) {
-    this.isAdminFlag = !!isAdmin
-    try {
-      localStorage.setItem('loan_army_is_admin', this.isAdminFlag ? 'true' : 'false')
-    } catch (err) {
-      console.warn('Failed to persist admin flag', err)
-    }
-    this._emitAuthChanged()
-  }
-
-  static isAdmin() {
-    if (this.isAdminFlag) return true
-    if (typeof localStorage === 'undefined') return false
-    try {
-      return localStorage.getItem('loan_army_is_admin') === 'true'
-    } catch (err) {
-      console.warn('Failed to read admin flag', err)
-      return false
-    }
-  }
-
-  static setDisplayName(name) {
-    this.displayName = name || null
-    try {
-      if (name) {
-        localStorage.setItem('loan_army_display_name', name)
-      } else {
-        localStorage.removeItem('loan_army_display_name')
-      }
-    } catch (err) {
-      console.warn('Failed to persist display name', err)
-    }
-    if (!name) {
-      this.setDisplayNameConfirmed(false, { silent: true })
-    }
-    this._emitAuthChanged()
-  }
-
-  static clearDisplayNameCache() {
-    this.displayName = null
-    try {
-      localStorage.removeItem('loan_army_display_name')
-    } catch (err) {
-      console.warn('Failed to clear display name cache', err)
-    }
-    this.setDisplayNameConfirmed(false, { silent: true })
-  }
-
-  static async getProfile() {
-    const res = await this.request('/auth/me')
-    if (typeof res?.display_name_confirmed !== 'undefined') {
-      this.setDisplayNameConfirmed(res.display_name_confirmed, { silent: true })
-    }
-    if (res?.display_name) {
-      this.setDisplayName(res.display_name)
-    }
-    if (typeof res?.role !== 'undefined') {
-      this.setIsAdmin(res.role === 'admin')
-    }
-    return res
-  }
-
-  static async updateDisplayName(displayName) {
-    const res = await this.request('/auth/display-name', {
-      method: 'POST',
-      body: JSON.stringify({ display_name: displayName })
-    })
-    if (res?.display_name) {
-      this.setDisplayName(res.display_name)
-    }
-    if (typeof res?.display_name_confirmed !== 'undefined') {
-      this.setDisplayNameConfirmed(res.display_name_confirmed, { silent: true })
-    }
-    return res
-  }
-
-  static async request(endpoint, options = {}, extra = {}) {
-    try {
-      const admin = extra && extra.admin
-      const headers = {
-        'Content-Type': 'application/json',
-        ...options.headers,
-      }
-      if (admin) {
-        if (!this.userToken) {
-          const err = new Error('Admin login required. Please sign in with an admin email.')
-          err.status = 401
-          throw err
-        }
-        if (!this.adminKey) {
-          const err = new Error('Admin API key required. Save your key under API Credentials.')
-          err.status = 401
-          throw err
-        }
-        headers['Authorization'] = `Bearer ${this.userToken}`
-        headers['X-API-Key'] = this.adminKey
-        headers['X-Admin-Key'] = this.adminKey
-      } else if (this.userToken) {
-        headers['Authorization'] = `Bearer ${this.userToken}`
-      }
-      const response = await fetch(`${API_BASE_URL}${endpoint}`, { ...options, headers })
+import { useQueryParam } from '@/hooks/useQueryParam'
 
 
-      if (!response.ok) {
-        const contentType = response.headers.get('content-type') || ''
-        let parsed = null
-        let errorText = ''
-        try {
-          if (contentType.includes('application/json')) {
-            parsed = await response.json()
-            errorText = parsed?.error || JSON.stringify(parsed)
-          } else {
-            errorText = await response.text()
-          }
-        } catch {
-          try {
-            errorText = await response.text()
-          } catch {
-            errorText = ''
-          }
-        }
-        console.error(`❌ HTTP error response body:`, parsed || errorText)
-        const err = new Error(parsed?.error || errorText || `HTTP ${response.status}`)
-        err.status = response.status
-        err.body = parsed || errorText
-        throw err
-      }
-
-      if (response.status === 204) return null
-
-      const data = await response.json()
-      return data
-    } catch (error) {
-      console.error('❌ API request failed:', error)
-      throw error
-    }
-  }
-
-  static async getLeagues() {
-    return this.request('/leagues')
-  }
-
-  static async getTeams(filters = {}) {
-    console.log('🏟️ Getting teams with filters:', filters)
-    const params = new URLSearchParams(filters)
-    console.log('🔗 Teams URL params:', params.toString())
-    return this.request(`/teams?${params}`)
-  }
-
-  static async getTeamLoans(teamId, params = {}) {
-    const merged = { active_only: 'true', dedupe: 'true', ...params }
-    const search = new URLSearchParams()
-    for (const [key, value] of Object.entries(merged)) {
-      if (value === undefined || value === null) continue
-      search.append(key, String(value))
-    }
-    const query = search.toString()
-    const suffix = query ? `?${query}` : ''
-    return this.request(`/teams/${teamId}/loans${suffix}`)
-  }
-
-  static async getNewsletters(filters = {}) {
-    const params = new URLSearchParams(filters)
-    return this.request(`/newsletters?${params}`)
-  }
-
-  static async getNewsletter(id) {
-    if (!id) {
-      throw new Error('newsletter id is required')
-    }
-    return this.request(`/newsletters/${encodeURIComponent(id)}`)
-  }
-
-  static async createSubscriptions(data) {
-    return this.request('/subscriptions/bulk_create', {
-      method: 'POST',
-      body: JSON.stringify(data),
-    })
-  }
-
-  static async unsubscribeEmail(data = {}) {
-    return this.request('/subscriptions/unsubscribe', {
-      method: 'POST',
-      body: JSON.stringify(data),
-    })
-  }
-
-  static async getMySubscriptions() {
-    return this.request('/subscriptions/me')
-  }
-
-  static async updateMySubscriptions(data = {}) {
-    return this.request('/subscriptions/me', {
-      method: 'POST',
-      body: JSON.stringify(data),
-    })
-  }
-
-  static async getManageState(token) {
-    return this.request(`/subscriptions/manage/${encodeURIComponent(token)}`)
-  }
-
-  static async updateManageState(token, data) {
-    return this.request(`/subscriptions/manage/${encodeURIComponent(token)}`, {
-      method: 'POST',
-      body: JSON.stringify(data),
-    })
-  }
-
-  static async tokenUnsubscribe(token) {
-    return this.request(`/subscriptions/unsubscribe/${encodeURIComponent(token)}`, {
-      method: 'POST',
-    })
-  }
-
-  static async verifyToken(token) {
-    return this.request(`/verify/${encodeURIComponent(token)}`, {
-      method: 'POST',
-    })
-  }
-
-  static async getStats() {
-    return this.request('/stats/overview')
-  }
-
-  static async initializeData() {
-    return this.request('/init-data', {
-      method: 'POST',
-    })
-  }
-
-  static async debugDatabase() {
-    console.log('🔍 Checking database debug info...')
-    return this.request('/debug/database', {}, { admin: true })
-  }
-
-  static async generateNewsletter(data) {
-    console.log('📰 Generating newsletter for:', data)
-    return this.request('/newsletters/generate', {
-      method: 'POST',
-      body: JSON.stringify(data),
-    })
-  }
-
-  static async requestLoginCode(email) {
-    const trimmed = (email || '').trim().toLowerCase()
-    if (!trimmed) {
-      const err = new Error('Email is required')
-      err.status = 400
-      throw err
-    }
-    return this.request('/auth/request-code', {
-      method: 'POST',
-      body: JSON.stringify({ email: trimmed })
-    })
-  }
-
-  static _recordLoginResult(payload = {}) {
-    const role = payload.role || 'user'
-    const token = payload.token || payload.access_token
-    if (token) {
-      this.setUserToken(token)
-    }
-    this.setIsAdmin(role === 'admin')
-    if (typeof payload.display_name_confirmed !== 'undefined') {
-      this.setDisplayNameConfirmed(payload.display_name_confirmed, { silent: true })
-    }
-    if (typeof payload.display_name !== 'undefined' && payload.display_name !== null) {
-      this.setDisplayName(payload.display_name)
-    } else if (!payload.display_name && !token) {
-      this.clearDisplayNameCache()
-    }
-    this._emitAuthChanged({
-      role,
-      displayNameConfirmed: payload.display_name_confirmed,
-      expiresIn: payload.expires_in,
-    })
-    return payload
-  }
-
-  static async verifyLoginCode(email, code) {
-    const trimmedEmail = (email || '').trim().toLowerCase()
-    const trimmedCode = (code || '').trim()
-    if (!trimmedEmail || !trimmedCode) {
-      const err = new Error('Email and code are required')
-      err.status = 400
-      throw err
-    }
-    const res = await this.request('/auth/verify-code', {
-      method: 'POST',
-      body: JSON.stringify({ email: trimmedEmail, code: trimmedCode })
-    })
-    this._recordLoginResult(res || {})
-    return res
-  }
-
-  static async refreshProfile() {
-    try {
-      return await this.getProfile()
-    } catch (err) {
-      if (err?.status === 401) {
-        this.logout()
-      }
-      throw err
-    }
-  }
-
-  static logout({ clearAdminKey = false } = {}) {
-    this.setUserToken('')
-    this.clearDisplayNameCache()
-    if (clearAdminKey) {
-      this.setAdminKey('')
-    }
-    this.setIsAdmin(false)
-    this._emitAuthChanged({ role: 'user', token: null })
-  }
-
-  // Admin endpoints
-  static async validateAdminCredentials() {
-    return this.request('/admin/auth-check', {}, { admin: true })
-  }
-  static async adminGetConfig() { return this.request('/admin/config', {}, { admin: true }) }
-  static async adminUpdateConfig(settings) {
-    return this.request('/admin/config', { method: 'POST', body: JSON.stringify({ settings }) }, { admin: true })
-  }
-  static async adminGetRunStatus() { return this.request('/admin/run-status', {}, { admin: true }) }
-  static async adminSetRunStatus(paused) {
-    return this.request('/admin/run-status', { method: 'POST', body: JSON.stringify({ runs_paused: !!paused }) }, { admin: true })
-  }
-  static async adminGenerateAll(dateStr) {
-    return this.request('/newsletters/generate-weekly-all', { method: 'POST', body: JSON.stringify({ target_date: dateStr }) }, { admin: true })
-  }
-  static async adminListPendingFlags() { return this.request('/loans/flags/pending', {}, { admin: true }) }
-  static async adminResolveFlag(flagId, { deactivateLoan = false, note = '' } = {}) {
-    return this.request(`/loans/flags/${flagId}/resolve`, { method: 'POST', body: JSON.stringify({ action: deactivateLoan ? 'deactivate_loan' : 'none', note }) }, { admin: true })
-  }
-  static async adminLoansList(params = {}) {
-    const q = new URLSearchParams(params)
-    return this.request(`/admin/loans?${q}`, {}, { admin: true })
-  }
-  static async adminLoanCreate(payload) {
-    return this.request('/admin/loans', { method: 'POST', body: JSON.stringify(payload) }, { admin: true })
-  }
-  static async adminLoanUpdate(loanId, payload) {
-    return this.request(`/admin/loans/${loanId}`, { method: 'PUT', body: JSON.stringify(payload) }, { admin: true })
-  }
-  static async adminLoanDeactivate(loanId) {
-    return this.request(`/admin/loans/${loanId}/deactivate`, { method: 'POST' }, { admin: true })
-  }
-  static async adminFlags(params = {}) {
-    const q = new URLSearchParams(params)
-    return this.request(`/admin/flags?${q}`, {}, { admin: true })
-  }
-  static async adminFlagUpdate(flagId, payload) {
-    return this.request(`/admin/flags/${flagId}`, { method: 'POST', body: JSON.stringify(payload) }, { admin: true })
-  }
-  static async adminBackfillTeamLeagues(season) {
-    return this.request(`/admin/backfill-team-leagues/${season}`, { method: 'POST' }, { admin: true })
-  }
-  static async adminBackfillTeamLeaguesAll(seasons) {
-    const body = seasons && seasons.length ? { seasons } : {}
-    return this.request(`/admin/backfill-team-leagues`, { method: 'POST', body: JSON.stringify(body) }, { admin: true })
-  }
-  static async adminMissingNames(params = {}) {
-    const q = new URLSearchParams(params)
-    return this.request(`/admin/loans/missing-names?${q}`, {}, { admin: true })
-  }
-  static async adminBackfillNames(payload = {}) {
-    return this.request(`/admin/loans/backfill-names`, { method: 'POST', body: JSON.stringify(payload) }, { admin: true })
-  }
-  static async adminSandboxTasks() {
-    return this.request('/admin/sandbox?format=json', { headers: { Accept: 'application/json' } }, { admin: true })
-  }
-  static async adminSandboxRun(taskId, payload = {}) {
-    if (!taskId) {
-      throw new Error('taskId is required')
-    }
-    return this.request(`/admin/sandbox/run/${encodeURIComponent(taskId)}`, {
-      method: 'POST',
-      body: JSON.stringify(payload || {}),
-    }, { admin: true })
-  }
-  static async adminSupplementalLoansList(params = {}) {
-    const q = new URLSearchParams(params)
-    return this.request(`/admin/supplemental-loans?${q}`, {}, { admin: true })
-  }
-  static async adminSupplementalLoanCreate(payload) {
-    return this.request('/admin/supplemental-loans', { method: 'POST', body: JSON.stringify(payload) }, { admin: true })
-  }
-  static async adminSupplementalLoanUpdate(loanId, payload) {
-    return this.request(`/admin/supplemental-loans/${loanId}`, { method: 'PUT', body: JSON.stringify(payload) }, { admin: true })
-  }
-  static async adminSupplementalLoanDelete(loanId) {
-    return this.request(`/admin/supplemental-loans/${loanId}`, { method: 'DELETE' }, { admin: true })
-  }
-  static async adminNewslettersList(params = {}) {
-    const q = new URLSearchParams(params)
-    const query = q.toString()
-    const url = query ? `/admin/newsletters?${query}` : '/admin/newsletters'
-    const data = await this.request(url, {}, { admin: true })
-    if (!data) {
-      return { items: [], total: 0, page: 1, page_size: 0, total_pages: 1, meta: {} }
-    }
-    if (Array.isArray(data)) {
-      return { items: data, total: data.length, page: 1, page_size: data.length, total_pages: 1, meta: {} }
-    }
-    const items = Array.isArray(data.items)
-      ? data.items
-      : Array.isArray(data.results)
-        ? data.results
-        : []
-    const total = Number(data.total) || items.length
-    const meta = (data.meta && typeof data.meta === 'object') ? data.meta : {}
-    return {
-      items,
-      total,
-      page: Number(data.page) || 1,
-      page_size: Number(data.page_size) || items.length,
-      total_pages: Number(data.total_pages) || 1,
-      meta,
-    }
-  }
-  static async adminNewsletterGet(id) {
-    return this.request(`/admin/newsletters/${id}`, {}, { admin: true })
-  }
-  static async adminNewsletterUpdate(id, payload) {
-    return this.request(`/admin/newsletters/${id}`, { method: 'PUT', body: JSON.stringify(payload) }, { admin: true })
-  }
-  static async adminNewsletterBulkPublish(selection, publish = true) {
-    const payload = { publish: !!publish }
-    if (selection && typeof selection === 'object' && !Array.isArray(selection)) {
-      const filterParams = selection.filter_params || selection.filterParams
-      if (filterParams) payload.filter_params = filterParams
-      if (selection.exclude_ids || selection.excludeIds) {
-        const ids = normalizeNewsletterIds(selection.exclude_ids || selection.excludeIds)
-        if (ids.length > 0) payload.exclude_ids = ids
-      }
-      if (typeof selection.expected_total !== 'undefined') {
-        payload.expected_total = Number(selection.expected_total)
-      }
-      if (Array.isArray(selection.ids)) {
-        const ids = normalizeNewsletterIds(selection.ids)
-        if (ids.length > 0) payload.ids = ids
-      }
-    } else {
-      const ids = normalizeNewsletterIds(selection)
-      if (ids.length === 0) {
-        throw new Error('No newsletter ids provided')
-      }
-      payload.ids = ids
-    }
-    const body = JSON.stringify(payload)
-    return this.request('/admin/newsletters/bulk-publish', { method: 'POST', body }, { admin: true })
-  }
-
-  static async adminNewsletterYoutubeLinksList(newsletterId) {
-    return this.request(`/admin/newsletters/${newsletterId}/youtube-links`, {}, { admin: true })
-  }
-  static async adminNewsletterYoutubeLinkCreate(newsletterId, payload) {
-    return this.request(`/admin/newsletters/${newsletterId}/youtube-links`, { method: 'POST', body: JSON.stringify(payload) }, { admin: true })
-  }
-  static async adminNewsletterYoutubeLinkUpdate(newsletterId, linkId, payload) {
-    return this.request(`/admin/newsletters/${newsletterId}/youtube-links/${linkId}`, { method: 'PUT', body: JSON.stringify(payload) }, { admin: true })
-  }
-  static async adminNewsletterYoutubeLinkDelete(newsletterId, linkId) {
-    return this.request(`/admin/newsletters/${newsletterId}/youtube-links/${linkId}`, { method: 'DELETE' }, { admin: true })
-  }
-  
-  // Player Management API methods
-  static async adminPlayersList(params = {}) {
-    const q = new URLSearchParams(params)
-    const query = q.toString()
-    const url = query ? `/admin/players?${query}` : '/admin/players'
-    const data = await this.request(url, {}, { admin: true })
-    if (!data) {
-      return { items: [], total: 0, page: 1, page_size: 50, total_pages: 1 }
-    }
-    return {
-      items: Array.isArray(data.items) ? data.items : [],
-      total: Number(data.total) || 0,
-      page: Number(data.page) || 1,
-      page_size: Number(data.page_size) || 50,
-      total_pages: Number(data.total_pages) || 1,
-    }
-  }
-  static async adminPlayerGet(playerId) {
-    return this.request(`/admin/players/${playerId}`, {}, { admin: true })
-  }
-  static async adminPlayerUpdate(playerId, payload) {
-    return this.request(`/admin/players/${playerId}`, { method: 'PUT', body: JSON.stringify(payload) }, { admin: true })
-  }
-  static async adminPlayerBulkUpdateSofascore(updates) {
-    return this.request('/admin/players/bulk-update-sofascore', {
-      method: 'POST',
-      body: JSON.stringify({ updates })
-    }, { admin: true })
-  }
-  static async adminPlayerCreate(payload) {
-    return this.request('/admin/players', {
-      method: 'POST',
-      body: JSON.stringify(payload)
-    }, { admin: true })
-  }
-  static async adminPlayerDelete(playerId) {
-    return this.request(`/admin/players/${playerId}`, { method: 'DELETE' }, { admin: true })
-  }
-  static async adminPlayerFieldOptions() {
-    return this.request('/admin/players/field-options', {}, { admin: true })
-  }
-
-  static async adminNewsletterBulkDelete(selection = {}) {
-    const payload = {}
-    if (selection && typeof selection === 'object' && !Array.isArray(selection)) {
-      if (selection.filter_params || selection.filterParams) {
-        payload.filter_params = selection.filter_params || selection.filterParams
-      }
-      if (selection.exclude_ids || selection.excludeIds) {
-        const ids = normalizeNewsletterIds(selection.exclude_ids || selection.excludeIds)
-        if (ids.length > 0) payload.exclude_ids = ids
-      }
-      if (typeof selection.expected_total !== 'undefined') {
-        payload.expected_total = Number(selection.expected_total)
-      }
-      if (Array.isArray(selection.ids)) {
-        const ids = normalizeNewsletterIds(selection.ids)
-        if (ids.length > 0) payload.ids = ids
-      }
-    } else if (Array.isArray(selection)) {
-      const ids = normalizeNewsletterIds(selection)
-      if (ids.length > 0) payload.ids = ids
-    }
-
-    if (!payload.filter_params && (!payload.ids || payload.ids.length === 0)) {
-      throw new Error('Provide ids or filter_params for bulk delete')
-    }
-
-    const body = JSON.stringify(payload)
-    return this.request('/admin/newsletters/bulk', { method: 'DELETE', body }, { admin: true })
-  }
-  static async adminNewsletterSendPreview(id, overrides = {}) {
-    const normalized = Number(id)
-    if (!Number.isInteger(normalized) || normalized <= 0) {
-      throw new Error('Newsletter id must be a positive integer')
-    }
-    const payload = { test_to: '__admins__' }
-    if (overrides && typeof overrides === 'object') {
-      for (const [key, value] of Object.entries(overrides)) {
-        if (typeof value === 'undefined') continue
-        payload[key] = value
-      }
-    }
-    return this.request(`/newsletters/${normalized}/send`, { method: 'POST', body: JSON.stringify(payload) }, { admin: true })
-  }
-  static async adminNewsletterDelete(id) {
-    const normalized = Number(id)
-    if (!Number.isInteger(normalized) || normalized <= 0) {
-      throw new Error('Newsletter id must be a positive integer')
-    }
-    return this.request(`/newsletters/${normalized}`, { method: 'DELETE' }, { admin: true })
-  }
-  static async adminNewsletterRender(id, fmt = 'web') {
-    const headers = { 'Accept': 'text/html' }
-    const key = this.adminKey || (typeof localStorage !== 'undefined' && localStorage.getItem('loan_army_admin_key'))
-    if (key) headers['X-API-Key'] = key
-    const token = this.userToken || (typeof localStorage !== 'undefined' && localStorage.getItem('loan_army_user_token'))
-    if (token) headers['Authorization'] = `Bearer ${token}`
-    const res = await fetch(`${API_BASE_URL}/newsletters/${id}/render.${fmt}`, { headers, method: 'GET' })
-    const text = await res.text()
-    if (!res.ok) {
-      const err = new Error(text || `HTTP ${res.status}`)
-      err.status = res.status
-      err.body = text
-      throw err
-    }
-    return text
-  }
-
-  static async listNewsletterComments(newsletterId) {
-    return this.request(`/newsletters/${newsletterId}/comments`)
-  }
-
-  static async createNewsletterComment(newsletterId, body) {
-    return this.request(`/newsletters/${newsletterId}/comments`, {
-      method: 'POST',
-      body: JSON.stringify({ body }),
-    })
-  }
-}
-
-const AuthContext = createContext({
-  token: null,
-  isAdmin: false,
-  hasApiKey: false,
-  displayName: null,
-  displayNameConfirmed: false,
-})
-
-const AuthUIContext = createContext({
-  openLoginModal: () => {},
-  closeLoginModal: () => {},
-  logout: () => {},
-  isLoginModalOpen: false,
-})
-
-const useAuth = () => useContext(AuthContext)
-const useAuthUI = () => useContext(AuthUIContext)
-
-const buildAuthSnapshot = (detail = {}) => {
-  const snapshot = {
-    token: APIService.userToken,
-    isAdmin: APIService.isAdmin(),
-    hasApiKey: !!APIService.adminKey,
-    displayName: typeof detail.displayName !== 'undefined'
-      ? detail.displayName
-      : (APIService.displayName || null),
-    displayNameConfirmed: typeof detail.displayNameConfirmed !== 'undefined'
-      ? !!detail.displayNameConfirmed
-      : APIService.displayNameConfirmed(),
-  }
-  return snapshot
-}
 
 const RELATIVE_TIME_DIVISIONS = [
   { amount: 60, unit: 'second' },
@@ -1045,15 +203,11 @@ function HistoricalNewslettersPage() {
   useEffect(() => {
     const loadTeams = async () => {
       try {
-        console.log('🏟️ [Historical] Loading teams...')
         const data = await APIService.getTeams({ european_only: 'true' })
-        console.log('✅ [Historical] Teams loaded:', data.length, 'teams')
         const { season, teams: filtered } = filterLatestSeasonTeams(data)
-        console.log('🎯 [Historical] Filtering teams to latest season:', season, 'count:', filtered.length)
         setTeams(filtered)
         setCurrentSeason(season)
       } catch (error) {
-        console.error('❌ [Historical] Failed to load teams:', error)
         setMessage({ type: 'error', text: 'Failed to load teams' })
       } finally {
         setLoading(false)
@@ -1064,8 +218,8 @@ function HistoricalNewslettersPage() {
   }, [])
 
   const handleTeamToggle = (teamId) => {
-    setSelectedTeams(prev => 
-      prev.includes(teamId) 
+    setSelectedTeams(prev =>
+      prev.includes(teamId)
         ? prev.filter(id => id !== teamId)
         : [...prev, teamId]
     )
@@ -1079,21 +233,20 @@ function HistoricalNewslettersPage() {
 
     setGenerating(true)
     setNewsletters([])
-    
+
     try {
       const generatedNewsletters = []
-      
+
       // Generate newsletter for each selected team
       for (const teamId of selectedTeams) {
-        console.log(`📰 Generating newsletter for team ${teamId} on ${selectedDate}`)
-        
+
         try {
           const newsletter = await APIService.generateNewsletter({
             team_id: teamId,
             target_date: selectedDate,
             type: 'weekly'
           })
-          
+
           generatedNewsletters.push({
             ...newsletter.newsletter,
             teamName: teams.find(t => t.id === teamId)?.name || 'Unknown Team'
@@ -1102,13 +255,13 @@ function HistoricalNewslettersPage() {
           console.error(`❌ Failed to generate newsletter for team ${teamId}:`, error)
         }
       }
-      
+
       setNewsletters(generatedNewsletters)
-      setMessage({ 
-        type: 'success', 
-        text: `Generated ${generatedNewsletters.length} newsletters for ${selectedDate}` 
+      setMessage({
+        type: 'success',
+        text: `Generated ${generatedNewsletters.length} newsletters for ${selectedDate}`
       })
-      
+
     } catch (error) {
       console.error('❌ Failed to generate newsletters:', error)
       setMessage({ type: 'error', text: 'Failed to generate newsletters' })
@@ -1143,11 +296,10 @@ function HistoricalNewslettersPage() {
         </div>
 
         {message && (
-          <div className={`mb-6 p-4 rounded-md ${
-            message.type === 'error' 
-              ? 'bg-red-50 border border-red-200 text-red-700' 
-              : 'bg-green-50 border border-green-200 text-green-700'
-          }`}>
+          <div className={`mb-6 p-4 rounded-md ${message.type === 'error'
+            ? 'bg-red-50 border border-red-200 text-red-700'
+            : 'bg-green-50 border border-green-200 text-green-700'
+            }`}>
             {message.text}
           </div>
         )}
@@ -1219,7 +371,7 @@ function HistoricalNewslettersPage() {
             </Card>
 
             {/* Generate Button */}
-            <Button 
+            <Button
               onClick={generateNewsletters}
               disabled={generating || !selectedDate || selectedTeams.length === 0}
               size="lg"
@@ -1245,7 +397,7 @@ function HistoricalNewslettersPage() {
               <CardHeader>
                 <CardTitle>Generated Newsletters</CardTitle>
                 <CardDescription>
-                  {newsletters.length > 0 
+                  {newsletters.length > 0
                     ? `${newsletters.length} newsletters for ${selectedDate}`
                     : 'Select teams and date to generate newsletters'
                   }
@@ -1263,7 +415,7 @@ function HistoricalNewslettersPage() {
                           {newsletter.title}
                         </h4>
                         <div className="text-sm text-gray-600 whitespace-pre-wrap">
-                          {typeof newsletter.content === 'string' 
+                          {typeof newsletter.content === 'string'
                             ? JSON.parse(newsletter.content).summary || newsletter.content
                             : newsletter.content?.summary || 'No content available'
                           }
@@ -1282,7 +434,7 @@ function HistoricalNewslettersPage() {
             </Card>
           </div>
         </div>
-      ) : (
+        ) : (
         <div className="rounded-lg border border-dashed bg-muted/40 p-6 text-sm text-muted-foreground space-y-3">
           {authToken && !hasAdminToken ? (
             <>
@@ -1313,7 +465,7 @@ function HistoricalNewslettersPage() {
             </>
           )}
         </div>
-      )
+        )
 
       </div>
     </div>
@@ -1652,7 +804,7 @@ function RequireAuth({ children }) {
 }
 
 // Admin page
-function AdminPage() {
+function AdminPage({ defaultTab = 'newsletters', includeSandbox = true, forcedTab = null, hideTabs = false }) {
   const [adminKey, setAdminKey] = useState(APIService.adminKey || '')
   const [adminKeyInput, setAdminKeyInput] = useState('')
   const [showKeyValue, setShowKeyValue] = useState(false)
@@ -1673,15 +825,28 @@ function AdminPage() {
   const [flags, setFlags] = useState([])
   const [flagEditors, setFlagEditors] = useState({})
   const [loans, setLoans] = useState([])
-  const [loanFilters, setLoanFilters] = useState({ active_only: 'true', player_name: '', season: '' })
-  const [loanForm, setLoanForm] = useState({ player_id: '', player_name: '', primary_team_api_id: '', loan_team_api_id: '', season: '' })
+  const [loanForm, setLoanForm] = useState({
+    player_id: '',
+    player_name: '',
+    primary_team_api_id: '',
+    loan_team_api_id: '',
+    season: '',
+  })
+  const [loanFilters, setLoanFilters] = useState({ season: '', sortBy: 'created_at', sortOrder: 'desc', showActive: true })
+  const [loansPagination, setLoansPagination] = useState({ page: 1, pageSize: 25 })
   const [supplementalLoans, setSupplementalLoans] = useState([])
   const [supplementalFilters, setSupplementalFilters] = useState({ player_name: '', season: '' })
   const [supplementalForm, setSupplementalForm] = useState({ player_name: '', parent_team_name: '', loan_team_name: '', season_year: '' })
   const [missingNames, setMissingNames] = useState([])
-  const [mnTeamApiId, setMnTeamApiId] = useState('')
   const [mnTeamDbId, setMnTeamDbId] = useState(null)
+  const [mnTeamApiId, setMnTeamApiId] = useState('')
   const [mnBusy, setMnBusy] = useState(false)
+
+  // Confirmation dialogs
+  const [deleteSupplementalLoanConfirm, setDeleteSupplementalLoanConfirm] = useState(null)
+  const [deleteNewsletterConfirm, setDeleteNewsletterConfirm] = useState(null)
+  const [deletePlayerFromNlConfirm, setDeletePlayerFromNlConfirm] = useState(null)
+  const [deletePlayerConfirm, setDeletePlayerConfirm] = useState(null)
   const [message, setMessage] = useState(null)
   const [nlFilters, setNlFilters] = useState({ published_only: '', week_start: '', week_end: '', issue_start: '', issue_end: '', created_start: '', created_end: '' })
   const [newslettersAdmin, setNewslettersAdmin] = useState([])
@@ -1696,7 +861,7 @@ function AdminPage() {
   const [deleteBusyIds, setDeleteBusyIds] = useState([])
   const [editingNl, setEditingNl] = useState(null)
   const [nlYoutubeLinks, setNlYoutubeLinks] = useState([])
-  const [nlYoutubeLinkForm, setNlYoutubeLinkForm] = useState({ player_name: '', youtube_link: '', player_id: null, supplemental_loan_id: null })
+  const [nlYoutubeLinkForm, setNlYoutubeLinkForm] = useState({ player_name: '', youtube_link: '', player_id: null })
   const [editingNlYoutubeLink, setEditingNlYoutubeLink] = useState(null)
   const [previewHtml, setPreviewHtml] = useState('')
   const [previewError, setPreviewError] = useState('')
@@ -1706,6 +871,9 @@ function AdminPage() {
   const [selectedRunTeams, setSelectedRunTeams] = useState([])
   const [teamRunBusy, setTeamRunBusy] = useState(false)
   const [teamRunMsg, setTeamRunMsg] = useState(null)
+  const [confirmRunAllOpen, setConfirmRunAllOpen] = useState(false)
+  const [estimatedTeamCount, setEstimatedTeamCount] = useState(null)
+  const [seedSectionOpen, setSeedSectionOpen] = useState(false)
   const [adminNewsPage, setAdminNewsPage] = useState(1)
   const [reviewModalOpen, setReviewModalOpen] = useState(false)
   const [reviewQueue, setReviewQueue] = useState([])
@@ -1746,6 +914,13 @@ function AdminPage() {
     use_custom_loan_team: false,
     custom_loan_team_name: ''
   })
+  // Subscriber Analytics state
+  const [subscriberStats, setSubscriberStats] = useState({ teams: [], total_subscribers: 0 })
+  const [subscriberStatsLoading, setSubscriberStatsLoading] = useState(false)
+  const [subscriberSearch, setSubscriberSearch] = useState('')
+  const [subscriberSort, setSubscriberSort] = useState('desc')
+  const [toggleStatusBusy, setToggleStatusBusy] = useState({})
+
   const [playerFieldOptions, setPlayerFieldOptions] = useState({
     positions: [],
     nationalities: []
@@ -1777,6 +952,43 @@ function AdminPage() {
     const total = Math.ceil(newslettersAdmin.length / ADMIN_NEWSLETTER_PAGE_SIZE)
     return total > 0 ? total : 1
   }, [newslettersAdmin])
+
+  // Unified Dashboard: Tab state and sandbox integration
+  const [searchParams, setSearchParams] = useSearchParams()
+  const adminTabs = useMemo(() => {
+    if (forcedTab) return [forcedTab]
+    return getAdminTabs({ includeSandbox })
+  }, [forcedTab, includeSandbox])
+  const activeTab = useMemo(
+    () => resolveAdminTab({ searchParams, defaultTab, allowedTabs: adminTabs, forcedTab }),
+    [searchParams, defaultTab, adminTabs, forcedTab],
+  )
+  const navigate = useNavigate()
+
+  // Sandbox task state (integrated from AdminSandboxPage)
+  const [sandboxTasks, setSandboxTasks] = useState([])
+  const [sandboxCollapsedTasks, setSandboxCollapsedTasks] = useState({})
+  const [sandboxFormValues, setSandboxFormValues] = useState({})
+  const [sandboxResults, setSandboxResults] = useState({})
+  const [sandboxLoading, setSandboxLoading] = useState(false)
+  const [sandboxError, setSandboxError] = useState('')
+  const [runningTaskId, setRunningTaskId] = useState(null)
+  const [sofascorePlayers, setSofascorePlayers] = useState([])
+  const [sofascoreInputs, setSofascoreInputs] = useState({})
+  const [sofascoreUpdatingKey, setSofascoreUpdatingKey] = useState(null)
+  const [sofascoreStatus, setSofascoreStatus] = useState(null)
+
+  useEffect(() => {
+    const normalizedTab = resolveAdminTab({ searchParams, defaultTab, allowedTabs: adminTabs, forcedTab })
+    const current = searchParams.get('tab')
+    if (current !== normalizedTab) {
+      setSearchParams({ tab: normalizedTab }, { replace: true })
+    }
+  }, [searchParams, defaultTab, adminTabs, setSearchParams, forcedTab])
+
+  const handleTabChange = useCallback((value) => {
+    setSearchParams({ tab: value }, { replace: true })
+  }, [setSearchParams])
   const adminPageStart = newslettersAdmin.length ? (adminNewsPage - 1) * ADMIN_NEWSLETTER_PAGE_SIZE + 1 : 0
   const adminPageEnd = newslettersAdmin.length ? Math.min(adminNewsPage * ADMIN_NEWSLETTER_PAGE_SIZE, newslettersAdmin.length) : 0
   const paginatedNewslettersAdmin = useMemo(() => {
@@ -2118,7 +1330,23 @@ function AdminPage() {
       console.error('Failed to toggle run status', error)
     }
   }
+  const fetchTeamCountEstimate = useCallback(async () => {
+    try {
+      const stats = await APIService.getStats()
+      setEstimatedTeamCount(stats?.teams_with_loans || null)
+    } catch (error) {
+      console.warn('Failed to fetch team count estimate', error)
+      setEstimatedTeamCount(null)
+    }
+  }, [])
+
+  const handleRunAllClick = useCallback(() => {
+    fetchTeamCountEstimate()
+    setConfirmRunAllOpen(true)
+  }, [fetchTeamCountEstimate])
+
   const runAll = async () => {
+    setConfirmRunAllOpen(false)
     setRunning(true)
     setMessage(null)
     try {
@@ -2330,10 +1558,10 @@ function AdminPage() {
       if (updatedLoan) {
         setFlags((prev) => prev.map((f) => (f.id === flag.id
           ? {
-              ...f,
-              primary_team_api_id: updatedLoan.primary_team_api_id,
-              loan_team_api_id: updatedLoan.loan_team_api_id,
-            }
+            ...f,
+            primary_team_api_id: updatedLoan.primary_team_api_id,
+            loan_team_api_id: updatedLoan.loan_team_api_id,
+          }
           : f)))
       }
       setMessage({ type: 'success', text: 'Loan assignment updated.' })
@@ -2491,21 +1719,27 @@ function AdminPage() {
         return
       }
       await APIService.adminSupplementalLoanCreate(payload)
-      setMessage({ type: 'success', text: 'Supplemental loan created' })
+      setMessage({ type: 'success', text: 'Manual player added successfully' })
       setSupplementalForm({ player_name: '', parent_team_name: '', loan_team_name: '', season_year: '' })
       await refreshSupplementalLoans()
     } catch (error) {
       setMessage({ type: 'error', text: `Create failed: ${error?.body?.error || error.message}` })
     }
   }
-  const deleteSupplementalLoan = async (loan) => {
+  const deleteSupplementalLoan = (loan) => {
+    setDeleteSupplementalLoanConfirm(loan)
+  }
+
+  const confirmDeleteSupplementalLoan = async () => {
+    if (!deleteSupplementalLoanConfirm) return
     try {
-      if (!window.confirm(`Delete supplemental loan for ${loan.player_name}?`)) return
-      await APIService.adminSupplementalLoanDelete(loan.id)
-      setMessage({ type: 'success', text: 'Supplemental loan deleted' })
+      await APIService.adminSupplementalLoanDelete(deleteSupplementalLoanConfirm.id)
+      setMessage({ type: 'success', text: 'Manual player deleted successfully' })
+      setDeleteSupplementalLoanConfirm(null)
       await refreshSupplementalLoans()
     } catch (error) {
       setMessage({ type: 'error', text: `Delete failed: ${error?.body?.error || error.message}` })
+      setDeleteSupplementalLoanConfirm(null)
     }
   }
   const teamIdToTeam = useMemo(() => {
@@ -2663,13 +1897,11 @@ function AdminPage() {
       return { successIds: [], failureDetails: [] }
     }
 
-    let confirmed = true
     if (confirmPrompt && typeof window !== 'undefined') {
       const label = normalized.length === 1 ? `newsletter #${normalized[0]}` : `${normalized.length} newsletters`
-      confirmed = window.confirm(`Delete ${label}? This cannot be undone.`)
-    }
-    if (!confirmed) {
-      return { successIds: [], failureDetails: [] }
+      return new Promise((resolve) => {
+        setDeleteNewsletterConfirm({ ids: normalized, label, resolve, trackBulk })
+      })
     }
 
     if (trackBulk) setBulkDeleteBusy(true)
@@ -2703,6 +1935,50 @@ function AdminPage() {
     setMessage({ type, text: formatDeleteSummary({ successIds, failureDetails }) })
     return { successIds, failureDetails }
   }, [addDeletingIds, removeDeletingIds, refreshNewsletters, setMessage, setSelectedNewsletterIds])
+
+  const confirmDeleteNewsletter = async () => {
+    if (!deleteNewsletterConfirm) return
+    const { ids, resolve, trackBulk, isFiltered, filterParams, totalMatched, excludedIds } = deleteNewsletterConfirm
+
+    setDeleteNewsletterConfirm(null)
+
+    if (resolve && typeof resolve === 'function') {
+      // For review mode with custom resolve
+      await resolve()
+      return
+    }
+
+    if (isFiltered) {
+      // For filtered bulk delete
+      setBulkDeleteBusy(true)
+      try {
+        const payload = resolveBulkActionPayload({
+          useFilters: true,
+          filterParams,
+          totalMatched,
+          excludedIds,
+          explicitIds: [],
+        })
+        const result = await APIService.adminNewsletterBulkDelete(payload)
+        const deleted = result?.deleted || 0
+        setMessage({ type: 'success', text: `Deleted ${deleted} newsletter(s)` })
+        setAllFilteredSelected(false)
+        setSelectedNewsletterIds([])
+        await refreshNewsletters()
+      } catch (error) {
+        setMessage({ type: 'error', text: `Bulk delete failed: ${error?.body?.error || error.message}` })
+      } finally {
+        setBulkDeleteBusy(false)
+      }
+      return
+    }
+
+    // For standard deletion with ids
+    if (ids && ids.length > 0) {
+      await deleteNewsletters(ids, { confirmPrompt: false, trackBulk })
+    }
+  }
+
   const sendAdminPreview = useCallback(async (ids, { trackBulk = false } = {}) => {
     const normalized = normalizeNewsletterIds(ids)
     if (normalized.length === 0) {
@@ -2744,12 +2020,20 @@ function AdminPage() {
         setMessage({ type: 'error', text: 'No newsletters match your filters.' })
         return { successIds: [], failureDetails: [] }
       }
-      let confirmed = true
       if (typeof window !== 'undefined') {
-        confirmed = window.confirm(`Delete ${total - selectedNewsletterIds.length} newsletters? This cannot be undone.`)
-      }
-      if (!confirmed) {
-        return { successIds: [], failureDetails: [] }
+        const label = `${total - selectedNewsletterIds.length} filtered newsletters`
+        return new Promise((resolve) => {
+          setDeleteNewsletterConfirm({
+            ids: null,
+            label,
+            resolve,
+            trackBulk: true,
+            isFiltered: true,
+            filterParams: appliedNlFilters,
+            totalMatched: total,
+            excludedIds: selectedNewsletterIds
+          })
+        })
       }
       setBulkDeleteBusy(true)
       try {
@@ -2985,11 +2269,33 @@ function AdminPage() {
       goToNextReview()
       return
     }
-    let confirmed = true
     if (typeof window !== 'undefined') {
-      confirmed = window.confirm(`Delete newsletter #${current.id}? This cannot be undone.`)
+      setDeleteNewsletterConfirm({
+        ids: [current.id],
+        label: `newsletter #${current.id}`,
+        resolve: async () => {
+          try {
+            setReviewLoadingDetail(true)
+            await APIService.adminNewsletterDelete(current.id)
+            reviewDirtyRef.current = true
+            setMessage({ type: 'success', text: `Deleted newsletter #${current.id}.` })
+            setReviewQueue((prev) => prev.filter((item) => item.id !== current.id))
+            setReviewIndex((idx) => {
+              const nextLength = reviewQueue.length - 1
+              if (nextLength <= 0) return 0
+              if (idx >= nextLength) return Math.max(0, nextLength - 1)
+              return idx
+            })
+          } catch (error) {
+            setMessage({ type: 'error', text: `Delete failed: ${error?.body?.error || error.message}` })
+          } finally {
+            setReviewLoadingDetail(false)
+          }
+        },
+        trackBulk: false
+      })
+      return
     }
-    if (!confirmed) return
     try {
       setReviewLoadingDetail(true)
       await APIService.adminNewsletterDelete(current.id)
@@ -3090,9 +2396,9 @@ function AdminPage() {
         title: editingNl.title,
         content_json: (() => { try { return typeof editingNl.content === 'string' ? JSON.parse(editingNl.content) : editingNl.content } catch { return editingNl.content } })(),
         published: !!editingNl.published,
-        issue_date: editingNl.issue_date?.slice(0,10),
-        week_start_date: editingNl.week_start_date?.slice(0,10),
-        week_end_date: editingNl.week_end_date?.slice(0,10),
+        issue_date: editingNl.issue_date?.slice(0, 10),
+        week_start_date: editingNl.week_start_date?.slice(0, 10),
+        week_end_date: editingNl.week_end_date?.slice(0, 10),
       }
       await APIService.adminNewsletterUpdate(editingNl.id, payload)
       setMessage({ type: 'success', text: 'Newsletter updated' })
@@ -3142,11 +2448,10 @@ function AdminPage() {
       await APIService.adminNewsletterYoutubeLinkCreate(editingNl.id, {
         player_name: nlYoutubeLinkForm.player_name,
         youtube_link: nlYoutubeLinkForm.youtube_link,
-        player_id: nlYoutubeLinkForm.player_id,
-        supplemental_loan_id: nlYoutubeLinkForm.supplemental_loan_id
+        player_id: nlYoutubeLinkForm.player_id
       })
       setMessage({ type: 'success', text: 'YouTube link added' })
-      setNlYoutubeLinkForm({ player_name: '', youtube_link: '', player_id: null, supplemental_loan_id: null })
+      setNlYoutubeLinkForm({ player_name: '', youtube_link: '', player_id: null })
       await loadNewsletterYoutubeLinks(editingNl.id)
     } catch (error) {
       setMessage({ type: 'error', text: `Failed to add YouTube link: ${error?.body?.error || error.message}` })
@@ -3195,7 +2500,6 @@ function AdminPage() {
             players.push({
               player_name: item.player_name,
               player_id: item.player_id || null,
-              supplemental_loan_id: item.supplemental_loan_id || null,
               loan_team: item.loan_team || item.loan_team_name || ''
             })
           }
@@ -3230,14 +2534,14 @@ function AdminPage() {
     try {
       const content = typeof editingNl.content === 'string' ? JSON.parse(editingNl.content) : editingNl.content
       const sections = content?.sections || []
-      
+
       if (!sections[fromSectionIdx] || !sections[fromSectionIdx].items || !sections[fromSectionIdx].items[fromItemIdx]) {
         setMessage({ type: 'error', text: 'Invalid source position' })
         return
       }
 
       const player = sections[fromSectionIdx].items[fromItemIdx]
-      
+
       // Moving within same section
       if (fromSectionIdx === toSectionIdx) {
         const items = sections[fromSectionIdx].items
@@ -3267,7 +2571,12 @@ function AdminPage() {
 
   const deletePlayerFromNewsletter = (sectionIndex, itemIndex) => {
     if (!editingNl) return
-    if (!confirm('Remove this player from the newsletter?')) return
+    setDeletePlayerFromNlConfirm({ sectionIndex, itemIndex })
+  }
+
+  const confirmDeletePlayerFromNewsletter = () => {
+    if (!deletePlayerFromNlConfirm || !editingNl) return
+    const { sectionIndex, itemIndex } = deletePlayerFromNlConfirm
     try {
       const content = typeof editingNl.content === 'string' ? JSON.parse(editingNl.content) : editingNl.content
       const sections = content?.sections || []
@@ -3276,9 +2585,11 @@ function AdminPage() {
         setEditingNl({ ...editingNl, content: JSON.stringify(content, null, 2) })
         setMessage({ type: 'success', text: 'Player removed from newsletter' })
       }
+      setDeletePlayerFromNlConfirm(null)
     } catch (error) {
       console.error('Failed to delete player:', error)
       setMessage({ type: 'error', text: 'Failed to delete player' })
+      setDeletePlayerFromNlConfirm(null)
     }
   }
 
@@ -3302,10 +2613,10 @@ function AdminPage() {
       if (playersHubFilters.team_id) params.team_id = playersHubFilters.team_id
       if (playersHubFilters.search) params.search = playersHubFilters.search
       if (playersHubFilters.has_sofascore) params.has_sofascore = playersHubFilters.has_sofascore
-      
+
       const data = await APIService.adminPlayersList(params)
       setPlayersHubData(data)
-      
+
       // Load field options for the add player form
       try {
         const options = await APIService.adminPlayerFieldOptions()
@@ -3447,17 +2758,16 @@ function AdminPage() {
       const result = await APIService.adminPlayerBulkUpdateSofascore(updates)
       const successCount = result.results?.updated?.length || 0
       const failCount = result.results?.failed?.length || 0
-      
+
       if (failCount > 0) {
-        setMessage({ 
-          type: 'warning', 
-          text: `Bulk update: ${successCount} succeeded, ${failCount} failed. Check console for details.` 
+        setMessage({
+          type: 'warning',
+          text: `Bulk update: ${successCount} succeeded, ${failCount} failed. Check console for details.`
         })
-        console.log('Bulk update failures:', result.results.failed)
       } else {
         setMessage({ type: 'success', text: `Bulk updated ${successCount} players` })
       }
-      
+
       setSelectedPlayersForBulk([])
       setEditingPlayerSofascore({})
       setBulkSofascoreMode(false)
@@ -3496,7 +2806,7 @@ function AdminPage() {
       setMessage({ type: 'error', text: 'Player name is required' })
       return
     }
-    
+
     // Validate primary team
     if (!addPlayerForm.use_custom_primary_team && !addPlayerForm.primary_team_id) {
       setMessage({ type: 'error', text: 'Primary team is required (or check "Custom team")' })
@@ -3506,7 +2816,7 @@ function AdminPage() {
       setMessage({ type: 'error', text: 'Custom primary team name is required' })
       return
     }
-    
+
     // Validate loan team
     if (!addPlayerForm.use_custom_loan_team && !addPlayerForm.loan_team_id) {
       setMessage({ type: 'error', text: 'Loan team is required (or check "Custom team")' })
@@ -3516,7 +2826,7 @@ function AdminPage() {
       setMessage({ type: 'error', text: 'Custom loan team name is required' })
       return
     }
-    
+
     if (!addPlayerForm.window_key) {
       setMessage({ type: 'error', text: 'Season/window is required' })
       return
@@ -3533,14 +2843,14 @@ function AdminPage() {
         sofascore_id: addPlayerForm.sofascore_id ? parseInt(addPlayerForm.sofascore_id) : null,
         window_key: addPlayerForm.window_key
       }
-      
+
       // Add primary team (either ID or custom name)
       if (addPlayerForm.use_custom_primary_team) {
         payload.custom_primary_team_name = addPlayerForm.custom_primary_team_name.trim()
       } else {
         payload.primary_team_id = parseInt(addPlayerForm.primary_team_id)
       }
-      
+
       // Add loan team (either ID or custom name)
       if (addPlayerForm.use_custom_loan_team) {
         payload.custom_loan_team_name = addPlayerForm.custom_loan_team_name.trim()
@@ -3578,19 +2888,19 @@ function AdminPage() {
     try {
       // Fetch full player details
       const playerData = await APIService.adminPlayerGet(playerId)
-      
+
       // Get the first/primary loan record
       const primaryLoan = playerData.loans && playerData.loans.length > 0 ? playerData.loans[0] : null
-      
+
       if (!primaryLoan) {
         setMessage({ type: 'error', text: 'No loan record found for this player' })
         return
       }
-      
+
       // Populate form
       const isCustomPrimaryTeam = !primaryLoan.primary_team_id
       const isCustomLoanTeam = !primaryLoan.loan_team_id
-      
+
       setEditPlayerForm({
         name: playerData.name || '',
         position: playerData.position || '',
@@ -3605,7 +2915,7 @@ function AdminPage() {
         custom_loan_team_name: isCustomLoanTeam ? primaryLoan.loan_team_name : '',
         window_key: primaryLoan.window_key || ''
       })
-      
+
       setEditingPlayerDialog({ player: playerData, loan: primaryLoan })
     } catch (error) {
       setMessage({ type: 'error', text: `Failed to load player: ${error?.body?.error || error.message}` })
@@ -3614,10 +2924,10 @@ function AdminPage() {
 
   const savePlayerEdit = async () => {
     if (!editingPlayerDialog) return
-    
+
     try {
       const { player, loan } = editingPlayerDialog
-      
+
       // Update Player record
       const playerPayload = {
         name: editPlayerForm.name.trim(),
@@ -3626,15 +2936,15 @@ function AdminPage() {
         age: editPlayerForm.age ? parseInt(editPlayerForm.age) : null,
         sofascore_id: editPlayerForm.sofascore_id ? parseInt(editPlayerForm.sofascore_id) : null
       }
-      
+
       await APIService.adminPlayerUpdate(player.player_id, playerPayload)
-      
+
       // Update LoanedPlayer record (teams)
       const loanPayload = {
         player_name: editPlayerForm.name.trim(),
         window_key: editPlayerForm.window_key
       }
-      
+
       // Handle primary team
       if (editPlayerForm.use_custom_primary_team) {
         loanPayload.primary_team_name = editPlayerForm.custom_primary_team_name.trim()
@@ -3643,7 +2953,7 @@ function AdminPage() {
       } else if (editPlayerForm.primary_team_id) {
         loanPayload.primary_team_db_id = parseInt(editPlayerForm.primary_team_id)
       }
-      
+
       // Handle loan team
       if (editPlayerForm.use_custom_loan_team) {
         loanPayload.loan_team_name = editPlayerForm.custom_loan_team_name.trim()
@@ -3652,9 +2962,9 @@ function AdminPage() {
       } else if (editPlayerForm.loan_team_id) {
         loanPayload.loan_team_db_id = parseInt(editPlayerForm.loan_team_id)
       }
-      
+
       await APIService.adminLoanUpdate(loan.id, loanPayload)
-      
+
       setMessage({ type: 'success', text: `Player "${editPlayerForm.name}" updated successfully` })
       setEditingPlayerDialog(null)
       await loadPlayersHub()
@@ -3666,13 +2976,22 @@ function AdminPage() {
   const deletePlayer = async (playerId, playerName, loanCount) => {
     const isManual = playerId < 0
     const playerType = isManual ? 'manual player' : 'player'
-    const warningMessage = loanCount > 0 
-      ? `Are you sure you want to delete "${playerName}"?\n\nThis will remove:\n- ${loanCount} loan record(s)\n- Any associated YouTube links\n- Player from all tracking\n\nThis action cannot be undone.`
-      : `Are you sure you want to delete "${playerName}"?\n\nThis ${playerType} will be permanently removed from tracking.\n\nThis action cannot be undone.`
-    
-    if (!confirm(warningMessage)) {
-      return
-    }
+    const warningMessage = loanCount > 0
+      ? `This will remove ${loanCount} loan record(s), any associated YouTube links, and remove the player from all tracking.`
+      : `This ${playerType} will be permanently removed from tracking.`
+
+    setDeletePlayerConfirm({
+      playerId,
+      playerName,
+      warningMessage,
+      isManual,
+      loanCount
+    })
+  }
+
+  const confirmDeletePlayer = async () => {
+    if (!deletePlayerConfirm) return
+    const { playerId, playerName } = deletePlayerConfirm
 
     try {
       const result = await APIService.adminPlayerDelete(playerId)
@@ -3681,9 +3000,10 @@ function AdminPage() {
       if (deletedInfo.loaned_records > 0) details.push(`${deletedInfo.loaned_records} loan record(s)`)
       if (deletedInfo.youtube_links > 0) details.push(`${deletedInfo.youtube_links} YouTube link(s)`)
       if (deletedInfo.player_record) details.push('player record')
-      
+
       const detailsText = details.length > 0 ? ` (removed: ${details.join(', ')})` : ''
       setMessage({ type: 'success', text: `Player "${playerName}" deleted successfully${detailsText}` })
+      setDeletePlayerConfirm(null)
       await loadPlayersHub()
     } catch (error) {
       setMessage({ type: 'error', text: `Failed to delete player: ${error?.body?.error || error.message}` })
@@ -3695,6 +3015,315 @@ function AdminPage() {
       loadPlayersHub()
     }
   }, [adminReady, playersHubPage])
+
+  // Sandbox task loading functions (from AdminSandboxPage)
+  const buildSandboxDefaults = useCallback((taskList) => {
+    const defaults = {}
+    for (const task of taskList) {
+      const params = task?.parameters || []
+      defaults[task.task_id] = params.reduce((acc, param) => {
+        if (param.type === 'checkbox') {
+          acc[param.name] = false
+        } else {
+          acc[param.name] = ''
+        }
+        return acc
+      }, {})
+    }
+    return defaults
+  }, [])
+
+  const ensureAdminSession = useCallback(() => {
+    const storedToken = APIService.userToken || (typeof localStorage !== 'undefined' ? localStorage.getItem('loan_army_user_token') : null)
+    if (storedToken && !APIService.userToken) {
+      APIService.setUserToken(storedToken)
+    }
+    if (!storedToken) {
+      const err = new Error('Admin login required. Sign in with an admin email to continue.')
+      err.code = 'missing_token'
+      throw err
+    }
+    const storedKey = APIService.adminKey || (typeof localStorage !== 'undefined' ? localStorage.getItem('loan_army_admin_key') : null)
+    if (storedKey && !APIService.adminKey) {
+      APIService.setAdminKey(storedKey)
+    }
+    if (!storedKey) {
+      const err = new Error('Admin API key required. Add your key in the admin dashboard.')
+      err.code = 'missing_key'
+      throw err
+    }
+  }, [])
+
+  const loadSandboxTasks = useCallback(async () => {
+    setSandboxLoading(true)
+    setSandboxError('')
+    try {
+      ensureAdminSession()
+
+      let payload
+      try {
+        payload = await APIService.adminSandboxTasks()
+      } catch (err) {
+        if (err?.status === 401) {
+          await APIService.refreshProfile()
+          ensureAdminSession()
+          payload = await APIService.adminSandboxTasks()
+        } else {
+          throw err
+        }
+      }
+      const taskList = Array.isArray(payload?.tasks) ? payload.tasks : []
+      setSandboxTasks(taskList)
+      setSandboxCollapsedTasks((prev) => mergeCollapseState(prev, taskList))
+      setSandboxFormValues((prev) => ({ ...buildSandboxDefaults(taskList), ...prev }))
+    } catch (err) {
+      setSandboxError(err?.message || 'Failed to load sandbox tasks')
+    } finally {
+      setSandboxLoading(false)
+    }
+  }, [buildSandboxDefaults, ensureAdminSession])
+
+  useEffect(() => {
+    if (!includeSandbox) return
+    if (activeTab === 'tools' && hasAdminAccess) {
+      loadSandboxTasks()
+    }
+  }, [activeTab, hasAdminAccess, loadSandboxTasks, includeSandbox])
+
+  const toggleSandboxTaskCollapsed = useCallback((taskId) => {
+    setSandboxCollapsedTasks((prev) => toggleCollapseState(prev, taskId))
+  }, [])
+
+  const handleSandboxInputChange = useCallback((taskId, fieldName, fieldType) => (event) => {
+    const value = fieldType === 'checkbox' ? event.target.checked : event.target.value
+    setSandboxFormValues((prev) => ({
+      ...prev,
+      [taskId]: {
+        ...(prev[taskId] || {}),
+        [fieldName]: value,
+      },
+    }))
+  }, [])
+
+  const handleSandboxSelectChange = useCallback((taskId, param, option, params) => {
+    setSandboxFormValues((prev) => {
+      const updates = buildSelectUpdates(param, option, params)
+      if (!updates || Object.keys(updates).length === 0) {
+        return prev
+      }
+      const nextTaskValues = { ...(prev[taskId] || {}) }
+      for (const [key, value] of Object.entries(updates)) {
+        nextTaskValues[key] = value
+      }
+      return { ...prev, [taskId]: nextTaskValues }
+    })
+  }, [])
+
+  const buildSandboxPayload = useCallback((task) => {
+    const params = task?.parameters || []
+    const currentValues = sandboxFormValues[task.task_id] || {}
+    const payload = {}
+    for (const param of params) {
+      const rawValue = currentValues[param.name]
+      if (param.type === 'checkbox') {
+        payload[param.name] = !!rawValue
+        continue
+      }
+      if (rawValue === '' || typeof rawValue === 'undefined' || rawValue === null) {
+        continue
+      }
+      if (param.type === 'number') {
+        const numeric = Number(rawValue)
+        if (!Number.isNaN(numeric)) {
+          payload[param.name] = numeric
+        }
+      } else {
+        payload[param.name] = rawValue
+      }
+    }
+    return payload
+  }, [sandboxFormValues])
+
+  const runSandboxTask = useCallback(async (task) => {
+    if (!task?.task_id) return
+    setRunningTaskId(task.task_id)
+    try {
+      const payload = buildSandboxPayload(task)
+      ensureAdminSession()
+      let result
+      try {
+        result = await APIService.adminSandboxRun(task.task_id, payload)
+      } catch (err) {
+        if (err?.status === 401) {
+          await APIService.refreshProfile()
+          ensureAdminSession()
+          result = await APIService.adminSandboxRun(task.task_id, payload)
+        } else {
+          throw err
+        }
+      }
+      if (task.task_id === 'list-missing-sofascore-ids') {
+        const players = Array.isArray(result?.payload?.players) ? result.payload.players : []
+        const enriched = players.map((player, index) => ({
+          ...player,
+          __row_key: sofascoreRowKey(player, index),
+        }))
+        const inputDefaults = {}
+        for (const player of enriched) {
+          const rowKey = player.__row_key
+          inputDefaults[rowKey] = player?.sofascore_id ? String(player.sofascore_id) : ''
+        }
+        setSofascorePlayers(enriched)
+        setSofascoreInputs(inputDefaults)
+        setSofascoreStatus(null)
+        setSofascoreUpdatingKey(null)
+      }
+      if (task.task_id === 'update-player-sofascore-id') {
+        setSofascoreStatus({ type: 'success', message: result?.summary || 'Sofascore id updated.' })
+      }
+      setSandboxResults((prev) => ({
+        ...prev,
+        [task.task_id]: { status: 'ok', result },
+      }))
+    } catch (err) {
+      if (task?.task_id === 'update-player-sofascore-id') {
+        setSofascoreStatus({ type: 'error', message: err?.message || 'Failed to update Sofascore id.' })
+      }
+      setSandboxResults((prev) => ({
+        ...prev,
+        [task.task_id]: {
+          status: 'error',
+          message: err?.message || 'Task execution failed',
+          detail: err?.body,
+        },
+      }))
+    } finally {
+      setRunningTaskId(null)
+    }
+  }, [buildSandboxPayload, ensureAdminSession])
+
+  const handleSofascoreAssign = useCallback(async (row, inputValue) => {
+    const payload = buildSofascoreUpdatePayload(row, typeof inputValue === 'string' ? inputValue.trim() : inputValue)
+    if (!payload) {
+      setSofascoreStatus({ type: 'error', message: 'Unable to update Sofascore id for this row.' })
+      return
+    }
+
+    const rowKey = row?.__row_key || sofascoreRowKey(row)
+    setSofascoreStatus(null)
+    setSofascoreUpdatingKey(rowKey)
+    try {
+      ensureAdminSession()
+      const result = await APIService.adminSandboxRun('update-player-sofascore-id', payload)
+      setSofascoreStatus({ type: 'success', message: result?.summary || 'Sofascore id updated.' })
+      setSofascorePlayers((prev) => prev.filter((item) => (item.__row_key || sofascoreRowKey(item)) !== rowKey))
+      setSofascoreInputs((prev) => {
+        const next = { ...prev }
+        delete next[rowKey]
+        return next
+      })
+    } catch (err) {
+      setSofascoreStatus({ type: 'error', message: err?.message || 'Failed to update Sofascore id.' })
+    } finally {
+      setSofascoreUpdatingKey(null)
+    }
+  }, [ensureAdminSession])
+
+  const handleSupplementalDelete = useCallback(async (row) => {
+    if (!row?.supplemental_id) return
+    const rowKey = row?.__row_key || sofascoreRowKey(row)
+    setSofascoreStatus(null)
+    setSofascoreUpdatingKey(rowKey)
+    try {
+      ensureAdminSession()
+      const result = await APIService.adminSandboxRun('delete-supplemental-loan', {
+        supplemental_id: row.supplemental_id,
+        confirm: true,
+      })
+      setSofascoreStatus({ type: 'success', message: result?.summary || 'Supplemental row deleted.' })
+      setSofascorePlayers((prev) => prev.filter((item) => (item.__row_key || sofascoreRowKey(item)) !== rowKey))
+      setSofascoreInputs((prev) => {
+        const next = { ...prev }
+        delete next[rowKey]
+        return next
+      })
+    } catch (err) {
+      setSofascoreStatus({ type: 'error', message: err?.message || 'Failed to delete supplemental loan.' })
+    } finally {
+      setSofascoreUpdatingKey(null)
+    }
+  }, [ensureAdminSession])
+
+  const loadSubscriberStats = useCallback(async () => {
+    const startedAt = Date.now()
+    const debugRequestId = (typeof crypto !== 'undefined' && crypto.randomUUID)
+      ? crypto.randomUUID()
+      : `sub-stats-${startedAt.toString(36)}-${Math.random().toString(36).slice(2, 8)}`
+    const params = {
+      search: subscriberSearch,
+      sort: subscriberSort
+    }
+    console.info(`[subscriber-stats:${debugRequestId}] fetching`, params)
+    setSubscriberStatsLoading(true)
+    try {
+      ensureAdminSession()
+      const data = await APIService.getSubscriberStats(params, { requestId: debugRequestId })
+      setSubscriberStats(data || { teams: [], total_subscribers: 0 })
+      console.info(`[subscriber-stats:${debugRequestId}] success`, {
+        durationMs: Date.now() - startedAt,
+        teamCount: data?.teams?.length ?? 0,
+        totalSubscribers: data?.total_subscribers ?? 0,
+        serverRequestId: data?.request_id,
+      })
+    } catch (err) {
+      const duration = Date.now() - startedAt
+      const serverDetail = typeof err?.body === 'string'
+        ? err.body
+        : err?.body?.detail || err?.body?.error || err?.body?.message
+      const serverRequestId = err?.body?.request_id || err?.body?.reference
+      console.error(`[subscriber-stats:${debugRequestId}] failed`, {
+        params,
+        durationMs: duration,
+        status: err?.status,
+        serverRequestId,
+        body: err?.body,
+        message: err?.message,
+        stack: err?.stack,
+      })
+      const readableDetail = serverDetail || err?.message
+      const messageText = [
+        'Failed to load subscriber statistics',
+        readableDetail ? `(${readableDetail})` : null,
+        serverRequestId ? `ref ${serverRequestId}` : `ref ${debugRequestId}`
+      ].filter(Boolean).join(' ')
+      setMessage({ type: 'error', text: messageText })
+    } finally {
+      setSubscriberStatsLoading(false)
+    }
+  }, [ensureAdminSession, subscriberSearch, subscriberSort])
+
+  const handleToggleNewsletterStatus = useCallback(async (teamId, currentStatus) => {
+    setToggleStatusBusy((prev) => ({ ...prev, [teamId]: true }))
+    try {
+      ensureAdminSession()
+      await APIService.toggleNewsletterStatus(teamId, !currentStatus)
+      // Reload stats
+      await loadSubscriberStats()
+      setMessage({ type: 'success', text: 'Newsletter status updated successfully' })
+    } catch (err) {
+      console.error('Failed to toggle newsletter status:', err)
+      setMessage({ type: 'error', text: 'Failed to update newsletter status' })
+    } finally {
+      setToggleStatusBusy((prev) => ({ ...prev, [teamId]: false }))
+    }
+  }, [ensureAdminSession, loadSubscriberStats])
+
+  // Load subscriber stats when tab changes to newsletters
+  useEffect(() => {
+    if (activeTab === 'newsletters' && hasAdminAccess) {
+      loadSubscriberStats()
+    }
+  }, [activeTab, hasAdminAccess, loadSubscriberStats])
 
   return (
     <div className="max-w-6xl mx-auto py-6 sm:px-6 lg:px-8">
@@ -3762,22 +3391,22 @@ function AdminPage() {
                   ? (
                     authToken
                       ? (
-                          <Button
-                            size="sm"
-                            variant="outline"
-                            onClick={() => {
-                              triggerLogout({ clearAdminKey: true })
-                              setIsAdmin(false)
-                            }}
-                          >
-                            Log out
-                          </Button>
-                        )
+                        <Button
+                          size="sm"
+                          variant="outline"
+                          onClick={() => {
+                            triggerLogout({ clearAdminKey: true })
+                            setIsAdmin(false)
+                          }}
+                        >
+                          Log out
+                        </Button>
+                      )
                       : (
-                          <Button size="sm" onClick={openLoginModal}>
-                            <LogIn className="mr-1 h-4 w-4" /> Sign in as admin
-                          </Button>
-                        )
+                        <Button size="sm" onClick={openLoginModal}>
+                          <LogIn className="mr-1 h-4 w-4" /> Sign in as admin
+                        </Button>
+                      )
                   ) : null}
                 {hasAdminToken && !hasStoredKey && !editingKey && (
                   <Button size="sm" variant="outline" onClick={startEditingKey}>
@@ -3789,2255 +3418,3028 @@ function AdminPage() {
           </div>
 
           {hasAdminToken && (
-          <div id="admin-api" className="rounded-lg border bg-white/90 p-4 shadow-sm space-y-4">
-            <div className="flex items-start justify-between gap-3">
-              <div>
-                <h2 className="text-lg font-semibold flex items-center gap-2">
-                  <KeyRound className="h-4 w-4 text-blue-600" />
-                  API Key
-                </h2>
-                <p className="text-sm text-muted-foreground">
-                  Stored locally; only sent when you trigger an admin action.
-                </p>
+            <div id="admin-api" className="rounded-lg border bg-white/90 p-4 shadow-sm space-y-4">
+              <div className="flex items-start justify-between gap-3">
+                <div>
+                  <h2 className="text-lg font-semibold flex items-center gap-2">
+                    <KeyRound className="h-4 w-4 text-blue-600" />
+                    API Key
+                  </h2>
+                  <p className="text-sm text-muted-foreground">
+                    Stored locally; only sent when you trigger an admin action.
+                  </p>
+                </div>
+                {hasStoredKey && !editingKey && (
+                  <Button size="sm" variant="ghost" type="button" onClick={() => setShowKeyValue(v => !v)}>
+                    {showKeyValue ? 'Hide key' : 'Reveal key'}
+                  </Button>
+                )}
               </div>
-              {hasStoredKey && !editingKey && (
-                <Button size="sm" variant="ghost" type="button" onClick={() => setShowKeyValue(v => !v)}>
-                  {showKeyValue ? 'Hide key' : 'Reveal key'}
-                </Button>
+              {hasStoredKey && !editingKey ? (
+                <div className="rounded-md border bg-muted/40 p-3 flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+                  <code className="font-mono text-sm break-all">
+                    {showKeyValue ? adminKey : maskedKey}
+                  </code>
+                  <div className="flex flex-wrap gap-2">
+                    <Button size="sm" variant="secondary" type="button" onClick={startEditingKey}>Replace</Button>
+                    <Button size="sm" variant="ghost" type="button" onClick={clearKey}>Clear</Button>
+                  </div>
+                </div>
+              ) : (
+                <form
+                  className="space-y-3"
+                  onSubmit={async (event) => {
+                    event.preventDefault()
+                    await saveKey()
+                  }}
+                >
+                  <div className="space-y-2">
+                    <Label htmlFor="admin-key-input" className="text-sm font-medium">Admin API key</Label>
+                    <Input
+                      id="admin-key-input"
+                      type={showKeyValue ? 'text' : 'password'}
+                      value={adminKeyInput}
+                      onChange={(e) => setAdminKeyInput(e.target.value)}
+                      placeholder="Paste the admin API key"
+                      autoComplete="off"
+                    />
+                  </div>
+                  <div className="flex flex-wrap items-center gap-2">
+                    <Button type="submit" size="sm" disabled={validatingKey}>
+                      {validatingKey ? 'Validating…' : 'Save key'}
+                    </Button>
+                    {hasStoredKey && (
+                      <Button
+                        type="button"
+                        size="sm"
+                        variant="ghost"
+                        onClick={() => {
+                          setEditingKey(false)
+                          setAdminKeyInput('')
+                          setShowKeyValue(false)
+                        }}
+                      >
+                        Cancel
+                      </Button>
+                    )}
+                    <Button type="button" size="sm" variant="ghost" onClick={() => setShowKeyValue(v => !v)}>
+                      {showKeyValue ? 'Hide' : 'Show'}
+                    </Button>
+                  </div>
+                </form>
               )}
             </div>
-            {hasStoredKey && !editingKey ? (
-              <div className="rounded-md border bg-muted/40 p-3 flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
-                <code className="font-mono text-sm break-all">
-                  {showKeyValue ? adminKey : maskedKey}
-                </code>
-                <div className="flex flex-wrap gap-2">
-                  <Button size="sm" variant="secondary" type="button" onClick={startEditingKey}>Replace</Button>
-                  <Button size="sm" variant="ghost" type="button" onClick={clearKey}>Clear</Button>
-                </div>
-              </div>
-            ) : (
-              <form
-                className="space-y-3"
-                onSubmit={async (event) => {
-                  event.preventDefault()
-                  await saveKey()
-                }}
-              >
-                <div className="space-y-2">
-                  <Label htmlFor="admin-key-input" className="text-sm font-medium">Admin API key</Label>
-                  <Input
-                    id="admin-key-input"
-                    type={showKeyValue ? 'text' : 'password'}
-                    value={adminKeyInput}
-                    onChange={(e) => setAdminKeyInput(e.target.value)}
-                    placeholder="Paste the admin API key"
-                    autoComplete="off"
-                  />
-                </div>
-                <div className="flex flex-wrap items-center gap-2">
-                  <Button type="submit" size="sm" disabled={validatingKey}>
-                    {validatingKey ? 'Validating…' : 'Save key'}
-                  </Button>
-                  {hasStoredKey && (
-                    <Button
-                      type="button"
-                      size="sm"
-                      variant="ghost"
-                      onClick={() => {
-                        setEditingKey(false)
-                        setAdminKeyInput('')
-                        setShowKeyValue(false)
-                      }}
-                    >
-                      Cancel
-                    </Button>
-                  )}
-                  <Button type="button" size="sm" variant="ghost" onClick={() => setShowKeyValue(v => !v)}>
-                    {showKeyValue ? 'Hide' : 'Show'}
-                  </Button>
-                </div>
-              </form>
-            )}
-          </div>
           )}
         </div>
 
         {hasAdminAccess ? (
           <>
-          <div className="sticky top-2 z-10 bg-white/80 backdrop-blur border rounded p-2 flex flex-wrap gap-2">
-            {adminQuickLinks.map((link) => {
-              const button = (
-                <Button size="sm" variant="outline">{link.label}</Button>
-              )
-              if (link.spa) {
-                return (
-                  <Link key={link.label} to={link.href}>
-                    {button}
-                  </Link>
-                )
-              }
-              if (link.external) {
-                return (
-                  <a key={link.label} href={link.href} target="_blank" rel="noreferrer">
-                    {button}
-                  </a>
-                )
-              }
-              return (
-                <a key={link.label} href={link.href}>
-                  {button}
-                </a>
-              )
-            })}
-          </div>
-          <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-          <div id="admin-runs" className="border rounded p-4">
-            <h2 className="font-semibold mb-3">Runs</h2>
-            <div className="flex gap-2 items-center">
-              <input type="date" className="border rounded p-2" value={runDate} onChange={e=>setRunDate(e.target.value)} />
-              <Button onClick={()=>runAll(false)} disabled={running}>
-                <span className="inline-flex items-center gap-2">
-                  {running && <Loader2 className="h-4 w-4 animate-spin" />}
-                  {running ? 'Running…' : 'Run All'}
-                </span>
-              </Button>
-              {running && (
-                <span className="text-xs text-muted-foreground">Processing newsletter generation…</span>
+            <Tabs value={activeTab} onValueChange={handleTabChange} className="w-full">
+              {!hideTabs && (
+                <TabsList
+                  className="grid w-full mb-4"
+                  style={{ gridTemplateColumns: `repeat(${adminTabs.length}, minmax(0, 1fr))` }}
+                >
+                  {adminTabs.includes('newsletters') && <TabsTrigger value="newsletters">Newsletters</TabsTrigger>}
+                  {adminTabs.includes('loans') && <TabsTrigger value="loans">Loans</TabsTrigger>}
+                  {adminTabs.includes('tools') && <TabsTrigger value="tools">Tools</TabsTrigger>}
+                  {adminTabs.includes('settings') && <TabsTrigger value="settings">Settings</TabsTrigger>}
+                </TabsList>
               )}
-            </div>
-            <div className="mt-4">
-              <div className="text-sm font-semibold mb-2">Run Specific Teams</div>
-              <TeamMultiSelect
-                teams={runTeams}
-                value={selectedRunTeams}
-                onChange={setSelectedRunTeams}
-                placeholder="Search and select teams…"
-              />
-              <div id="admin-seed" className="mt-3 grid grid-cols-1 md:grid-cols-3 gap-2">
-                <div className="flex flex-col">
-                  <span className="text-xs text-muted-foreground">Seed season (YYYY)</span>
-                  <input
-                    className="border rounded p-2 text-sm"
-                    placeholder="2025"
-                    inputMode="numeric"
-                    pattern="[0-9]*"
-                    value={seedSeason}
-                    onChange={(e)=>{ const y=(e.target.value||'').replace(/[^0-9]/g,'').slice(0,4); setSeedSeason(y) }}
-                  />
-                </div>
-                <div className="flex items-end">
-                  <Button size="sm" variant="outline" onClick={async () => {
-                    const y = parseInt((seedSeason || (runDate||'').slice(0,4)),10)
-                    if (!y) { setTeamRunMsg({ type:'error', text:'Enter a valid season year'}); return }
-                    try{
-                      setTeamRunBusy(true); setTeamRunMsg(null)
-                      const res = await APIService.request('/admin/loans/seed-top5', { method:'POST', body: JSON.stringify({ season: y, overwrite: true }) }, { admin: true })
-                      setTeamRunMsg({ type: 'success', text: `Seeded ${res.created} players (skipped ${res.skipped}) for ${res.season}` })
-                      await refreshLoans()
-                      try {
-                        await refreshRunHistory()
-                      } catch (error) {
-                        console.warn('Failed to refresh history after seed', error)
-                      }
-                    } catch (error) {
-                      const baseError = error?.body?.error || error.message || 'Unknown error'
-                      const detail = error?.body?.detail || (error?.body?.reference ? `Reference: ${error.body.reference}` : '')
-                      const detailText = detail ? ` — ${detail}` : ''
-                      setTeamRunMsg({
-                        type:'error',
-                        text: `Seed failed: ${baseError}${detailText}`
-                      })
-                    }
-                    finally{ setTeamRunBusy(false) }
-                  }} disabled={teamRunBusy}>Seed Top-5 Loans</Button>
-                </div>
-                <div className="flex items-end">
-                  <Button size="sm" variant="ghost" onClick={async () => {
-                    const y = parseInt((seedSeason || (runDate||'').slice(0,4)),10)
-                    if (!y) { setTeamRunMsg({ type:'error', text:'Enter a valid season year'}); return }
-                    try{
-                      setTeamRunBusy(true); setTeamRunMsg(null)
-                      const res = await APIService.request('/admin/loans/seed-top5', { method:'POST', body: JSON.stringify({ season: y, dry_run: true }) }, { admin: true })
-                      const wouldCreate = (res.details||[]).filter(d=>d.status==='created').length
-                      setTeamRunMsg({ type: 'success', text: `Dry-run: would create ${wouldCreate} of ${res.candidates}` })
-                      try {
-                        await refreshRunHistory()
-                      } catch (error) {
-                        console.warn('Failed to refresh history after dry-run', error)
-                      }
-                    } catch (error) {
-                      const baseError = error?.body?.error || error.message || 'Unknown error'
-                      const detail = error?.body?.detail || (error?.body?.reference ? `Reference: ${error.body.reference}` : '')
-                      const detailText = detail ? ` — ${detail}` : ''
-                      setTeamRunMsg({
-                        type:'error',
-                        text: `Dry-run failed: ${baseError}${detailText}`
-                      })
-                    }
-                    finally{ setTeamRunBusy(false) }
-                  }} disabled={teamRunBusy}>Dry-run</Button>
-                </div>
-              </div>
-              <div className="mt-2 flex gap-2 items-center flex-wrap">
-                <Button size="sm" onClick={async ()=>{
-                  if (!selectedRunTeams.length) return
-                  setTeamRunBusy(true); setTeamRunMsg(null)
-                  const d = runDate || new Date().toISOString().slice(0,10)
-                  let ok=0, errs=0
-                  for (const tid of selectedRunTeams) {
-                    try {
-                      await APIService.generateNewsletter({ team_id: tid, target_date: d, type: 'weekly' })
-                      ok++
-                    } catch {
-                      errs++
-                    }
-                  }
-                  setTeamRunMsg({ type: errs? 'error':'success', text: `OpenAI run: ${ok} ok, ${errs} errors` })
-                  setTeamRunBusy(false)
-                }} disabled={teamRunBusy || selectedRunTeams.length===0}>Run Selected (OpenAI)</Button>
-                <Button size="sm" variant="secondary" onClick={async ()=>{
-                  const y = parseInt((seedSeason || (runDate||'').slice(0,4)),10)
-                  if (!y) { setTeamRunMsg({ type:'error', text:'Enter a valid season year above'}); return }
-                  if (!selectedRunTeams.length) return
-                  setTeamRunBusy(true); setTeamRunMsg(null)
-                  let created=0, errs=0
-                  for (const dbId of selectedRunTeams) {
-                    try {
-                      const res = await APIService.request('/admin/loans/seed-team', { method:'POST', body: JSON.stringify({ season: y, team_db_id: dbId, overwrite: true }) }, { admin: true })
-                      created += (res.created||0)
-                    } catch {
-                      errs++
-                    }
-                  }
-                  setTeamRunMsg({ type: errs? 'error':'success', text: `Seeded ${created} players across ${selectedRunTeams.length} team(s)` })
-                  setTeamRunBusy(false)
-                  await refreshLoans()
-                  try {
-                    await refreshRunHistory()
-                  } catch (error) {
-                    console.warn('Failed to refresh history after team seed', error)
-                  }
-                }} disabled={teamRunBusy || selectedRunTeams.length===0}>Seed Selected Team(s)</Button>
-                {(teamRunBusy || running) && <Loader2 className="h-4 w-4 animate-spin text-muted-foreground" />}
-                {(teamRunBusy || running) && <span className="text-xs text-muted-foreground">Working…</span>}
-              </div>
-              {teamRunMsg && (
-                <div className={`mt-2 p-2 rounded text-sm ${teamRunMsg.type==='error'?'bg-red-100 text-red-700':'bg-green-100 text-green-700'}`}>{teamRunMsg.text}</div>
-              )}
-              <div className="mt-4">
-                <div className="flex items-center justify-between">
-                  <div className="text-sm font-semibold">Recent Runs</div>
-                  <Button size="sm" variant="ghost" onClick={refreshRunHistory}>Refresh</Button>
-                </div>
-                {runHistory.length === 0 ? (
-                  <div className="text-xs text-muted-foreground">No recent runs.</div>
-                ) : (
-                  <div className="mt-2 grid grid-cols-1 md:grid-cols-2 gap-2">
-                    <div className="border rounded">
-                      <div className="px-2 py-1 text-xs font-semibold bg-gray-50 border-b">Newsletter Runs</div>
-                      <div className="max-h-48 overflow-auto">
-                        <table className="w-full text-xs">
-                          <thead>
-                            <tr className="text-left">
-                              <th className="p-2">Time</th>
-                              <th className="p-2">Info</th>
-                            </tr>
-                          </thead>
-                          <tbody>
-                            {runHistory.filter(r => (r.kind||'').startsWith('newsletter')).slice(0,20).map((r, i) => (
-                              <tr key={i} className="border-t">
-                                <td className="p-2 whitespace-nowrap">{r.ts?.replace('T',' ').slice(0,19) || ''}</td>
-                                <td className="p-2 truncate">{r.message || r.text || r.detail || ''}</td>
-                              </tr>
-                            ))}
-                          </tbody>
-                        </table>
+
+              <TabsContent value="newsletters" className="space-y-6">
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+                  {/* Newsletter Generation Card */}
+                  <Card id="admin-runs" className="md:col-span-2">
+                    <CardHeader>
+                      <CardTitle className="flex items-center justify-between">
+                        <span>Newsletter Generation</span>
+                        {running && (
+                          <Badge variant="secondary" className="flex items-center gap-1">
+                            <Loader2 className="h-3 w-3 animate-spin" />
+                            Running…
+                          </Badge>
+                        )}
+                      </CardTitle>
+                      <CardDescription>
+                        Generate weekly newsletters for selected teams or all teams with active loans
+                      </CardDescription>
+                    </CardHeader>
+                    <CardContent className="space-y-4">
+                      {/* Date Selection */}
+                      <div className="flex flex-col gap-2">
+                        <Label htmlFor="run-date">Target Date</Label>
+                        <Input
+                          id="run-date"
+                          type="date"
+                          value={runDate}
+                          onChange={(e) => setRunDate(e.target.value)}
+                          className="w-full max-w-xs"
+                        />
                       </div>
-                    </div>
-                    <div className="border rounded">
-                      <div className="px-2 py-1 text-xs font-semibold bg-gray-50 border-b">Seeding Runs</div>
-                      <div className="max-h-48 overflow-auto">
-                        <table className="w-full text-xs">
-                          <thead>
-                            <tr className="text-left">
-                              <th className="p-2">Time</th>
-                              <th className="p-2">Type</th>
-                              <th className="p-2">Details</th>
-                            </tr>
-                          </thead>
-                          <tbody>
-                            {runHistory.filter(r => ['seed-top5','seed-team','seed-top5-dry'].includes(r.kind)).slice(0,20).map((r, i) => (
-                              <tr key={i} className="border-t">
-                                <td className="p-2 whitespace-nowrap">{r.ts?.replace('T',' ').slice(0,19) || ''}</td>
-                                <td className="p-2 whitespace-nowrap">{r.kind}</td>
-                                <td className="p-2 truncate">
-                                  {r.season ? `Szn ${r.season}` : ''} {r.window_key ? `• ${r.window_key}` : ''} {r.team_db_id ? `• team_db_id=${r.team_db_id}` : ''} {r.api_team_id ? `• api_id=${r.api_team_id}` : ''}
-                                  {r.message ? ` • ${r.message}` : ''}
-                                </td>
-                              </tr>
-                            ))}
-                          </tbody>
-                        </table>
+
+                      {/* Team Selection */}
+                      <div className="space-y-2">
+                        <div className="flex items-center justify-between">
+                          <Label>Select Teams</Label>
+                          {selectedRunTeams.length > 0 && (
+                            <div className="flex items-center gap-2">
+                              <Badge variant="secondary">{selectedRunTeams.length} selected</Badge>
+                              <Button
+                                size="sm"
+                                variant="ghost"
+                                onClick={() => setSelectedRunTeams([])}
+                                disabled={running || teamRunBusy}
+                              >
+                                Clear
+                              </Button>
+                            </div>
+                          )}
+                        </div>
+                        <TeamMultiSelect
+                          teams={runTeams}
+                          value={selectedRunTeams}
+                          onChange={setSelectedRunTeams}
+                          placeholder="Search and select teams…"
+                          disabled={running || teamRunBusy}
+                        />
+                        {selectedRunTeams.length === 0 && (
+                          <Alert>
+                            <AlertCircle className="h-4 w-4" />
+                            <AlertDescription>
+                              Select at least one team to generate newsletters, or use "Generate for All Teams" below
+                            </AlertDescription>
+                          </Alert>
+                        )}
+                      </div>
+
+                      {/* Action Buttons */}
+                      <div className="flex flex-col gap-2 pt-2 border-t">
+                        <div className="flex items-center gap-2 flex-wrap">
+                          <Button
+                            onClick={async () => {
+                              if (!selectedRunTeams.length) return
+                              setTeamRunBusy(true)
+                              setTeamRunMsg(null)
+                              const d = runDate || new Date().toISOString().slice(0, 10)
+                              let ok = 0, errs = 0
+                              for (const tid of selectedRunTeams) {
+                                try {
+                                  await APIService.generateNewsletter({ team_id: tid, target_date: d, type: 'weekly' })
+                                  ok++
+                                } catch {
+                                  errs++
+                                }
+                              }
+                              setTeamRunMsg({ type: errs ? 'error' : 'success', text: `Generated: ${ok} ok, ${errs} errors` })
+                              setTeamRunBusy(false)
+                            }}
+                            disabled={teamRunBusy || selectedRunTeams.length === 0 || running}
+                            size="default"
+                          >
+                            {teamRunBusy ? (
+                              <>
+                                <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                                Generating…
+                              </>
+                            ) : (
+                              <>
+                                Generate for Selected Teams ({selectedRunTeams.length})
+                              </>
+                            )}
+                          </Button>
+
+                          <Button
+                            onClick={handleRunAllClick}
+                            variant="destructive"
+                            disabled={running || teamRunBusy}
+                            size="default"
+                          >
+                            {running ? (
+                              <>
+                                <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                                Running…
+                              </>
+                            ) : (
+                              'Generate for All Teams'
+                            )}
+                          </Button>
+                        </div>
+                        {running && (
+                          <Alert>
+                            <Loader2 className="h-4 w-4 animate-spin" />
+                            <AlertDescription>
+                              Processing newsletter generation for all teams. This process cannot be cancelled but can be paused.
+                            </AlertDescription>
+                          </Alert>
+                        )}
+                      </div>
+
+                      {/* Results/Status Messages */}
+                      {teamRunMsg && (
+                        <Alert variant={teamRunMsg.type === 'error' ? 'destructive' : 'default'}>
+                          <AlertDescription>{teamRunMsg.text}</AlertDescription>
+                        </Alert>
+                      )}
+
+                      {/* Run History */}
+                      <div className="mt-4 space-y-2">
+                        <div className="flex items-center justify-between">
+                          <Label>Recent Runs</Label>
+                          <Button size="sm" variant="ghost" onClick={refreshRunHistory} disabled={running}>
+                            Refresh
+                          </Button>
+                        </div>
+                        {runHistory.length === 0 ? (
+                          <p className="text-sm text-muted-foreground">No recent runs.</p>
+                        ) : (
+                          <div className="grid grid-cols-1 md:grid-cols-2 gap-2">
+                            <div className="border rounded">
+                              <div className="px-2 py-1 text-xs font-semibold bg-gray-50 border-b">Newsletter Runs</div>
+                              <div className="max-h-48 overflow-auto">
+                                <table className="w-full text-xs">
+                                  <thead>
+                                    <tr className="text-left">
+                                      <th className="p-2">Time</th>
+                                      <th className="p-2">Info</th>
+                                    </tr>
+                                  </thead>
+                                  <tbody>
+                                    {runHistory.filter(r => (r.kind || '').startsWith('newsletter')).slice(0, 20).map((r, i) => (
+                                      <tr key={i} className="border-t">
+                                        <td className="p-2 whitespace-nowrap">{r.ts?.replace('T', ' ').slice(0, 19) || ''}</td>
+                                        <td className="p-2 truncate">{r.message || r.text || r.detail || ''}</td>
+                                      </tr>
+                                    ))}
+                                  </tbody>
+                                </table>
+                              </div>
+                            </div>
+                            <div className="border rounded">
+                              <div className="px-2 py-1 text-xs font-semibold bg-gray-50 border-b">Seeding Runs</div>
+                              <div className="max-h-48 overflow-auto">
+                                <table className="w-full text-xs">
+                                  <thead>
+                                    <tr className="text-left">
+                                      <th className="p-2">Time</th>
+                                      <th className="p-2">Type</th>
+                                      <th className="p-2">Details</th>
+                                    </tr>
+                                  </thead>
+                                  <tbody>
+                                    {runHistory.filter(r => ['seed-top5', 'seed-team', 'seed-top5-dry'].includes(r.kind)).slice(0, 20).map((r, i) => (
+                                      <tr key={i} className="border-t">
+                                        <td className="p-2 whitespace-nowrap">{r.ts?.replace('T', ' ').slice(0, 19) || ''}</td>
+                                        <td className="p-2 whitespace-nowrap">{r.kind}</td>
+                                        <td className="p-2 truncate">
+                                          {r.season ? `Szn ${r.season}` : ''} {r.window_key ? `• ${r.window_key}` : ''} {r.team_db_id ? `• team_db_id=${r.team_db_id}` : ''} {r.api_team_id ? `• api_id=${r.api_team_id}` : ''}
+                                          {r.message ? ` • ${r.message}` : ''}
+                                        </td>
+                                      </tr>
+                                    ))}
+                                  </tbody>
+                                </table>
+                              </div>
+                            </div>
+                          </div>
+                        )}
+                      </div>
+
+                      {/* Pause/Resume Toggle */}
+                      <div className="flex items-center gap-2 pt-2 border-t">
+                        <Label className="text-sm">Runs paused:</Label>
+                        <Button variant={runStatus ? 'default' : 'outline'} onClick={toggleRun} disabled={running} size="sm">
+                          {runStatus ? 'Resume' : 'Pause'}
+                        </Button>
+                      </div>
+                    </CardContent>
+                  </Card>
+
+                  {/* Subscriber Analytics Card */}
+                  <Card className="md:col-span-2">
+                    <CardHeader>
+                      <CardTitle>Team Subscriber Analytics</CardTitle>
+                      <CardDescription>
+                        Track which teams have subscribers to inform newsletter generation decisions
+                      </CardDescription>
+                    </CardHeader>
+                    <CardContent className="space-y-4">
+                      {/* Search and Sort Controls */}
+                      <div className="flex flex-col sm:flex-row gap-2">
+                        <div className="flex-1">
+                          <Input
+                            placeholder="Search teams..."
+                            value={subscriberSearch}
+                            onChange={(e) => setSubscriberSearch(e.target.value)}
+                            className="w-full"
+                          />
+                        </div>
+                        <div className="flex gap-2">
+                          <Button
+                            variant="outline"
+                            size="sm"
+                            onClick={() => setSubscriberSort(subscriberSort === 'desc' ? 'asc' : 'desc')}
+                          >
+                            Sort: {subscriberSort === 'desc' ? 'High to Low' : 'Low to High'}
+                          </Button>
+                          <Button
+                            variant="outline"
+                            size="sm"
+                            onClick={loadSubscriberStats}
+                            disabled={subscriberStatsLoading}
+                          >
+                            {subscriberStatsLoading ? <Loader2 className="h-4 w-4 animate-spin" /> : 'Refresh'}
+                          </Button>
+                        </div>
+                      </div>
+
+                      {/* Summary Stats */}
+                      <div className="flex items-center gap-4 p-3 bg-muted rounded-lg">
+                        <div className="flex items-center gap-2">
+                          <Users className="h-5 w-5 text-muted-foreground" />
+                          <div>
+                            <p className="text-sm text-muted-foreground">Total Subscribers</p>
+                            <p className="text-2xl font-bold">{subscriberStats.total_subscribers}</p>
+                          </div>
+                        </div>
+                        <div className="h-10 w-px bg-border" />
+                        <div>
+                          <p className="text-sm text-muted-foreground">Teams with Subscribers</p>
+                          <p className="text-2xl font-bold">{subscriberStats.teams.filter(t => t.subscriber_count > 0).length}</p>
+                        </div>
+                        <div className="h-10 w-px bg-border" />
+                        <div>
+                          <p className="text-sm text-muted-foreground">Active Newsletters</p>
+                          <p className="text-2xl font-bold">{subscriberStats.teams.filter(t => t.newsletters_active).length}</p>
+                        </div>
+                      </div>
+
+                      {/* Teams List */}
+                      {subscriberStatsLoading ? (
+                        <div className="flex items-center justify-center py-8">
+                          <Loader2 className="h-8 w-8 animate-spin text-muted-foreground" />
+                        </div>
+                      ) : subscriberStats.teams.length === 0 ? (
+                        <div className="text-center py-8 text-muted-foreground">
+                          No teams found
+                        </div>
+                      ) : (
+                        <div className="border rounded-lg overflow-hidden">
+                          <div className="max-h-96 overflow-y-auto">
+                            <table className="w-full text-sm">
+                              <thead className="bg-muted sticky top-0">
+                                <tr className="border-b">
+                                  <th className="px-4 py-3 text-left font-medium">Team</th>
+                                  <th className="px-4 py-3 text-center font-medium">Subscribers</th>
+                                  <th className="px-4 py-3 text-center font-medium">Active</th>
+                                  <th className="px-4 py-3 text-center font-medium">Status</th>
+                                  <th className="px-4 py-3 text-center font-medium">Actions</th>
+                                </tr>
+                              </thead>
+                              <tbody>
+                                {subscriberStats.teams
+                                  .filter(team => !subscriberSearch || team.name.toLowerCase().includes(subscriberSearch.toLowerCase()))
+                                  .map((team) => (
+                                    <tr key={team.id} className="border-b hover:bg-muted/50">
+                                      <td className="px-4 py-3">
+                                        <div className="flex items-center gap-2">
+                                          {team.logo && (
+                                            <img src={team.logo} alt="" className="h-6 w-6 object-contain" />
+                                          )}
+                                          <span className="font-medium">{team.name}</span>
+                                        </div>
+                                      </td>
+                                      <td className="px-4 py-3 text-center">
+                                        <Badge variant="secondary">
+                                          {team.active_subscriber_count} / {team.subscriber_count}
+                                        </Badge>
+                                      </td>
+                                      <td className="px-4 py-3 text-center">
+                                        {team.latest_newsletter_date ? (
+                                          <span className="text-xs text-muted-foreground">
+                                            {new Date(team.latest_newsletter_date).toLocaleDateString()}
+                                          </span>
+                                        ) : (
+                                          <span className="text-xs text-muted-foreground">—</span>
+                                        )}
+                                      </td>
+                                      <td className="px-4 py-3 text-center">
+                                        {team.newsletters_active ? (
+                                          <Badge variant="default" className="bg-green-600">Active</Badge>
+                                        ) : (
+                                          <Badge variant="outline">Inactive</Badge>
+                                        )}
+                                      </td>
+                                      <td className="px-4 py-3 text-center">
+                                        <Button
+                                          size="sm"
+                                          variant={team.newsletters_active ? "destructive" : "default"}
+                                          onClick={() => handleToggleNewsletterStatus(team.id, team.newsletters_active)}
+                                          disabled={toggleStatusBusy[team.id]}
+                                        >
+                                          {toggleStatusBusy[team.id] ? (
+                                            <Loader2 className="h-3 w-3 animate-spin" />
+                                          ) : team.newsletters_active ? (
+                                            'Deactivate'
+                                          ) : (
+                                            'Activate'
+                                          )}
+                                        </Button>
+                                      </td>
+                                    </tr>
+                                  ))}
+                              </tbody>
+                            </table>
+                          </div>
+                        </div>
+                      )}
+
+                      <Alert>
+                        <AlertCircle className="h-4 w-4" />
+                        <AlertDescription>
+                          Newsletter generation is resource-intensive. Activate newsletters for teams with sufficient subscriber interest.
+                          Users subscribing to inactive teams will be notified that newsletters will start once there's more interest.
+                        </AlertDescription>
+                      </Alert>
+                    </CardContent>
+                  </Card>
+
+                  {/* Data Seeding Card */}
+                  <Card>
+                    <CardHeader>
+                      <CardTitle>Data Seeding</CardTitle>
+                      <CardDescription>
+                        Seed loan data from API-Football for top leagues or specific teams
+                      </CardDescription>
+                    </CardHeader>
+                    <CardContent className="space-y-4">
+                      <Accordion type="single" collapsible value={seedSectionOpen ? 'seeding' : ''} onValueChange={(v) => setSeedSectionOpen(v === 'seeding')}>
+                        <AccordionItem value="seeding">
+                          <AccordionTrigger>Loan Data Seeding</AccordionTrigger>
+                          <AccordionContent className="space-y-4 pt-4">
+                            {/* Seed Top-5 */}
+                            <div className="space-y-2">
+                              <Label>Seed Top-5 Leagues</Label>
+                              <div className="grid grid-cols-1 md:grid-cols-2 gap-2">
+                                <div className="flex flex-col">
+                                  <span className="text-xs text-muted-foreground mb-1">Season (YYYY)</span>
+                                  <Input
+                                    type="text"
+                                    inputMode="numeric"
+                                    pattern="[0-9]*"
+                                    placeholder="2025"
+                                    value={seedSeason}
+                                    onChange={(e) => {
+                                      const y = (e.target.value || '').replace(/[^0-9]/g, '').slice(0, 4)
+                                      setSeedSeason(y)
+                                    }}
+                                    disabled={teamRunBusy}
+                                  />
+                                </div>
+                                <div className="flex items-end gap-2">
+                                  <Button
+                                    size="sm"
+                                    variant="outline"
+                                    onClick={async () => {
+                                      const y = parseInt((seedSeason || (runDate || '').slice(0, 4)), 10)
+                                      if (!y) {
+                                        setTeamRunMsg({ type: 'error', text: 'Enter a valid season year' })
+                                        return
+                                      }
+                                      try {
+                                        setTeamRunBusy(true)
+                                        setTeamRunMsg(null)
+                                        const res = await APIService.request('/admin/loans/seed-top5', {
+                                          method: 'POST',
+                                          body: JSON.stringify({ season: y, dry_run: true })
+                                        }, { admin: true })
+                                        const wouldCreate = (res.details || []).filter(d => d.status === 'created').length
+                                        setTeamRunMsg({ type: 'success', text: `Dry-run: would create ${wouldCreate} of ${res.candidates}` })
+                                        try {
+                                          await refreshRunHistory()
+                                        } catch (error) {
+                                          console.warn('Failed to refresh history after dry-run', error)
+                                        }
+                                      } catch (error) {
+                                        const baseError = error?.body?.error || error.message || 'Unknown error'
+                                        const detail = error?.body?.detail || (error?.body?.reference ? `Reference: ${error.body.reference}` : '')
+                                        const detailText = detail ? ` — ${detail}` : ''
+                                        setTeamRunMsg({
+                                          type: 'error',
+                                          text: `Dry-run failed: ${baseError}${detailText}`
+                                        })
+                                      } finally {
+                                        setTeamRunBusy(false)
+                                      }
+                                    }}
+                                    disabled={teamRunBusy}
+                                  >
+                                    Dry-run
+                                  </Button>
+                                  <Button
+                                    size="sm"
+                                    variant="outline"
+                                    onClick={async () => {
+                                      const y = parseInt((seedSeason || (runDate || '').slice(0, 4)), 10)
+                                      if (!y) {
+                                        setTeamRunMsg({ type: 'error', text: 'Enter a valid season year' })
+                                        return
+                                      }
+                                      try {
+                                        setTeamRunBusy(true)
+                                        setTeamRunMsg(null)
+                                        const res = await APIService.request('/admin/loans/seed-top5', {
+                                          method: 'POST',
+                                          body: JSON.stringify({ season: y, overwrite: true })
+                                        }, { admin: true })
+                                        setTeamRunMsg({ type: 'success', text: `Seeded ${res.created} players (skipped ${res.skipped}) for ${res.season}` })
+                                        await refreshLoans()
+                                        try {
+                                          await refreshRunHistory()
+                                        } catch (error) {
+                                          console.warn('Failed to refresh history after seed', error)
+                                        }
+                                      } catch (error) {
+                                        const baseError = error?.body?.error || error.message || 'Unknown error'
+                                        const detail = error?.body?.detail || (error?.body?.reference ? `Reference: ${error.body.reference}` : '')
+                                        const detailText = detail ? ` — ${detail}` : ''
+                                        setTeamRunMsg({
+                                          type: 'error',
+                                          text: `Seed failed: ${baseError}${detailText}`
+                                        })
+                                      } finally {
+                                        setTeamRunBusy(false)
+                                      }
+                                    }}
+                                    disabled={teamRunBusy}
+                                  >
+                                    Seed Top-5
+                                  </Button>
+                                </div>
+                              </div>
+                            </div>
+
+                            {/* Seed Selected Teams */}
+                            <div className="space-y-2">
+                              <Label>Seed Selected Teams</Label>
+                              <Button
+                                size="sm"
+                                variant="secondary"
+                                onClick={async () => {
+                                  const y = parseInt((seedSeason || (runDate || '').slice(0, 4)), 10)
+                                  if (!y) {
+                                    setTeamRunMsg({ type: 'error', text: 'Enter a valid season year above' })
+                                    return
+                                  }
+                                  if (!selectedRunTeams.length) {
+                                    setTeamRunMsg({ type: 'error', text: 'Select at least one team' })
+                                    return
+                                  }
+                                  setTeamRunBusy(true)
+                                  setTeamRunMsg(null)
+                                  let created = 0, errs = 0
+                                  for (const dbId of selectedRunTeams) {
+                                    try {
+                                      const res = await APIService.request('/admin/loans/seed-team', {
+                                        method: 'POST',
+                                        body: JSON.stringify({ season: y, team_db_id: dbId, overwrite: true })
+                                      }, { admin: true })
+                                      created += (res.created || 0)
+                                    } catch {
+                                      errs++
+                                    }
+                                  }
+                                  setTeamRunMsg({ type: errs ? 'error' : 'success', text: `Seeded ${created} players across ${selectedRunTeams.length} team(s)` })
+                                  setTeamRunBusy(false)
+                                  await refreshLoans()
+                                  try {
+                                    await refreshRunHistory()
+                                  } catch (error) {
+                                    console.warn('Failed to refresh history after team seed', error)
+                                  }
+                                }}
+                                disabled={teamRunBusy || selectedRunTeams.length === 0}
+                                className="w-full"
+                              >
+                                {teamRunBusy ? (
+                                  <>
+                                    <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                                    Seeding…
+                                  </>
+                                ) : (
+                                  `Seed Selected Team(s) (${selectedRunTeams.length})`
+                                )}
+                              </Button>
+                            </div>
+                          </AccordionContent>
+                        </AccordionItem>
+                      </Accordion>
+                    </CardContent>
+                  </Card>
+
+                  {/* Confirmation Dialog for Run All */}
+                  <Dialog open={confirmRunAllOpen} onOpenChange={setConfirmRunAllOpen}>
+                    <DialogContent>
+                      <DialogHeader>
+                        <DialogTitle>Confirm Generate for All Teams</DialogTitle>
+                        <DialogDescription>
+                          This will generate newsletters for ALL teams with active loans. This process cannot be cancelled once started.
+                        </DialogDescription>
+                      </DialogHeader>
+                      <div className="space-y-4 py-4">
+                        <Alert variant="destructive">
+                          <AlertCircle className="h-4 w-4" />
+                          <AlertDescription>
+                            <strong>Warning:</strong> This operation will process approximately{' '}
+                            <strong>{estimatedTeamCount !== null ? estimatedTeamCount : 'many'}</strong> teams.
+                            This may take a significant amount of time and cannot be stopped mid-process.
+                          </AlertDescription>
+                        </Alert>
+                        <div className="space-y-2">
+                          <div className="text-sm">
+                            <strong>Target Date:</strong> {runDate || new Date().toISOString().slice(0, 10)}
+                          </div>
+                          {estimatedTeamCount !== null && (
+                            <div className="text-sm text-muted-foreground">
+                              Estimated teams to process: <strong>{estimatedTeamCount}</strong>
+                            </div>
+                          )}
+                          <div className="text-sm text-muted-foreground">
+                            You can pause runs globally using the "Pause" button, but this will only stop future iterations, not the current batch.
+                          </div>
+                        </div>
+                      </div>
+                      <DialogFooter>
+                        <Button variant="outline" onClick={() => setConfirmRunAllOpen(false)}>
+                          Cancel
+                        </Button>
+                        <Button variant="destructive" onClick={runAll} disabled={running}>
+                          {running ? (
+                            <>
+                              <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                              Running…
+                            </>
+                          ) : (
+                            'Generate for All Teams'
+                          )}
+                        </Button>
+                      </DialogFooter>
+                    </DialogContent>
+                  </Dialog>
+                </div>
+              </TabsContent>
+
+              <TabsContent value="loans" className="space-y-6">
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+                  <div id="admin-players-loans" className="md:col-span-2">
+                    <Accordion type="single" collapsible className="border rounded-lg">
+                      <AccordionItem value="players-loans">
+                        <AccordionTrigger className="px-4 py-3 hover:no-underline">
+                          <div className="flex items-center justify-between w-full pr-4">
+                            <h2 className="font-semibold text-lg">Players & Loans Manager</h2>
+                            <div className="text-sm text-gray-600">
+                              {playersHubData.items.length} player{playersHubData.items.length !== 1 ? 's' : ''}
+                            </div>
+                          </div>
+                        </AccordionTrigger>
+                        <AccordionContent className="px-4 pb-4">
+                          <div className="mb-4 flex justify-end">
+                            <Button size="sm" onClick={() => setShowAddPlayerForm(!showAddPlayerForm)}>
+                              {showAddPlayerForm ? 'Cancel' : '+ Add Player'}
+                            </Button>
+                          </div>
+
+                          {/* Add Player Form */}
+                          {showAddPlayerForm && (
+                            <div className="bg-gradient-to-r from-green-50 to-blue-50 border border-green-200 rounded-lg p-4 mb-4">
+                              <h3 className="text-sm font-semibold mb-3">Create New Player</h3>
+                              <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+                                <div className="md:col-span-2">
+                                  <label className="text-xs font-medium text-gray-700 block mb-1">Player Name *</label>
+                                  <input
+                                    type="text"
+                                    className="border rounded p-2 text-sm w-full"
+                                    placeholder="Full name"
+                                    value={addPlayerForm.name}
+                                    onChange={(e) => setAddPlayerForm({ ...addPlayerForm, name: e.target.value })}
+                                  />
+                                </div>
+                                <div>
+                                  <div className="flex items-center justify-between mb-1">
+                                    <label className="text-xs font-medium text-gray-700">Primary Team (Parent Club) *</label>
+                                    <label className="flex items-center gap-1 text-xs text-gray-600 cursor-pointer">
+                                      <input
+                                        type="checkbox"
+                                        checked={addPlayerForm.use_custom_primary_team}
+                                        onChange={(e) => setAddPlayerForm({
+                                          ...addPlayerForm,
+                                          use_custom_primary_team: e.target.checked,
+                                          primary_team_id: '',
+                                          custom_primary_team_name: ''
+                                        })}
+                                      />
+                                      Custom team
+                                    </label>
+                                  </div>
+                                  {addPlayerForm.use_custom_primary_team ? (
+                                    <input
+                                      type="text"
+                                      className="border rounded p-2 text-sm w-full"
+                                      placeholder="e.g. Portsmouth, Sunderland"
+                                      value={addPlayerForm.custom_primary_team_name}
+                                      onChange={(e) => setAddPlayerForm({ ...addPlayerForm, custom_primary_team_name: e.target.value })}
+                                    />
+                                  ) : (
+                                    <TeamSelect
+                                      teams={runTeams}
+                                      value={addPlayerForm.primary_team_id}
+                                      onChange={(id) => setAddPlayerForm({ ...addPlayerForm, primary_team_id: id })}
+                                      placeholder="Select primary team..."
+                                    />
+                                  )}
+                                </div>
+                                <div>
+                                  <div className="flex items-center justify-between mb-1">
+                                    <label className="text-xs font-medium text-gray-700">Loan Team (Current Club) *</label>
+                                    <label className="flex items-center gap-1 text-xs text-gray-600 cursor-pointer">
+                                      <input
+                                        type="checkbox"
+                                        checked={addPlayerForm.use_custom_loan_team}
+                                        onChange={(e) => setAddPlayerForm({
+                                          ...addPlayerForm,
+                                          use_custom_loan_team: e.target.checked,
+                                          loan_team_id: '',
+                                          custom_loan_team_name: ''
+                                        })}
+                                      />
+                                      Custom team
+                                    </label>
+                                  </div>
+                                  {addPlayerForm.use_custom_loan_team ? (
+                                    <input
+                                      type="text"
+                                      className="border rounded p-2 text-sm w-full"
+                                      placeholder="e.g. Sheffield Wednesday, Hull City"
+                                      value={addPlayerForm.custom_loan_team_name}
+                                      onChange={(e) => setAddPlayerForm({ ...addPlayerForm, custom_loan_team_name: e.target.value })}
+                                    />
+                                  ) : (
+                                    <TeamSelect
+                                      teams={runTeams}
+                                      value={addPlayerForm.loan_team_id}
+                                      onChange={(id) => setAddPlayerForm({ ...addPlayerForm, loan_team_id: id })}
+                                      placeholder="Select loan team..."
+                                    />
+                                  )}
+                                </div>
+                                <div className="md:col-span-2">
+                                  <label className="text-xs font-medium text-gray-700 block mb-1">Season / Window *</label>
+                                  <select
+                                    className="border rounded p-2 text-sm w-full"
+                                    value={addPlayerForm.window_key}
+                                    onChange={(e) => setAddPlayerForm({ ...addPlayerForm, window_key: e.target.value })}
+                                  >
+                                    <option value="">Select season...</option>
+                                    {generateSeasonOptions().map(opt => (
+                                      <option key={opt.value} value={opt.value}>{opt.label}</option>
+                                    ))}
+                                  </select>
+                                </div>
+                                <div>
+                                  <label className="text-xs font-medium text-gray-700 block mb-1">Position</label>
+                                  <select
+                                    className="border rounded p-2 text-sm w-full"
+                                    value={addPlayerForm.position}
+                                    onChange={(e) => setAddPlayerForm({ ...addPlayerForm, position: e.target.value })}
+                                  >
+                                    <option value="">Select position...</option>
+                                    {playerFieldOptions.positions.map(pos => (
+                                      <option key={pos} value={pos}>{pos}</option>
+                                    ))}
+                                    <option value="__custom__">+ Add custom position</option>
+                                  </select>
+                                  {addPlayerForm.position === '__custom__' && (
+                                    <input
+                                      type="text"
+                                      className="border rounded p-2 text-sm w-full mt-2"
+                                      placeholder="Enter custom position"
+                                      onChange={(e) => setAddPlayerForm({ ...addPlayerForm, position: e.target.value })}
+                                      autoFocus
+                                    />
+                                  )}
+                                </div>
+                                <div>
+                                  <label className="text-xs font-medium text-gray-700 block mb-1">Nationality</label>
+                                  <select
+                                    className="border rounded p-2 text-sm w-full"
+                                    value={addPlayerForm.nationality}
+                                    onChange={(e) => setAddPlayerForm({ ...addPlayerForm, nationality: e.target.value })}
+                                  >
+                                    <option value="">Select nationality...</option>
+                                    {playerFieldOptions.nationalities.map(nat => (
+                                      <option key={nat} value={nat}>{nat}</option>
+                                    ))}
+                                    <option value="__custom__">+ Add custom nationality</option>
+                                  </select>
+                                  {addPlayerForm.nationality === '__custom__' && (
+                                    <input
+                                      type="text"
+                                      className="border rounded p-2 text-sm w-full mt-2"
+                                      placeholder="Enter custom nationality"
+                                      onChange={(e) => setAddPlayerForm({ ...addPlayerForm, nationality: e.target.value })}
+                                      autoFocus
+                                    />
+                                  )}
+                                </div>
+                                <div>
+                                  <label className="text-xs font-medium text-gray-700 block mb-1">Age</label>
+                                  <input
+                                    type="number"
+                                    className="border rounded p-2 text-sm w-full"
+                                    placeholder="Age"
+                                    value={addPlayerForm.age}
+                                    onChange={(e) => setAddPlayerForm({ ...addPlayerForm, age: e.target.value })}
+                                  />
+                                </div>
+                                <div>
+                                  <label className="text-xs font-medium text-gray-700 block mb-1">Sofascore ID</label>
+                                  <input
+                                    type="number"
+                                    className="border rounded p-2 text-sm w-full"
+                                    placeholder="Optional Sofascore ID"
+                                    value={addPlayerForm.sofascore_id}
+                                    onChange={(e) => setAddPlayerForm({ ...addPlayerForm, sofascore_id: e.target.value })}
+                                  />
+                                </div>
+                              </div>
+                              <div className="mt-3 flex gap-2">
+                                <Button size="sm" onClick={createManualPlayer}>
+                                  Create Player
+                                </Button>
+                                <Button size="sm" variant="outline" onClick={() => {
+                                  setShowAddPlayerForm(false)
+                                  setAddPlayerForm({
+                                    name: '',
+                                    firstname: '',
+                                    lastname: '',
+                                    position: '',
+                                    nationality: '',
+                                    age: '',
+                                    sofascore_id: '',
+                                    primary_team_id: '',
+                                    loan_team_id: '',
+                                    window_key: '',
+                                    use_custom_primary_team: false,
+                                    custom_primary_team_name: '',
+                                    use_custom_loan_team: false,
+                                    custom_loan_team_name: ''
+                                  })
+                                }}>
+                                  Cancel
+                                </Button>
+                              </div>
+                            </div>
+                          )}
+
+                          {/* Filters Section */}
+                          <div className="bg-gray-50 border rounded-lg p-4 mb-4">
+                            <div className="flex items-center justify-between mb-3">
+                              <h3 className="font-medium text-sm">Filters</h3>
+                              <div className="flex gap-2">
+                                <Button size="sm" variant="outline" onClick={applyPlayersHubFilters}>
+                                  Apply Filters
+                                </Button>
+                                <Button size="sm" variant="ghost" onClick={resetPlayersHubFilters}>
+                                  Reset
+                                </Button>
+                              </div>
+                            </div>
+                            <div className="grid grid-cols-1 md:grid-cols-5 gap-3">
+                              <div>
+                                <label className="text-xs font-medium text-gray-700 block mb-1">Team</label>
+                                <TeamSelect
+                                  teams={runTeams}
+                                  value={playersHubFilters.team_id}
+                                  onChange={(id) => setPlayersHubFilters({ ...playersHubFilters, team_id: id })}
+                                  placeholder="Filter by team..."
+                                />
+                              </div>
+                              <div>
+                                <label className="text-xs font-medium text-gray-700 block mb-1">Player Name</label>
+                                <input
+                                  className="border rounded p-2 text-sm w-full"
+                                  placeholder="Search by name..."
+                                  value={playersHubFilters.search}
+                                  onChange={e => setPlayersHubFilters({ ...playersHubFilters, search: e.target.value })}
+                                  onKeyPress={(e) => e.key === 'Enter' && applyPlayersHubFilters()}
+                                />
+                              </div>
+                              <div>
+                                <label className="text-xs font-medium text-gray-700 block mb-1">Position</label>
+                                <select
+                                  className="border rounded p-2 text-sm w-full"
+                                  value={playersHubFilters.position || ''}
+                                  onChange={e => setPlayersHubFilters({ ...playersHubFilters, position: e.target.value })}
+                                >
+                                  <option value="">All positions</option>
+                                  {playerFieldOptions.positions.map(pos => (
+                                    <option key={pos} value={pos}>{pos}</option>
+                                  ))}
+                                </select>
+                              </div>
+                              <div>
+                                <label className="text-xs font-medium text-gray-700 block mb-1">Sofascore ID</label>
+                                <select
+                                  className="border rounded p-2 text-sm w-full"
+                                  value={playersHubFilters.has_sofascore}
+                                  onChange={e => setPlayersHubFilters({ ...playersHubFilters, has_sofascore: e.target.value })}
+                                >
+                                  <option value="">All players</option>
+                                  <option value="true">Has Sofascore ID</option>
+                                  <option value="false">Missing Sofascore ID</option>
+                                </select>
+                              </div>
+                              <div>
+                                <label className="text-xs font-medium text-gray-700 block mb-1">Status</label>
+                                <select
+                                  className="border rounded p-2 text-sm w-full"
+                                  value={playersHubFilters.is_active || ''}
+                                  onChange={e => setPlayersHubFilters({ ...playersHubFilters, is_active: e.target.value })}
+                                >
+                                  <option value="">All</option>
+                                  <option value="true">Active only</option>
+                                  <option value="false">Inactive</option>
+                                </select>
+                              </div>
+                            </div>
+                          </div>
+
+                          {/* Bulk Actions */}
+                          {selectedPlayersForBulk.length > 0 && (
+                            <div className="bg-blue-50 border border-blue-200 rounded-lg p-3 mb-4">
+                              <div className="flex items-center justify-between">
+                                <span className="text-sm font-medium">{selectedPlayersForBulk.length} player(s) selected</span>
+                                <div className="flex gap-2">
+                                  <Button size="sm" onClick={() => setBulkSofascoreMode(!bulkSofascoreMode)}>
+                                    {bulkSofascoreMode ? 'Cancel Bulk Edit' : 'Bulk Edit Sofascore'}
+                                  </Button>
+                                  {bulkSofascoreMode && (
+                                    <Button size="sm" variant="default" onClick={bulkUpdateSofascoreIds}>
+                                      Save Bulk Updates
+                                    </Button>
+                                  )}
+                                  <Button size="sm" variant="ghost" onClick={() => setSelectedPlayersForBulk([])}>
+                                    Clear Selection
+                                  </Button>
+                                </div>
+                              </div>
+                            </div>
+                          )}
+
+                          {/* Advanced Tools (Collapsed) */}
+                          <Accordion type="single" collapsible className="mb-4">
+                            <AccordionItem value="advanced" className="border rounded-lg">
+                              <AccordionTrigger className="px-4 py-2 hover:no-underline">
+                                <span className="text-sm font-medium text-gray-700">🔧 Advanced Tools & Backfill Helpers</span>
+                              </AccordionTrigger>
+                              <AccordionContent className="px-4 pb-4">
+                                <div className="space-y-3">
+                                  <div>
+                                    <div className="text-xs font-medium text-gray-700 mb-2">Backfill Operations</div>
+                                    <div className="flex flex-wrap gap-2">
+                                      <Button size="sm" variant="outline" onClick={backfillTeamLeagues}>
+                                        Backfill Team Leagues
+                                      </Button>
+                                      <Button size="sm" variant="outline" onClick={backfillAllSeasons}>
+                                        Backfill All Seasons
+                                      </Button>
+                                    </div>
+                                  </div>
+
+                                  <div>
+                                    <div className="text-xs font-medium text-gray-700 mb-2">Missing Names Checker</div>
+                                    <div className="flex flex-wrap gap-2 items-end">
+                                      <div className="flex-1 min-w-[200px]">
+                                        <label className="text-xs text-gray-600 block mb-1">Team (optional)</label>
+                                        <TeamSelect
+                                          teams={runTeams}
+                                          value={mnTeamDbId}
+                                          onChange={setMnTeamDbId}
+                                          placeholder="Select team..."
+                                        />
+                                      </div>
+                                      <div className="w-32">
+                                        <label className="text-xs text-gray-600 block mb-1">Team API ID</label>
+                                        <input
+                                          className="border rounded p-2 text-sm w-full"
+                                          placeholder="API ID"
+                                          value={mnTeamApiId}
+                                          onChange={e => setMnTeamApiId(e.target.value)}
+                                        />
+                                      </div>
+                                      <Button size="sm" variant="outline" onClick={listMissingNames} disabled={mnBusy}>
+                                        {mnBusy ? 'Checking...' : 'Find Missing Names'}
+                                      </Button>
+                                      <Button size="sm" onClick={backfillMissingNames} disabled={mnBusy || !missingNames?.length}>
+                                        Backfill Names
+                                      </Button>
+                                    </div>
+
+                                    {missingNames && missingNames.length > 0 && (
+                                      <div className="mt-3 border rounded-lg overflow-hidden">
+                                        <div className="bg-yellow-50 px-3 py-2 text-xs font-medium text-yellow-800">
+                                          Found {missingNames.length} loans with missing names
+                                        </div>
+                                        <div className="max-h-48 overflow-auto">
+                                          <table className="min-w-full text-xs">
+                                            <thead className="bg-gray-50 sticky top-0">
+                                              <tr className="text-left">
+                                                <th className="p-2">Loan ID</th>
+                                                <th className="p-2">Player ID</th>
+                                                <th className="p-2">Name</th>
+                                                <th className="p-2">Primary Team</th>
+                                                <th className="p-2">Loan Team</th>
+                                                <th className="p-2">Window</th>
+                                              </tr>
+                                            </thead>
+                                            <tbody>
+                                              {missingNames.map(m => (
+                                                <tr key={m.id} className="border-t hover:bg-gray-50">
+                                                  <td className="p-2 whitespace-nowrap">{m.id}</td>
+                                                  <td className="p-2 whitespace-nowrap">{m.player_id}</td>
+                                                  <td className="p-2 text-gray-500 italic">{m.player_name || '(empty)'}</td>
+                                                  <td className="p-2 whitespace-nowrap">{m.primary_team_name}</td>
+                                                  <td className="p-2 whitespace-nowrap">{m.loan_team_name}</td>
+                                                  <td className="p-2 whitespace-nowrap">{m.window_key}</td>
+                                                </tr>
+                                              ))}
+                                            </tbody>
+                                          </table>
+                                        </div>
+                                      </div>
+                                    )}
+                                  </div>
+                                </div>
+                              </AccordionContent>
+                            </AccordionItem>
+                          </Accordion>
+
+                          {/* Players Table */}
+                          {playersHubLoading ? (
+                            <div className="text-center py-8 text-gray-500">
+                              <Loader2 className="h-6 w-6 animate-spin mx-auto mb-2" />
+                              Loading players...
+                            </div>
+                          ) : playersHubData.items.length === 0 ? (
+                            <div className="text-center py-8 text-gray-500 border rounded-lg bg-gray-50">
+                              <div className="text-sm font-medium mb-1">No players found</div>
+                              <div className="text-xs">Try adjusting your filters or add a new player</div>
+                            </div>
+                          ) : (
+                            <>
+                              <div className="border rounded-lg overflow-hidden mb-4">
+                                <div className="overflow-x-auto">
+                                  <table className="min-w-full text-sm">
+                                    <thead className="bg-gray-50 border-b">
+                                      <tr className="text-left">
+                                        <th className="p-3">
+                                          <input
+                                            type="checkbox"
+                                            checked={selectedPlayersForBulk.length === playersHubData.items.length && playersHubData.items.length > 0}
+                                            onChange={toggleAllPlayersSelection}
+                                          />
+                                        </th>
+                                        <th className="p-3 font-medium">Player</th>
+                                        <th className="p-3 font-medium">Teams</th>
+                                        <th className="p-3 font-medium">Season</th>
+                                        <th className="p-3 font-medium">Sofascore ID</th>
+                                        <th className="p-3 font-medium text-center">Status</th>
+                                        <th className="p-3 font-medium text-center">Loans</th>
+                                        <th className="p-3 font-medium">Actions</th>
+                                      </tr>
+                                    </thead>
+                                    <tbody className="divide-y">
+                                      {playersHubData.items.map((player) => {
+                                        const isEditingName = Object.prototype.hasOwnProperty.call(inlinePlayerNameEdits, player.player_id)
+                                        const draftName = isEditingName ? inlinePlayerNameEdits[player.player_id] : ''
+                                        const isSavingName = !!inlinePlayerNameSaving[player.player_id]
+                                        return (
+                                          <tr key={player.player_id} className="hover:bg-gray-50">
+                                            <td className="p-3">
+                                              <input
+                                                type="checkbox"
+                                                checked={selectedPlayersForBulk.includes(player.player_id)}
+                                                onChange={() => togglePlayerSelection(player.player_id)}
+                                              />
+                                            </td>
+                                            <td className="p-3">
+                                              <div className="flex items-start gap-2">
+                                                <div className="flex-1 min-w-[200px]">
+                                                  {isEditingName ? (
+                                                    <>
+                                                      <input
+                                                        type="text"
+                                                        className="border rounded p-1 text-sm w-full max-w-xs"
+                                                        placeholder="Player name"
+                                                        value={draftName}
+                                                        onChange={(e) => setInlinePlayerNameEdits((prev) => ({ ...prev, [player.player_id]: e.target.value }))}
+                                                        disabled={isSavingName}
+                                                      />
+                                                      <div className="mt-2 flex gap-2">
+                                                        <Button
+                                                          size="sm"
+                                                          onClick={() => saveInlinePlayerNameEdit(player.player_id)}
+                                                          disabled={isSavingName}
+                                                        >
+                                                          {isSavingName && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}Save
+                                                        </Button>
+                                                        <Button
+                                                          size="sm"
+                                                          variant="ghost"
+                                                          onClick={() => cancelInlinePlayerNameEdit(player.player_id)}
+                                                          disabled={isSavingName}
+                                                        >
+                                                          Cancel
+                                                        </Button>
+                                                      </div>
+                                                    </>
+                                                  ) : (
+                                                    <div className="flex items-center gap-2">
+                                                      <div className="font-medium">{player.player_name}</div>
+                                                      <Button
+                                                        size="sm"
+                                                        variant="ghost"
+                                                        onClick={() => startInlinePlayerNameEdit(player)}
+                                                      >
+                                                        Rename
+                                                      </Button>
+                                                    </div>
+                                                  )}
+                                                  <div className="text-xs text-gray-500 mt-1">ID: {player.player_id}</div>
+                                                  {player.position && (
+                                                    <div className="text-xs text-gray-500">{player.position}</div>
+                                                  )}
+                                                </div>
+                                                {player.player_id < 0 && (
+                                                  <span className="inline-flex items-center px-1.5 py-0.5 rounded text-xs font-medium bg-green-100 text-green-800" title="Manual Player">
+                                                    M
+                                                  </span>
+                                                )}
+                                              </div>
+                                            </td>
+                                            <td className="p-3">
+                                              <div className="space-y-2">
+                                                <div>
+                                                  <div className="text-xs text-gray-600 mb-1">Parent Club</div>
+                                                  <div className="text-sm font-medium mb-1">{player.primary_team_name}</div>
+                                                  <TeamSelect
+                                                    teams={runTeams}
+                                                    value={player.primary_team_id}
+                                                    onChange={(id) => moveLoanDb({ id: player.loan_id }, 'primary', id)}
+                                                    placeholder="Change parent..."
+                                                    className="text-xs"
+                                                  />
+                                                </div>
+                                                <div>
+                                                  <div className="text-xs text-gray-600 mb-1">Loan Club</div>
+                                                  <div className="text-sm font-medium mb-1">{player.loan_team_name}</div>
+                                                  <TeamSelect
+                                                    teams={runTeams}
+                                                    value={player.loan_team_id}
+                                                    onChange={(id) => moveLoanDb({ id: player.loan_id }, 'loan', id)}
+                                                    placeholder="Change loan..."
+                                                    className="text-xs"
+                                                  />
+                                                </div>
+                                              </div>
+                                            </td>
+                                            <td className="p-3">
+                                              <div className="text-sm">
+                                                {player.loan_season || player.window_key || <span className="text-gray-400">No season</span>}
+                                              </div>
+                                            </td>
+                                            <td className="p-3">
+                                              {editingPlayerSofascore[player.player_id] !== undefined || bulkSofascoreMode && selectedPlayersForBulk.includes(player.player_id) ? (
+                                                <div className="flex gap-2 items-center">
+                                                  <input
+                                                    type="number"
+                                                    className="border rounded p-1 text-sm w-32"
+                                                    placeholder="Sofascore ID"
+                                                    value={editingPlayerSofascore[player.player_id] ?? player.sofascore_id ?? ''}
+                                                    onChange={(e) => setEditingPlayerSofascore({
+                                                      ...editingPlayerSofascore,
+                                                      [player.player_id]: e.target.value
+                                                    })}
+                                                  />
+                                                  {!bulkSofascoreMode && (
+                                                    <>
+                                                      <Button
+                                                        size="sm"
+                                                        variant="outline"
+                                                        onClick={() => updatePlayerSofascoreId(player.player_id, editingPlayerSofascore[player.player_id])}
+                                                      >
+                                                        Save
+                                                      </Button>
+                                                      <Button
+                                                        size="sm"
+                                                        variant="ghost"
+                                                        onClick={() => setEditingPlayerSofascore((prev) => {
+                                                          const next = { ...prev }
+                                                          delete next[player.player_id]
+                                                          return next
+                                                        })}
+                                                      >
+                                                        Cancel
+                                                      </Button>
+                                                    </>
+                                                  )}
+                                                </div>
+                                              ) : (
+                                                <div className="flex gap-2 items-center">
+                                                  {player.sofascore_id ? (
+                                                    <a
+                                                      href={`https://www.sofascore.com/player/_/${player.sofascore_id}`}
+                                                      target="_blank"
+                                                      rel="noopener noreferrer"
+                                                      className="text-blue-600 hover:underline text-sm"
+                                                    >
+                                                      {player.sofascore_id}
+                                                    </a>
+                                                  ) : (
+                                                    <span className="text-gray-400 text-sm">—</span>
+                                                  )}
+                                                  <Button
+                                                    size="sm"
+                                                    variant="outline"
+                                                    onClick={() => setEditingPlayerSofascore({
+                                                      ...editingPlayerSofascore,
+                                                      [player.player_id]: player.sofascore_id || ''
+                                                    })}
+                                                  >
+                                                    Edit
+                                                  </Button>
+                                                </div>
+                                              )}
+                                            </td>
+                                            <td className="p-3 text-center">
+                                              {player.has_sofascore_id ? (
+                                                <span className="inline-flex items-center px-2 py-1 rounded-full text-xs font-medium bg-green-100 text-green-800">
+                                                  ✓ Has ID
+                                                </span>
+                                              ) : (
+                                                <span className="inline-flex items-center px-2 py-1 rounded-full text-xs font-medium bg-yellow-100 text-yellow-800">
+                                                  ⚠ Missing
+                                                </span>
+                                              )}
+                                            </td>
+                                            <td className="p-3 text-center">
+                                              <span className="text-sm font-medium">{player.loan_count}</span>
+                                            </td>
+                                            <td className="p-3">
+                                              <div className="flex gap-1">
+                                                <Button
+                                                  size="sm"
+                                                  variant="outline"
+                                                  onClick={() => openEditPlayerDialog(player.player_id)}
+                                                  title="Edit player details"
+                                                >
+                                                  Edit
+                                                </Button>
+                                                <Button
+                                                  size="sm"
+                                                  variant="destructive"
+                                                  onClick={() => deletePlayer(player.player_id, player.player_name, player.loan_count)}
+                                                  title="Delete player"
+                                                >
+                                                  Delete
+                                                </Button>
+                                              </div>
+                                            </td>
+                                          </tr>
+                                        )
+                                      })}
+                                    </tbody>
+                                  </table>
+                                </div>
+                              </div>
+
+                              {/* Pagination */}
+                              {playersHubData.total_pages > 1 && (
+                                <div className="flex items-center justify-between border-t border-gray-200 pt-3">
+                                  <span className="text-sm text-gray-600">
+                                    Page {playersHubData.page} of {playersHubData.total_pages}
+                                  </span>
+                                  <div className="flex gap-2">
+                                    <Button
+                                      size="sm"
+                                      variant="outline"
+                                      onClick={() => setPlayersHubPage(Math.max(1, playersHubPage - 1))}
+                                      disabled={playersHubPage === 1 || playersHubLoading}
+                                    >
+                                      Previous
+                                    </Button>
+                                    <Button
+                                      size="sm"
+                                      variant="outline"
+                                      onClick={() => setPlayersHubPage(Math.min(playersHubData.total_pages, playersHubPage + 1))}
+                                      disabled={playersHubPage === playersHubData.total_pages || playersHubLoading}
+                                    >
+                                      Next
+                                    </Button>
+                                  </div>
+                                </div>
+                              )}
+                            </>
+                          )}
+                        </AccordionContent>
+                      </AccordionItem>
+                    </Accordion>
+                  </div>
+                  <div id="admin-supplemental-loans" className="border rounded p-4 md:col-span-2">
+                    <h2 className="font-semibold mb-3">Manual Player Entries</h2>
+                    <p className="text-sm text-gray-600 mb-4">
+                      Add players who aren't tracked by the API-Football service. Use this for loans from or to teams outside the API's coverage,
+                      or for players missing from the automated data feeds. These entries won't have automatic stats updates.
+                    </p>
+                    <div className="space-y-4">
+                      <div className="grid grid-cols-1 lg:grid-cols-3 gap-4">
+                        <div className="space-y-2">
+                          <div className="font-medium">Filters</div>
+                          <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+                            <div className="flex flex-col">
+                              <span className="text-xs text-muted-foreground">Player name</span>
+                              <input className="border rounded p-2 text-sm w-full" placeholder="e.g., Smith" value={supplementalFilters.player_name} onChange={e => setSupplementalFilters({ ...supplementalFilters, player_name: e.target.value })} />
+                            </div>
+                            <div className="flex flex-col">
+                              <span className="text-xs text-muted-foreground">Season (YYYY)</span>
+                              <input type="number" inputMode="numeric" pattern="[0-9]*" className="border rounded p-2 text-sm w-full" placeholder="2025" value={supplementalFilters.season} onChange={e => setSupplementalFilters({ ...supplementalFilters, season: e.target.value })} />
+                            </div>
+                          </div>
+                          <Button size="sm" variant="outline" className="w-full" onClick={refreshSupplementalLoans}>Apply Filters</Button>
+                        </div>
+                        <div className="space-y-2 lg:col-span-2">
+                          <div className="font-medium">Add Manual Player</div>
+                          <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-4 gap-2">
+                            <input className="border rounded p-2 text-sm" placeholder="Player name" value={supplementalForm.player_name} onChange={e => setSupplementalForm({ ...supplementalForm, player_name: e.target.value })} />
+                            <input className="border rounded p-2 text-sm" placeholder="Parent team name" value={supplementalForm.parent_team_name} onChange={e => setSupplementalForm({ ...supplementalForm, parent_team_name: e.target.value })} />
+                            <input className="border rounded p-2 text-sm" placeholder="Loan team name" value={supplementalForm.loan_team_name} onChange={e => setSupplementalForm({ ...supplementalForm, loan_team_name: e.target.value })} />
+                            <input className="border rounded p-2 text-sm" placeholder="Season (YYYY)" value={supplementalForm.season_year} onChange={e => setSupplementalForm({ ...supplementalForm, season_year: e.target.value })} />
+                          </div>
+                          <Button size="sm" onClick={createSupplementalLoan} disabled={!supplementalForm.player_name || !supplementalForm.parent_team_name || !supplementalForm.loan_team_name || !supplementalForm.season_year}>Add Manual Player</Button>
+                        </div>
+                      </div>
+                      <div className="mt-4">
+                        {supplementalLoans.length === 0 ? (
+                          <div className="text-sm text-gray-600">No manual players found. Click "Apply Filters" to load or add a new one above.</div>
+                        ) : (
+                          <div className="overflow-x-auto">
+                            <table className="min-w-full text-sm border">
+                              <thead className="bg-gray-50">
+                                <tr className="text-left border-b">
+                                  <th className="p-2">Player</th>
+                                  <th className="p-2">Parent Team</th>
+                                  <th className="p-2">Loan Team</th>
+                                  <th className="p-2">Season</th>
+                                  <th className="p-2">Actions</th>
+                                </tr>
+                              </thead>
+                              <tbody>
+                                {supplementalLoans.map((sl) => (
+                                  <tr key={sl.id} className="border-b">
+                                    <td className="p-2 whitespace-nowrap">
+                                      <div className="font-medium">{sl.player_name}</div>
+                                      <div className="text-gray-500 text-xs">ID: {sl.id}</div>
+                                    </td>
+                                    <td className="p-2">{sl.parent_team_name}</td>
+                                    <td className="p-2">{sl.loan_team_name}</td>
+                                    <td className="p-2">{sl.season_year}</td>
+                                    <td className="p-2">
+                                      <Button size="sm" variant="destructive" onClick={() => deleteSupplementalLoan(sl)}>Delete</Button>
+                                    </td>
+                                  </tr>
+                                ))}
+                              </tbody>
+                            </table>
+                          </div>
+                        )}
                       </div>
                     </div>
                   </div>
-                )}
-              </div>
-            </div>
-            <div className="mt-3 flex items-center gap-2">
-              <span className="text-sm">Runs paused:</span>
-              <Button variant={runStatus? 'default':'outline'} onClick={toggleRun} disabled={running}>{runStatus? 'Resume':'Pause'}</Button>
-            </div>
-          </div>
-          <div id="admin-players-loans" className="md:col-span-2">
-            <Accordion type="single" collapsible className="border rounded-lg">
-              <AccordionItem value="players-loans">
-                <AccordionTrigger className="px-4 py-3 hover:no-underline">
-                  <div className="flex items-center justify-between w-full pr-4">
-                    <h2 className="font-semibold text-lg">Players & Loans Manager</h2>
-                    <div className="text-sm text-gray-600">
-                      {playersHubData.items.length} player{playersHubData.items.length !== 1 ? 's' : ''}
+                </div>
+              </TabsContent>
+
+              <TabsContent value="newsletters" className="space-y-6">
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+                  <div id="admin-newsletters" className="border rounded p-4 md:col-span-2">
+                    <h2 className="font-semibold mb-3">Newsletters Manager</h2>
+                    <div className="space-y-3">
+                      <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
+                        <div className="md:col-span-1 border rounded p-2">
+                          <div className="text-xs font-semibold mb-1">Issue date (primary)</div>
+                          <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+                            <input type="date" className="border rounded p-2 text-sm" value={nlFilters.issue_start} onChange={e => setNlFilters({ ...nlFilters, issue_start: e.target.value })} />
+                            <input type="date" className="border rounded p-2 text-sm" value={nlFilters.issue_end} onChange={e => setNlFilters({ ...nlFilters, issue_end: e.target.value })} />
+                          </div>
+                        </div>
+                        <div className="md:col-span-1 border rounded p-2">
+                          <div className="text-xs font-semibold mb-1">Created date</div>
+                          <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+                            <input type="date" className="border rounded p-2 text-sm" value={nlFilters.created_start} onChange={e => setNlFilters({ ...nlFilters, created_start: e.target.value })} />
+                            <input type="date" className="border rounded p-2 text-sm" value={nlFilters.created_end} onChange={e => setNlFilters({ ...nlFilters, created_end: e.target.value })} />
+                          </div>
+                        </div>
+                        <div className="md:col-span-1 border rounded p-2">
+                          <div className="text-xs font-semibold mb-1">Week range (optional)</div>
+                          <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+                            <input type="date" className="border rounded p-2 text-sm" value={nlFilters.week_start} onChange={e => setNlFilters({ ...nlFilters, week_start: e.target.value })} />
+                            <input type="date" className="border rounded p-2 text-sm" value={nlFilters.week_end} onChange={e => setNlFilters({ ...nlFilters, week_end: e.target.value })} />
+                          </div>
+                        </div>
+                      </div>
+                      <div className="flex flex-wrap items-center gap-2">
+                        <label className="text-sm flex items-center gap-1">
+                          <span>Published only</span>
+                          <input type="checkbox" checked={nlFilters.published_only === 'true'} onChange={e => setNlFilters({ ...nlFilters, published_only: e.target.checked ? 'true' : '' })} />
+                        </label>
+                        <div className="ml-auto flex gap-2">
+                          <Button size="sm" variant="outline" onClick={refreshNewsletters}>Apply filters</Button>
+                          <Button size="sm" variant="ghost" onClick={resetNewsletterFilters}>Reset</Button>
+                        </div>
+                      </div>
                     </div>
+                    <div className="mt-4">
+                      {newslettersAdmin.length === 0 ? (
+                        <div className="text-sm text-gray-600">No newsletters.</div>
+                      ) : (
+                        <>
+                          <div className="flex flex-wrap items-center gap-2 mb-2">
+                            <label className="flex items-center gap-2 text-xs text-gray-600">
+                              <input
+                                type="checkbox"
+                                checked={allFilteredSelected}
+                                onChange={(e) => handleToggleAllFiltered(e.target.checked)}
+                              />
+                              <span>Select all filtered</span>
+                            </label>
+                            <span className="text-xs text-gray-500">Total {totalFilteredCount}</span>
+                            {allFilteredSelected && (
+                              <span className="text-xs text-gray-500">Excluding {selectedNewsletterIds.length}</span>
+                            )}
+                            <span className="text-xs text-gray-600">Selected {selectedNewsletterCount}</span>
+                            <Button
+                              size="sm"
+                              onClick={sendAdminPreviewSelected}
+                              disabled={allFilteredSelected || selectedNewsletterCount === 0 || sendSelectedBusy || bulkDeleteBusy}
+                              title={allFilteredSelected ? 'Disable “Select all filtered” to send previews.' : undefined}
+                            >
+                              {sendSelectedBusy && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}Send admin preview
+                            </Button>
+                            <Button
+                              size="sm"
+                              onClick={() => bulkPublishSelected(true)}
+                              disabled={selectedNewsletterCount === 0 || bulkPublishBusy || bulkDeleteBusy}
+                            >
+                              Publish selected
+                            </Button>
+                            <Button
+                              size="sm"
+                              variant="outline"
+                              onClick={() => bulkPublishSelected(false)}
+                              disabled={selectedNewsletterCount === 0 || bulkPublishBusy || bulkDeleteBusy}
+                            >
+                              Unpublish selected
+                            </Button>
+                            <Button
+                              size="sm"
+                              variant="destructive"
+                              onClick={deleteSelectedNewsletters}
+                              disabled={selectedNewsletterCount === 0 || bulkDeleteBusy}
+                            >
+                              {bulkDeleteBusy ? (
+                                <span className="inline-flex items-center gap-2">
+                                  <Loader2 className="h-4 w-4 animate-spin" />
+                                  Deleting…
+                                </span>
+                              ) : (
+                                'Delete selected'
+                              )}
+                            </Button>
+                            <Button
+                              size="sm"
+                              variant="ghost"
+                              onClick={clearNewsletterSelection}
+                              disabled={selectedNewsletterCount === 0 || bulkPublishBusy || bulkDeleteBusy}
+                            >
+                              Clear selection
+                            </Button>
+                            <Button
+                              size="sm"
+                              variant="outline"
+                              onClick={() => openReviewModal('manual')}
+                              disabled={newslettersAdmin.length === 0}
+                            >
+                              Review queue
+                            </Button>
+                            <Button
+                              size="sm"
+                              variant="secondary"
+                              onClick={() => openReviewModal('auto')}
+                              disabled={newslettersAdmin.length === 0}
+                            >
+                              Review & publish filtered
+                            </Button>
+                          </div>
+                          <div className="overflow-x-auto">
+                            <table className="min-w-full text-sm">
+                              <thead>
+                                <tr className="text-left border-b">
+                                  <th className="p-2 w-10">
+                                    <input
+                                      ref={pageSelectRef}
+                                      type="checkbox"
+                                      checked={allPageSelected}
+                                      onChange={(e) => togglePageSelection(e.target.checked)}
+                                      aria-label="Select newsletters on this page"
+                                    />
+                                  </th>
+                                  <th className="p-2">ID</th>
+                                  <th className="p-2">Team</th>
+                                  <th className="p-2">Title</th>
+                                  <th className="p-2">Week</th>
+                                  <th className="p-2">Published</th>
+                                  <th className="p-2">Actions</th>
+                                </tr>
+                              </thead>
+                              <tbody>
+                                {paginatedNewslettersAdmin.map(n => (
+                                  <tr key={n.id} className="border-b">
+                                    <td className="p-2 align-top">
+                                      <input
+                                        type="checkbox"
+                                        checked={allFilteredSelected ? !selectedNewsletterIdsSet.has(n.id) : selectedNewsletterIdsSet.has(n.id)}
+                                        onChange={() => toggleNewsletterSelection(n.id)}
+                                        aria-label={`Select newsletter ${n.id}`}
+                                      />
+                                    </td>
+                                    <td className="p-2 align-top text-sm text-gray-600">#{n.id}</td>
+                                    <td className="p-2 whitespace-nowrap">{n.team_name}</td>
+                                    <td className="p-2">{n.title}</td>
+                                    <td className="p-2">{n.week_start_date ? `${n.week_start_date} → ${n.week_end_date}` : ''}</td>
+                                    <td className="p-2">{n.published ? `Yes (${n.published_date?.slice(0, 10) || ''})` : 'No'}</td>
+                                    <td className="p-2">
+                                      <div className="flex flex-wrap items-center gap-2">
+                                        <Button
+                                          size="sm"
+                                          onClick={() => sendAdminPreview([n.id])}
+                                          disabled={sendPreviewBusyIds.includes(n.id) || sendSelectedBusy || bulkDeleteBusy}
+                                        >
+                                          {(sendPreviewBusyIds.includes(n.id) || sendSelectedBusy) && (
+                                            <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                                          )}
+                                          Send preview
+                                        </Button>
+                                        <Button size="sm" variant="outline" onClick={() => startEditNewsletter(n)}>View/Edit</Button>
+                                        <Button size="sm" variant="ghost" asChild>
+                                          <Link to={`/admin/newsletters/${n.id}`} className="text-blue-600 hover:underline">
+                                            Open detail
+                                          </Link>
+                                        </Button>
+                                        <Button
+                                          size="sm"
+                                          variant="destructive"
+                                          type="button"
+                                          onClick={(e) => {
+                                            e.preventDefault()
+                                            e.stopPropagation()
+                                            deleteNewsletters([n.id])
+                                          }}
+                                          disabled={deleteBusyIds.includes(n.id) || bulkDeleteBusy}
+                                        >
+                                          {(deleteBusyIds.includes(n.id) || bulkDeleteBusy) && (
+                                            <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                                          )}
+                                          Delete
+                                        </Button>
+                                      </div>
+                                    </td>
+                                  </tr>
+                                ))}
+                              </tbody>
+                            </table>
+                          </div>
+                          <div className="flex flex-wrap items-center justify-between gap-3 border-t border-gray-200 pt-4 mt-4 text-sm text-gray-600">
+                            <span>
+                              Page {adminNewsPage} of {adminTotalPages}
+                              {adminPageStart > 0 ? ` • Showing ${adminPageStart}–${adminPageEnd} of ${newslettersAdmin.length}` : ''}
+                            </span>
+                            <div className="flex gap-2">
+                              <Button
+                                variant="outline"
+                                size="sm"
+                                onClick={() => setAdminNewsPage((page) => Math.max(1, page - 1))}
+                                disabled={adminNewsPage === 1}
+                              >
+                                Previous
+                              </Button>
+                              <Button
+                                variant="outline"
+                                size="sm"
+                                onClick={() => setAdminNewsPage((page) => Math.min(adminTotalPages, page + 1))}
+                                disabled={adminNewsPage === adminTotalPages || newslettersAdmin.length === 0}
+                              >
+                                Next
+                              </Button>
+                            </div>
+                          </div>
+                        </>
+                      )}
+                    </div>
+                    <Dialog open={reviewModalOpen} onOpenChange={(open) => { if (!open) closeReviewModal() }}>
+                      <DialogContent
+                        className="w-full max-w-none p-0 lg:p-6"
+                        style={{ ...reviewModalSizing, overflow: 'auto' }}
+                      >
+                        <div className="flex h-full flex-col gap-4 p-4 lg:p-0">
+                          <DialogHeader className="px-0">
+                            <div className="flex items-center justify-between gap-3">
+                              <div>
+                                <DialogTitle>{reviewMode === 'auto' ? 'Review & publish filtered newsletters' : 'Review newsletters'}</DialogTitle>
+                                <DialogDescription>{reviewProgressLabel}</DialogDescription>
+                              </div>
+                              {reviewMode === 'auto' ? (
+                                <Badge variant="secondary">Auto publish</Badge>
+                              ) : (
+                                <Badge variant="secondary">Manual</Badge>
+                              )}
+                            </div>
+                          </DialogHeader>
+                          <div className="flex-1 overflow-auto">
+                            {reviewFinalizeBusy ? (
+                              <div className="flex h-full flex-col items-center justify-center gap-3 text-sm text-gray-600">
+                                <Loader2 className="h-6 w-6 animate-spin" />
+                                Finalizing bulk actions…
+                              </div>
+                            ) : (
+                              <div className="grid h-full grid-cols-1 gap-4 lg:grid-cols-5">
+                                <div className="flex h-full flex-col gap-3 rounded-md border bg-gray-50 p-4 lg:col-span-2">
+                                  <div className="space-y-1 overflow-y-auto">
+                                    <div className="text-sm font-semibold text-gray-800">{currentReviewItem?.title || 'Untitled newsletter'}</div>
+                                    <div className="text-xs text-gray-500">Team: {reviewDetail?.team_name || currentReviewItem?.team_name || '—'}</div>
+                                    <div className="text-xs text-gray-500">Issue date: {reviewDetail?.issue_date || currentReviewItem?.issue_date || '—'}</div>
+                                    <div className="text-xs text-gray-500">Week: {reviewDetail?.week_start_date && reviewDetail?.week_end_date ? `${reviewDetail.week_start_date} → ${reviewDetail.week_end_date}` : (currentReviewItem?.week_start_date ? `${currentReviewItem.week_start_date} → ${currentReviewItem.week_end_date}` : '—')}</div>
+                                    <div className="text-xs text-gray-500">Published: {reviewDetail?.published ? `Yes (${reviewDetail?.published_date?.slice(0, 10) || ''})` : 'No'}</div>
+                                    {reviewMode === 'auto' && (
+                                      <div className="text-xs text-gray-500">Queued skips: {reviewBatchExclude.length} • Queued deletes: {reviewBatchDelete.length}</div>
+                                    )}
+                                    <div className="text-xs text-gray-500">
+                                      Keyboard: Arrow keys or j/k to navigate, space to {reviewMode === 'auto' ? 'approve & move next' : 'publish'}.
+                                    </div>
+                                  </div>
+                                </div>
+                                <div className="flex h-full flex-col gap-3 lg:col-span-3">
+                                  <Tabs value={reviewPreviewFormat} onValueChange={changeReviewFormat} className="w-full">
+                                    <TabsList className="w-fit">
+                                      <TabsTrigger value="web">Web preview</TabsTrigger>
+                                      <TabsTrigger value="email">Email preview</TabsTrigger>
+                                    </TabsList>
+                                  </Tabs>
+                                  <div className="flex-1 overflow-auto rounded-md border bg-white p-4">
+                                    {reviewLoadingDetail ? (
+                                      <div className="flex h-full items-center justify-center gap-2 text-sm text-gray-500">
+                                        <Loader2 className="h-4 w-4 animate-spin" />
+                                        Loading newsletter…
+                                      </div>
+                                    ) : reviewPreviewFormat === 'email' ? (
+                                      reviewRenderedContent.email ? (
+                                        <div className="prose max-w-none" dangerouslySetInnerHTML={{ __html: reviewRenderedContent.email }} />
+                                      ) : reviewRenderedContent.emailError ? (
+                                        <div className="text-sm text-red-600">{reviewRenderedContent.emailError}</div>
+                                      ) : (
+                                        <div className="text-xs text-gray-500">Email preview not loaded yet.</div>
+                                      )
+                                    ) : reviewRenderedContent.web ? (
+                                      <div className="prose max-w-none" dangerouslySetInnerHTML={{ __html: reviewRenderedContent.web }} />
+                                    ) : reviewRenderedContent.webError ? (
+                                      <div className="text-sm text-red-600">{reviewRenderedContent.webError}</div>
+                                    ) : (
+                                      <div className="text-xs text-gray-500">Preview not available.</div>
+                                    )}
+                                  </div>
+                                </div>
+                              </div>
+                            )}
+                          </div>
+                          <DialogFooter className="flex flex-wrap items-center justify-between gap-3 px-0">
+                            <div className="text-xs text-muted-foreground">
+                              {currentReviewItem ? `#${currentReviewItem.id} • ${currentReviewItem.team_name || 'Unknown team'}` : 'Queue complete'}
+                            </div>
+                            <div className="flex flex-wrap gap-2">
+                              {reviewMode === 'auto' ? (
+                                <>
+                                  <Button onClick={handleApproveAndNext} disabled={reviewFinalizeBusy || reviewLoadingDetail || !currentReviewItem}>
+                                    Approve & Next
+                                  </Button>
+                                  <Button variant="outline" onClick={handleSkipReview} disabled={reviewFinalizeBusy || reviewLoadingDetail || !currentReviewItem}>
+                                    Skip
+                                  </Button>
+                                  <Button variant="destructive" onClick={handleDeleteReview} disabled={reviewFinalizeBusy || reviewLoadingDetail || !currentReviewItem}>
+                                    Delete
+                                  </Button>
+                                  <Button variant="ghost" onClick={finalizeAutoReview} disabled={reviewFinalizeBusy}>
+                                    Finish review
+                                  </Button>
+                                </>
+                              ) : (
+                                <>
+                                  <Button onClick={handlePublishReview} disabled={reviewLoadingDetail || !currentReviewItem}>
+                                    Publish
+                                  </Button>
+                                  <Button variant="outline" onClick={goToNextReview} disabled={!currentReviewItem}>
+                                    Next
+                                  </Button>
+                                  <Button variant="destructive" onClick={handleDeleteReview} disabled={reviewLoadingDetail || !currentReviewItem}>
+                                    Delete
+                                  </Button>
+                                </>
+                              )}
+                              <Button variant="ghost" onClick={closeReviewModal} disabled={reviewFinalizeBusy}>
+                                Close
+                              </Button>
+                            </div>
+                          </DialogFooter>
+                        </div>
+                      </DialogContent>
+                    </Dialog>
+                    {editingNl && (
+                      <div className="mt-4 border-t pt-4">
+                        <div className="flex items-center justify-between mb-4">
+                          <div className="font-medium">Editing: {editingNl.title}</div>
+                          <div className="flex gap-2">
+                            <Button
+                              size="sm"
+                              variant={enhancedEditorMode === 'visual' ? 'default' : 'outline'}
+                              onClick={() => setEnhancedEditorMode('visual')}
+                            >
+                              Visual Editor
+                            </Button>
+                            <Button
+                              size="sm"
+                              variant={enhancedEditorMode === 'json' ? 'default' : 'outline'}
+                              onClick={() => setEnhancedEditorMode('json')}
+                            >
+                              JSON Editor
+                            </Button>
+                          </div>
+                        </div>
+
+                        {enhancedEditorMode === 'visual' ? (
+                          <div className="space-y-4">
+                            {/* Metadata Section */}
+                            <div className="bg-gradient-to-r from-blue-50 to-gray-50 p-4 rounded-lg border border-blue-200">
+                              <h3 className="text-sm font-semibold mb-3 text-gray-900">Newsletter Metadata</h3>
+                              <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+                                <div>
+                                  <label className="text-xs text-gray-600 mb-1 block">Title</label>
+                                  <input
+                                    className="border rounded p-2 text-sm w-full"
+                                    value={editingNl.title || ''}
+                                    onChange={e => setEditingNl({ ...editingNl, title: e.target.value })}
+                                  />
+                                </div>
+                                <div>
+                                  <label className="text-xs text-gray-600 mb-1 block">Issue Date</label>
+                                  <input
+                                    type="date"
+                                    className="border rounded p-2 text-sm w-full"
+                                    value={editingNl.issue_date?.slice(0, 10) || ''}
+                                    onChange={e => setEditingNl({ ...editingNl, issue_date: e.target.value })}
+                                  />
+                                </div>
+                                <div>
+                                  <label className="text-xs text-gray-600 mb-1 block">Week Start</label>
+                                  <input
+                                    type="date"
+                                    className="border rounded p-2 text-sm w-full"
+                                    value={editingNl.week_start_date?.slice(0, 10) || ''}
+                                    onChange={e => setEditingNl({ ...editingNl, week_start_date: e.target.value })}
+                                  />
+                                </div>
+                                <div>
+                                  <label className="text-xs text-gray-600 mb-1 block">Week End</label>
+                                  <input
+                                    type="date"
+                                    className="border rounded p-2 text-sm w-full"
+                                    value={editingNl.week_end_date?.slice(0, 10) || ''}
+                                    onChange={e => setEditingNl({ ...editingNl, week_end_date: e.target.value })}
+                                  />
+                                </div>
+                                <div className="flex items-center gap-2">
+                                  <input
+                                    type="checkbox"
+                                    id="published-checkbox"
+                                    checked={!!editingNl.published}
+                                    onChange={e => setEditingNl({ ...editingNl, published: e.target.checked })}
+                                  />
+                                  <label htmlFor="published-checkbox" className="text-sm font-medium">Published</label>
+                                </div>
+                              </div>
+                            </div>
+
+                            {/* Player Cards by Section */}
+                            {(() => {
+                              try {
+                                const content = typeof editingNl.content === 'string' ? JSON.parse(editingNl.content) : (editingNl.content || {})
+                                const sections = content?.sections || []
+                                const filteredSections = sections.filter(s =>
+                                  (s?.title || '').trim().toLowerCase() !== 'what the internet is saying'
+                                )
+
+                                return (
+                                  <div className="space-y-4">
+                                    {/* Newsletter Summary */}
+                                    {content.summary && (
+                                      <div className="bg-yellow-50 p-4 rounded-lg border border-yellow-200">
+                                        <div className="text-sm font-semibold mb-2 text-gray-900">Newsletter Summary</div>
+                                        <textarea
+                                          className="w-full border rounded p-2 text-sm"
+                                          rows="3"
+                                          value={content.summary}
+                                          onChange={(e) => {
+                                            content.summary = e.target.value
+                                            setEditingNl({ ...editingNl, content: JSON.stringify(content, null, 2) })
+                                          }}
+                                        />
+                                      </div>
+                                    )}
+
+                                    {/* Highlights */}
+                                    {content.highlights && Array.isArray(content.highlights) && (
+                                      <div className="bg-amber-50 p-4 rounded-lg border border-amber-200">
+                                        <div className="text-sm font-semibold mb-2 text-gray-900">Key Highlights</div>
+                                        <div className="space-y-2">
+                                          {content.highlights.map((h, idx) => (
+                                            <div key={idx} className="flex gap-2">
+                                              <input
+                                                className="flex-1 border rounded p-2 text-sm"
+                                                value={h}
+                                                onChange={(e) => {
+                                                  content.highlights[idx] = e.target.value
+                                                  setEditingNl({ ...editingNl, content: JSON.stringify(content, null, 2) })
+                                                }}
+                                              />
+                                              <Button
+                                                size="sm"
+                                                variant="ghost"
+                                                onClick={() => {
+                                                  content.highlights.splice(idx, 1)
+                                                  setEditingNl({ ...editingNl, content: JSON.stringify(content, null, 2) })
+                                                }}
+                                              >
+                                                ✕
+                                              </Button>
+                                            </div>
+                                          ))}
+                                        </div>
+                                      </div>
+                                    )}
+
+                                    {/* Player Sections */}
+                                    {filteredSections.map((section, sectionIdx) => {
+                                      const originalSectionIdx = sections.findIndex(s => s === section)
+                                      return (
+                                        <div key={sectionIdx} className="bg-white border-2 border-gray-200 rounded-lg overflow-hidden">
+                                          <div className="bg-gradient-to-r from-gray-100 to-gray-50 px-4 py-3 border-b border-gray-200">
+                                            <div className="flex items-center justify-between">
+                                              <h3 className="font-semibold text-gray-900">{section.title || 'Untitled Section'}</h3>
+                                              <div className="text-xs text-gray-600">{section.items?.length || 0} players</div>
+                                            </div>
+                                          </div>
+                                          <div className="p-4 space-y-3">
+                                            {section.items && section.items.length > 0 ? (
+                                              section.items.map((item, itemIdx) => {
+                                                const isEditing = editingPlayerCard?.sectionIndex === originalSectionIdx && editingPlayerCard?.itemIndex === itemIdx
+                                                const playerYoutubeLink = nlYoutubeLinks.find(
+                                                  link => link.player_name === item.player_name ||
+                                                    (link.player_id && item.player_id && link.player_id === item.player_id)
+                                                )
+
+                                                return (
+                                                  <div key={itemIdx} className={`border rounded-lg p-3 ${isEditing ? 'border-blue-500 bg-blue-50' : 'border-gray-200 bg-gray-50 hover:bg-white'} transition-colors`}>
+                                                    {isEditing ? (
+                                                      <div className="space-y-3">
+                                                        <div className="grid grid-cols-2 gap-2">
+                                                          <div>
+                                                            <label className="text-xs font-medium text-gray-700">Player Name</label>
+                                                            <input
+                                                              className="w-full border rounded p-2 text-sm mt-1"
+                                                              value={editingPlayerCard.data.player_name || ''}
+                                                              onChange={(e) => setEditingPlayerCard({
+                                                                ...editingPlayerCard,
+                                                                data: { ...editingPlayerCard.data, player_name: e.target.value }
+                                                              })}
+                                                            />
+                                                          </div>
+                                                          <div>
+                                                            <label className="text-xs font-medium text-gray-700">Loan Team</label>
+                                                            <input
+                                                              className="w-full border rounded p-2 text-sm mt-1"
+                                                              value={editingPlayerCard.data.loan_team || ''}
+                                                              onChange={(e) => setEditingPlayerCard({
+                                                                ...editingPlayerCard,
+                                                                data: { ...editingPlayerCard.data, loan_team: e.target.value }
+                                                              })}
+                                                            />
+                                                          </div>
+                                                        </div>
+                                                        <div className="grid grid-cols-3 gap-2">
+                                                          <div>
+                                                            <label className="text-xs font-medium text-gray-700">Goals</label>
+                                                            <input
+                                                              type="number"
+                                                              className="w-full border rounded p-2 text-sm mt-1"
+                                                              value={editingPlayerCard.data.stats?.goals || 0}
+                                                              onChange={(e) => setEditingPlayerCard({
+                                                                ...editingPlayerCard,
+                                                                data: {
+                                                                  ...editingPlayerCard.data,
+                                                                  stats: { ...(editingPlayerCard.data.stats || {}), goals: parseInt(e.target.value) || 0 }
+                                                                }
+                                                              })}
+                                                            />
+                                                          </div>
+                                                          <div>
+                                                            <label className="text-xs font-medium text-gray-700">Assists</label>
+                                                            <input
+                                                              type="number"
+                                                              className="w-full border rounded p-2 text-sm mt-1"
+                                                              value={editingPlayerCard.data.stats?.assists || 0}
+                                                              onChange={(e) => setEditingPlayerCard({
+                                                                ...editingPlayerCard,
+                                                                data: {
+                                                                  ...editingPlayerCard.data,
+                                                                  stats: { ...(editingPlayerCard.data.stats || {}), assists: parseInt(e.target.value) || 0 }
+                                                                }
+                                                              })}
+                                                            />
+                                                          </div>
+                                                          <div>
+                                                            <label className="text-xs font-medium text-gray-700">Minutes</label>
+                                                            <input
+                                                              type="number"
+                                                              className="w-full border rounded p-2 text-sm mt-1"
+                                                              value={editingPlayerCard.data.stats?.minutes || 0}
+                                                              onChange={(e) => setEditingPlayerCard({
+                                                                ...editingPlayerCard,
+                                                                data: {
+                                                                  ...editingPlayerCard.data,
+                                                                  stats: { ...(editingPlayerCard.data.stats || {}), minutes: parseInt(e.target.value) || 0 }
+                                                                }
+                                                              })}
+                                                            />
+                                                          </div>
+                                                        </div>
+                                                        <div>
+                                                          <label className="text-xs font-medium text-gray-700">Week Summary</label>
+                                                          <textarea
+                                                            className="w-full border rounded p-2 text-sm mt-1"
+                                                            rows="3"
+                                                            value={editingPlayerCard.data.week_summary || ''}
+                                                            onChange={(e) => setEditingPlayerCard({
+                                                              ...editingPlayerCard,
+                                                              data: { ...editingPlayerCard.data, week_summary: e.target.value }
+                                                            })}
+                                                          />
+                                                        </div>
+                                                        <div className="flex gap-2 pt-2">
+                                                          <Button
+                                                            size="sm"
+                                                            onClick={() => updatePlayerInNewsletter(originalSectionIdx, itemIdx, editingPlayerCard.data)}
+                                                          >
+                                                            Save Changes
+                                                          </Button>
+                                                          <Button
+                                                            size="sm"
+                                                            variant="outline"
+                                                            onClick={() => setEditingPlayerCard(null)}
+                                                          >
+                                                            Cancel
+                                                          </Button>
+                                                        </div>
+                                                      </div>
+                                                    ) : (
+                                                      <>
+                                                        <div className="flex items-start justify-between mb-2">
+                                                          <div className="flex-1">
+                                                            <div className="flex items-center gap-2 flex-wrap">
+                                                              <span className="font-semibold text-gray-900">{item.player_name}</span>
+                                                              {item.loan_team && (
+                                                                <span className="bg-blue-100 text-blue-800 px-2 py-0.5 rounded text-xs font-medium">
+                                                                  → {item.loan_team}
+                                                                </span>
+                                                              )}
+                                                              {item.stats && (
+                                                                <div className="flex gap-1">
+                                                                  {item.stats.goals > 0 && (
+                                                                    <span className="bg-green-100 text-green-800 px-2 py-0.5 rounded text-xs font-medium">
+                                                                      {item.stats.goals}G
+                                                                    </span>
+                                                                  )}
+                                                                  {item.stats.assists > 0 && (
+                                                                    <span className="bg-purple-100 text-purple-800 px-2 py-0.5 rounded text-xs font-medium">
+                                                                      {item.stats.assists}A
+                                                                    </span>
+                                                                  )}
+                                                                  {item.stats.minutes > 0 && (
+                                                                    <span className="bg-blue-100 text-blue-800 px-2 py-0.5 rounded text-xs font-medium">
+                                                                      {item.stats.minutes}'
+                                                                    </span>
+                                                                  )}
+                                                                </div>
+                                                              )}
+                                                              {playerYoutubeLink && (
+                                                                <a
+                                                                  href={playerYoutubeLink.youtube_link}
+                                                                  target="_blank"
+                                                                  rel="noopener noreferrer"
+                                                                  className="bg-red-100 text-red-800 px-2 py-0.5 rounded text-xs font-medium hover:bg-red-200"
+                                                                >
+                                                                  🎬 Highlights
+                                                                </a>
+                                                              )}
+                                                            </div>
+                                                            {item.week_summary && (
+                                                              <p className="text-sm text-gray-700 mt-2 leading-relaxed">{item.week_summary}</p>
+                                                            )}
+                                                          </div>
+                                                          <div className="flex gap-1 ml-2">
+                                                            <Button
+                                                              size="sm"
+                                                              variant="ghost"
+                                                              onClick={() => setEditingPlayerCard({
+                                                                sectionIndex: originalSectionIdx,
+                                                                itemIndex: itemIdx,
+                                                                data: { ...item }
+                                                              })}
+                                                              title="Edit player"
+                                                            >
+                                                              ✏️
+                                                            </Button>
+                                                            <Button
+                                                              size="sm"
+                                                              variant="ghost"
+                                                              onClick={() => movePlayerInNewsletter(originalSectionIdx, itemIdx, originalSectionIdx, 'up')}
+                                                              disabled={itemIdx === 0}
+                                                              title="Move up"
+                                                            >
+                                                              ↑
+                                                            </Button>
+                                                            <Button
+                                                              size="sm"
+                                                              variant="ghost"
+                                                              onClick={() => movePlayerInNewsletter(originalSectionIdx, itemIdx, originalSectionIdx, 'down')}
+                                                              disabled={itemIdx === section.items.length - 1}
+                                                              title="Move down"
+                                                            >
+                                                              ↓
+                                                            </Button>
+                                                            <Button
+                                                              size="sm"
+                                                              variant="ghost"
+                                                              onClick={() => deletePlayerFromNewsletter(originalSectionIdx, itemIdx)}
+                                                              title="Remove player"
+                                                            >
+                                                              🗑️
+                                                            </Button>
+                                                          </div>
+                                                        </div>
+                                                      </>
+                                                    )}
+                                                  </div>
+                                                )
+                                              })
+                                            ) : (
+                                              <div className="text-center py-4 text-sm text-gray-500">
+                                                No players in this section
+                                              </div>
+                                            )}
+                                          </div>
+                                        </div>
+                                      )
+                                    })}
+                                  </div>
+                                )
+                              } catch (error) {
+                                return (
+                                  <div className="bg-red-50 border border-red-200 rounded p-4 text-sm text-red-700">
+                                    Unable to parse newsletter content. Switch to JSON Editor to fix.
+                                  </div>
+                                )
+                              }
+                            })()}
+
+                            {/* YouTube Links Section */}
+                            <div className="border rounded-lg p-4 bg-gradient-to-r from-red-50 to-pink-50">
+                              <h3 className="text-sm font-semibold mb-3 flex items-center gap-2">
+                                🎬 YouTube Links for Players
+                              </h3>
+                              <div className="mb-3 space-y-2">
+                                <div className="text-xs text-gray-600">Add YouTube highlight links to players in this newsletter</div>
+                                <div className="grid grid-cols-1 sm:grid-cols-3 gap-2">
+                                  <select
+                                    className="border rounded p-2 text-sm"
+                                    value={nlYoutubeLinkForm.player_name}
+                                    onChange={(e) => {
+                                      const selectedPlayer = extractPlayersFromNewsletter(editingNl).find(p => p.player_name === e.target.value)
+                                      setNlYoutubeLinkForm({
+                                        player_name: e.target.value,
+                                        youtube_link: nlYoutubeLinkForm.youtube_link,
+                                        player_id: selectedPlayer?.player_id || null
+                                      })
+                                    }}
+                                  >
+                                    <option value="">Select player...</option>
+                                    {extractPlayersFromNewsletter(editingNl).map((player, idx) => (
+                                      <option key={idx} value={player.player_name}>
+                                        {player.player_name} ({player.loan_team})
+                                      </option>
+                                    ))}
+                                  </select>
+                                  <input
+                                    className="border rounded p-2 text-sm"
+                                    placeholder="YouTube URL"
+                                    value={nlYoutubeLinkForm.youtube_link}
+                                    onChange={(e) => setNlYoutubeLinkForm({ ...nlYoutubeLinkForm, youtube_link: e.target.value })}
+                                  />
+                                  <Button size="sm" onClick={createNewsletterYoutubeLink}>Add Link</Button>
+                                </div>
+                              </div>
+                              <div className="space-y-2">
+                                {nlYoutubeLinks.length === 0 ? (
+                                  <div className="text-xs text-gray-500">No YouTube links added yet</div>
+                                ) : (
+                                  nlYoutubeLinks.map((link) => (
+                                    <div key={link.id} className="bg-white border rounded p-2 flex items-center gap-2">
+                                      <div className="flex-1">
+                                        <div className="text-sm font-medium">{link.player_name}</div>
+                                        {editingNlYoutubeLink?.id === link.id ? (
+                                          <input
+                                            className="border rounded p-1 text-xs w-full mt-1"
+                                            value={editingNlYoutubeLink.youtube_link}
+                                            onChange={(e) => setEditingNlYoutubeLink({ ...editingNlYoutubeLink, youtube_link: e.target.value })}
+                                          />
+                                        ) : (
+                                          <a href={link.youtube_link} target="_blank" rel="noopener noreferrer" className="text-xs text-blue-600 hover:underline truncate block">
+                                            {link.youtube_link}
+                                          </a>
+                                        )}
+                                      </div>
+                                      <div className="flex gap-1">
+                                        {editingNlYoutubeLink?.id === link.id ? (
+                                          <>
+                                            <Button size="sm" variant="outline" onClick={() => updateNewsletterYoutubeLink(link.id)}>Save</Button>
+                                            <Button size="sm" variant="ghost" onClick={() => setEditingNlYoutubeLink(null)}>Cancel</Button>
+                                          </>
+                                        ) : (
+                                          <>
+                                            <Button size="sm" variant="outline" onClick={() => setEditingNlYoutubeLink(link)}>Edit</Button>
+                                            <Button size="sm" variant="destructive" onClick={() => deleteNewsletterYoutubeLink(link.id)}>Delete</Button>
+                                          </>
+                                        )}
+                                      </div>
+                                    </div>
+                                  ))
+                                )}
+                              </div>
+                            </div>
+
+                            {/* Commentary Section */}
+                            <div className="border rounded-lg p-4 bg-gradient-to-r from-purple-50 to-indigo-50">
+                              <h3 className="text-sm font-semibold mb-3 flex items-center gap-2">
+                                ✍️ Author Commentary
+                              </h3>
+                              <CommentaryManager
+                                newsletterId={editingNl.id}
+                                players={extractPlayersFromNewsletter(editingNl)}
+                                apiService={APIService}
+                              />
+                            </div>
+
+                            {/* Preview Section */}
+                            <div className="border rounded-lg overflow-hidden">
+                              <div className="bg-gray-100 px-4 py-2 border-b flex items-center justify-between">
+                                <span className="text-sm font-semibold">Live Preview</span>
+                                <div className="flex items-center gap-2">
+                                  <Button size="sm" variant={previewFormat === 'web' ? 'default' : 'outline'} onClick={() => setPreviewFormat('web')}>Web</Button>
+                                  <Button size="sm" variant={previewFormat === 'email' ? 'default' : 'outline'} onClick={() => setPreviewFormat('email')}>Email</Button>
+                                  <Button size="sm" variant="ghost" onClick={refreshPreview}>Reload</Button>
+                                </div>
+                              </div>
+                              <div className="bg-white max-h-[520px] overflow-auto p-4">
+                                {previewError ? (
+                                  <div className="p-3 text-sm text-red-700 bg-red-50 border border-red-200 rounded">
+                                    {previewError}
+                                  </div>
+                                ) : previewHtml ? (
+                                  <div dangerouslySetInnerHTML={{ __html: previewHtml }} />
+                                ) : (
+                                  <div className="p-3 text-sm text-gray-500">No preview loaded yet. Click "Reload" to generate.</div>
+                                )}
+                              </div>
+                            </div>
+                          </div>
+                        ) : (
+                          /* JSON Editor Mode */
+                          <div className="grid grid-cols-1 lg:grid-cols-2 gap-3">
+                            <div className="flex flex-col gap-2">
+                              <div className="text-sm font-medium">Content JSON</div>
+                              <textarea
+                                className="border rounded p-2 text-sm font-mono"
+                                rows="24"
+                                value={(() => {
+                                  try {
+                                    return typeof editingNl.content === 'string' ? editingNl.content : JSON.stringify(editingNl.content || {}, null, 2)
+                                  } catch {
+                                    return String(editingNl.content || '')
+                                  }
+                                })()}
+                                onChange={e => setEditingNl({ ...editingNl, content: e.target.value })}
+                              />
+                            </div>
+                            <div className="flex flex-col gap-2">
+                              <div className="text-sm font-medium">Preview</div>
+                              <div className="border rounded bg-white p-4 max-h-[600px] overflow-auto">
+                                {(() => {
+                                  try {
+                                    const obj = (() => { try { return typeof editingNl.content === 'string' ? JSON.parse(editingNl.content) : (editingNl.content || {}) } catch { return {} } })()
+                                    const previewSections = Array.isArray(obj.sections)
+                                      ? obj.sections.filter((section) => ((section?.title || '').trim().toLowerCase()) !== 'what the internet is saying')
+                                      : []
+                                    return (
+                                      <div className="space-y-4">
+                                        <div className="bg-gradient-to-r from-blue-50 to-gray-50 p-4 rounded border-l-4 border-blue-500">
+                                          <div className="text-xl font-bold text-gray-900 mb-1">{obj.title || editingNl.title}</div>
+                                          {obj.range && (
+                                            <div className="text-xs text-gray-600">Week: {obj.range[0]} - {obj.range[1]}</div>
+                                          )}
+                                          {obj.summary && (
+                                            <div className="text-gray-700 leading-relaxed mt-2">{obj.summary}</div>
+                                          )}
+                                        </div>
+                                        {obj.highlights && Array.isArray(obj.highlights) && obj.highlights.length > 0 && (
+                                          <div className="bg-yellow-50 p-3 rounded border-l-4 border-yellow-400">
+                                            <div className="text-sm font-semibold text-gray-900 mb-2">Key Highlights</div>
+                                            <ul className="list-disc ml-5 space-y-1">
+                                              {obj.highlights.map((h, i) => (<li key={i} className="text-sm text-gray-700">{h}</li>))}
+                                            </ul>
+                                          </div>
+                                        )}
+                                        {previewSections.length > 0 && (
+                                          <div className="space-y-3">
+                                            {previewSections.map((sec, si) => (
+                                              <div key={si} className="bg-white border rounded">
+                                                {sec.title && (
+                                                  <div className="bg-gray-100 px-3 py-2 border-b text-sm font-semibold">{sec.title}</div>
+                                                )}
+                                                <div className="p-3 space-y-2">
+                                                  {sec.items && sec.items.map((it, ii) => (
+                                                    <div key={ii} className="border-l-4 border-blue-200 pl-3 py-1">
+                                                      <div className="flex flex-wrap items-center gap-2">
+                                                        {it.player_name && (<span className="font-semibold text-gray-900">{it.player_name}</span>)}
+                                                        {it.loan_team && (<span className="bg-blue-100 text-blue-800 px-2 py-0.5 rounded text-xs">→ {it.loan_team}</span>)}
+                                                        {it.stats && (
+                                                          <div className="flex gap-1 text-xs">
+                                                            {it.stats.goals > 0 && (<span className="bg-green-100 text-green-800 px-1 rounded">{it.stats.goals}G</span>)}
+                                                            {it.stats.assists > 0 && (<span className="bg-purple-100 text-purple-800 px-1 rounded">{it.stats.assists}A</span>)}
+                                                            {it.stats.minutes > 0 && (<span className="bg-blue-100 text-blue-800 px-1 rounded">{it.stats.minutes}'</span>)}
+                                                          </div>
+                                                        )}
+                                                      </div>
+                                                      {it.week_summary && (<div className="text-sm text-gray-700">{it.week_summary}</div>)}
+                                                    </div>
+                                                  ))}
+                                                </div>
+                                              </div>
+                                            ))}
+                                          </div>
+                                        )}
+                                      </div>
+                                    )
+                                  } catch {
+                                    return <div className="text-sm text-gray-600">Unable to render preview. Check JSON syntax.</div>
+                                  }
+                                })()}
+                              </div>
+                            </div>
+                          </div>
+                        )}
+
+                        <div className="mt-4 flex gap-2 border-t pt-4">
+                          <Button size="sm" onClick={saveNewsletter}>Save Newsletter</Button>
+                          <Button size="sm" variant="outline" onClick={() => { setEditingNl(null); setEditingPlayerCard(null); setEnhancedEditorMode('visual') }}>Cancel</Button>
+                        </div>
+                      </div>
+                    )}
                   </div>
-                </AccordionTrigger>
-                <AccordionContent className="px-4 pb-4">
-                  <div className="mb-4 flex justify-end">
-                    <Button size="sm" onClick={() => setShowAddPlayerForm(!showAddPlayerForm)}>
-                      {showAddPlayerForm ? 'Cancel' : '+ Add Player'}
+                </div>
+              </TabsContent>
+
+              {adminTabs.includes('tools') && (
+                <TabsContent value="tools" className="space-y-6">
+                  <div className="flex items-center justify-between gap-2 mb-4">
+                    <h2 className="text-2xl font-semibold">Diagnostic Tools</h2>
+                    <Button variant="outline" size="sm" onClick={loadSandboxTasks} disabled={sandboxLoading}>
+                      {sandboxLoading ? 'Refreshing…' : 'Refresh tasks'}
                     </Button>
                   </div>
 
-                  {/* Add Player Form */}
-                  {showAddPlayerForm && (
-                    <div className="bg-gradient-to-r from-green-50 to-blue-50 border border-green-200 rounded-lg p-4 mb-4">
-                <h3 className="text-sm font-semibold mb-3">Create New Player</h3>
-                <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
-                  <div className="md:col-span-2">
-                    <label className="text-xs font-medium text-gray-700 block mb-1">Player Name *</label>
-                    <input
-                      type="text"
-                      className="border rounded p-2 text-sm w-full"
-                      placeholder="Full name"
-                      value={addPlayerForm.name}
-                      onChange={(e) => setAddPlayerForm({...addPlayerForm, name: e.target.value})}
-                    />
+                  {sandboxError && (
+                    <Alert variant="destructive">
+                      <AlertDescription>{sandboxError}</AlertDescription>
+                    </Alert>
+                  )}
+
+                  {sandboxLoading && !sandboxTasks.length ? (
+                    <div className="rounded-lg border bg-white p-6 text-sm text-gray-600">
+                      Loading sandbox tasks…
+                    </div>
+                  ) : null}
+
+                  {!sandboxLoading && !sandboxTasks.length && !sandboxError ? (
+                    <div className="rounded-lg border bg-white p-6 text-sm text-gray-600">
+                      No sandbox tasks are currently registered.
+                    </div>
+                  ) : null}
+
+                  <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-3">
+                    {sandboxTasks.map((task) => {
+                      const params = task?.parameters || []
+                      const values = sandboxFormValues[task.task_id] || {}
+                      const outcome = sandboxResults[task.task_id]
+                      const isRunning = runningTaskId === task.task_id
+                      const isCollapsed = (sandboxCollapsedTasks && Object.prototype.hasOwnProperty.call(sandboxCollapsedTasks, task.task_id))
+                        ? !!sandboxCollapsedTasks[task.task_id]
+                        : true
+                      const ToggleIcon = isCollapsed ? ChevronRight : ChevronDown
+
+                      return (
+                        <Card key={task.task_id} className="rounded-xl border shadow-sm">
+                          <CardHeader className={sandboxCardHeaderClasses('shadow-sm')}>
+                            <div className="space-y-1">
+                              <CardTitle className="text-lg">{task.label}</CardTitle>
+                              <CardDescription>{task.description}</CardDescription>
+                            </div>
+                            <div className="flex items-center gap-2">
+                              {outcome?.status === 'ok' ? (
+                                <span className="text-xs font-medium text-green-600">Success</span>
+                              ) : null}
+                              {outcome?.status === 'error' ? (
+                                <span
+                                  className="max-w-[12rem] truncate text-xs font-medium text-red-600"
+                                  title={outcome.message}
+                                >
+                                  {outcome.message}
+                                </span>
+                              ) : null}
+                              <button
+                                type="button"
+                                onClick={() => toggleSandboxTaskCollapsed(task.task_id)}
+                                aria-expanded={!isCollapsed}
+                                className="inline-flex items-center gap-1 rounded-md border border-gray-200 bg-gray-100 px-2 py-1 text-xs font-medium text-gray-700 transition hover:bg-gray-200"
+                              >
+                                <ToggleIcon className="h-4 w-4" />
+                                {isCollapsed ? 'Expand' : 'Collapse'}
+                              </button>
+                            </div>
+                          </CardHeader>
+                          {!isCollapsed && (
+                            <CardContent className="px-4 py-4 space-y-4">
+                              <form
+                                className="space-y-4"
+                                onSubmit={(event) => {
+                                  event.preventDefault()
+                                  runSandboxTask(task)
+                                }}
+                              >
+                                {params.length > 0 ? (
+                                  <div className="grid gap-3">
+                                    {params.map((param) => {
+                                      const selectOptions = Array.isArray(param.options) ? param.options : []
+                                      const hasSelect = param.type === 'select' && selectOptions.length > 0
+                                      const currentValue = values[param.name] ?? ''
+                                      const selectValue = hasSelect ? String(currentValue ?? '') : ''
+                                      const selectLookup = hasSelect
+                                        ? new Map(selectOptions.map((option, index) => {
+                                          const optValue = option?.value ?? option?.label ?? index
+                                          return [String(optValue), option]
+                                        }))
+                                        : null
+
+                                      return (
+                                        <label key={param.name} className="flex flex-col gap-2 text-sm font-medium text-gray-700">
+                                          <span>{param.label}</span>
+                                          {param.type === 'checkbox' ? (
+                                            <div className="flex items-center gap-2 text-sm font-normal">
+                                              <input
+                                                type="checkbox"
+                                                checked={!!values[param.name]}
+                                                onChange={handleSandboxInputChange(task.task_id, param.name, param.type)}
+                                              />
+                                              {param.help ? <span className="text-gray-600">{param.help}</span> : null}
+                                            </div>
+                                          ) : hasSelect ? (
+                                            <Select
+                                              value={selectValue}
+                                              onValueChange={(newValue) => {
+                                                if (!selectLookup) {
+                                                  handleSandboxSelectChange(task.task_id, param, newValue ? { value: newValue } : null, params)
+                                                  return
+                                                }
+                                                const option = selectLookup.get(newValue)
+                                                handleSandboxSelectChange(
+                                                  task.task_id,
+                                                  param,
+                                                  option || (newValue ? { value: newValue } : null),
+                                                  params
+                                                )
+                                              }}
+                                            >
+                                              <SelectTrigger>
+                                                <SelectValue placeholder={param.placeholder || 'Select option…'} />
+                                              </SelectTrigger>
+                                              <SelectContent>
+                                                {selectOptions.map((option, index) => {
+                                                  const optionValue = String(option?.value ?? option?.label ?? index)
+                                                  const optionLabel = option?.label ?? option?.value ?? optionValue
+                                                  return (
+                                                    <SelectItem key={`${optionValue}-${index}`} value={optionValue}>
+                                                      {optionLabel}
+                                                    </SelectItem>
+                                                  )
+                                                })}
+                                              </SelectContent>
+                                            </Select>
+                                          ) : (
+                                            <Input
+                                              type={param.type || 'text'}
+                                              value={values[param.name] ?? ''}
+                                              placeholder={param.placeholder || ''}
+                                              onChange={handleSandboxInputChange(task.task_id, param.name, param.type)}
+                                            />
+                                          )}
+                                          {param.type !== 'checkbox' && param.help ? (
+                                            <span className="text-xs font-normal text-gray-500">{param.help}</span>
+                                          ) : null}
+                                        </label>
+                                      )
+                                    })}
+                                  </div>
+                                ) : (
+                                  <p className="text-sm text-gray-600">No parameters required.</p>
+                                )}
+                                <div className="flex items-center gap-3">
+                                  <Button type="submit" size="sm" disabled={isRunning}>
+                                    {isRunning ? 'Running…' : 'Run task'}
+                                  </Button>
+                                  {outcome?.status === 'ok' && (
+                                    <span className="text-sm text-green-600">Success</span>
+                                  )}
+                                  {outcome?.status === 'error' && (
+                                    <span className="text-sm text-red-600">{outcome.message}</span>
+                                  )}
+                                </div>
+                                {task.task_id !== 'list-missing-sofascore-ids' && outcome?.status === 'ok' && outcome.result && (
+                                  <pre className="mt-3 max-h-64 overflow-auto rounded-md bg-gray-900 p-3 text-xs text-gray-100">
+                                    {JSON.stringify(outcome.result, null, 2)}
+                                  </pre>
+                                )}
+                                {outcome?.status === 'error' && outcome.detail && (
+                                  <pre className="mt-3 max-h-64 overflow-auto rounded-md bg-red-900/80 p-3 text-xs text-red-100">
+                                    {typeof outcome.detail === 'string'
+                                      ? outcome.detail
+                                      : JSON.stringify(outcome.detail, null, 2)}
+                                  </pre>
+                                )}
+                              </form>
+                              {task.task_id === 'list-missing-sofascore-ids' && (
+                                <div className="border-t px-4 py-4 space-y-4">
+                                  {sofascoreStatus && (
+                                    <Alert variant={sofascoreStatus.type === 'error' ? 'destructive' : 'default'}>
+                                      <AlertDescription>{sofascoreStatus.message}</AlertDescription>
+                                    </Alert>
+                                  )}
+                                  {sofascorePlayers.length === 0 ? (
+                                    <p className="text-sm text-gray-600">
+                                      Run the task to load players missing Sofascore ids.
+                                    </p>
+                                  ) : (
+                                    <div className="overflow-auto">
+                                      <table className="min-w-full text-sm">
+                                        <thead>
+                                          <tr className="text-left text-xs uppercase tracking-wide text-gray-500">
+                                            <th className="pb-2 pr-4">Player</th>
+                                            <th className="pb-2 pr-4">Parent Club</th>
+                                            <th className="pb-2 pr-4">Loan Club</th>
+                                            <th className="pb-2 pr-4">Sofascore ID</th>
+                                            <th className="pb-2 pr-4">Actions</th>
+                                          </tr>
+                                        </thead>
+                                        <tbody>
+                                          {sofascorePlayers.map((player, index) => {
+                                            const rowKey = player?.__row_key || sofascoreRowKey(player, index)
+                                            const isSupplemental = Boolean(player?.is_supplemental)
+                                            const apiLabel = player?.player_id
+                                              ? `API #${player.player_id}`
+                                              : isSupplemental && player?.supplemental_id
+                                                ? `Supp #${player.supplemental_id}`
+                                                : '—'
+                                            const value = sofascoreInputs[rowKey] ?? (player?.sofascore_id ? String(player.sofascore_id) : '')
+                                            return (
+                                              <tr key={rowKey} className="border-t border-gray-100 last:border-b">
+                                                <td className="py-2 pr-4 align-top">
+                                                  <div className="font-medium text-gray-900">{player?.player_name || (player?.player_id ? `Player #${player.player_id}` : 'Supplemental player')}</div>
+                                                  <div className="text-xs text-gray-500">{apiLabel}</div>
+                                                </td>
+                                                <td className="py-2 pr-4 align-top text-gray-600">{player?.primary_team || '—'}</td>
+                                                <td className="py-2 pr-4 align-top text-gray-600">{player?.loan_team || '—'}</td>
+                                                <td className="py-2 pr-4 align-top">
+                                                  <Input
+                                                    aria-label={`Sofascore id for ${player?.player_name || apiLabel}`}
+                                                    value={value}
+                                                    placeholder="e.g. 1101989"
+                                                    onChange={(event) => {
+                                                      const next = event.target.value
+                                                      setSofascoreInputs((prev) => ({ ...prev, [rowKey]: next }))
+                                                    }}
+                                                    className="w-36"
+                                                  />
+                                                </td>
+                                                <td className="py-2 pr-4 align-top">
+                                                  <div className="flex flex-wrap gap-2">
+                                                    <Button
+                                                      size="sm"
+                                                      disabled={sofascoreUpdatingKey === rowKey || !(value && value.trim())}
+                                                      onClick={() => handleSofascoreAssign(player, (value || '').trim())}
+                                                    >
+                                                      {sofascoreUpdatingKey === rowKey ? 'Saving…' : 'Save'}
+                                                    </Button>
+                                                    <Button
+                                                      size="sm"
+                                                      variant="outline"
+                                                      disabled={sofascoreUpdatingKey === rowKey}
+                                                      onClick={() => handleSofascoreAssign(player, '')}
+                                                    >
+                                                      Clear
+                                                    </Button>
+                                                    {isSupplemental && (
+                                                      <Button
+                                                        size="sm"
+                                                        variant="destructive"
+                                                        disabled={sofascoreUpdatingKey === rowKey}
+                                                        onClick={() => handleSupplementalDelete(player)}
+                                                      >
+                                                        Delete
+                                                      </Button>
+                                                    )}
+                                                  </div>
+                                                </td>
+                                              </tr>
+                                            )
+                                          })}
+                                        </tbody>
+                                      </table>
+                                    </div>
+                                  )}
+                                </div>
+                              )}
+                            </CardContent>
+                          )}
+                        </Card>
+                      )
+                    })}
                   </div>
-                  <div>
-                    <div className="flex items-center justify-between mb-1">
-                      <label className="text-xs font-medium text-gray-700">Primary Team (Parent Club) *</label>
-                      <label className="flex items-center gap-1 text-xs text-gray-600 cursor-pointer">
-                        <input
-                          type="checkbox"
-                          checked={addPlayerForm.use_custom_primary_team}
-                          onChange={(e) => setAddPlayerForm({
-                            ...addPlayerForm, 
-                            use_custom_primary_team: e.target.checked,
-                            primary_team_id: '',
-                            custom_primary_team_name: ''
-                          })}
-                        />
-                        Custom team
-                  </label>
-                  </div>
-                    {addPlayerForm.use_custom_primary_team ? (
-                      <input
-                        type="text"
-                        className="border rounded p-2 text-sm w-full"
-                        placeholder="e.g. Portsmouth, Sunderland"
-                        value={addPlayerForm.custom_primary_team_name}
-                        onChange={(e) => setAddPlayerForm({...addPlayerForm, custom_primary_team_name: e.target.value})}
-                      />
-                    ) : (
-                      <TeamSelect
-                        teams={runTeams}
-                        value={addPlayerForm.primary_team_id}
-                        onChange={(id) => setAddPlayerForm({...addPlayerForm, primary_team_id: id})}
-                        placeholder="Select primary team..."
-                      />
-                    )}
-                  </div>
-                  <div>
-                    <div className="flex items-center justify-between mb-1">
-                      <label className="text-xs font-medium text-gray-700">Loan Team (Current Club) *</label>
-                      <label className="flex items-center gap-1 text-xs text-gray-600 cursor-pointer">
-                        <input
-                          type="checkbox"
-                          checked={addPlayerForm.use_custom_loan_team}
-                          onChange={(e) => setAddPlayerForm({
-                            ...addPlayerForm, 
-                            use_custom_loan_team: e.target.checked,
-                            loan_team_id: '',
-                            custom_loan_team_name: ''
-                          })}
-                        />
-                        Custom team
+                </TabsContent>
+              )}
+
+              <TabsContent value="settings" className="space-y-6">
+                <div className="border rounded p-4">
+                  <h2 className="font-semibold mb-3">Newsletter Settings</h2>
+                  <div className="space-y-2">
+                    {[
+                      ['brave_soft_rank', 'Soft Rank (quality-first ordering)'],
+                      ['brave_site_boost', 'Site Boost (local/club sources)'],
+                      ['brave_cup_synonyms', 'Cup Synonyms (EFL/FA/League)'],
+                      ['search_strict_range', 'Strict Date Window (drop undated)'],
+                    ].map(([k, label]) => (
+                      <label key={k} className="flex items-center gap-2">
+                        <input type="checkbox" checked={!!settings[k]} onChange={e => setSettings({ ...settings, [k]: e.target.checked })} />
+                        <span>{label}</span>
                       </label>
+                    ))}
                   </div>
-                    {addPlayerForm.use_custom_loan_team ? (
-                      <input
-                        type="text"
-                        className="border rounded p-2 text-sm w-full"
-                        placeholder="e.g. Sheffield Wednesday, Hull City"
-                        value={addPlayerForm.custom_loan_team_name}
-                        onChange={(e) => setAddPlayerForm({...addPlayerForm, custom_loan_team_name: e.target.value})}
-                      />
-                    ) : (
-                      <TeamSelect
-                        teams={runTeams}
-                        value={addPlayerForm.loan_team_id}
-                        onChange={(id) => setAddPlayerForm({...addPlayerForm, loan_team_id: id})}
-                        placeholder="Select loan team..."
-                      />
-                    )}
+                  <div className="mt-2">
+                    <Button onClick={saveSettings}>Save Settings</Button>
+                  </div>
                 </div>
-                  <div className="md:col-span-2">
-                    <label className="text-xs font-medium text-gray-700 block mb-1">Season / Window *</label>
-                    <select
-                      className="border rounded p-2 text-sm w-full"
-                      value={addPlayerForm.window_key}
-                      onChange={(e) => setAddPlayerForm({...addPlayerForm, window_key: e.target.value})}
-                    >
-                      <option value="">Select season...</option>
-                      {generateSeasonOptions().map(opt => (
-                        <option key={opt.value} value={opt.value}>{opt.label}</option>
-                      ))}
-                    </select>
-                  </div>
+                <div className="border rounded p-4">
+                  <h2 className="font-semibold mb-3">Pending Player Flags</h2>
+                  {flags.length === 0 ? (
+                    <p className="text-sm text-gray-600">No pending flags.</p>
+                  ) : (
+                    <div className="space-y-3">
+                      {flags.map(f => {
+                        const editor = flagEditors[f.id]
+                        const loanOptions = editor?.loans || []
+                        const teamOptions = buildTeamOptionsForLoan(loanOptions)
+                        const selectedLoan = loanOptions.find((l) => l.id === editor?.selectedLoanId)
+                        return (
+                          <div key={f.id} className="border rounded p-3">
+                            <div className="text-sm font-semibold">Flag #{f.id}</div>
+                            <div className="mt-1 grid gap-1 text-sm text-gray-700">
+                              <div>Player API: {f.player_api_id}</div>
+                              <div>Primary Team API: {f.primary_team_api_id}</div>
+                              {f.loan_team_api_id && <div>Loan Team API: {f.loan_team_api_id}</div>}
+                              {f.season && <div>Season: {f.season}</div>}
+                              <div className="text-gray-800">Reason: {f.reason}</div>
+                            </div>
+                            <div className="mt-2 flex flex-wrap gap-2">
+                              <Button
+                                size="sm"
+                                variant="outline"
+                                onClick={() => (editor ? closeFlagEditor(f.id) : openFlagEditor(f))}
+                                disabled={editor?.saving}
+                              >
+                                {editor ? 'Hide editor' : 'Edit loan assignment'}
+                              </Button>
+                              <Button size="sm" onClick={() => resolveFlag(f.id, false)}>Resolve</Button>
+                              <Button size="sm" variant="outline" onClick={() => resolveFlag(f.id, true)}>Resolve + Deactivate Loan</Button>
+                            </div>
+                            {editor && (
+                              <div className="mt-3 space-y-3 rounded border border-dashed bg-white/70 p-3 text-sm">
+                                {editor.loading ? (
+                                  <div className="flex items-center gap-2 text-gray-600">
+                                    <Loader2 className="h-4 w-4 animate-spin" /> Loading loan details…
+                                  </div>
+                                ) : editor.error ? (
+                                  <div className="rounded border border-red-200 bg-red-50 p-2 text-red-700">{editor.error}</div>
+                                ) : (
+                                  <>
+                                    {loanOptions.length > 1 && (
+                                      <div className="grid gap-1">
+                                        <Label className="text-xs uppercase tracking-wide text-gray-500">Loan record</Label>
+                                        <Select
+                                          value={String(editor.selectedLoanId)}
+                                          onValueChange={(value) => selectFlagLoanRecord(f.id, value)}
+                                        >
+                                          <SelectTrigger>
+                                            <SelectValue />
+                                          </SelectTrigger>
+                                          <SelectContent>
+                                            {loanOptions.map((loan) => (
+                                              <SelectItem key={loan.id} value={String(loan.id)}>
+                                                {loan.primary_team_name} → {loan.loan_team_name} {loan.is_active ? '(active)' : '(inactive)'}
+                                              </SelectItem>
+                                            ))}
+                                          </SelectContent>
+                                        </Select>
+                                      </div>
+                                    )}
+                                    {selectedLoan && (
+                                      <div className="rounded bg-gray-50 p-2 text-xs text-gray-600">
+                                        Current assignment: {selectedLoan.primary_team_name} → {selectedLoan.loan_team_name}
+                                      </div>
+                                    )}
+                                    <div className="grid gap-3 sm:grid-cols-2">
+                                      <div className="space-y-1">
+                                        <Label className="text-xs uppercase tracking-wide text-gray-500">Primary team</Label>
+                                        <TeamSelect
+                                          teams={teamOptions}
+                                          value={editor.primaryTeamId ?? null}
+                                          onChange={(id) => setFlagPrimaryTeam(f.id, id)}
+                                          placeholder="Select primary team…"
+                                        />
+                                      </div>
+                                      <div className="space-y-1">
+                                        <Label className="text-xs uppercase tracking-wide text-gray-500">Loan team</Label>
+                                        <TeamSelect
+                                          teams={teamOptions}
+                                          value={editor.loanTeamId ?? null}
+                                          onChange={(id) => setFlagLoanTeam(f.id, id)}
+                                          placeholder="Select loan team…"
+                                        />
+                                      </div>
+                                    </div>
+                                    <div className="flex flex-wrap gap-2">
+                                      <Button
+                                        size="sm"
+                                        onClick={() => saveFlagLoanChanges(f)}
+                                        disabled={editor.saving}
+                                      >
+                                        {editor.saving && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}Save loan changes
+                                      </Button>
+                                      <Button
+                                        size="sm"
+                                        variant="ghost"
+                                        onClick={() => closeFlagEditor(f.id)}
+                                        disabled={editor.saving}
+                                      >
+                                        Cancel
+                                      </Button>
+                                    </div>
+                                  </>
+                                )}
+                              </div>
+                            )}
+                          </div>
+                        )
+                      })}
+                    </div>
+                  )}
+                </div>
+              </TabsContent>
+            </Tabs>
+          </>
+        ) : (
+          <div className="rounded-lg border border-dashed bg-muted/40 p-6 text-sm text-muted-foreground space-y-3">
+            <p>Admin tools are locked. Sign in with an approved admin email and store the API key above.</p>
+            <div className="flex flex-wrap gap-2">
+              {!hasAdminToken && (
+                <Button size="sm" onClick={openLoginModal}>
+                  <LogIn className="mr-1 h-4 w-4" /> Sign in as admin
+                </Button>
+              )}
+              {!hasStoredKey && (
+                <Button size="sm" variant="outline" onClick={startEditingKey}>
+                  <KeyRound className="mr-1 h-4 w-4" /> Add API key
+                </Button>
+              )}
+            </div>
+          </div>
+        )}
+
+        {/* Edit Player Dialog */}
+        {editingPlayerDialog && (
+          <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center p-4 z-50" onClick={() => setEditingPlayerDialog(null)}>
+            <div className="bg-white rounded-lg p-6 max-w-2xl w-full max-h-[90vh] overflow-y-auto" onClick={(e) => e.stopPropagation()}>
+              <h2 className="text-xl font-semibold mb-4">Edit Player</h2>
+
+              <div className="space-y-4">
+                {/* Player Name */}
+                <div>
+                  <label className="text-sm font-medium text-gray-700 block mb-1">Player Name *</label>
+                  <input
+                    type="text"
+                    className="border rounded p-2 text-sm w-full"
+                    value={editPlayerForm.name}
+                    onChange={(e) => setEditPlayerForm({ ...editPlayerForm, name: e.target.value })}
+                  />
+                </div>
+
+                <div className="grid grid-cols-2 gap-4">
+                  {/* Position */}
                   <div>
-                    <label className="text-xs font-medium text-gray-700 block mb-1">Position</label>
+                    <label className="text-sm font-medium text-gray-700 block mb-1">Position</label>
                     <select
                       className="border rounded p-2 text-sm w-full"
-                      value={addPlayerForm.position}
-                      onChange={(e) => setAddPlayerForm({...addPlayerForm, position: e.target.value})}
+                      value={editPlayerForm.position}
+                      onChange={(e) => setEditPlayerForm({ ...editPlayerForm, position: e.target.value })}
                     >
                       <option value="">Select position...</option>
                       {playerFieldOptions.positions.map(pos => (
                         <option key={pos} value={pos}>{pos}</option>
                       ))}
-                      <option value="__custom__">+ Add custom position</option>
                     </select>
-                    {addPlayerForm.position === '__custom__' && (
-                      <input
-                        type="text"
-                        className="border rounded p-2 text-sm w-full mt-2"
-                        placeholder="Enter custom position"
-                        onChange={(e) => setAddPlayerForm({...addPlayerForm, position: e.target.value})}
-                        autoFocus
-                      />
-                    )}
                   </div>
+
+                  {/* Nationality */}
                   <div>
-                    <label className="text-xs font-medium text-gray-700 block mb-1">Nationality</label>
+                    <label className="text-sm font-medium text-gray-700 block mb-1">Nationality</label>
                     <select
                       className="border rounded p-2 text-sm w-full"
-                      value={addPlayerForm.nationality}
-                      onChange={(e) => setAddPlayerForm({...addPlayerForm, nationality: e.target.value})}
+                      value={editPlayerForm.nationality}
+                      onChange={(e) => setEditPlayerForm({ ...editPlayerForm, nationality: e.target.value })}
                     >
                       <option value="">Select nationality...</option>
                       {playerFieldOptions.nationalities.map(nat => (
                         <option key={nat} value={nat}>{nat}</option>
                       ))}
-                      <option value="__custom__">+ Add custom nationality</option>
                     </select>
-                    {addPlayerForm.nationality === '__custom__' && (
+                  </div>
+                </div>
+
+                <div className="grid grid-cols-2 gap-4">
+                  {/* Age */}
+                  <div>
+                    <label className="text-sm font-medium text-gray-700 block mb-1">Age</label>
+                    <input
+                      type="number"
+                      className="border rounded p-2 text-sm w-full"
+                      value={editPlayerForm.age}
+                      onChange={(e) => setEditPlayerForm({ ...editPlayerForm, age: e.target.value })}
+                    />
+                  </div>
+
+                  {/* Sofascore ID */}
+                  <div>
+                    <label className="text-sm font-medium text-gray-700 block mb-1">Sofascore ID</label>
+                    <input
+                      type="number"
+                      className="border rounded p-2 text-sm w-full"
+                      value={editPlayerForm.sofascore_id}
+                      onChange={(e) => setEditPlayerForm({ ...editPlayerForm, sofascore_id: e.target.value })}
+                    />
+                  </div>
+                </div>
+
+                {/* Primary Team */}
+                <div>
+                  <div className="flex items-center justify-between mb-1">
+                    <label className="text-sm font-medium text-gray-700">Primary Team (Parent Club) *</label>
+                    <label className="flex items-center gap-1 text-xs text-gray-600 cursor-pointer">
                       <input
-                        type="text"
-                        className="border rounded p-2 text-sm w-full mt-2"
-                        placeholder="Enter custom nationality"
-                        onChange={(e) => setAddPlayerForm({...addPlayerForm, nationality: e.target.value})}
-                        autoFocus
+                        type="checkbox"
+                        checked={editPlayerForm.use_custom_primary_team}
+                        onChange={(e) => setEditPlayerForm({
+                          ...editPlayerForm,
+                          use_custom_primary_team: e.target.checked,
+                          primary_team_id: '',
+                          custom_primary_team_name: ''
+                        })}
                       />
-                    )}
+                      Custom team
+                    </label>
                   </div>
-                  <div>
-                    <label className="text-xs font-medium text-gray-700 block mb-1">Age</label>
+                  {editPlayerForm.use_custom_primary_team ? (
                     <input
-                      type="number"
+                      type="text"
                       className="border rounded p-2 text-sm w-full"
-                      placeholder="Age"
-                      value={addPlayerForm.age}
-                      onChange={(e) => setAddPlayerForm({...addPlayerForm, age: e.target.value})}
+                      placeholder="e.g. Portsmouth, Sunderland"
+                      value={editPlayerForm.custom_primary_team_name}
+                      onChange={(e) => setEditPlayerForm({ ...editPlayerForm, custom_primary_team_name: e.target.value })}
                     />
-                  </div>
-                  <div>
-                    <label className="text-xs font-medium text-gray-700 block mb-1">Sofascore ID</label>
-                    <input
-                      type="number"
-                      className="border rounded p-2 text-sm w-full"
-                      placeholder="Optional Sofascore ID"
-                      value={addPlayerForm.sofascore_id}
-                      onChange={(e) => setAddPlayerForm({...addPlayerForm, sofascore_id: e.target.value})}
-                    />
-                  </div>
-                </div>
-                <div className="mt-3 flex gap-2">
-                  <Button size="sm" onClick={createManualPlayer}>
-                    Create Player
-                  </Button>
-                  <Button size="sm" variant="outline" onClick={() => {
-                    setShowAddPlayerForm(false)
-                    setAddPlayerForm({ 
-                      name: '', 
-                      firstname: '', 
-                      lastname: '', 
-                      position: '', 
-                      nationality: '', 
-                      age: '', 
-                      sofascore_id: '',
-                      primary_team_id: '',
-                      loan_team_id: '',
-                      window_key: '',
-                      use_custom_primary_team: false,
-                      custom_primary_team_name: '',
-                      use_custom_loan_team: false,
-                      custom_loan_team_name: ''
-                    })
-                  }}>
-                    Cancel
-                  </Button>
-                </div>
-              </div>
-            )}
-
-            {/* Filters Section */}
-            <div className="bg-gray-50 border rounded-lg p-4 mb-4">
-              <div className="flex items-center justify-between mb-3">
-                <h3 className="font-medium text-sm">Filters</h3>
-                <div className="flex gap-2">
-                  <Button size="sm" variant="outline" onClick={applyPlayersHubFilters}>
-                    Apply Filters
-                  </Button>
-                  <Button size="sm" variant="ghost" onClick={resetPlayersHubFilters}>
-                    Reset
-                  </Button>
-                </div>
-              </div>
-              <div className="grid grid-cols-1 md:grid-cols-5 gap-3">
-                <div>
-                  <label className="text-xs font-medium text-gray-700 block mb-1">Team</label>
-                  <TeamSelect
-                    teams={runTeams}
-                    value={playersHubFilters.team_id}
-                    onChange={(id) => setPlayersHubFilters({...playersHubFilters, team_id: id})}
-                    placeholder="Filter by team..."
-                  />
-                </div>
-                <div>
-                  <label className="text-xs font-medium text-gray-700 block mb-1">Player Name</label>
-                  <input
-                    className="border rounded p-2 text-sm w-full"
-                    placeholder="Search by name..."
-                    value={playersHubFilters.search}
-                    onChange={e=>setPlayersHubFilters({...playersHubFilters, search: e.target.value})}
-                    onKeyPress={(e) => e.key === 'Enter' && applyPlayersHubFilters()}
-                  />
-                </div>
-                <div>
-                  <label className="text-xs font-medium text-gray-700 block mb-1">Position</label>
-                  <select
-                    className="border rounded p-2 text-sm w-full"
-                    value={playersHubFilters.position || ''}
-                    onChange={e=>setPlayersHubFilters({...playersHubFilters, position: e.target.value})}
-                  >
-                    <option value="">All positions</option>
-                    {playerFieldOptions.positions.map(pos => (
-                      <option key={pos} value={pos}>{pos}</option>
-                    ))}
-                  </select>
-                </div>
-                <div>
-                  <label className="text-xs font-medium text-gray-700 block mb-1">Sofascore ID</label>
-                  <select
-                    className="border rounded p-2 text-sm w-full"
-                    value={playersHubFilters.has_sofascore}
-                    onChange={e=>setPlayersHubFilters({...playersHubFilters, has_sofascore: e.target.value})}
-                  >
-                    <option value="">All players</option>
-                    <option value="true">Has Sofascore ID</option>
-                    <option value="false">Missing Sofascore ID</option>
-                  </select>
-                </div>
-                <div>
-                  <label className="text-xs font-medium text-gray-700 block mb-1">Status</label>
-                  <select
-                    className="border rounded p-2 text-sm w-full"
-                    value={playersHubFilters.is_active || ''}
-                    onChange={e=>setPlayersHubFilters({...playersHubFilters, is_active: e.target.value})}
-                  >
-                    <option value="">All</option>
-                    <option value="true">Active only</option>
-                    <option value="false">Inactive</option>
-                  </select>
-                </div>
-              </div>
-            </div>
-
-            {/* Bulk Actions */}
-            {selectedPlayersForBulk.length > 0 && (
-              <div className="bg-blue-50 border border-blue-200 rounded-lg p-3 mb-4">
-                <div className="flex items-center justify-between">
-                  <span className="text-sm font-medium">{selectedPlayersForBulk.length} player(s) selected</span>
-                  <div className="flex gap-2">
-                    <Button size="sm" onClick={() => setBulkSofascoreMode(!bulkSofascoreMode)}>
-                      {bulkSofascoreMode ? 'Cancel Bulk Edit' : 'Bulk Edit Sofascore'}
-                    </Button>
-                    {bulkSofascoreMode && (
-                      <Button size="sm" variant="default" onClick={bulkUpdateSofascoreIds}>
-                        Save Bulk Updates
-                      </Button>
-                    )}
-                    <Button size="sm" variant="ghost" onClick={() => setSelectedPlayersForBulk([])}>
-                      Clear Selection
-                    </Button>
-                  </div>
-                </div>
-              </div>
-            )}
-
-            {/* Advanced Tools (Collapsed) */}
-            <Accordion type="single" collapsible className="mb-4">
-              <AccordionItem value="advanced" className="border rounded-lg">
-                <AccordionTrigger className="px-4 py-2 hover:no-underline">
-                  <span className="text-sm font-medium text-gray-700">🔧 Advanced Tools & Backfill Helpers</span>
-                </AccordionTrigger>
-                <AccordionContent className="px-4 pb-4">
-                  <div className="space-y-3">
-                    <div>
-                      <div className="text-xs font-medium text-gray-700 mb-2">Backfill Operations</div>
-                      <div className="flex flex-wrap gap-2">
-                        <Button size="sm" variant="outline" onClick={backfillTeamLeagues}>
-                          Backfill Team Leagues
-                        </Button>
-                        <Button size="sm" variant="outline" onClick={backfillAllSeasons}>
-                          Backfill All Seasons
-                        </Button>
-                      </div>
-                    </div>
-                    
-                    <div>
-                      <div className="text-xs font-medium text-gray-700 mb-2">Missing Names Checker</div>
-                      <div className="flex flex-wrap gap-2 items-end">
-                        <div className="flex-1 min-w-[200px]">
-                          <label className="text-xs text-gray-600 block mb-1">Team (optional)</label>
+                  ) : (
                     <TeamSelect
                       teams={runTeams}
-                      value={mnTeamDbId}
-                      onChange={setMnTeamDbId}
-                            placeholder="Select team..."
+                      value={editPlayerForm.primary_team_id}
+                      onChange={(id) => setEditPlayerForm({ ...editPlayerForm, primary_team_id: id })}
+                      placeholder="Select primary team..."
                     />
-                  </div>
-                        <div className="w-32">
-                          <label className="text-xs text-gray-600 block mb-1">Team API ID</label>
-                          <input
-                            className="border rounded p-2 text-sm w-full"
-                            placeholder="API ID"
-                            value={mnTeamApiId}
-                            onChange={e=>setMnTeamApiId(e.target.value)}
-                          />
-                </div>
-                        <Button size="sm" variant="outline" onClick={listMissingNames} disabled={mnBusy}>
-                          {mnBusy ? 'Checking...' : 'Find Missing Names'}
-                        </Button>
-                        <Button size="sm" onClick={backfillMissingNames} disabled={mnBusy || !missingNames?.length}>
-                          Backfill Names
-                        </Button>
-                      </div>
-                      
-                {missingNames && missingNames.length > 0 && (
-                        <div className="mt-3 border rounded-lg overflow-hidden">
-                          <div className="bg-yellow-50 px-3 py-2 text-xs font-medium text-yellow-800">
-                            Found {missingNames.length} loans with missing names
-                          </div>
-                          <div className="max-h-48 overflow-auto">
-                      <table className="min-w-full text-xs">
-                              <thead className="bg-gray-50 sticky top-0">
-                          <tr className="text-left">
-                            <th className="p-2">Loan ID</th>
-                            <th className="p-2">Player ID</th>
-                                  <th className="p-2">Name</th>
-                                  <th className="p-2">Primary Team</th>
-                                  <th className="p-2">Loan Team</th>
-                            <th className="p-2">Window</th>
-                          </tr>
-                        </thead>
-                        <tbody>
-                          {missingNames.map(m => (
-                                  <tr key={m.id} className="border-t hover:bg-gray-50">
-                              <td className="p-2 whitespace-nowrap">{m.id}</td>
-                              <td className="p-2 whitespace-nowrap">{m.player_id}</td>
-                                    <td className="p-2 text-gray-500 italic">{m.player_name || '(empty)'}</td>
-                              <td className="p-2 whitespace-nowrap">{m.primary_team_name}</td>
-                              <td className="p-2 whitespace-nowrap">{m.loan_team_name}</td>
-                              <td className="p-2 whitespace-nowrap">{m.window_key}</td>
-                            </tr>
-                          ))}
-                        </tbody>
-                      </table>
-                    </div>
-                  </div>
-                )}
-              </div>
-                </div>
-                </AccordionContent>
-              </AccordionItem>
-            </Accordion>
-
-            {/* Players Table */}
-            {playersHubLoading ? (
-              <div className="text-center py-8 text-gray-500">
-                <Loader2 className="h-6 w-6 animate-spin mx-auto mb-2" />
-                Loading players...
-              </div>
-            ) : playersHubData.items.length === 0 ? (
-              <div className="text-center py-8 text-gray-500 border rounded-lg bg-gray-50">
-                <div className="text-sm font-medium mb-1">No players found</div>
-                <div className="text-xs">Try adjusting your filters or add a new player</div>
-            </div>
-            ) : (
-              <>
-                <div className="border rounded-lg overflow-hidden mb-4">
-                                    <div className="overflow-x-auto">
-                                      <table className="min-w-full text-sm">
-                      <thead className="bg-gray-50 border-b">
-                        <tr className="text-left">
-                          <th className="p-3">
-                            <input
-                              type="checkbox"
-                              checked={selectedPlayersForBulk.length === playersHubData.items.length && playersHubData.items.length > 0}
-                              onChange={toggleAllPlayersSelection}
-                            />
-                          </th>
-                          <th className="p-3 font-medium">Player</th>
-                          <th className="p-3 font-medium">Teams</th>
-                          <th className="p-3 font-medium">Sofascore ID</th>
-                          <th className="p-3 font-medium text-center">Status</th>
-                          <th className="p-3 font-medium text-center">Loans</th>
-                          <th className="p-3 font-medium">Actions</th>
-                                          </tr>
-                                        </thead>
-                      <tbody className="divide-y">
-                        {playersHubData.items.map((player) => {
-                          const isEditingName = Object.prototype.hasOwnProperty.call(inlinePlayerNameEdits, player.player_id)
-                          const draftName = isEditingName ? inlinePlayerNameEdits[player.player_id] : ''
-                          const isSavingName = !!inlinePlayerNameSaving[player.player_id]
-                          return (
-                            <tr key={player.player_id} className="hover:bg-gray-50">
-                            <td className="p-3">
-                              <input
-                                type="checkbox"
-                                checked={selectedPlayersForBulk.includes(player.player_id)}
-                                onChange={() => togglePlayerSelection(player.player_id)}
-                              />
-                                              </td>
-                            <td className="p-3">
-                              <div className="flex items-start gap-2">
-                                <div className="flex-1 min-w-[200px]">
-                                  {isEditingName ? (
-                                    <>
-                                      <input
-                                        type="text"
-                                        className="border rounded p-1 text-sm w-full max-w-xs"
-                                        placeholder="Player name"
-                                        value={draftName}
-                                        onChange={(e) => setInlinePlayerNameEdits((prev) => ({ ...prev, [player.player_id]: e.target.value }))}
-                                        disabled={isSavingName}
-                                      />
-                                      <div className="mt-2 flex gap-2">
-                                        <Button
-                                          size="sm"
-                                          onClick={() => saveInlinePlayerNameEdit(player.player_id)}
-                                          disabled={isSavingName}
-                                        >
-                                          {isSavingName && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}Save
-                                        </Button>
-                                        <Button
-                                          size="sm"
-                                          variant="ghost"
-                                          onClick={() => cancelInlinePlayerNameEdit(player.player_id)}
-                                          disabled={isSavingName}
-                                        >
-                                          Cancel
-                                        </Button>
-                                      </div>
-                                    </>
-                                  ) : (
-                                    <div className="flex items-center gap-2">
-                                      <div className="font-medium">{player.player_name}</div>
-                                      <Button
-                                        size="sm"
-                                        variant="ghost"
-                                        onClick={() => startInlinePlayerNameEdit(player)}
-                                      >
-                                        Rename
-                                      </Button>
-                                    </div>
-                                  )}
-                                  <div className="text-xs text-gray-500 mt-1">ID: {player.player_id}</div>
-                                  {player.position && (
-                                    <div className="text-xs text-gray-500">{player.position}</div>
-                                  )}
-                                </div>
-                                {player.player_id < 0 && (
-                                  <span className="inline-flex items-center px-1.5 py-0.5 rounded text-xs font-medium bg-green-100 text-green-800" title="Manual Player">
-                                    M
-                                  </span>
-                                )}
-                              </div>
-                            </td>
-                            <td className="p-3">
-                              <div className="space-y-2">
-                                <div>
-                                  <div className="text-xs text-gray-600 mb-1">Parent Club</div>
-                                  <div className="text-sm font-medium mb-1">{player.primary_team_name}</div>
-                                                  <TeamSelect
-                                                    teams={runTeams}
-                                    value={player.primary_team_id}
-                                    onChange={(id) => moveLoanDb({ id: player.loan_id }, 'primary', id)}
-                                    placeholder="Change parent..."
-                                    className="text-xs"
-                                  />
-                                </div>
-                                <div>
-                                  <div className="text-xs text-gray-600 mb-1">Loan Club</div>
-                                  <div className="text-sm font-medium mb-1">{player.loan_team_name}</div>
-                                                  <TeamSelect
-                                                    teams={runTeams}
-                                    value={player.loan_team_id}
-                                    onChange={(id) => moveLoanDb({ id: player.loan_id }, 'loan', id)}
-                                    placeholder="Change loan..."
-                                    className="text-xs"
-                                  />
-                                </div>
-                                                </div>
-                                              </td>
-                            <td className="p-3">
-                              {editingPlayerSofascore[player.player_id] !== undefined || bulkSofascoreMode && selectedPlayersForBulk.includes(player.player_id) ? (
-                                                  <div className="flex gap-2 items-center">
-                                                    <input
-                                    type="number"
-                                    className="border rounded p-1 text-sm w-32"
-                                    placeholder="Sofascore ID"
-                                    value={editingPlayerSofascore[player.player_id] ?? player.sofascore_id ?? ''}
-                                    onChange={(e) => setEditingPlayerSofascore({
-                                      ...editingPlayerSofascore,
-                                      [player.player_id]: e.target.value
-                                    })}
-                                  />
-                                  {!bulkSofascoreMode && (
-                                    <>
-                                      <Button
-                                        size="sm"
-                                        variant="outline"
-                                        onClick={() => updatePlayerSofascoreId(player.player_id, editingPlayerSofascore[player.player_id])}
-                                      >
-                                        Save
-                                      </Button>
-                                      <Button
-                                        size="sm"
-                                        variant="ghost"
-                                        onClick={() => setEditingPlayerSofascore((prev) => {
-                                          const next = {...prev}
-                                          delete next[player.player_id]
-                                          return next
-                                        })}
-                                      >
-                                        Cancel
-                                      </Button>
-                                    </>
-                                  )}
-                                                  </div>
-                                                ) : (
-                                                  <div className="flex gap-2 items-center">
-                                  {player.sofascore_id ? (
-                                    <a
-                                      href={`https://www.sofascore.com/player/_/${player.sofascore_id}`}
-                                      target="_blank"
-                                      rel="noopener noreferrer"
-                                      className="text-blue-600 hover:underline text-sm"
-                                    >
-                                      {player.sofascore_id}
-                                    </a>
-                                  ) : (
-                                    <span className="text-gray-400 text-sm">—</span>
-                                  )}
-                                  <Button
-                                    size="sm"
-                                    variant="outline"
-                                    onClick={() => setEditingPlayerSofascore({
-                                      ...editingPlayerSofascore,
-                                      [player.player_id]: player.sofascore_id || ''
-                                    })}
-                                  >
-                                    Edit
-                                  </Button>
-                                                  </div>
-                                                )}
-                                              </td>
-                            <td className="p-3 text-center">
-                              {player.has_sofascore_id ? (
-                                <span className="inline-flex items-center px-2 py-1 rounded-full text-xs font-medium bg-green-100 text-green-800">
-                                  ✓ Has ID
-                                </span>
-                              ) : (
-                                <span className="inline-flex items-center px-2 py-1 rounded-full text-xs font-medium bg-yellow-100 text-yellow-800">
-                                  ⚠ Missing
-                                </span>
-                              )}
-                            </td>
-                            <td className="p-3 text-center">
-                              <span className="text-sm font-medium">{player.loan_count}</span>
-                            </td>
-                            <td className="p-3">
-                              <div className="flex gap-1">
-                                <Button
-                                  size="sm"
-                                  variant="outline"
-                                  onClick={() => openEditPlayerDialog(player.player_id)}
-                                  title="Edit player details"
-                                >
-                                  Edit
-                                </Button>
-                                <Button
-                                  size="sm"
-                                  variant="destructive"
-                                  onClick={() => deletePlayer(player.player_id, player.player_name, player.loan_count)}
-                                  title="Delete player"
-                                >
-                                  Delete
-                                </Button>
-                                                </div>
-                                              </td>
-                            </tr>
-                          )
-                        })}
-                                        </tbody>
-                                      </table>
-                                    </div>
-                          </div>
-
-                {/* Pagination */}
-                {playersHubData.total_pages > 1 && (
-                  <div className="flex items-center justify-between border-t border-gray-200 pt-3">
-                    <span className="text-sm text-gray-600">
-                      Page {playersHubData.page} of {playersHubData.total_pages}
-                    </span>
-                    <div className="flex gap-2">
-                      <Button
-                        size="sm"
-                        variant="outline"
-                        onClick={() => setPlayersHubPage(Math.max(1, playersHubPage - 1))}
-                        disabled={playersHubPage === 1 || playersHubLoading}
-                      >
-                        Previous
-                      </Button>
-                      <Button
-                        size="sm"
-                        variant="outline"
-                        onClick={() => setPlayersHubPage(Math.min(playersHubData.total_pages, playersHubPage + 1))}
-                        disabled={playersHubPage === playersHubData.total_pages || playersHubLoading}
-                      >
-                        Next
-                      </Button>
-                    </div>
-                  </div>
-                )}
-              </>
-            )}
-                        </AccordionContent>
-                      </AccordionItem>
-                </Accordion>
-          </div>
-          <div id="admin-supplemental-loans" className="border rounded p-4 md:col-span-2">
-            <h2 className="font-semibold mb-3">Supplemental Players Manager</h2>
-            <div className="space-y-4">
-              <div className="grid grid-cols-1 lg:grid-cols-3 gap-4">
-                <div className="space-y-2">
-                  <div className="font-medium">Filters</div>
-                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
-                    <div className="flex flex-col">
-                      <span className="text-xs text-muted-foreground">Player name</span>
-                      <input className="border rounded p-2 text-sm w-full" placeholder="e.g., Smith" value={supplementalFilters.player_name} onChange={e=>setSupplementalFilters({...supplementalFilters, player_name: e.target.value})} />
-                    </div>
-                    <div className="flex flex-col">
-                      <span className="text-xs text-muted-foreground">Season (YYYY)</span>
-                      <input type="number" inputMode="numeric" pattern="[0-9]*" className="border rounded p-2 text-sm w-full" placeholder="2025" value={supplementalFilters.season} onChange={e=>setSupplementalFilters({...supplementalFilters, season: e.target.value})} />
-                    </div>
-                  </div>
-                  <Button size="sm" variant="outline" className="w-full" onClick={refreshSupplementalLoans}>Apply Filters</Button>
-                </div>
-                <div className="space-y-2 lg:col-span-2">
-                  <div className="font-medium">Add Supplemental Player</div>
-                  <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-4 gap-2">
-                    <input className="border rounded p-2 text-sm" placeholder="Player name" value={supplementalForm.player_name} onChange={e=>setSupplementalForm({...supplementalForm, player_name: e.target.value})} />
-                    <input className="border rounded p-2 text-sm" placeholder="Parent team name" value={supplementalForm.parent_team_name} onChange={e=>setSupplementalForm({...supplementalForm, parent_team_name: e.target.value})} />
-                    <input className="border rounded p-2 text-sm" placeholder="Loan team name" value={supplementalForm.loan_team_name} onChange={e=>setSupplementalForm({...supplementalForm, loan_team_name: e.target.value})} />
-                    <input className="border rounded p-2 text-sm" placeholder="Season (YYYY)" value={supplementalForm.season_year} onChange={e=>setSupplementalForm({...supplementalForm, season_year: e.target.value})} />
-                  </div>
-                  <Button size="sm" onClick={createSupplementalLoan} disabled={!supplementalForm.player_name || !supplementalForm.parent_team_name || !supplementalForm.loan_team_name || !supplementalForm.season_year}>Create Supplemental Player</Button>
-                </div>
-              </div>
-              <div className="mt-4">
-                {supplementalLoans.length === 0 ? (
-                  <div className="text-sm text-gray-600">No supplemental players found. Click "Apply Filters" to load or add a new one above.</div>
-                ) : (
-                  <div className="overflow-x-auto">
-                    <table className="min-w-full text-sm border">
-                      <thead className="bg-gray-50">
-                        <tr className="text-left border-b">
-                          <th className="p-2">Player</th>
-                          <th className="p-2">Parent Team</th>
-                          <th className="p-2">Loan Team</th>
-                          <th className="p-2">Season</th>
-                          <th className="p-2">Actions</th>
-                        </tr>
-                      </thead>
-                      <tbody>
-                        {supplementalLoans.map((sl) => (
-                          <tr key={sl.id} className="border-b">
-                            <td className="p-2 whitespace-nowrap">
-                              <div className="font-medium">{sl.player_name}</div>
-                              <div className="text-gray-500 text-xs">ID: {sl.id}</div>
-                            </td>
-                            <td className="p-2">{sl.parent_team_name}</td>
-                            <td className="p-2">{sl.loan_team_name}</td>
-                            <td className="p-2">{sl.season_year}</td>
-                            <td className="p-2">
-                              <Button size="sm" variant="destructive" onClick={() => deleteSupplementalLoan(sl)}>Delete</Button>
-                            </td>
-                          </tr>
-                        ))}
-                      </tbody>
-                    </table>
-                  </div>
-                )}
-              </div>
-            </div>
-          </div>
-          <div id="admin-newsletters" className="border rounded p-4 md:col-span-2">
-            <h2 className="font-semibold mb-3">Newsletters Manager</h2>
-            <div className="space-y-3">
-              <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
-                <div className="md:col-span-1 border rounded p-2">
-                  <div className="text-xs font-semibold mb-1">Issue date (primary)</div>
-                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
-                    <input type="date" className="border rounded p-2 text-sm" value={nlFilters.issue_start} onChange={e=>setNlFilters({...nlFilters, issue_start: e.target.value})} />
-                    <input type="date" className="border rounded p-2 text-sm" value={nlFilters.issue_end} onChange={e=>setNlFilters({...nlFilters, issue_end: e.target.value})} />
-                  </div>
-                </div>
-                <div className="md:col-span-1 border rounded p-2">
-                  <div className="text-xs font-semibold mb-1">Created date</div>
-                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
-                    <input type="date" className="border rounded p-2 text-sm" value={nlFilters.created_start} onChange={e=>setNlFilters({...nlFilters, created_start: e.target.value})} />
-                    <input type="date" className="border rounded p-2 text-sm" value={nlFilters.created_end} onChange={e=>setNlFilters({...nlFilters, created_end: e.target.value})} />
-                  </div>
-                </div>
-                <div className="md:col-span-1 border rounded p-2">
-                  <div className="text-xs font-semibold mb-1">Week range (optional)</div>
-                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
-                    <input type="date" className="border rounded p-2 text-sm" value={nlFilters.week_start} onChange={e=>setNlFilters({...nlFilters, week_start: e.target.value})} />
-                    <input type="date" className="border rounded p-2 text-sm" value={nlFilters.week_end} onChange={e=>setNlFilters({...nlFilters, week_end: e.target.value})} />
-                  </div>
-                </div>
-              </div>
-              <div className="flex flex-wrap items-center gap-2">
-                <label className="text-sm flex items-center gap-1">
-                  <span>Published only</span>
-                  <input type="checkbox" checked={nlFilters.published_only === 'true'} onChange={e=>setNlFilters({...nlFilters, published_only: e.target.checked ? 'true' : ''})} />
-                </label>
-                <div className="ml-auto flex gap-2">
-                  <Button size="sm" variant="outline" onClick={refreshNewsletters}>Apply filters</Button>
-                  <Button size="sm" variant="ghost" onClick={resetNewsletterFilters}>Reset</Button>
-                </div>
-              </div>
-            </div>
-            <div className="mt-4">
-              {newslettersAdmin.length === 0 ? (
-                <div className="text-sm text-gray-600">No newsletters.</div>
-              ) : (
-                <>
-                <div className="flex flex-wrap items-center gap-2 mb-2">
-                  <label className="flex items-center gap-2 text-xs text-gray-600">
-                    <input
-                      type="checkbox"
-                      checked={allFilteredSelected}
-                      onChange={(e) => handleToggleAllFiltered(e.target.checked)}
-                    />
-                    <span>Select all filtered</span>
-                  </label>
-                  <span className="text-xs text-gray-500">Total {totalFilteredCount}</span>
-                  {allFilteredSelected && (
-                    <span className="text-xs text-gray-500">Excluding {selectedNewsletterIds.length}</span>
                   )}
-                  <span className="text-xs text-gray-600">Selected {selectedNewsletterCount}</span>
-                  <Button
-                    size="sm"
-                    onClick={sendAdminPreviewSelected}
-                    disabled={allFilteredSelected || selectedNewsletterCount === 0 || sendSelectedBusy || bulkDeleteBusy}
-                    title={allFilteredSelected ? 'Disable “Select all filtered” to send previews.' : undefined}
-                  >
-                    {sendSelectedBusy && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}Send admin preview
-                  </Button>
-                  <Button
-                    size="sm"
-                    onClick={() => bulkPublishSelected(true)}
-                    disabled={selectedNewsletterCount === 0 || bulkPublishBusy || bulkDeleteBusy}
-                  >
-                    Publish selected
-                  </Button>
-                  <Button
-                    size="sm"
-                    variant="outline"
-                    onClick={() => bulkPublishSelected(false)}
-                    disabled={selectedNewsletterCount === 0 || bulkPublishBusy || bulkDeleteBusy}
-                  >
-                    Unpublish selected
-                  </Button>
-                  <Button
-                    size="sm"
-                    variant="destructive"
-                    onClick={deleteSelectedNewsletters}
-                    disabled={selectedNewsletterCount === 0 || bulkDeleteBusy}
-                  >
-                    {bulkDeleteBusy ? (
-                      <span className="inline-flex items-center gap-2">
-                        <Loader2 className="h-4 w-4 animate-spin" />
-                        Deleting…
-                      </span>
-                    ) : (
-                      'Delete selected'
-                    )}
-                  </Button>
-                  <Button
-                    size="sm"
-                    variant="ghost"
-                    onClick={clearNewsletterSelection}
-                    disabled={selectedNewsletterCount === 0 || bulkPublishBusy || bulkDeleteBusy}
-                  >
-                    Clear selection
-                  </Button>
-                  <Button
-                    size="sm"
-                    variant="outline"
-                    onClick={() => openReviewModal('manual')}
-                    disabled={newslettersAdmin.length === 0}
-                  >
-                    Review queue
-                  </Button>
-                  <Button
-                    size="sm"
-                    variant="secondary"
-                    onClick={() => openReviewModal('auto')}
-                    disabled={newslettersAdmin.length === 0}
-                  >
-                    Review & publish filtered
-                  </Button>
-                </div>
-                <div className="overflow-x-auto">
-                  <table className="min-w-full text-sm">
-                    <thead>
-                      <tr className="text-left border-b">
-                        <th className="p-2 w-10">
-                          <input
-                            ref={pageSelectRef}
-                            type="checkbox"
-                            checked={allPageSelected}
-                            onChange={(e) => togglePageSelection(e.target.checked)}
-                            aria-label="Select newsletters on this page"
-                          />
-                        </th>
-                        <th className="p-2">ID</th>
-                        <th className="p-2">Team</th>
-                        <th className="p-2">Title</th>
-                        <th className="p-2">Week</th>
-                        <th className="p-2">Published</th>
-                        <th className="p-2">Actions</th>
-                      </tr>
-                    </thead>
-                    <tbody>
-                      {paginatedNewslettersAdmin.map(n => (
-                        <tr key={n.id} className="border-b">
-                          <td className="p-2 align-top">
-                            <input
-                              type="checkbox"
-                              checked={allFilteredSelected ? !selectedNewsletterIdsSet.has(n.id) : selectedNewsletterIdsSet.has(n.id)}
-                              onChange={() => toggleNewsletterSelection(n.id)}
-                              aria-label={`Select newsletter ${n.id}`}
-                            />
-                          </td>
-                          <td className="p-2 align-top text-sm text-gray-600">#{n.id}</td>
-                          <td className="p-2 whitespace-nowrap">{n.team_name}</td>
-                          <td className="p-2">{n.title}</td>
-                          <td className="p-2">{n.week_start_date ? `${n.week_start_date} → ${n.week_end_date}` : ''}</td>
-                          <td className="p-2">{n.published ? `Yes (${n.published_date?.slice(0,10) || ''})` : 'No'}</td>
-                          <td className="p-2">
-                            <div className="flex flex-wrap items-center gap-2">
-                              <Button
-                                size="sm"
-                                onClick={() => sendAdminPreview([n.id])}
-                                disabled={sendPreviewBusyIds.includes(n.id) || sendSelectedBusy || bulkDeleteBusy}
-                              >
-                                {(sendPreviewBusyIds.includes(n.id) || sendSelectedBusy) && (
-                                  <Loader2 className="mr-2 h-4 w-4 animate-spin" />
-                                )}
-                                Send preview
-                              </Button>
-                              <Button size="sm" variant="outline" onClick={()=>startEditNewsletter(n)}>View/Edit</Button>
-                              <Button size="sm" variant="ghost" asChild>
-                                <Link to={`/admin/newsletters/${n.id}`} className="text-blue-600 hover:underline">
-                                  Open detail
-                                </Link>
-                              </Button>
-                              <Button
-                                size="sm"
-                                variant="destructive"
-                                onClick={() => deleteNewsletters([n.id])}
-                                disabled={deleteBusyIds.includes(n.id) || bulkDeleteBusy}
-                              >
-                                {(deleteBusyIds.includes(n.id) || bulkDeleteBusy) && (
-                                  <Loader2 className="mr-2 h-4 w-4 animate-spin" />
-                                )}
-                                Delete
-                              </Button>
-                            </div>
-                          </td>
-                        </tr>
-                      ))}
-                    </tbody>
-                  </table>
-                </div>
-                <div className="flex flex-wrap items-center justify-between gap-3 border-t border-gray-200 pt-4 mt-4 text-sm text-gray-600">
-                  <span>
-                    Page {adminNewsPage} of {adminTotalPages}
-                    {adminPageStart > 0 ? ` • Showing ${adminPageStart}–${adminPageEnd} of ${newslettersAdmin.length}` : ''}
-                  </span>
-                  <div className="flex gap-2">
-                    <Button
-                      variant="outline"
-                      size="sm"
-                      onClick={() => setAdminNewsPage((page) => Math.max(1, page - 1))}
-                      disabled={adminNewsPage === 1}
-                    >
-                      Previous
-                    </Button>
-                    <Button
-                      variant="outline"
-                      size="sm"
-                      onClick={() => setAdminNewsPage((page) => Math.min(adminTotalPages, page + 1))}
-                      disabled={adminNewsPage === adminTotalPages || newslettersAdmin.length === 0}
-                    >
-                      Next
-                    </Button>
-                  </div>
-                </div>
-                </>
-              )}
-            </div>
-            <Dialog open={reviewModalOpen} onOpenChange={(open) => { if (!open) closeReviewModal() }}>
-              <DialogContent
-                className="w-full max-w-none p-0 lg:p-6"
-                style={{ ...reviewModalSizing, overflow: 'auto' }}
-              >
-                <div className="flex h-full flex-col gap-4 p-4 lg:p-0">
-                  <DialogHeader className="px-0">
-                    <div className="flex items-center justify-between gap-3">
-                      <div>
-                        <DialogTitle>{reviewMode === 'auto' ? 'Review & publish filtered newsletters' : 'Review newsletters'}</DialogTitle>
-                        <DialogDescription>{reviewProgressLabel}</DialogDescription>
-                      </div>
-                      {reviewMode === 'auto' ? (
-                        <Badge variant="secondary">Auto publish</Badge>
-                      ) : (
-                        <Badge variant="secondary">Manual</Badge>
-                      )}
-                    </div>
-                  </DialogHeader>
-                  <div className="flex-1 overflow-auto">
-                    {reviewFinalizeBusy ? (
-                      <div className="flex h-full flex-col items-center justify-center gap-3 text-sm text-gray-600">
-                        <Loader2 className="h-6 w-6 animate-spin" />
-                        Finalizing bulk actions…
-                      </div>
-                    ) : (
-                      <div className="grid h-full grid-cols-1 gap-4 lg:grid-cols-5">
-                        <div className="flex h-full flex-col gap-3 rounded-md border bg-gray-50 p-4 lg:col-span-2">
-                          <div className="space-y-1 overflow-y-auto">
-                            <div className="text-sm font-semibold text-gray-800">{currentReviewItem?.title || 'Untitled newsletter'}</div>
-                            <div className="text-xs text-gray-500">Team: {reviewDetail?.team_name || currentReviewItem?.team_name || '—'}</div>
-                            <div className="text-xs text-gray-500">Issue date: {reviewDetail?.issue_date || currentReviewItem?.issue_date || '—'}</div>
-                            <div className="text-xs text-gray-500">Week: {reviewDetail?.week_start_date && reviewDetail?.week_end_date ? `${reviewDetail.week_start_date} → ${reviewDetail.week_end_date}` : (currentReviewItem?.week_start_date ? `${currentReviewItem.week_start_date} → ${currentReviewItem.week_end_date}` : '—')}</div>
-                            <div className="text-xs text-gray-500">Published: {reviewDetail?.published ? `Yes (${reviewDetail?.published_date?.slice(0,10) || ''})` : 'No'}</div>
-                            {reviewMode === 'auto' && (
-                              <div className="text-xs text-gray-500">Queued skips: {reviewBatchExclude.length} • Queued deletes: {reviewBatchDelete.length}</div>
-                            )}
-                            <div className="text-xs text-gray-500">
-                              Keyboard: Arrow keys or j/k to navigate, space to {reviewMode === 'auto' ? 'approve & move next' : 'publish'}.
-                            </div>
-                          </div>
-                        </div>
-                        <div className="flex h-full flex-col gap-3 lg:col-span-3">
-                          <Tabs value={reviewPreviewFormat} onValueChange={changeReviewFormat} className="w-full">
-                            <TabsList className="w-fit">
-                              <TabsTrigger value="web">Web preview</TabsTrigger>
-                              <TabsTrigger value="email">Email preview</TabsTrigger>
-                            </TabsList>
-                          </Tabs>
-                          <div className="flex-1 overflow-auto rounded-md border bg-white p-4">
-                            {reviewLoadingDetail ? (
-                              <div className="flex h-full items-center justify-center gap-2 text-sm text-gray-500">
-                                <Loader2 className="h-4 w-4 animate-spin" />
-                                Loading newsletter…
-                              </div>
-                            ) : reviewPreviewFormat === 'email' ? (
-                              reviewRenderedContent.email ? (
-                                <div className="prose max-w-none" dangerouslySetInnerHTML={{ __html: reviewRenderedContent.email }} />
-                              ) : reviewRenderedContent.emailError ? (
-                                <div className="text-sm text-red-600">{reviewRenderedContent.emailError}</div>
-                              ) : (
-                                <div className="text-xs text-gray-500">Email preview not loaded yet.</div>
-                              )
-                            ) : reviewRenderedContent.web ? (
-                              <div className="prose max-w-none" dangerouslySetInnerHTML={{ __html: reviewRenderedContent.web }} />
-                            ) : reviewRenderedContent.webError ? (
-                              <div className="text-sm text-red-600">{reviewRenderedContent.webError}</div>
-                            ) : (
-                              <div className="text-xs text-gray-500">Preview not available.</div>
-                            )}
-                          </div>
-                        </div>
-                      </div>
-                    )}
-                  </div>
-                  <DialogFooter className="flex flex-wrap items-center justify-between gap-3 px-0">
-                    <div className="text-xs text-muted-foreground">
-                      {currentReviewItem ? `#${currentReviewItem.id} • ${currentReviewItem.team_name || 'Unknown team'}` : 'Queue complete'}
-                    </div>
-                    <div className="flex flex-wrap gap-2">
-                      {reviewMode === 'auto' ? (
-                        <>
-                          <Button onClick={handleApproveAndNext} disabled={reviewFinalizeBusy || reviewLoadingDetail || !currentReviewItem}>
-                            Approve & Next
-                          </Button>
-                          <Button variant="outline" onClick={handleSkipReview} disabled={reviewFinalizeBusy || reviewLoadingDetail || !currentReviewItem}>
-                            Skip
-                          </Button>
-                          <Button variant="destructive" onClick={handleDeleteReview} disabled={reviewFinalizeBusy || reviewLoadingDetail || !currentReviewItem}>
-                            Delete
-                          </Button>
-                          <Button variant="ghost" onClick={finalizeAutoReview} disabled={reviewFinalizeBusy}>
-                            Finish review
-                          </Button>
-                        </>
-                      ) : (
-                        <>
-                          <Button onClick={handlePublishReview} disabled={reviewLoadingDetail || !currentReviewItem}>
-                            Publish
-                          </Button>
-                          <Button variant="outline" onClick={goToNextReview} disabled={!currentReviewItem}>
-                            Next
-                          </Button>
-                          <Button variant="destructive" onClick={handleDeleteReview} disabled={reviewLoadingDetail || !currentReviewItem}>
-                            Delete
-                          </Button>
-                        </>
-                      )}
-                      <Button variant="ghost" onClick={closeReviewModal} disabled={reviewFinalizeBusy}>
-                        Close
-                      </Button>
-                    </div>
-                  </DialogFooter>
-                </div>
-              </DialogContent>
-            </Dialog>
-            {editingNl && (
-              <div className="mt-4 border-t pt-4">
-                <div className="flex items-center justify-between mb-4">
-                  <div className="font-medium">Editing: {editingNl.title}</div>
-                  <div className="flex gap-2">
-                    <Button 
-                      size="sm" 
-                      variant={enhancedEditorMode === 'visual' ? 'default' : 'outline'}
-                      onClick={() => setEnhancedEditorMode('visual')}
-                    >
-                      Visual Editor
-                    </Button>
-                    <Button 
-                      size="sm" 
-                      variant={enhancedEditorMode === 'json' ? 'default' : 'outline'}
-                      onClick={() => setEnhancedEditorMode('json')}
-                    >
-                      JSON Editor
-                    </Button>
-                  </div>
                 </div>
 
-                {enhancedEditorMode === 'visual' ? (
-                  <div className="space-y-4">
-                    {/* Metadata Section */}
-                    <div className="bg-gradient-to-r from-blue-50 to-gray-50 p-4 rounded-lg border border-blue-200">
-                      <h3 className="text-sm font-semibold mb-3 text-gray-900">Newsletter Metadata</h3>
-                      <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
-                        <div>
-                          <label className="text-xs text-gray-600 mb-1 block">Title</label>
-                          <input 
-                            className="border rounded p-2 text-sm w-full" 
-                            value={editingNl.title || ''} 
-                            onChange={e=>setEditingNl({...editingNl, title: e.target.value})} 
-                          />
-                        </div>
-                        <div>
-                          <label className="text-xs text-gray-600 mb-1 block">Issue Date</label>
-                          <input 
-                            type="date" 
-                            className="border rounded p-2 text-sm w-full" 
-                            value={editingNl.issue_date?.slice(0,10) || ''} 
-                            onChange={e=>setEditingNl({...editingNl, issue_date: e.target.value})} 
-                          />
-                        </div>
-                        <div>
-                          <label className="text-xs text-gray-600 mb-1 block">Week Start</label>
-                          <input 
-                            type="date" 
-                            className="border rounded p-2 text-sm w-full" 
-                            value={editingNl.week_start_date?.slice(0,10) || ''} 
-                            onChange={e=>setEditingNl({...editingNl, week_start_date: e.target.value})} 
-                          />
-                        </div>
-                        <div>
-                          <label className="text-xs text-gray-600 mb-1 block">Week End</label>
-                          <input 
-                            type="date" 
-                            className="border rounded p-2 text-sm w-full" 
-                            value={editingNl.week_end_date?.slice(0,10) || ''} 
-                            onChange={e=>setEditingNl({...editingNl, week_end_date: e.target.value})} 
-                          />
-                        </div>
-                        <div className="flex items-center gap-2">
-                          <input 
-                            type="checkbox" 
-                            id="published-checkbox" 
-                            checked={!!editingNl.published} 
-                            onChange={e=>setEditingNl({...editingNl, published: e.target.checked})} 
-                          />
-                          <label htmlFor="published-checkbox" className="text-sm font-medium">Published</label>
-                        </div>
-                      </div>
-                    </div>
-
-                    {/* Player Cards by Section */}
-                    {(() => {
-                      try {
-                        const content = typeof editingNl.content === 'string' ? JSON.parse(editingNl.content) : (editingNl.content || {})
-                        const sections = content?.sections || []
-                        const filteredSections = sections.filter(s => 
-                          (s?.title || '').trim().toLowerCase() !== 'what the internet is saying'
-                        )
-                        
-                        return (
-                          <div className="space-y-4">
-                            {/* Newsletter Summary */}
-                            {content.summary && (
-                              <div className="bg-yellow-50 p-4 rounded-lg border border-yellow-200">
-                                <div className="text-sm font-semibold mb-2 text-gray-900">Newsletter Summary</div>
-                                <textarea
-                                  className="w-full border rounded p-2 text-sm"
-                                  rows="3"
-                                  value={content.summary}
-                                  onChange={(e) => {
-                                    content.summary = e.target.value
-                                    setEditingNl({...editingNl, content: JSON.stringify(content, null, 2)})
-                                  }}
-                                />
-                              </div>
-                            )}
-
-                            {/* Highlights */}
-                            {content.highlights && Array.isArray(content.highlights) && (
-                              <div className="bg-amber-50 p-4 rounded-lg border border-amber-200">
-                                <div className="text-sm font-semibold mb-2 text-gray-900">Key Highlights</div>
-                                <div className="space-y-2">
-                                  {content.highlights.map((h, idx) => (
-                                    <div key={idx} className="flex gap-2">
-                                      <input
-                                        className="flex-1 border rounded p-2 text-sm"
-                                        value={h}
-                                        onChange={(e) => {
-                                          content.highlights[idx] = e.target.value
-                                          setEditingNl({...editingNl, content: JSON.stringify(content, null, 2)})
-                                        }}
-                                      />
-                                      <Button
-                                        size="sm"
-                                        variant="ghost"
-                                        onClick={() => {
-                                          content.highlights.splice(idx, 1)
-                                          setEditingNl({...editingNl, content: JSON.stringify(content, null, 2)})
-                                        }}
-                                      >
-                                        ✕
-                                      </Button>
-                                    </div>
-                                  ))}
-                                </div>
-                              </div>
-                            )}
-
-                            {/* Player Sections */}
-                            {filteredSections.map((section, sectionIdx) => {
-                              const originalSectionIdx = sections.findIndex(s => s === section)
-                              return (
-                                <div key={sectionIdx} className="bg-white border-2 border-gray-200 rounded-lg overflow-hidden">
-                                  <div className="bg-gradient-to-r from-gray-100 to-gray-50 px-4 py-3 border-b border-gray-200">
-                                    <div className="flex items-center justify-between">
-                                      <h3 className="font-semibold text-gray-900">{section.title || 'Untitled Section'}</h3>
-                                      <div className="text-xs text-gray-600">{section.items?.length || 0} players</div>
-                                    </div>
-                                  </div>
-                                  <div className="p-4 space-y-3">
-                                    {section.items && section.items.length > 0 ? (
-                                      section.items.map((item, itemIdx) => {
-                                        const isEditing = editingPlayerCard?.sectionIndex === originalSectionIdx && editingPlayerCard?.itemIndex === itemIdx
-                                        const playerYoutubeLink = nlYoutubeLinks.find(
-                                          link => link.player_name === item.player_name || 
-                                          (link.player_id && item.player_id && link.player_id === item.player_id)
-                                        )
-                                        
-                                        return (
-                                          <div key={itemIdx} className={`border rounded-lg p-3 ${isEditing ? 'border-blue-500 bg-blue-50' : 'border-gray-200 bg-gray-50 hover:bg-white'} transition-colors`}>
-                                            {isEditing ? (
-                                              <div className="space-y-3">
-                                                <div className="grid grid-cols-2 gap-2">
-                                                  <div>
-                                                    <label className="text-xs font-medium text-gray-700">Player Name</label>
-                                                    <input
-                                                      className="w-full border rounded p-2 text-sm mt-1"
-                                                      value={editingPlayerCard.data.player_name || ''}
-                                                      onChange={(e) => setEditingPlayerCard({
-                                                        ...editingPlayerCard,
-                                                        data: {...editingPlayerCard.data, player_name: e.target.value}
-                                                      })}
-                                                    />
-                                                  </div>
-                                                  <div>
-                                                    <label className="text-xs font-medium text-gray-700">Loan Team</label>
-                                                    <input
-                                                      className="w-full border rounded p-2 text-sm mt-1"
-                                                      value={editingPlayerCard.data.loan_team || ''}
-                                                      onChange={(e) => setEditingPlayerCard({
-                                                        ...editingPlayerCard,
-                                                        data: {...editingPlayerCard.data, loan_team: e.target.value}
-                                                      })}
-                                                    />
-                                                  </div>
-                                                </div>
-                                                <div className="grid grid-cols-3 gap-2">
-                                                  <div>
-                                                    <label className="text-xs font-medium text-gray-700">Goals</label>
-                                                    <input
-                                                      type="number"
-                                                      className="w-full border rounded p-2 text-sm mt-1"
-                                                      value={editingPlayerCard.data.stats?.goals || 0}
-                                                      onChange={(e) => setEditingPlayerCard({
-                                                        ...editingPlayerCard,
-                                                        data: {
-                                                          ...editingPlayerCard.data,
-                                                          stats: {...(editingPlayerCard.data.stats || {}), goals: parseInt(e.target.value) || 0}
-                                                        }
-                                                      })}
-                                                    />
-                                                  </div>
-                                                  <div>
-                                                    <label className="text-xs font-medium text-gray-700">Assists</label>
-                                                    <input
-                                                      type="number"
-                                                      className="w-full border rounded p-2 text-sm mt-1"
-                                                      value={editingPlayerCard.data.stats?.assists || 0}
-                                                      onChange={(e) => setEditingPlayerCard({
-                                                        ...editingPlayerCard,
-                                                        data: {
-                                                          ...editingPlayerCard.data,
-                                                          stats: {...(editingPlayerCard.data.stats || {}), assists: parseInt(e.target.value) || 0}
-                                                        }
-                                                      })}
-                                                    />
-                                                  </div>
-                                                  <div>
-                                                    <label className="text-xs font-medium text-gray-700">Minutes</label>
-                                                    <input
-                                                      type="number"
-                                                      className="w-full border rounded p-2 text-sm mt-1"
-                                                      value={editingPlayerCard.data.stats?.minutes || 0}
-                                                      onChange={(e) => setEditingPlayerCard({
-                                                        ...editingPlayerCard,
-                                                        data: {
-                                                          ...editingPlayerCard.data,
-                                                          stats: {...(editingPlayerCard.data.stats || {}), minutes: parseInt(e.target.value) || 0}
-                                                        }
-                                                      })}
-                                                    />
-                                                  </div>
-                                                </div>
-                                                <div>
-                                                  <label className="text-xs font-medium text-gray-700">Week Summary</label>
-                                                  <textarea
-                                                    className="w-full border rounded p-2 text-sm mt-1"
-                                                    rows="3"
-                                                    value={editingPlayerCard.data.week_summary || ''}
-                                                    onChange={(e) => setEditingPlayerCard({
-                                                      ...editingPlayerCard,
-                                                      data: {...editingPlayerCard.data, week_summary: e.target.value}
-                                                    })}
-                                                  />
-                                                </div>
-                                                <div className="flex gap-2 pt-2">
-                                                  <Button
-                                                    size="sm"
-                                                    onClick={() => updatePlayerInNewsletter(originalSectionIdx, itemIdx, editingPlayerCard.data)}
-                                                  >
-                                                    Save Changes
-                                                  </Button>
-                                                  <Button
-                                                    size="sm"
-                                                    variant="outline"
-                                                    onClick={() => setEditingPlayerCard(null)}
-                                                  >
-                                                    Cancel
-                                                  </Button>
-                                                </div>
-                                              </div>
-                                            ) : (
-                                              <>
-                                                <div className="flex items-start justify-between mb-2">
-                                                  <div className="flex-1">
-                                                    <div className="flex items-center gap-2 flex-wrap">
-                                                      <span className="font-semibold text-gray-900">{item.player_name}</span>
-                                                      {item.loan_team && (
-                                                        <span className="bg-blue-100 text-blue-800 px-2 py-0.5 rounded text-xs font-medium">
-                                                          → {item.loan_team}
-                                                        </span>
-                                                      )}
-                                                      {item.stats && (
-                                                        <div className="flex gap-1">
-                                                          {item.stats.goals > 0 && (
-                                                            <span className="bg-green-100 text-green-800 px-2 py-0.5 rounded text-xs font-medium">
-                                                              {item.stats.goals}G
-                                                            </span>
-                                                          )}
-                                                          {item.stats.assists > 0 && (
-                                                            <span className="bg-purple-100 text-purple-800 px-2 py-0.5 rounded text-xs font-medium">
-                                                              {item.stats.assists}A
-                                                            </span>
-                                                          )}
-                                                          {item.stats.minutes > 0 && (
-                                                            <span className="bg-blue-100 text-blue-800 px-2 py-0.5 rounded text-xs font-medium">
-                                                              {item.stats.minutes}'
-                                                            </span>
-                                                          )}
-                                                        </div>
-                                                      )}
-                                                      {playerYoutubeLink && (
-                                                        <a 
-                                                          href={playerYoutubeLink.youtube_link} 
-                                                          target="_blank" 
-                                                          rel="noopener noreferrer"
-                                                          className="bg-red-100 text-red-800 px-2 py-0.5 rounded text-xs font-medium hover:bg-red-200"
-                                                        >
-                                                          🎬 Highlights
-                                                        </a>
-                                                      )}
-                                                    </div>
-                                                    {item.week_summary && (
-                                                      <p className="text-sm text-gray-700 mt-2 leading-relaxed">{item.week_summary}</p>
-                                                    )}
-                                                  </div>
-                                                  <div className="flex gap-1 ml-2">
-                                                    <Button
-                                                      size="sm"
-                                                      variant="ghost"
-                                                      onClick={() => setEditingPlayerCard({
-                                                        sectionIndex: originalSectionIdx,
-                                                        itemIndex: itemIdx,
-                                                        data: {...item}
-                                                      })}
-                                                      title="Edit player"
-                                                    >
-                                                      ✏️
-                                                    </Button>
-                                                    <Button
-                                                      size="sm"
-                                                      variant="ghost"
-                                                      onClick={() => movePlayerInNewsletter(originalSectionIdx, itemIdx, originalSectionIdx, 'up')}
-                                                      disabled={itemIdx === 0}
-                                                      title="Move up"
-                                                    >
-                                                      ↑
-                                                    </Button>
-                                                    <Button
-                                                      size="sm"
-                                                      variant="ghost"
-                                                      onClick={() => movePlayerInNewsletter(originalSectionIdx, itemIdx, originalSectionIdx, 'down')}
-                                                      disabled={itemIdx === section.items.length - 1}
-                                                      title="Move down"
-                                                    >
-                                                      ↓
-                                                    </Button>
-                                                    <Button
-                                                      size="sm"
-                                                      variant="ghost"
-                                                      onClick={() => deletePlayerFromNewsletter(originalSectionIdx, itemIdx)}
-                                                      title="Remove player"
-                                                    >
-                                                      🗑️
-                                                    </Button>
-                                                  </div>
-                                                </div>
-                                              </>
-                                            )}
-                                          </div>
-                                        )
-                                      })
-                                    ) : (
-                                      <div className="text-center py-4 text-sm text-gray-500">
-                                        No players in this section
-                                      </div>
-                                    )}
-                                  </div>
-                                </div>
-                              )
-                            })}
-                          </div>
-                        )
-                      } catch (error) {
-                        return (
-                          <div className="bg-red-50 border border-red-200 rounded p-4 text-sm text-red-700">
-                            Unable to parse newsletter content. Switch to JSON Editor to fix.
-                          </div>
-                        )
-                      }
-                    })()}
-
-                    {/* YouTube Links Section */}
-                    <div className="border rounded-lg p-4 bg-gradient-to-r from-red-50 to-pink-50">
-                      <h3 className="text-sm font-semibold mb-3 flex items-center gap-2">
-                        🎬 YouTube Links for Players
-                      </h3>
-                      <div className="mb-3 space-y-2">
-                        <div className="text-xs text-gray-600">Add YouTube highlight links to players in this newsletter</div>
-                        <div className="grid grid-cols-1 sm:grid-cols-3 gap-2">
-                          <select 
-                            className="border rounded p-2 text-sm" 
-                            value={nlYoutubeLinkForm.player_name}
-                            onChange={(e) => {
-                              const selectedPlayer = extractPlayersFromNewsletter(editingNl).find(p => p.player_name === e.target.value)
-                              setNlYoutubeLinkForm({
-                                player_name: e.target.value,
-                                youtube_link: nlYoutubeLinkForm.youtube_link,
-                                player_id: selectedPlayer?.player_id || null,
-                                supplemental_loan_id: selectedPlayer?.supplemental_loan_id || null
-                              })
-                            }}
-                          >
-                            <option value="">Select player...</option>
-                            {extractPlayersFromNewsletter(editingNl).map((player, idx) => (
-                              <option key={idx} value={player.player_name}>
-                                {player.player_name} ({player.loan_team})
-                              </option>
-                            ))}
-                          </select>
-                          <input 
-                            className="border rounded p-2 text-sm" 
-                            placeholder="YouTube URL"
-                            value={nlYoutubeLinkForm.youtube_link}
-                            onChange={(e) => setNlYoutubeLinkForm({...nlYoutubeLinkForm, youtube_link: e.target.value})}
-                          />
-                          <Button size="sm" onClick={createNewsletterYoutubeLink}>Add Link</Button>
-                        </div>
-                      </div>
-                      <div className="space-y-2">
-                        {nlYoutubeLinks.length === 0 ? (
-                          <div className="text-xs text-gray-500">No YouTube links added yet</div>
-                        ) : (
-                          nlYoutubeLinks.map((link) => (
-                            <div key={link.id} className="bg-white border rounded p-2 flex items-center gap-2">
-                              <div className="flex-1">
-                                <div className="text-sm font-medium">{link.player_name}</div>
-                                {editingNlYoutubeLink?.id === link.id ? (
-                                  <input 
-                                    className="border rounded p-1 text-xs w-full mt-1"
-                                    value={editingNlYoutubeLink.youtube_link}
-                                    onChange={(e) => setEditingNlYoutubeLink({...editingNlYoutubeLink, youtube_link: e.target.value})}
-                                  />
-                                ) : (
-                                  <a href={link.youtube_link} target="_blank" rel="noopener noreferrer" className="text-xs text-blue-600 hover:underline truncate block">
-                                    {link.youtube_link}
-                                  </a>
-                                )}
-                              </div>
-                              <div className="flex gap-1">
-                                {editingNlYoutubeLink?.id === link.id ? (
-                                  <>
-                                    <Button size="sm" variant="outline" onClick={() => updateNewsletterYoutubeLink(link.id)}>Save</Button>
-                                    <Button size="sm" variant="ghost" onClick={() => setEditingNlYoutubeLink(null)}>Cancel</Button>
-                                  </>
-                                ) : (
-                                  <>
-                                    <Button size="sm" variant="outline" onClick={() => setEditingNlYoutubeLink(link)}>Edit</Button>
-                                    <Button size="sm" variant="destructive" onClick={() => deleteNewsletterYoutubeLink(link.id)}>Delete</Button>
-                                  </>
-                                )}
-                              </div>
-                            </div>
-                          ))
-                        )}
-                      </div>
-                    </div>
-
-                    {/* Preview Section */}
-                    <div className="border rounded-lg overflow-hidden">
-                      <div className="bg-gray-100 px-4 py-2 border-b flex items-center justify-between">
-                        <span className="text-sm font-semibold">Live Preview</span>
-                        <div className="flex items-center gap-2">
-                          <Button size="sm" variant={previewFormat==='web'?'default':'outline'} onClick={()=>setPreviewFormat('web')}>Web</Button>
-                          <Button size="sm" variant={previewFormat==='email'?'default':'outline'} onClick={()=>setPreviewFormat('email')}>Email</Button>
-                          <Button size="sm" variant="ghost" onClick={refreshPreview}>Reload</Button>
-                        </div>
-                      </div>
-                      <div className="bg-white max-h-[520px] overflow-auto p-4">
-                        {previewError ? (
-                          <div className="p-3 text-sm text-red-700 bg-red-50 border border-red-200 rounded">
-                            {previewError}
-                          </div>
-                        ) : previewHtml ? (
-                          <div dangerouslySetInnerHTML={{ __html: previewHtml }} />
-                        ) : (
-                          <div className="p-3 text-sm text-gray-500">No preview loaded yet. Click "Reload" to generate.</div>
-                        )}
-                      </div>
-                    </div>
-                  </div>
-                ) : (
-                  /* JSON Editor Mode */
-                  <div className="grid grid-cols-1 lg:grid-cols-2 gap-3">
-                    <div className="flex flex-col gap-2">
-                      <div className="text-sm font-medium">Content JSON</div>
-                      <textarea 
-                        className="border rounded p-2 text-sm font-mono" 
-                        rows="24" 
-                        value={(() => { 
-                          try { 
-                            return typeof editingNl.content === 'string' ? editingNl.content : JSON.stringify(editingNl.content || {}, null, 2) 
-                          } catch { 
-                            return String(editingNl.content || '') 
-                          } 
-                        })()} 
-                        onChange={e=>setEditingNl({...editingNl, content: e.target.value})} 
+                {/* Loan Team */}
+                <div>
+                  <div className="flex items-center justify-between mb-1">
+                    <label className="text-sm font-medium text-gray-700">Loan Team (Current Club) *</label>
+                    <label className="flex items-center gap-1 text-xs text-gray-600 cursor-pointer">
+                      <input
+                        type="checkbox"
+                        checked={editPlayerForm.use_custom_loan_team}
+                        onChange={(e) => setEditPlayerForm({
+                          ...editPlayerForm,
+                          use_custom_loan_team: e.target.checked,
+                          loan_team_id: '',
+                          custom_loan_team_name: ''
+                        })}
                       />
-                    </div>
-                    <div className="flex flex-col gap-2">
-                      <div className="text-sm font-medium">Preview</div>
-                      <div className="border rounded bg-white p-4 max-h-[600px] overflow-auto">
-                        {(() => {
-                          try {
-                            const obj = (() => { try { return typeof editingNl.content === 'string' ? JSON.parse(editingNl.content) : (editingNl.content || {}) } catch { return {} } })()
-                            const previewSections = Array.isArray(obj.sections)
-                              ? obj.sections.filter((section) => ((section?.title || '').trim().toLowerCase()) !== 'what the internet is saying')
-                              : []
-                            return (
-                              <div className="space-y-4">
-                                <div className="bg-gradient-to-r from-blue-50 to-gray-50 p-4 rounded border-l-4 border-blue-500">
-                                  <div className="text-xl font-bold text-gray-900 mb-1">{obj.title || editingNl.title}</div>
-                                  {obj.range && (
-                                    <div className="text-xs text-gray-600">Week: {obj.range[0]} - {obj.range[1]}</div>
-                                  )}
-                                  {obj.summary && (
-                                    <div className="text-gray-700 leading-relaxed mt-2">{obj.summary}</div>
-                                  )}
-                                </div>
-                                {obj.highlights && Array.isArray(obj.highlights) && obj.highlights.length > 0 && (
-                                  <div className="bg-yellow-50 p-3 rounded border-l-4 border-yellow-400">
-                                    <div className="text-sm font-semibold text-gray-900 mb-2">Key Highlights</div>
-                                    <ul className="list-disc ml-5 space-y-1">
-                                      {obj.highlights.map((h, i) => (<li key={i} className="text-sm text-gray-700">{h}</li>))}
-                                    </ul>
-                                  </div>
-                                )}
-                                {previewSections.length > 0 && (
-                                  <div className="space-y-3">
-                                    {previewSections.map((sec, si) => (
-                                      <div key={si} className="bg-white border rounded">
-                                          {sec.title && (
-                                            <div className="bg-gray-100 px-3 py-2 border-b text-sm font-semibold">{sec.title}</div>
-                                          )}
-                                          <div className="p-3 space-y-2">
-                                            {sec.items && sec.items.map((it, ii) => (
-                                              <div key={ii} className="border-l-4 border-blue-200 pl-3 py-1">
-                                                <div className="flex flex-wrap items-center gap-2">
-                                                  {it.player_name && (<span className="font-semibold text-gray-900">{it.player_name}</span>)}
-                                                  {it.loan_team && (<span className="bg-blue-100 text-blue-800 px-2 py-0.5 rounded text-xs">→ {it.loan_team}</span>)}
-                                                  {it.stats && (
-                                                    <div className="flex gap-1 text-xs">
-                                                      {it.stats.goals > 0 && (<span className="bg-green-100 text-green-800 px-1 rounded">{it.stats.goals}G</span>)}
-                                                      {it.stats.assists > 0 && (<span className="bg-purple-100 text-purple-800 px-1 rounded">{it.stats.assists}A</span>)}
-                                                      {it.stats.minutes > 0 && (<span className="bg-blue-100 text-blue-800 px-1 rounded">{it.stats.minutes}'</span>)}
-                                                    </div>
-                                                  )}
-                                                </div>
-                                                {it.week_summary && (<div className="text-sm text-gray-700">{it.week_summary}</div>)}
-                                              </div>
-                                            ))}
-                                          </div>
-                                        </div>
-                                      ))}
-                                  </div>
-                                )}
-                              </div>
-                            )
-                          } catch {
-                            return <div className="text-sm text-gray-600">Unable to render preview. Check JSON syntax.</div>
-                          }
-                        })()}
-                      </div>
-                    </div>
-                        </div>
-                )}
+                      Custom team
+                    </label>
+                  </div>
+                  {editPlayerForm.use_custom_loan_team ? (
+                    <input
+                      type="text"
+                      className="border rounded p-2 text-sm w-full"
+                      placeholder="e.g. Sheffield Wednesday, Hull City"
+                      value={editPlayerForm.custom_loan_team_name}
+                      onChange={(e) => setEditPlayerForm({ ...editPlayerForm, custom_loan_team_name: e.target.value })}
+                    />
+                  ) : (
+                    <TeamSelect
+                      teams={runTeams}
+                      value={editPlayerForm.loan_team_id}
+                      onChange={(id) => setEditPlayerForm({ ...editPlayerForm, loan_team_id: id })}
+                      placeholder="Select loan team..."
+                    />
+                  )}
+                </div>
 
-                <div className="mt-4 flex gap-2 border-t pt-4">
-                  <Button size="sm" onClick={saveNewsletter}>Save Newsletter</Button>
-                  <Button size="sm" variant="outline" onClick={()=>{setEditingNl(null); setEditingPlayerCard(null); setEnhancedEditorMode('visual')}}>Cancel</Button>
-                </div>
-              </div>
-            )}
-          </div>
-          <div className="border rounded p-4">
-            <h2 className="font-semibold mb-3">Newsletter Settings</h2>
-            <div className="space-y-2">
-              {[
-                ['brave_soft_rank','Soft Rank (quality-first ordering)'],
-                ['brave_site_boost','Site Boost (local/club sources)'],
-                ['brave_cup_synonyms','Cup Synonyms (EFL/FA/League)'],
-                ['search_strict_range','Strict Date Window (drop undated)'],
-              ].map(([k,label]) => (
-                <label key={k} className="flex items-center gap-2">
-                  <input type="checkbox" checked={!!settings[k]} onChange={e=>setSettings({...settings, [k]: e.target.checked})} />
-                  <span>{label}</span>
-                </label>
-              ))}
-            </div>
-            <div className="mt-2">
-              <Button onClick={saveSettings}>Save Settings</Button>
-            </div>
-          </div>
-          <div className="border rounded p-4">
-            <h2 className="font-semibold mb-3">Pending Player Flags</h2>
-            {flags.length===0 ? (
-              <p className="text-sm text-gray-600">No pending flags.</p>
-            ) : (
-              <div className="space-y-3">
-                {flags.map(f => {
-                  const editor = flagEditors[f.id]
-                  const loanOptions = editor?.loans || []
-                  const teamOptions = buildTeamOptionsForLoan(loanOptions)
-                  const selectedLoan = loanOptions.find((l) => l.id === editor?.selectedLoanId)
-                  return (
-                    <div key={f.id} className="border rounded p-3">
-                      <div className="text-sm font-semibold">Flag #{f.id}</div>
-                      <div className="mt-1 grid gap-1 text-sm text-gray-700">
-                        <div>Player API: {f.player_api_id}</div>
-                        <div>Primary Team API: {f.primary_team_api_id}</div>
-                        {f.loan_team_api_id && <div>Loan Team API: {f.loan_team_api_id}</div>}
-                        {f.season && <div>Season: {f.season}</div>}
-                        <div className="text-gray-800">Reason: {f.reason}</div>
-                      </div>
-                      <div className="mt-2 flex flex-wrap gap-2">
-                        <Button
-                          size="sm"
-                          variant="outline"
-                          onClick={() => (editor ? closeFlagEditor(f.id) : openFlagEditor(f))}
-                          disabled={editor?.saving}
-                        >
-                          {editor ? 'Hide editor' : 'Edit loan assignment'}
-                        </Button>
-                        <Button size="sm" onClick={()=>resolveFlag(f.id,false)}>Resolve</Button>
-                        <Button size="sm" variant="outline" onClick={()=>resolveFlag(f.id,true)}>Resolve + Deactivate Loan</Button>
-                      </div>
-                      {editor && (
-                        <div className="mt-3 space-y-3 rounded border border-dashed bg-white/70 p-3 text-sm">
-                          {editor.loading ? (
-                            <div className="flex items-center gap-2 text-gray-600">
-                              <Loader2 className="h-4 w-4 animate-spin" /> Loading loan details…
-                            </div>
-                          ) : editor.error ? (
-                            <div className="rounded border border-red-200 bg-red-50 p-2 text-red-700">{editor.error}</div>
-                          ) : (
-                            <>
-                              {loanOptions.length > 1 && (
-                                <div className="grid gap-1">
-                                  <Label className="text-xs uppercase tracking-wide text-gray-500">Loan record</Label>
-                                  <Select
-                                    value={String(editor.selectedLoanId)}
-                                    onValueChange={(value) => selectFlagLoanRecord(f.id, value)}
-                                  >
-                                    <SelectTrigger>
-                                      <SelectValue />
-                                    </SelectTrigger>
-                                    <SelectContent>
-                                      {loanOptions.map((loan) => (
-                                        <SelectItem key={loan.id} value={String(loan.id)}>
-                                          {loan.primary_team_name} → {loan.loan_team_name} {loan.is_active ? '(active)' : '(inactive)'}
-                                        </SelectItem>
-                                      ))}
-                                    </SelectContent>
-                                  </Select>
-                                </div>
-                              )}
-                              {selectedLoan && (
-                                <div className="rounded bg-gray-50 p-2 text-xs text-gray-600">
-                                  Current assignment: {selectedLoan.primary_team_name} → {selectedLoan.loan_team_name}
-                                </div>
-                              )}
-                              <div className="grid gap-3 sm:grid-cols-2">
-                                <div className="space-y-1">
-                                  <Label className="text-xs uppercase tracking-wide text-gray-500">Primary team</Label>
-                                  <TeamSelect
-                                    teams={teamOptions}
-                                    value={editor.primaryTeamId ?? null}
-                                    onChange={(id) => setFlagPrimaryTeam(f.id, id)}
-                                    placeholder="Select primary team…"
-                                  />
-                                </div>
-                                <div className="space-y-1">
-                                  <Label className="text-xs uppercase tracking-wide text-gray-500">Loan team</Label>
-                                  <TeamSelect
-                                    teams={teamOptions}
-                                    value={editor.loanTeamId ?? null}
-                                    onChange={(id) => setFlagLoanTeam(f.id, id)}
-                                    placeholder="Select loan team…"
-                                  />
-                                </div>
-                              </div>
-                              <div className="flex flex-wrap gap-2">
-                                <Button
-                                  size="sm"
-                                  onClick={() => saveFlagLoanChanges(f)}
-                                  disabled={editor.saving}
-                                >
-                                  {editor.saving && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}Save loan changes
-                                </Button>
-                                <Button
-                                  size="sm"
-                                  variant="ghost"
-                                  onClick={() => closeFlagEditor(f.id)}
-                                  disabled={editor.saving}
-                                >
-                                  Cancel
-                                </Button>
-                              </div>
-                            </>
-                          )}
-                        </div>
-                      )}
-                    </div>
-                  )
-                })}
-              </div>
-            )}
-          </div>
-        </div>
-        </>
-      ) : (
-        <div className="rounded-lg border border-dashed bg-muted/40 p-6 text-sm text-muted-foreground space-y-3">
-          <p>Admin tools are locked. Sign in with an approved admin email and store the API key above.</p>
-          <div className="flex flex-wrap gap-2">
-            {!hasAdminToken && (
-              <Button size="sm" onClick={openLoginModal}>
-                <LogIn className="mr-1 h-4 w-4" /> Sign in as admin
-              </Button>
-            )}
-            {!hasStoredKey && (
-              <Button size="sm" variant="outline" onClick={startEditingKey}>
-                <KeyRound className="mr-1 h-4 w-4" /> Add API key
-              </Button>
-            )}
-          </div>
-        </div>
-      )}
-      
-      {/* Edit Player Dialog */}
-      {editingPlayerDialog && (
-        <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center p-4 z-50" onClick={() => setEditingPlayerDialog(null)}>
-          <div className="bg-white rounded-lg p-6 max-w-2xl w-full max-h-[90vh] overflow-y-auto" onClick={(e) => e.stopPropagation()}>
-            <h2 className="text-xl font-semibold mb-4">Edit Player</h2>
-            
-            <div className="space-y-4">
-              {/* Player Name */}
-              <div>
-                <label className="text-sm font-medium text-gray-700 block mb-1">Player Name *</label>
-                <input
-                  type="text"
-                  className="border rounded p-2 text-sm w-full"
-                  value={editPlayerForm.name}
-                  onChange={(e) => setEditPlayerForm({...editPlayerForm, name: e.target.value})}
-                />
-              </div>
-              
-              <div className="grid grid-cols-2 gap-4">
-                {/* Position */}
+                {/* Season/Window */}
                 <div>
-                  <label className="text-sm font-medium text-gray-700 block mb-1">Position</label>
+                  <label className="text-sm font-medium text-gray-700 block mb-1">Season / Window</label>
                   <select
                     className="border rounded p-2 text-sm w-full"
-                    value={editPlayerForm.position}
-                    onChange={(e) => setEditPlayerForm({...editPlayerForm, position: e.target.value})}
+                    value={editPlayerForm.window_key}
+                    onChange={(e) => setEditPlayerForm({ ...editPlayerForm, window_key: e.target.value })}
                   >
-                    <option value="">Select position...</option>
-                    {playerFieldOptions.positions.map(pos => (
-                      <option key={pos} value={pos}>{pos}</option>
-                    ))}
-                  </select>
-                </div>
-                
-                {/* Nationality */}
-                <div>
-                  <label className="text-sm font-medium text-gray-700 block mb-1">Nationality</label>
-                  <select
-                    className="border rounded p-2 text-sm w-full"
-                    value={editPlayerForm.nationality}
-                    onChange={(e) => setEditPlayerForm({...editPlayerForm, nationality: e.target.value})}
-                  >
-                    <option value="">Select nationality...</option>
-                    {playerFieldOptions.nationalities.map(nat => (
-                      <option key={nat} value={nat}>{nat}</option>
+                    <option value="">Select season...</option>
+                    {generateSeasonOptions().map(opt => (
+                      <option key={opt.value} value={opt.value}>{opt.label}</option>
                     ))}
                   </select>
                 </div>
               </div>
-              
-              <div className="grid grid-cols-2 gap-4">
-                {/* Age */}
-                <div>
-                  <label className="text-sm font-medium text-gray-700 block mb-1">Age</label>
-                  <input
-                    type="number"
-                    className="border rounded p-2 text-sm w-full"
-                    value={editPlayerForm.age}
-                    onChange={(e) => setEditPlayerForm({...editPlayerForm, age: e.target.value})}
-                  />
-                </div>
-                
-                {/* Sofascore ID */}
-                <div>
-                  <label className="text-sm font-medium text-gray-700 block mb-1">Sofascore ID</label>
-                  <input
-                    type="number"
-                    className="border rounded p-2 text-sm w-full"
-                    value={editPlayerForm.sofascore_id}
-                    onChange={(e) => setEditPlayerForm({...editPlayerForm, sofascore_id: e.target.value})}
-                  />
-                </div>
+
+              {/* Actions */}
+              <div className="mt-6 flex gap-3 justify-end">
+                <Button variant="outline" onClick={() => setEditingPlayerDialog(null)}>
+                  Cancel
+                </Button>
+                <Button onClick={savePlayerEdit}>
+                  Save Changes
+                </Button>
               </div>
-              
-              {/* Primary Team */}
-              <div>
-                <div className="flex items-center justify-between mb-1">
-                  <label className="text-sm font-medium text-gray-700">Primary Team (Parent Club) *</label>
-                  <label className="flex items-center gap-1 text-xs text-gray-600 cursor-pointer">
-                    <input
-                      type="checkbox"
-                      checked={editPlayerForm.use_custom_primary_team}
-                      onChange={(e) => setEditPlayerForm({
-                        ...editPlayerForm,
-                        use_custom_primary_team: e.target.checked,
-                        primary_team_id: '',
-                        custom_primary_team_name: ''
-                      })}
-                    />
-                    Custom team
-                  </label>
-                </div>
-                {editPlayerForm.use_custom_primary_team ? (
-                  <input
-                    type="text"
-                    className="border rounded p-2 text-sm w-full"
-                    placeholder="e.g. Portsmouth, Sunderland"
-                    value={editPlayerForm.custom_primary_team_name}
-                    onChange={(e) => setEditPlayerForm({...editPlayerForm, custom_primary_team_name: e.target.value})}
-                  />
-                ) : (
-                  <TeamSelect
-                    teams={runTeams}
-                    value={editPlayerForm.primary_team_id}
-                    onChange={(id) => setEditPlayerForm({...editPlayerForm, primary_team_id: id})}
-                    placeholder="Select primary team..."
-                  />
-                )}
-              </div>
-              
-              {/* Loan Team */}
-              <div>
-                <div className="flex items-center justify-between mb-1">
-                  <label className="text-sm font-medium text-gray-700">Loan Team (Current Club) *</label>
-                  <label className="flex items-center gap-1 text-xs text-gray-600 cursor-pointer">
-                    <input
-                      type="checkbox"
-                      checked={editPlayerForm.use_custom_loan_team}
-                      onChange={(e) => setEditPlayerForm({
-                        ...editPlayerForm,
-                        use_custom_loan_team: e.target.checked,
-                        loan_team_id: '',
-                        custom_loan_team_name: ''
-                      })}
-                    />
-                    Custom team
-                  </label>
-                </div>
-                {editPlayerForm.use_custom_loan_team ? (
-                  <input
-                    type="text"
-                    className="border rounded p-2 text-sm w-full"
-                    placeholder="e.g. Sheffield Wednesday, Hull City"
-                    value={editPlayerForm.custom_loan_team_name}
-                    onChange={(e) => setEditPlayerForm({...editPlayerForm, custom_loan_team_name: e.target.value})}
-                  />
-                ) : (
-                  <TeamSelect
-                    teams={runTeams}
-                    value={editPlayerForm.loan_team_id}
-                    onChange={(id) => setEditPlayerForm({...editPlayerForm, loan_team_id: id})}
-                    placeholder="Select loan team..."
-                  />
-                )}
-              </div>
-              
-              {/* Season/Window */}
-              <div>
-                <label className="text-sm font-medium text-gray-700 block mb-1">Season / Window</label>
-                <select
-                  className="border rounded p-2 text-sm w-full"
-                  value={editPlayerForm.window_key}
-                  onChange={(e) => setEditPlayerForm({...editPlayerForm, window_key: e.target.value})}
-                >
-                  <option value="">Select season...</option>
-                  {generateSeasonOptions().map(opt => (
-                    <option key={opt.value} value={opt.value}>{opt.label}</option>
-                  ))}
-                </select>
-              </div>
-            </div>
-            
-            {/* Actions */}
-            <div className="mt-6 flex gap-3 justify-end">
-              <Button variant="outline" onClick={() => setEditingPlayerDialog(null)}>
-                Cancel
-              </Button>
-              <Button onClick={savePlayerEdit}>
-                Save Changes
-              </Button>
             </div>
           </div>
-        </div>
-      )}
+        )}
+      </div>
+
+      {/* Confirmation Dialogs */}
+
+      {/* Delete Supplemental Loan Confirmation */}
+      <Dialog open={!!deleteSupplementalLoanConfirm} onOpenChange={() => setDeleteSupplementalLoanConfirm(null)}>
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>Delete Supplemental Loan?</DialogTitle>
+            <DialogDescription>
+              Are you sure you want to delete the supplemental loan for <strong>{deleteSupplementalLoanConfirm?.player_name}</strong>?
+              This action cannot be undone.
+            </DialogDescription>
+          </DialogHeader>
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setDeleteSupplementalLoanConfirm(null)}>
+              Cancel
+            </Button>
+            <Button variant="destructive" onClick={confirmDeleteSupplementalLoan}>
+              Delete
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      {/* Delete Newsletter Confirmation */}
+      <Dialog open={!!deleteNewsletterConfirm} onOpenChange={() => setDeleteNewsletterConfirm(null)}>
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>Delete Newsletter?</DialogTitle>
+            <DialogDescription>
+              Are you sure you want to delete {deleteNewsletterConfirm?.label}?
+              This action cannot be undone.
+            </DialogDescription>
+          </DialogHeader>
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setDeleteNewsletterConfirm(null)}>
+              Cancel
+            </Button>
+            <Button variant="destructive" onClick={confirmDeleteNewsletter}>
+              Delete
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      {/* Delete Player from Newsletter Confirmation */}
+      <Dialog open={!!deletePlayerFromNlConfirm} onOpenChange={() => setDeletePlayerFromNlConfirm(null)}>
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>Remove Player?</DialogTitle>
+            <DialogDescription>
+              Are you sure you want to remove this player from the newsletter?
+            </DialogDescription>
+          </DialogHeader>
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setDeletePlayerFromNlConfirm(null)}>
+              Cancel
+            </Button>
+            <Button variant="destructive" onClick={confirmDeletePlayerFromNewsletter}>
+              Remove
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      {/* Delete Player Confirmation */}
+      <Dialog open={!!deletePlayerConfirm} onOpenChange={() => setDeletePlayerConfirm(null)}>
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>Delete Player?</DialogTitle>
+            <DialogDescription>
+              Are you sure you want to delete <strong>"{deletePlayerConfirm?.playerName}"</strong>?
+              <br /><br />
+              {deletePlayerConfirm?.warningMessage}
+              <br /><br />
+              This action cannot be undone.
+            </DialogDescription>
+          </DialogHeader>
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setDeletePlayerConfirm(null)}>
+              Cancel
+            </Button>
+            <Button variant="destructive" onClick={confirmDeletePlayer}>
+              Delete
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
     </div>
-  </div>
   )
 }
 // Navigation component
@@ -6420,9 +6822,9 @@ function AdminSandboxPage() {
                           const selectValue = hasSelect ? String(currentValue ?? '') : ''
                           const selectLookup = hasSelect
                             ? new Map(selectOptions.map((option, index) => {
-                                const optValue = option?.value ?? option?.label ?? index
-                                return [String(optValue), option]
-                              }))
+                              const optValue = option?.value ?? option?.label ?? index
+                              return [String(optValue), option]
+                            }))
                             : null
 
                           return (
@@ -6615,7 +7017,7 @@ function AdminSandboxPage() {
 function Navigation() {
   const location = useLocation()
   const isMobile = useIsMobile()
-  const { token, isAdmin, hasApiKey } = useAuth()
+  const { token, isAdmin, hasApiKey, isJournalist } = useAuth()
   const [drawerOpen, setDrawerOpen] = useState(false)
 
   const adminUnlocked = !!token && isAdmin && hasApiKey
@@ -6625,7 +7027,11 @@ function Navigation() {
       { path: '/', label: 'Home', icon: Home },
       { path: '/teams', label: 'Browse Teams', icon: Users },
       { path: '/newsletters', label: 'Newsletters', icon: FileText },
+      { path: '/journalists', label: 'Journalists', icon: UserPlus },
     ]
+    if (isJournalist) {
+      items.push({ path: '/writer/dashboard', label: 'Writer Dashboard', icon: FileText })
+    }
     if (token) {
       items.push({ path: '/settings', label: 'Settings', icon: UserCog })
     }
@@ -6633,11 +7039,14 @@ function Navigation() {
       items.push({ path: '/admin', label: 'Admin', icon: Settings })
     }
     return items
-  }, [adminUnlocked, token])
+  }, [adminUnlocked, isJournalist, token])
 
   const linkClasses = (isActive) => (
-    `inline-flex items-center gap-2 rounded-md px-2.5 py-2 text-sm font-medium transition-colors sm:px-3 ` +
-    (isActive ? 'text-blue-600 bg-blue-50' : 'text-gray-600 hover:text-blue-600 hover:bg-blue-50/60')
+    `inline-flex items-center gap-2 rounded-full px-3 py-2 text-sm font-medium transition-colors sm:px-3 whitespace-nowrap no-underline ` +
+    (isActive
+      ? 'text-blue-700 bg-blue-50 shadow-inner'
+      : 'text-gray-700 hover:text-gray-900 hover:bg-gray-100'
+    )
   )
 
   const renderNavLinks = (variant) => navItems.map((item) => {
@@ -6672,8 +7081,8 @@ function Navigation() {
 
   return (
     <nav className="border-b bg-white/90 backdrop-blur supports-[backdrop-filter]:bg-white/70">
-      <div className="mx-auto flex h-16 max-w-7xl items-center justify-between px-4 sm:px-6 lg:px-8">
-        <Link to="/" className="flex items-center gap-2 text-gray-900 sm:gap-3">
+      <div className="mx-auto flex h-16 max-w-7xl items-center justify-between px-4 sm:px-6 lg:px-8 gap-4">
+        <Link to="/" className="flex items-center gap-2 text-gray-900 sm:gap-3 shrink-0">
           <span className="inline-flex h-10 w-10 items-center justify-center rounded bg-slate-900 shadow">
             <img src={BRAND_LOGO_SRC} alt="Go On Loan logo" className="h-7 w-7" />
           </span>
@@ -6684,11 +7093,11 @@ function Navigation() {
         </Link>
 
         {isMobile ? (
-            <Drawer open={drawerOpen} onOpenChange={setDrawerOpen}>
-              <DrawerTrigger asChild>
-                <button
-                  type="button"
-                  className="inline-flex items-center justify-center rounded-full border border-gray-300 bg-gray-100 p-2 shadow-sm transition hover:bg-gray-200"
+          <Drawer open={drawerOpen} onOpenChange={setDrawerOpen} autoFocus>
+            <DrawerTrigger asChild>
+              <button
+                type="button"
+                className="inline-flex items-center justify-center rounded-full border border-gray-300 bg-gray-100 p-2 shadow-sm transition hover:bg-gray-200"
                 aria-label="Toggle navigation menu"
                 aria-expanded={drawerOpen}
               >
@@ -6709,11 +7118,13 @@ function Navigation() {
             </DrawerContent>
           </Drawer>
         ) : (
-          <div className="flex min-w-0 items-center gap-4">
-            <div className="flex min-w-0 items-center gap-2 sm:gap-3 md:gap-4">
+          <div className="flex min-w-0 flex-1 items-center gap-4 overflow-hidden">
+            <div className="flex min-w-0 flex-1 items-center gap-2 sm:gap-3 md:gap-4 overflow-x-auto pr-2">
               {renderNavLinks('desktop')}
             </div>
-            <AuthControls />
+            <div className="flex shrink-0">
+              <AuthControls />
+            </div>
           </div>
         )}
       </div>
@@ -6776,7 +7187,7 @@ function AuthControls({ isMobile = false, onNavigate }) {
   }
 
   return (
-    <div className={isMobile ? 'flex flex-col gap-3' : 'flex items-center gap-4'}>
+    <div className={isMobile ? 'flex flex-col gap-3' : 'flex items-center gap-4 min-w-0 max-w-xs'}>
       {isAdmin && !adminUnlocked && (
         <span className="sr-only">Admin access requires API key</span>
       )}
@@ -6843,7 +7254,7 @@ function AuthControls({ isMobile = false, onNavigate }) {
             </Popover>
           )
         ) : (
-          <Badge variant="secondary">Goon Member</Badge>
+          <Badge variant="secondary">Go On Member</Badge>
         )}
       </div>
       <div className={isMobile ? 'flex flex-col gap-2' : 'flex items-center gap-2'}>
@@ -6862,216 +7273,7 @@ function AuthControls({ isMobile = false, onNavigate }) {
   )
 }
 
-function AuthModal() {
-  const { isLoginModalOpen, closeLoginModal, logout } = useAuthUI()
-  const auth = useAuth()
-  const [email, setEmail] = useState('')
-  const [code, setCode] = useState('')
-  const [requestSent, setRequestSent] = useState(false)
-  const [busy, setBusy] = useState(false)
-  const [status, setStatus] = useState(null)
-  const [displayNameInput, setDisplayNameInput] = useState(auth.displayName || '')
-  const [displayNameBusy, setDisplayNameBusy] = useState(false)
-  const [displayNameStatus, setDisplayNameStatus] = useState(null)
 
-  useEffect(() => {
-    if (!isLoginModalOpen) {
-      setEmail('')
-      setCode('')
-      setRequestSent(false)
-      setStatus(null)
-      setDisplayNameStatus(null)
-    }
-  }, [isLoginModalOpen])
-
-  useEffect(() => {
-    setDisplayNameInput(auth.displayName || '')
-  }, [auth.displayName, auth.token])
-
-  const handleRequest = async (event) => {
-    event.preventDefault()
-    const trimmed = (email || '').trim().toLowerCase()
-    if (!trimmed) {
-      setStatus({ type: 'error', message: 'Enter the email you use for Loan Army.' })
-      return
-    }
-    setBusy(true)
-    try {
-      await APIService.requestLoginCode(trimmed)
-      setStatus({ type: 'success', message: 'Code sent! Check your email within five minutes.' })
-      setRequestSent(true)
-    } catch (error) {
-      setStatus({ type: 'error', message: error?.body?.error || error.message || 'Failed to send login code.' })
-    } finally {
-      setBusy(false)
-    }
-  }
-
-  const handleVerify = async (event) => {
-    event.preventDefault()
-    const trimmedEmail = (email || '').trim().toLowerCase()
-    const trimmedCode = (code || '').trim()
-    if (!trimmedEmail || !trimmedCode) {
-      setStatus({ type: 'error', message: 'Enter both email and code to continue.' })
-      return
-    }
-    setBusy(true)
-    try {
-      console.log('[AuthModal] Verifying OTP for', trimmedEmail)
-      const result = await APIService.verifyLoginCode(trimmedEmail, trimmedCode)
-      console.log('[AuthModal] Verification payload', result)
-      const confirmed = !!result?.display_name_confirmed
-      setStatus({ type: 'success', message: confirmed ? 'Signed in! Welcome back.' : 'Signed in! Pick a display name to finish.' })
-      setRequestSent(false)
-      setCode('')
-      if (!confirmed) {
-        console.log('[AuthModal] No confirmed display name, entering edit mode')
-        setDisplayNameInput(result?.display_name || auth.displayName || '')
-        setDisplayNameStatus(null)
-      } else {
-        console.log('[AuthModal] Display name confirmed; closing modal after delay')
-        setTimeout(() => {
-          closeLoginModal()
-        }, 700)
-      }
-    } catch (error) {
-      setStatus({ type: 'error', message: error?.body?.error || error.message || 'Verification failed. Try again.' })
-    } finally {
-      setBusy(false)
-    }
-  }
-
-  const handleDisplayNameSave = async (event) => {
-    event.preventDefault()
-    const trimmed = (displayNameInput || '').trim()
-    if (trimmed.length < 3) {
-      setDisplayNameStatus({ type: 'error', message: 'Display name must be at least 3 characters.' })
-      return
-    }
-    setDisplayNameBusy(true)
-    console.log('[AuthModal] Saving display name attempt', trimmed)
-    try {
-      await APIService.updateDisplayName(trimmed)
-      await APIService.refreshProfile().catch(() => {})
-      setDisplayNameStatus({ type: 'success', message: 'Display name updated.' })
-    } catch (error) {
-      setDisplayNameStatus({ type: 'error', message: error?.body?.error || error.message || 'Failed to update display name.' })
-    } finally {
-      setDisplayNameBusy(false)
-    }
-  }
-
-  return (
-    <Dialog open={isLoginModalOpen} onOpenChange={(open) => { if (!open) closeLoginModal() }}>
-      <DialogContent className="sm:max-w-md">
-        <DialogHeader>
-          <DialogTitle>{auth.token ? 'Account' : 'Sign in to Loan Army'}</DialogTitle>
-          <DialogDescription>
-            {auth.token
-              ? 'Update your display name or sign out of your session.'
-              : 'We’ll email you a one-time code to finish signing in.'}
-          </DialogDescription>
-        </DialogHeader>
-
-        {auth.token ? (
-          <div className="space-y-4">
-            <div className="rounded-md border bg-muted/40 p-3 text-sm">
-              <div className="font-medium text-gray-900">Signed in as {auth.displayName || 'Loan Army supporter'}</div>
-              {auth.isAdmin && (
-                <div className="text-xs text-gray-600 mt-1">
-                  Admin access: {auth.hasApiKey ? 'ready' : 'missing API key'}
-                </div>
-              )}
-            </div>
-            <form className="space-y-2" onSubmit={handleDisplayNameSave}>
-              <Label htmlFor="display-name">Display name</Label>
-              <Input
-                id="display-name"
-                value={displayNameInput}
-                onChange={(e) => setDisplayNameInput(e.target.value)}
-                maxLength={40}
-                placeholder="Your public name"
-              />
-              {displayNameStatus && (
-                <p className={`text-xs ${displayNameStatus.type === 'error' ? 'text-red-600' : 'text-emerald-600'}`}>
-                  {displayNameStatus.message}
-                </p>
-              )}
-              <div className="flex items-center gap-2">
-                <Button size="sm" type="submit" disabled={displayNameBusy}>
-                  {displayNameBusy && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}Save
-                </Button>
-                <Button size="sm" variant="ghost" type="button" onClick={() => setDisplayNameInput(auth.displayName || '')}>
-                  Reset
-                </Button>
-              </div>
-            </form>
-          </div>
-        ) : (
-          <div className="space-y-4">
-            <form className="space-y-3" onSubmit={handleRequest}>
-              <div className="space-y-2">
-                <Label htmlFor="login-email">Email</Label>
-                <Input
-                  id="login-email"
-                  type="email"
-                  autoComplete="email"
-                  value={email}
-                  onChange={(e) => setEmail(e.target.value)}
-                  placeholder="you@example.com"
-                  required
-                />
-              </div>
-              <Button type="submit" disabled={busy} className="w-full">
-                {busy && !requestSent ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : null}
-                Send login code
-              </Button>
-            </form>
-
-            {requestSent && (
-              <form className="space-y-3" onSubmit={handleVerify}>
-                <div className="space-y-2">
-                  <Label htmlFor="login-code">Verification code</Label>
-                  <Input
-                    id="login-code"
-                    value={code}
-                    onChange={(e) => setCode(e.target.value)}
-                    placeholder="Enter the 11-character code"
-                    autoComplete="one-time-code"
-                  />
-                </div>
-                <Button type="submit" disabled={busy} className="w-full">
-                  {busy ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : null}
-                  Verify & sign in
-                </Button>
-              </form>
-            )}
-
-            {status && (
-              <Alert className={`border ${status.type === 'error' ? 'border-red-200 bg-red-50 text-red-700' : 'border-emerald-200 bg-emerald-50 text-emerald-700'}`}>
-                {status.type === 'error' ? <AlertCircle className="h-4 w-4" /> : <CheckCircle className="h-4 w-4" />}
-                <AlertDescription>{status.message}</AlertDescription>
-              </Alert>
-            )}
-          </div>
-        )}
-
-        <DialogFooter className="flex items-center justify-between">
-          {auth.token ? (
-            <Button variant="ghost" onClick={() => { logout(); closeLoginModal() }}>
-              <LogOut className="mr-2 h-4 w-4" /> Log out
-            </Button>
-          ) : requestSent ? (
-            <Button variant="ghost" onClick={() => { setRequestSent(false); setCode(''); setStatus(null) }}>
-              Back
-            </Button>
-          ) : <span />}
-          <Button variant="outline" onClick={closeLoginModal}>Close</Button>
-        </DialogFooter>
-      </DialogContent>
-    </Dialog>
-  )
-}
 
 // Home page component
 function HomePage() {
@@ -7155,7 +7357,7 @@ function HomePage() {
                 </p>
               </CardContent>
             </Card>
-            
+
             <Card>
               <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
                 <CardTitle className="text-sm font-medium">Active Loans</CardTitle>
@@ -7168,7 +7370,7 @@ function HomePage() {
                 </p>
               </CardContent>
             </Card>
-            
+
             <Card>
               <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
                 <CardTitle className="text-sm font-medium">Newsletters</CardTitle>
@@ -7207,7 +7409,7 @@ function HomePage() {
               Track loans from Premier League, La Liga, Serie A, Bundesliga, and Ligue 1
             </p>
           </div>
-          
+
           <div className="text-center">
             <div className="bg-green-100 rounded-full p-3 w-12 h-12 mx-auto mb-4">
               <Star className="h-6 w-6 text-green-600" />
@@ -7217,7 +7419,7 @@ function HomePage() {
               Get intelligent analysis and insights about player development
             </p>
           </div>
-          
+
           <div className="text-center">
             <div className="bg-purple-100 rounded-full p-3 w-12 h-12 mx-auto mb-4">
               <Mail className="h-6 w-6 text-purple-600" />
@@ -7246,17 +7448,13 @@ function SubscribePage() {
     const loadTeams = async () => {
       try {
         // First check database status for debugging
-        console.log('🔍 Checking database status first...')
         try {
           const dbStatus = await APIService.debugDatabase()
-          console.log('📊 Database status:', dbStatus)
         } catch (dbError) {
           console.warn('⚠️ Could not get database status:', dbError)
         }
 
-        console.log('🏟️ Loading teams...')
         const data = await APIService.getTeams({ european_only: 'true' })
-        console.log('✅ Teams loaded successfully:', Array.isArray(data) ? data.length : 0, 'teams')
         const { teams: filtered } = filterLatestSeasonTeams(Array.isArray(data) ? data : [])
         setTeams(filtered)
       } catch (error) {
@@ -7271,8 +7469,8 @@ function SubscribePage() {
   }, [])
 
   const handleTeamToggle = (teamId) => {
-    setSelectedTeams(prev => 
-      prev.includes(teamId) 
+    setSelectedTeams(prev =>
+      prev.includes(teamId)
         ? prev.filter(id => id !== teamId)
         : [...prev, teamId]
     )
@@ -7280,7 +7478,7 @@ function SubscribePage() {
 
   const handleSubmit = async (e) => {
     e.preventDefault()
-    
+
     if (!email || selectedTeams.length === 0) {
       setMessage({ type: 'error', text: 'Please enter email and select at least one team' })
       return
@@ -7297,9 +7495,18 @@ function SubscribePage() {
         const teamCount = response.team_count ?? selectedTeams.length
         const expiresLabel = response?.expires_at ? new Date(response.expires_at).toLocaleString() : null
         const detail = expiresLabel ? ` The confirmation link expires on ${expiresLabel}.` : ''
+        let text = `Almost done! We sent a confirmation email to ${email} for ${teamCount} team${teamCount === 1 ? '' : 's'}.${detail}`
+
+        // Add waitlist notification if applicable
+        const teamsWithoutNewsletters = response?.teams_without_newsletters || []
+        if (teamsWithoutNewsletters.length > 0) {
+          const teamNames = teamsWithoutNewsletters.map(t => t.team_name).join(', ')
+          text += ` Note: ${teamNames} ${teamsWithoutNewsletters.length === 1 ? "doesn't have" : "don't have"} active newsletters yet. We'll notify you once we start generating them!`
+        }
+
         setMessage({
           type: 'success',
-          text: `Almost done! We sent a confirmation email to ${email} for ${teamCount} team${teamCount === 1 ? '' : 's'}.${detail}`,
+          text: text,
         })
       } else {
         const created = response?.created_count ?? 0
@@ -7312,6 +7519,14 @@ function SubscribePage() {
         if (skippedCount) {
           text += ` ${skippedCount} already active.`
         }
+
+        // Add waitlist notification if applicable
+        const teamsWithoutNewsletters = response?.teams_without_newsletters || []
+        if (teamsWithoutNewsletters.length > 0) {
+          const teamNames = teamsWithoutNewsletters.map(t => t.team_name).join(', ')
+          text += ` Note: ${teamNames} ${teamsWithoutNewsletters.length === 1 ? "doesn't have" : "don't have"} active newsletters yet. We'll notify you once we start generating them!`
+        }
+
         setMessage({ type: 'success', text })
       }
       setSelectedTeams([])
@@ -7425,9 +7640,9 @@ function SubscribePage() {
           </Card>
 
           <div className="flex justify-center">
-            <Button 
-              type="submit" 
-              size="lg" 
+            <Button
+              type="submit"
+              size="lg"
               disabled={submitting || selectedTeams.length === 0}
               className="bg-blue-600 hover:bg-blue-700"
             >
@@ -7457,6 +7672,7 @@ function TeamsPage() {
   const [filter, setFilter] = useState('all')
   const [expandedTeamId, setExpandedTeamId] = useState(null)
   const [teamLoans, setTeamLoans] = useState({})
+  const [loadingLoans, setLoadingLoans] = useState({}) // Track loading state per team
   const [flagState, setFlagState] = useState({ open: false, team: null, loan: null, reason: '', email: '' })
   const [submittingFlag, setSubmittingFlag] = useState(false)
   const [selectedTeams, setSelectedTeams] = useState([])
@@ -7468,10 +7684,8 @@ function TeamsPage() {
     const loadTeams = async () => {
       try {
         // Check database status for debugging
-        console.log('🔍 [TeamsPage] Checking database status...')
         try {
           const dbStatus = await APIService.debugDatabase()
-          console.log('📊 [TeamsPage] Database status:', dbStatus)
         } catch (dbError) {
           console.warn('⚠️ [TeamsPage] Could not get database status:', dbError)
         }
@@ -7480,12 +7694,9 @@ function TeamsPage() {
         if (filter === 'with_loans') {
           filters.has_loans = 'true'
         }
-        
-        console.log('🏟️ [TeamsPage] Loading teams with filters:', filters)
+
         const data = await APIService.getTeams(filters)
-        console.log('✅ [TeamsPage] Teams loaded successfully:', Array.isArray(data) ? data.length : 0, 'teams')
         const { season, teams: filtered } = filterLatestSeasonTeams(Array.isArray(data) ? data : [])
-        console.log('🎯 [TeamsPage] Latest season detected:', season, 'unique teams:', filtered.length)
         setTeams(filtered)
       } catch (error) {
         console.error('❌ [TeamsPage] Failed to load teams:', error)
@@ -7498,18 +7709,28 @@ function TeamsPage() {
   }, [filter])
 
   const toggleExpand = async (teamId) => {
+    const isExpanding = expandedTeamId !== teamId
     setExpandedTeamId(prev => (prev === teamId ? null : teamId))
-    if (!teamLoans[teamId]) {
+
+    if (isExpanding && !teamLoans[teamId]) {
+      // Set loading state
+      setLoadingLoans(prev => ({ ...prev, [teamId]: true }))
       try {
         const teamMeta = teams.find((row) => row.id === teamId)
         const params = {}
         if (teamMeta && typeof teamMeta.season !== 'undefined' && teamMeta.season !== null) {
           params.season = teamMeta.season
         }
-        const loans = await APIService.getTeamLoans(teamId, params)
+        // Request season context for accurate cumulative stats (like newsletter uses)
+        const loans = await APIService.getTeamLoans(teamId, { ...params, include_season_context: 'true' })
         setTeamLoans(prev => ({ ...prev, [teamId]: loans }))
       } catch (error) {
         console.error('❌ Failed to load loans for team', teamId, error)
+        // Set empty array on error to prevent retry loops
+        setTeamLoans(prev => ({ ...prev, [teamId]: [] }))
+      } finally {
+        // Clear loading state
+        setLoadingLoans(prev => ({ ...prev, [teamId]: false }))
       }
     }
   }
@@ -7660,12 +7881,30 @@ function TeamsPage() {
                 <AccordionContent>
                   <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-4 px-4">
                     {leagueTeams.map((team) => (
-                      <Card key={team.id} className={`hover:shadow-lg transition-shadow ${selectedTeams.includes(team.id) ? 'ring-2 ring-blue-400' : ''}`} onClick={(e) => handleCardClick(e, team.id)}>
+                      <Card key={team.id} className={`hover:shadow-lg transition-shadow cursor-pointer ${selectedTeams.includes(team.id) ? 'ring-2 ring-blue-400' : ''}`} onClick={(e) => handleCardClick(e, team.id)}>
                         <CardHeader className="pb-3">
-                          <CardTitle className="text-lg">{team.name}</CardTitle>
-                          <CardDescription>
-                            {team.country} • Founded {team.founded || 'N/A'}
-                          </CardDescription>
+                          <div className="flex flex-col sm:flex-row items-center sm:items-start gap-2 sm:gap-3 mb-2">
+                            {team.logo ? (
+                              <Avatar className="h-10 w-10 sm:h-12 sm:w-12 shrink-0">
+                                <AvatarImage src={team.logo} alt={`${team.name} logo`} />
+                                <AvatarFallback className="text-xs bg-gray-200">
+                                  {team.name.split(' ').map(n => n[0]).join('').slice(0, 2).toUpperCase()}
+                                </AvatarFallback>
+                              </Avatar>
+                            ) : (
+                              <Avatar className="h-10 w-10 sm:h-12 sm:w-12 shrink-0 bg-gray-200">
+                                <AvatarFallback className="text-xs">
+                                  {team.name.split(' ').map(n => n[0]).join('').slice(0, 2).toUpperCase()}
+                                </AvatarFallback>
+                              </Avatar>
+                            )}
+                            <div className="flex-1 min-w-0 text-center sm:text-left">
+                              <CardTitle className="text-base sm:text-lg truncate">{team.name}</CardTitle>
+                              <CardDescription className="text-xs break-words sm:break-normal">
+                                {team.country} • Founded {team.founded || 'N/A'}
+                              </CardDescription>
+                            </div>
+                          </div>
                         </CardHeader>
                         <CardContent>
                           <div className="flex items-center gap-2 mb-3">
@@ -7685,30 +7924,160 @@ function TeamsPage() {
                             </Button>
                           </div>
                           {expandedTeamId === team.id && (
-                            <div className="mt-4 space-y-2">
-                              {(teamLoans[team.id] || []).length === 0 ? (
-                                <div className="text-sm text-gray-500">No loans found.</div>
+                            <div className="mt-4 space-y-3">
+                              {loadingLoans[team.id] ? (
+                                <div className="flex items-center justify-center py-8">
+                                  <Loader2 className="h-5 w-5 animate-spin text-gray-400 mr-2" />
+                                  <span className="text-sm text-gray-500">Loading loans...</span>
+                                </div>
+                              ) : (teamLoans[team.id] || []).length === 0 ? (
+                                <div className="text-sm text-gray-500 text-center py-4">No loans found.</div>
                               ) : (
                                 (teamLoans[team.id] || []).map((loan) => (
-                                  <div key={loan.id} className="border rounded p-2 text-sm">
-                                    <div className="font-medium">{loan.player_name}</div>
-                                    <div className="text-gray-600">Loan at {loan.loan_team_name}</div>
-                                    <div className="text-gray-500">Apps: {loan.appearances} • Goals: {loan.goals} • Assists: {loan.assists}</div>
-                                    <div className="mt-2">
-                                      <Button size="xs" variant="outline" onClick={() => openFlag(team, loan)}>Flag incorrect</Button>
-                                    </div>
-                                    {flagState.open && flagState.team?.id === team.id && flagState.loan?.id === loan.id && (
-                                      <div className="mt-2 border-t pt-2">
-                                        <textarea className="w-full border rounded p-2 text-sm" rows="3" placeholder="Why is this incorrect?" value={flagState.reason} onChange={(e) => setFlagState(prev => ({ ...prev, reason: e.target.value }))} />
-                                        <input type="email" className="w-full border rounded p-2 text-sm mt-2" placeholder="Optional email" value={flagState.email} onChange={(e) => setFlagState(prev => ({ ...prev, email: e.target.value }))} />
-                                        <div className="mt-2 flex gap-2">
-                                          <Button size="sm" onClick={submitFlag} disabled={submittingFlag || !flagState.reason.trim()}>
-                                            {submittingFlag ? 'Submitting...' : 'Submit flag'}
-                                          </Button>
-                                          <Button size="sm" variant="outline" onClick={closeFlag}>Cancel</Button>
-                                        </div>
+                                  <div key={loan.id} className="border rounded-lg p-2.5 sm:p-3 bg-gray-50/50 hover:bg-gray-50 transition-colors">
+                                    <div className="flex items-start gap-2 sm:gap-3">
+                                      {/* Player Photo */}
+                                      <div className="shrink-0">
+                                        {loan.player_photo ? (
+                                          <Avatar className="h-10 w-10 sm:h-12 sm:w-12">
+                                            <AvatarImage src={loan.player_photo} alt={`${loan.player_name} headshot`} />
+                                            <AvatarFallback className="text-xs bg-blue-100">
+                                              {loan.player_name.split(' ').map(n => n[0]).join('').slice(0, 2).toUpperCase()}
+                                            </AvatarFallback>
+                                          </Avatar>
+                                        ) : (
+                                          <Avatar className="h-10 w-10 sm:h-12 sm:w-12 bg-blue-100">
+                                            <AvatarFallback className="text-xs">
+                                              {loan.player_name.split(' ').map(n => n[0]).join('').slice(0, 2).toUpperCase()}
+                                            </AvatarFallback>
+                                          </Avatar>
+                                        )}
                                       </div>
-                                    )}
+
+                                      {/* Player Info */}
+                                      <div className="flex-1 min-w-0">
+                                        <div className="font-medium text-sm mb-1 break-words">{loan.player_name}</div>
+
+                                        {/* Loan Team with Logo */}
+                                        <div className="flex flex-wrap items-center gap-1.5 sm:gap-2 mb-2">
+                                          <span className="text-xs text-gray-600 whitespace-nowrap">Loaned to:</span>
+                                          {loan.loan_team_logo ? (
+                                            <div className="flex items-center gap-1.5 min-w-0">
+                                              <img
+                                                src={loan.loan_team_logo}
+                                                alt={`${loan.loan_team_name} logo`}
+                                                className="h-4 w-4 object-contain shrink-0"
+                                                onError={(e) => { e.target.style.display = 'none' }}
+                                              />
+                                              <span className="text-xs font-medium text-gray-700 break-words">{loan.loan_team_name}</span>
+                                            </div>
+                                          ) : (
+                                            <span className="text-xs font-medium text-gray-700 break-words">{loan.loan_team_name}</span>
+                                          )}
+                                        </div>
+
+                                        {/* Stats Badges */}
+                                        <div className="flex flex-wrap items-center gap-1.5 mb-2">
+                                          {loan.appearances !== null && loan.appearances !== undefined ? (
+                                            <Badge variant="secondary" className="text-xs px-1.5 py-0.5">
+                                              {loan.appearances} {loan.appearances === 1 ? 'app' : 'apps'}
+                                            </Badge>
+                                          ) : null}
+                                          {loan.goals !== null && loan.goals !== undefined ? (
+                                            <Badge
+                                              variant="secondary"
+                                              className={`text-xs px-1.5 py-0.5 ${loan.goals > 0 ? 'bg-green-100 text-green-800' : 'bg-gray-100 text-gray-600'}`}
+                                            >
+                                              {loan.goals} {loan.goals === 1 ? 'goal' : 'goals'}
+                                            </Badge>
+                                          ) : null}
+                                          {loan.assists !== null && loan.assists !== undefined ? (
+                                            <Badge
+                                              variant="secondary"
+                                              className={`text-xs px-1.5 py-0.5 ${loan.assists > 0 ? 'bg-blue-100 text-blue-800' : 'bg-gray-100 text-gray-600'}`}
+                                            >
+                                              {loan.assists} {loan.assists === 1 ? 'assist' : 'assists'}
+                                            </Badge>
+                                          ) : null}
+                                          {(loan.appearances === null || loan.appearances === undefined) &&
+                                            (loan.goals === null || loan.goals === undefined) &&
+                                            (loan.assists === null || loan.assists === undefined) && (
+                                              <span className="text-xs text-gray-500">No stats available</span>
+                                            )}
+                                        </div>
+
+                                        {/* Flag Button */}
+                                        <div className="mt-3 pt-2 border-t border-gray-200">
+                                          <Button
+                                            size="sm"
+                                            variant="ghost"
+                                            onClick={(e) => { e.stopPropagation(); openFlag(team, loan); }}
+                                            className="h-9 sm:h-8 text-xs text-gray-600 hover:text-gray-900 hover:bg-gray-100 min-h-[44px] sm:min-h-0 w-full sm:w-auto"
+                                          >
+                                            <AlertCircle className="h-3 w-3 mr-1.5" />
+                                            Flag incorrect
+                                          </Button>
+                                        </div>
+
+                                        {/* Flag Form */}
+                                        {flagState.open && flagState.team?.id === team.id && flagState.loan?.id === loan.id && (
+                                          <div className="mt-3 pt-3 border-t border-gray-200 space-y-3 bg-blue-50/30 rounded-lg p-2.5 sm:p-3">
+                                            <div className="space-y-1.5">
+                                              <Label htmlFor={`flag-reason-${loan.id}`} className="text-xs font-medium text-gray-700">
+                                                Why is this incorrect?
+                                              </Label>
+                                              <Textarea
+                                                id={`flag-reason-${loan.id}`}
+                                                className="w-full text-sm resize-none"
+                                                rows="3"
+                                                placeholder="Please provide details about what's wrong with this loan information..."
+                                                value={flagState.reason}
+                                                onChange={(e) => setFlagState(prev => ({ ...prev, reason: e.target.value }))}
+                                              />
+                                            </div>
+                                            <div className="space-y-1.5">
+                                              <Label htmlFor={`flag-email-${loan.id}`} className="text-xs font-medium text-gray-700">
+                                                Email (optional)
+                                              </Label>
+                                              <Input
+                                                id={`flag-email-${loan.id}`}
+                                                type="email"
+                                                className="w-full text-sm min-h-[44px]"
+                                                placeholder="your.email@example.com"
+                                                value={flagState.email}
+                                                onChange={(e) => setFlagState(prev => ({ ...prev, email: e.target.value }))}
+                                              />
+                                            </div>
+                                            <div className="flex flex-col sm:flex-row gap-2 pt-1">
+                                              <Button
+                                                size="sm"
+                                                onClick={submitFlag}
+                                                disabled={submittingFlag || !flagState.reason.trim()}
+                                                className="flex-1 min-h-[44px] sm:min-h-0"
+                                              >
+                                                {submittingFlag ? (
+                                                  <>
+                                                    <Loader2 className="h-3 w-3 mr-1.5 animate-spin" />
+                                                    Submitting...
+                                                  </>
+                                                ) : (
+                                                  'Submit Report'
+                                                )}
+                                              </Button>
+                                              <Button
+                                                size="sm"
+                                                variant="outline"
+                                                onClick={closeFlag}
+                                                disabled={submittingFlag}
+                                                className="min-h-[44px] sm:min-h-0"
+                                              >
+                                                Cancel
+                                              </Button>
+                                            </div>
+                                          </div>
+                                        )}
+                                      </div>
+                                    </div>
                                   </div>
                                 ))
                               )}
@@ -7734,13 +8103,25 @@ function TeamsPage() {
 function NewslettersPage() {
   const [rawNewsletters, setRawNewsletters] = useState([])
   const [newsletters, setNewsletters] = useState([])
+  const [focusedNewsletterDetail, setFocusedNewsletterDetail] = useState(null)
+  const [focusedNewsletterLoading, setFocusedNewsletterLoading] = useState(false)
+  const commentaryIdParam = useQueryParam('commentary_id', null)
   const [loading, setLoading] = useState(true)
   const [dateRange, setDateRange] = useState({ startDate: '', endDate: '', preset: 'all_time' })
   const [expandedId, setExpandedId] = useState(null)
   const auth = useAuth()
   const { openLoginModal } = useAuthUI()
   const navigate = useNavigate()
+  const location = useLocation()
+  const searchParams = new URLSearchParams(location.search)
+  const journalistIdParam = searchParams.get('journalist_id')
   const { newsletterId: newsletterIdParam } = useParams()
+  const buildNewsletterUrl = useCallback((item) => {
+    if (!item) return null
+    const slug = item.public_slug || item.slug || item.id
+    if (!slug && slug !== 0) return null
+    return `/newsletters/${encodeURIComponent(String(slug))}`
+  }, [])
   const [commentsByNewsletter, setCommentsByNewsletter] = useState({})
   const commentsRef = useRef(new Map())
   const [commentsLoading, setCommentsLoading] = useState({})
@@ -7760,6 +8141,25 @@ function NewslettersPage() {
   const [followedTeamFilter, setFollowedTeamFilter] = useState('')
   const [leagueFilter, setLeagueFilter] = useState('')
   const [teamFilter, setTeamFilter] = useState('')
+  const [mySubscriptions, setMySubscriptions] = useState([])
+  const [viewingJournalist, setViewingJournalist] = useState(null)
+
+  useEffect(() => {
+    if (!journalistIdParam) {
+      setViewingJournalist(null)
+      return
+    }
+    APIService.getJournalists().then(list => {
+      const found = list.find(j => j.id === parseInt(journalistIdParam))
+      setViewingJournalist(found)
+    }).catch(console.error)
+  }, [journalistIdParam])
+
+  useEffect(() => {
+    if (auth.token) {
+      APIService.getMySubscriptions().then(setMySubscriptions).catch(console.error)
+    }
+  }, [auth.token])
 
   const trackedTeamIdSet = useMemo(() => new Set(trackedTeamIds.map((id) => String(id))), [trackedTeamIds])
   const latestTeamIds = useMemo(() => {
@@ -7768,9 +8168,8 @@ function NewslettersPage() {
   }, [allTeams])
 
   const focusedNewsletterId = useMemo(() => {
-    if (!newsletterIdParam) return null
-    const parsed = Number(newsletterIdParam)
-    return Number.isFinite(parsed) ? parsed : null
+    const parsed = parseNewsletterId(newsletterIdParam)
+    return parsed ?? null
   }, [newsletterIdParam])
 
   const focusedViewActive = useMemo(() => focusedNewsletterId !== null, [focusedNewsletterId])
@@ -7896,8 +8295,11 @@ function NewslettersPage() {
 
   const focusedNewsletters = useMemo(() => {
     if (!focusedViewActive || focusedNewsletterId === null) return []
+    if (focusedNewsletterDetail && Number(focusedNewsletterDetail.id) === focusedNewsletterId) {
+      return [focusedNewsletterDetail]
+    }
     return filteredNewsletters.filter((item) => Number(item.id) === focusedNewsletterId)
-  }, [focusedViewActive, filteredNewsletters, focusedNewsletterId])
+  }, [focusedViewActive, filteredNewsletters, focusedNewsletterId, focusedNewsletterDetail])
 
   const displayNewsletters = focusedViewActive ? focusedNewsletters : paginatedNewsletters
 
@@ -7913,13 +8315,13 @@ function NewslettersPage() {
     const loadNewsletters = async () => {
       try {
         const params = { published_only: 'true' }
-        
+
         // Use date range if available, otherwise show all newsletters
         if (dateRange.startDate && dateRange.endDate) {
           params.week_start = dateRange.startDate
           params.week_end = dateRange.endDate
         }
-        
+
         const data = await APIService.getNewsletters(params)
         setRawNewsletters(Array.isArray(data) ? data : [])
       } catch (error) {
@@ -7945,6 +8347,49 @@ function NewslettersPage() {
     setNewsletters(filtered)
   }, [rawNewsletters, latestTeamIds])
 
+  // Load focused newsletter detail (for commentaries) when a specific newsletter is requested
+  useEffect(() => {
+    let cancelled = false
+    if (!focusedViewActive || focusedNewsletterId === null) {
+      setFocusedNewsletterDetail(null)
+      return () => { }
+    }
+
+    const fetchDetail = async () => {
+      setFocusedNewsletterLoading(true)
+      try {
+        const params = {}
+        if (journalistIdParam) {
+          params.journalist_id = journalistIdParam
+        }
+        const detail = await APIService.getNewsletter(focusedNewsletterId, params)
+        if (cancelled) return
+
+        // If a specific commentary is requested and missing, fetch and merge it
+        if (commentaryIdParam && (!detail.commentaries || !detail.commentaries.some(c => String(c.id) === String(commentaryIdParam)))) {
+          try {
+            const c = await APIService.getCommentary(commentaryIdParam)
+            if (c) {
+              if (!Array.isArray(detail.commentaries)) detail.commentaries = []
+              detail.commentaries.push(c)
+            }
+          } catch (_) {
+            // ignore commentary fetch errors
+          }
+        }
+
+        setFocusedNewsletterDetail(detail)
+      } catch (error) {
+        if (!cancelled) setFocusedNewsletterDetail(null)
+      } finally {
+        if (!cancelled) setFocusedNewsletterLoading(false)
+      }
+    }
+
+    fetchDetail()
+    return () => { cancelled = true }
+  }, [focusedViewActive, focusedNewsletterId, journalistIdParam, commentaryIdParam])
+
   useEffect(() => {
     commentsRef.current = new Map(Object.entries(commentsByNewsletter))
   }, [commentsByNewsletter])
@@ -7963,11 +8408,11 @@ function NewslettersPage() {
         if (cancelled) return
         const normalized = Array.isArray(rows)
           ? Array.from(new Set(
-              rows
-                .map((row) => row?.team_id)
-                .filter((id) => id !== null && id !== undefined)
-                .map((id) => String(id))
-            ))
+            rows
+              .map((row) => row?.team_id)
+              .filter((id) => id !== null && id !== undefined)
+              .map((id) => String(id))
+          ))
           : []
         const meta = {}
         if (Array.isArray(rows)) {
@@ -8197,7 +8642,7 @@ function NewslettersPage() {
     setDisplayNameStatus(null)
     try {
       await APIService.updateDisplayName(trimmed)
-      await APIService.refreshProfile().catch(() => {})
+      await APIService.refreshProfile().catch(() => { })
       setDisplayNameStatus({ type: 'success', message: 'Display name updated.' })
       setDisplayNameEditing(false)
     } catch (error) {
@@ -8241,10 +8686,33 @@ function NewslettersPage() {
         <BuyMeCoffeeButton className="mb-8" />
 
         {focusedViewActive && (
-          <div className="mb-4 flex justify-start">
-            <Button variant="ghost" size="sm" onClick={() => navigate('/newsletters')}>
-              <ArrowLeft className="mr-2 h-4 w-4" /> Back to all newsletters
-            </Button>
+          <div className="mb-4 flex flex-col gap-4">
+            <div className="flex justify-start">
+              <Button variant="ghost" size="sm" onClick={() => navigate('/newsletters')}>
+                <ArrowLeft className="mr-2 h-4 w-4" /> Back to all newsletters
+              </Button>
+            </div>
+            {viewingJournalist && (
+              <Alert className="bg-blue-50 border-blue-200">
+                <div className="flex items-center gap-4">
+                  <Avatar className="h-10 w-10 border border-blue-200">
+                    <AvatarImage src={viewingJournalist.profile_image_url} />
+                    <AvatarFallback>{viewingJournalist.display_name?.substring(0, 2).toUpperCase()}</AvatarFallback>
+                  </Avatar>
+                  <div>
+                    <AlertDescription className="text-blue-900 font-medium">
+                      Viewing analysis by {viewingJournalist.display_name}
+                    </AlertDescription>
+                    <p className="text-sm text-blue-700">
+                      Showing only commentaries written by this journalist.
+                    </p>
+                  </div>
+                  <Button variant="outline" size="sm" className="ml-auto bg-white hover:bg-blue-50 text-blue-700 border-blue-200" onClick={() => navigate(`/journalists/${viewingJournalist.id}`)}>
+                    View Profile
+                  </Button>
+                </div>
+              </Alert>
+            )}
           </div>
         )}
 
@@ -8261,102 +8729,102 @@ function NewslettersPage() {
         )}
 
         {!focusedViewActive && (
-        <Card className="mb-6">
-          <CardHeader>
-            <CardTitle>Filter by Team</CardTitle>
-            <CardDescription>
-              Jump to newsletters from teams you follow or browse by league and team.
-            </CardDescription>
-          </CardHeader>
-          <CardContent className="space-y-4">
-            {followedTeamOptions.length > 0 && (
-              <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
-                <Label className="text-sm font-medium text-gray-700">Teams you follow</Label>
-                <div className="flex w-full flex-col gap-2 sm:w-auto sm:flex-row sm:items-center">
+          <Card className="mb-6">
+            <CardHeader>
+              <CardTitle>Filter by Team</CardTitle>
+              <CardDescription>
+                Jump to newsletters from teams you follow or browse by league and team.
+              </CardDescription>
+            </CardHeader>
+            <CardContent className="space-y-4">
+              {followedTeamOptions.length > 0 && (
+                <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
+                  <Label className="text-sm font-medium text-gray-700">Teams you follow</Label>
+                  <div className="flex w-full flex-col gap-2 sm:w-auto sm:flex-row sm:items-center">
+                    <Select
+                      value={followedTeamFilter || 'all'}
+                      onValueChange={(value) => setFollowedTeamFilter(value === 'all' ? '' : value)}
+                    >
+                      <SelectTrigger className="sm:w-64">
+                        <SelectValue placeholder="All followed teams" />
+                      </SelectTrigger>
+                      <SelectContent>
+                        <SelectItem value="all">All followed teams</SelectItem>
+                        {followedTeamOptions.map((team) => (
+                          <SelectItem key={team.id} value={team.id}>{team.name}</SelectItem>
+                        ))}
+                      </SelectContent>
+                    </Select>
+                  </div>
+                </div>
+              )}
+
+              <div className="space-y-2">
+                <Label className="text-sm font-medium text-gray-700">Browse by league</Label>
+                <div className="flex flex-col gap-2 sm:flex-row sm:items-center">
                   <Select
-                    value={followedTeamFilter || 'all'}
-                    onValueChange={(value) => setFollowedTeamFilter(value === 'all' ? '' : value)}
+                    value={leagueFilter || 'all'}
+                    onValueChange={(value) => setLeagueFilter(value === 'all' ? '' : value)}
                   >
                     <SelectTrigger className="sm:w-64">
-                      <SelectValue placeholder="All followed teams" />
+                      <SelectValue placeholder="All leagues" />
                     </SelectTrigger>
                     <SelectContent>
-                      <SelectItem value="all">All followed teams</SelectItem>
-                      {followedTeamOptions.map((team) => (
+                      <SelectItem value="all">All leagues</SelectItem>
+                      {leagueOptions.map((league) => (
+                        <SelectItem key={league} value={league}>{league}</SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                  <Select
+                    value={teamFilter || 'all'}
+                    onValueChange={(value) => setTeamFilter(value === 'all' ? '' : value)}
+                    disabled={!leagueFilter || !teamsForSelectedLeague.length}
+                  >
+                    <SelectTrigger className="sm:w-64">
+                      <SelectValue placeholder={leagueFilter ? 'Select a team' : 'Select a league first'} />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="all">All teams in league</SelectItem>
+                      {teamsForSelectedLeague.map((team) => (
                         <SelectItem key={team.id} value={team.id}>{team.name}</SelectItem>
                       ))}
                     </SelectContent>
                   </Select>
                 </div>
               </div>
-            )}
 
-            <div className="space-y-2">
-              <Label className="text-sm font-medium text-gray-700">Browse by league</Label>
-              <div className="flex flex-col gap-2 sm:flex-row sm:items-center">
-                <Select
-                  value={leagueFilter || 'all'}
-                  onValueChange={(value) => setLeagueFilter(value === 'all' ? '' : value)}
-                >
-                  <SelectTrigger className="sm:w-64">
-                    <SelectValue placeholder="All leagues" />
-                  </SelectTrigger>
-                  <SelectContent>
-                    <SelectItem value="all">All leagues</SelectItem>
-                    {leagueOptions.map((league) => (
-                      <SelectItem key={league} value={league}>{league}</SelectItem>
-                    ))}
-                  </SelectContent>
-                </Select>
-                <Select
-                  value={teamFilter || 'all'}
-                  onValueChange={(value) => setTeamFilter(value === 'all' ? '' : value)}
-                  disabled={!leagueFilter || !teamsForSelectedLeague.length}
-                >
-                  <SelectTrigger className="sm:w-64">
-                    <SelectValue placeholder={leagueFilter ? 'Select a team' : 'Select a league first'} />
-                  </SelectTrigger>
-                  <SelectContent>
-                    <SelectItem value="all">All teams in league</SelectItem>
-                    {teamsForSelectedLeague.map((team) => (
-                      <SelectItem key={team.id} value={team.id}>{team.name}</SelectItem>
-                    ))}
-                  </SelectContent>
-                </Select>
-              </div>
-            </div>
-
-            <div className="flex flex-wrap items-center justify-between gap-2 text-sm text-gray-600">
-              <span>{filtersActive ? 'Filters applied' : 'No team filters applied'}</span>
-              <Button variant="ghost" size="sm" onClick={clearFilters} disabled={!filtersActive}>
-                Clear filters
-              </Button>
-            </div>
-            {auth.token && trackedTeamIds.length > 0 && (
-              <div className="flex flex-wrap items-center justify-between gap-2 rounded-md bg-gray-50 p-3 text-sm text-gray-700 border border-gray-200">
-                <span>You’re following {trackedTeamIds.length} team{trackedTeamIds.length === 1 ? '' : 's'}.</span>
-                <Button
-                  variant="outline"
-                  size="sm"
-                  onClick={async () => {
-                    try {
-                      const resp = await APIService.unsubscribeEmail({ email: auth.email, team_ids: trackedTeamIds })
-                      const removed = resp?.count ?? 0
-                      setTrackedTeamIds([])
-                      setMessage({ type: 'success', text: removed ? `Unsubscribed from ${removed} team${removed === 1 ? '' : 's'}.` : 'No active subscriptions were found.' })
-                    } catch (error) {
-                      console.error('Failed to unsubscribe', error)
-                      const detail = error?.body?.error || error.message || 'Failed to unsubscribe.'
-                      setMessage({ type: 'error', text: detail })
-                    }
-                  }}
-                >
-                  Unsubscribe from all followed teams
+              <div className="flex flex-wrap items-center justify-between gap-2 text-sm text-gray-600">
+                <span>{filtersActive ? 'Filters applied' : 'No team filters applied'}</span>
+                <Button variant="ghost" size="sm" onClick={clearFilters} disabled={!filtersActive}>
+                  Clear filters
                 </Button>
               </div>
-            )}
-          </CardContent>
-        </Card>
+              {auth.token && trackedTeamIds.length > 0 && (
+                <div className="flex flex-wrap items-center justify-between gap-2 rounded-md bg-gray-50 p-3 text-sm text-gray-700 border border-gray-200">
+                  <span>You’re following {trackedTeamIds.length} team{trackedTeamIds.length === 1 ? '' : 's'}.</span>
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    onClick={async () => {
+                      try {
+                        const resp = await APIService.unsubscribeEmail({ email: auth.email, team_ids: trackedTeamIds })
+                        const removed = resp?.count ?? 0
+                        setTrackedTeamIds([])
+                        setMessage({ type: 'success', text: removed ? `Unsubscribed from ${removed} team${removed === 1 ? '' : 's'}.` : 'No active subscriptions were found.' })
+                      } catch (error) {
+                        console.error('Failed to unsubscribe', error)
+                        const detail = error?.body?.error || error.message || 'Failed to unsubscribe.'
+                        setMessage({ type: 'error', text: detail })
+                      }
+                    }}
+                  >
+                    Unsubscribe from all followed teams
+                  </Button>
+                </div>
+              )}
+            </CardContent>
+          </Card>
         )}
 
         {loading ? (
@@ -8423,7 +8891,10 @@ function NewslettersPage() {
                         <Button
                           size="sm"
                           variant="outline"
-                          onClick={() => navigate(`/newsletters/${newsletter.id}`)}
+                          onClick={() => {
+                            const target = buildNewsletterUrl(newsletter)
+                            if (target) navigate(target)
+                          }}
                           disabled={focusedViewActive && expandedId === newsletter.id}
                         >
                           {focusedViewActive ? 'Viewing details' : 'Open detail view'}
@@ -8441,119 +8912,124 @@ function NewslettersPage() {
                     </div>
                   </CardHeader>
                   <CardContent>
-                  <div className="text-sm text-gray-500 mb-2">
-                    <Calendar className="h-4 w-4 inline mr-1" />
-                    {newsletter.week_start_date && newsletter.week_end_date && (
-                      `${new Date(newsletter.week_start_date).toLocaleDateString()} - ${new Date(newsletter.week_end_date).toLocaleDateString()}`
-                    )}
-                  </div>
-                  {expandedId === newsletter.id ? (
-                    <div className="max-w-none">
-                      {newsletter.rendered?.web_html ? (
-                        <div dangerouslySetInnerHTML={{ __html: newsletter.rendered.web_html }} className="prose max-w-none" />
-                      ) : (
-                        (() => {
-                          try {
-                            const obj = (newsletter.enriched_content && typeof newsletter.enriched_content === 'object')
-                              ? newsletter.enriched_content
-                              : JSON.parse(newsletter.content)
-                            const detailedSections = Array.isArray(obj.sections)
-                              ? obj.sections.filter((section) => ((section?.title || '').trim().toLowerCase()) !== 'what the internet is saying')
-                              : []
-                            return (
-                              <div className="space-y-6">
-                                {/* Newsletter Header */}
-                                <div className="bg-gradient-to-r from-blue-50 to-gray-50 p-6 rounded-lg border-l-4 border-blue-500">
-                                  <h2 className="text-2xl font-bold text-gray-900 mb-3">{obj.title || newsletter.title}</h2>
-                                  {obj.range && (
-                                    <div className="text-sm text-gray-600 mb-3">
-                                      📅 Week: {obj.range[0]} - {obj.range[1]}
-                                    </div>
-                                  )}
-                                  {obj.summary && (
-                                    <div className="text-gray-700 leading-relaxed text-lg">
-                                      {obj.summary}
-                                    </div>
-                                  )}
-                                </div>
-
-                                {/* Key Highlights Section */}
-                                {obj.highlights && Array.isArray(obj.highlights) && obj.highlights.length > 0 && (
-                                  <div className="bg-yellow-50 p-5 rounded-lg border-l-4 border-yellow-400">
-                                    <h3 className="text-lg font-bold text-gray-900 mb-3 flex items-center">
-                                      ⭐ Key Highlights
-                                    </h3>
-                                    <ul className="space-y-2">
-                                      {obj.highlights.map((highlight, idx) => (
-                                        <li key={idx} className="flex items-start">
-                                          <span className="bg-yellow-400 text-yellow-900 rounded-full w-6 h-6 flex items-center justify-center text-xs font-bold mr-3 mt-0.5 flex-shrink-0">
-                                            {idx + 1}
-                                          </span>
-                                          <span className="text-gray-700">{highlight}</span>
-                                        </li>
-                                      ))}
-                                    </ul>
+                    <div className="text-sm text-gray-500 mb-2">
+                      <Calendar className="h-4 w-4 inline mr-1" />
+                      {newsletter.week_start_date && newsletter.week_end_date && (
+                        `${new Date(newsletter.week_start_date).toLocaleDateString()} - ${new Date(newsletter.week_end_date).toLocaleDateString()}`
+                      )}
+                    </div>
+                    {(expandedId === newsletter.id || focusedViewActive) ? (
+                      <div className="max-w-none space-y-6">
+                        {/* Writer Commentary Section - Always show in focused view */}
+                        {focusedViewActive && focusedNewsletterId && (
+                          <NewsletterWriterOverlay newsletterId={focusedNewsletterId} />
+                        )}
+                        
+                        {newsletter.rendered?.web_html ? (
+                          <div dangerouslySetInnerHTML={{ __html: newsletter.rendered.web_html }} className="prose max-w-none" />
+                        ) : (
+                          (() => {
+                            try {
+                              const obj = (newsletter.enriched_content && typeof newsletter.enriched_content === 'object')
+                                ? newsletter.enriched_content
+                                : JSON.parse(newsletter.content)
+                              const detailedSections = Array.isArray(obj.sections)
+                                ? obj.sections.filter((section) => ((section?.title || '').trim().toLowerCase()) !== 'what the internet is saying')
+                                : []
+                              return (
+                                <div className="space-y-6">
+                                  {/* Newsletter Header */}
+                                  <div className="bg-gradient-to-r from-blue-50 to-gray-50 p-6 rounded-lg border-l-4 border-blue-500">
+                                    <h2 className="text-2xl font-bold text-gray-900 mb-3">{obj.title || newsletter.title}</h2>
+                                    {obj.range && (
+                                      <div className="text-sm text-gray-600 mb-3">
+                                        📅 Week: {obj.range[0]} - {obj.range[1]}
+                                      </div>
+                                    )}
+                                    {obj.summary && (
+                                      <div className="text-gray-700 leading-relaxed text-lg">
+                                        {obj.summary}
+                                      </div>
+                                    )}
                                   </div>
-                                )}
 
-                                {/* Performance Stats */}
-                                {obj.by_numbers && (
-                                  <div className="bg-gray-50 p-5 rounded-lg">
-                                    <h3 className="text-lg font-bold text-gray-900 mb-4 flex items-center">
-                                      📊 By The Numbers
-                                    </h3>
-                                    <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                                      {obj.by_numbers.minutes_leaders && obj.by_numbers.minutes_leaders.length > 0 && (
-                                        <div className="bg-white p-4 rounded-lg shadow-sm border">
-                                          <h4 className="font-semibold text-gray-900 mb-3 flex items-center">
-                                            ⏱️ Minutes Leaders
-                                          </h4>
-                                          <div className="space-y-2">
-                                            {obj.by_numbers.minutes_leaders.map((player, idx) => (
-                                              <div key={idx} className="flex justify-between items-center">
-                                                <span className="font-medium text-gray-700">{player.player}</span>
-                                                <span className="bg-blue-100 text-blue-800 px-2 py-1 rounded text-sm font-bold">
-                                                  {player.minutes}'
-                                                </span>
-                                              </div>
-                                            ))}
-                                          </div>
-                                        </div>
-                                      )}
-                                      
-                                      {obj.by_numbers.ga_leaders && obj.by_numbers.ga_leaders.length > 0 && (
-                                        <div className="bg-white p-4 rounded-lg shadow-sm border">
-                                          <h4 className="font-semibold text-gray-900 mb-3 flex items-center">
-                                            ⚽ Goal Contributors
-                                          </h4>
-                                          <div className="space-y-2">
-                                            {obj.by_numbers.ga_leaders.map((player, idx) => (
-                                              <div key={idx} className="flex justify-between items-center">
-                                                <span className="font-medium text-gray-700">{player.player}</span>
-                                                <div className="flex space-x-1">
-                                                  <span className="bg-green-100 text-green-800 px-2 py-1 rounded text-sm font-bold">
-                                                    {player.g}G
-                                                  </span>
-                                                  <span className="bg-purple-100 text-purple-800 px-2 py-1 rounded text-sm font-bold">
-                                                    {player.a}A
+                                  {/* Key Highlights Section */}
+                                  {obj.highlights && Array.isArray(obj.highlights) && obj.highlights.length > 0 && (
+                                    <div className="bg-yellow-50 p-5 rounded-lg border-l-4 border-yellow-400">
+                                      <h3 className="text-lg font-bold text-gray-900 mb-3 flex items-center">
+                                        ⭐ Key Highlights
+                                      </h3>
+                                      <ul className="space-y-2">
+                                        {obj.highlights.map((highlight, idx) => (
+                                          <li key={idx} className="flex items-start">
+                                            <span className="bg-yellow-400 text-yellow-900 rounded-full w-6 h-6 flex items-center justify-center text-xs font-bold mr-3 mt-0.5 flex-shrink-0">
+                                              {idx + 1}
+                                            </span>
+                                            <span className="text-gray-700">{highlight}</span>
+                                          </li>
+                                        ))}
+                                      </ul>
+                                    </div>
+                                  )}
+
+                                  {/* Performance Stats */}
+                                  {obj.by_numbers && (
+                                    <div className="bg-gray-50 p-5 rounded-lg">
+                                      <h3 className="text-lg font-bold text-gray-900 mb-4 flex items-center">
+                                        📊 By The Numbers
+                                      </h3>
+                                      <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                                        {obj.by_numbers.minutes_leaders && obj.by_numbers.minutes_leaders.length > 0 && (
+                                          <div className="bg-white p-4 rounded-lg shadow-sm border">
+                                            <h4 className="font-semibold text-gray-900 mb-3 flex items-center">
+                                              ⏱️ Minutes Leaders
+                                            </h4>
+                                            <div className="space-y-2">
+                                              {obj.by_numbers.minutes_leaders.map((player, idx) => (
+                                                <div key={idx} className="flex justify-between items-center">
+                                                  <span className="font-medium text-gray-700">{player.player}</span>
+                                                  <span className="bg-blue-100 text-blue-800 px-2 py-1 rounded text-sm font-bold">
+                                                    {player.minutes}'
                                                   </span>
                                                 </div>
-                                              </div>
-                                            ))}
+                                              ))}
+                                            </div>
                                           </div>
-                                        </div>
-                                      )}
-                                    </div>
-                                  </div>
-                                )}
+                                        )}
 
-                                {/* Detailed Sections */}
-                                {detailedSections.length > 0 && (
-                                  <div className="space-y-4">
-                                    <h3 className="text-lg font-bold text-gray-900 flex items-center">
-                                      📋 Detailed Report
-                                    </h3>
-                                    {detailedSections.map((sec, idx) => (
+                                        {obj.by_numbers.ga_leaders && obj.by_numbers.ga_leaders.length > 0 && (
+                                          <div className="bg-white p-4 rounded-lg shadow-sm border">
+                                            <h4 className="font-semibold text-gray-900 mb-3 flex items-center">
+                                              ⚽ Goal Contributors
+                                            </h4>
+                                            <div className="space-y-2">
+                                              {obj.by_numbers.ga_leaders.map((player, idx) => (
+                                                <div key={idx} className="flex justify-between items-center">
+                                                  <span className="font-medium text-gray-700">{player.player}</span>
+                                                  <div className="flex space-x-1">
+                                                    <span className="bg-green-100 text-green-800 px-2 py-1 rounded text-sm font-bold">
+                                                      {player.g}G
+                                                    </span>
+                                                    <span className="bg-purple-100 text-purple-800 px-2 py-1 rounded text-sm font-bold">
+                                                      {player.a}A
+                                                    </span>
+                                                  </div>
+                                                </div>
+                                              ))}
+                                            </div>
+                                          </div>
+                                        )}
+                                      </div>
+                                    </div>
+                                  )}
+
+                                  {/* Detailed Sections */}
+                                  {detailedSections.length > 0 && (
+                                    <div className="space-y-4">
+                                      <h3 className="text-lg font-bold text-gray-900 flex items-center">
+                                        📋 Detailed Report
+                                      </h3>
+                                      {detailedSections.map((sec, idx) => (
                                         <div key={idx} className="bg-white border rounded-lg overflow-hidden shadow-sm">
                                           {sec.title && (
                                             <div className="bg-gray-100 px-5 py-3 border-b">
@@ -8602,6 +9078,31 @@ function NewslettersPage() {
                                                     {it.week_summary && (
                                                       <p className="text-gray-700 leading-relaxed">{it.week_summary}</p>
                                                     )}
+
+                                                    {/* Upcoming Fixtures */}
+                                                    {it.upcoming_fixtures && Array.isArray(it.upcoming_fixtures) && it.upcoming_fixtures.length > 0 && (
+                                                      <div className="mt-4 p-3 bg-blue-50 border-l-4 border-blue-400 rounded">
+                                                        <h5 className="text-sm font-semibold text-blue-900 mb-2">📅 Upcoming Fixtures</h5>
+                                                        <div className="space-y-2">
+                                                          {it.upcoming_fixtures.map((fixture, fIdx) => (
+                                                            <div key={fIdx} className="text-sm text-gray-700">
+                                                              <span className="font-medium">{new Date(fixture.date).toLocaleDateString()}</span>
+                                                              <span className="mx-1 text-gray-400">•</span>
+                                                              <span>{fixture.is_home ? 'vs' : '@'} {fixture.opponent}</span>
+                                                              {fixture.competition && (
+                                                                <span className="text-gray-500"> ({fixture.competition})</span>
+                                                              )}
+                                                            </div>
+                                                          ))}
+                                                        </div>
+                                                      </div>
+                                                    )}
+                                                    {it.can_fetch_stats && (!it.upcoming_fixtures || it.upcoming_fixtures.length === 0) && (
+                                                      <div className="mt-4 p-2 bg-gray-50 border-l-4 border-gray-300 rounded">
+                                                        <p className="text-xs text-gray-500 italic">No scheduled fixtures in the coming week</p>
+                                                      </div>
+                                                    )}
+
                                                     {it.match_notes && Array.isArray(it.match_notes) && it.match_notes.length > 0 && (
                                                       <ul className="mt-2 list-disc space-y-1 pl-5 text-sm text-gray-600">
                                                         {it.match_notes.map((note, noteIndex) => (
@@ -8667,261 +9168,332 @@ function NewslettersPage() {
                                           </div>
                                         </div>
                                       ))}
-                                  </div>
-                                )}
-
-                                {/* Fan Pulse Section */}
-                              </div>
-                            )
-                          } catch {
-                            return (
-                              <div className="prose max-w-none">
-                                <div className="bg-gray-50 p-4 rounded-lg">
-                                  <h3 className="text-lg font-medium text-gray-900 mb-2">Newsletter Content</h3>
-                                  <div className="whitespace-pre-wrap text-gray-700">{newsletter.content}</div>
-                                </div>
-                              </div>
-                            )
-                          }
-                        })()
-                      )}
-
-                      <div className="mt-10 space-y-4 border-t pt-6">
-                        <div className="flex flex-wrap items-center justify-between gap-2">
-                          <div className="flex items-center gap-2">
-                            <MessageCircle className="h-5 w-5 text-blue-600" />
-                            <h3 className="text-lg font-semibold">Comments</h3>
-                            {(commentsByNewsletter[newsletter.id] || []).length > 0 && (
-                              <Badge variant="secondary">{(commentsByNewsletter[newsletter.id] || []).length}</Badge>
-                            )}
-                          </div>
-                          <Button
-                            size="sm"
-                            variant="ghost"
-                            onClick={() => loadComments(newsletter.id, { force: true })}
-                            disabled={commentsLoading[newsletter.id]}
-                          >
-                            {commentsLoading[newsletter.id] && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
-                            Refresh
-                          </Button>
-                        </div>
-                        {commentsError[newsletter.id] && (
-                          <div className="text-sm text-red-600">{commentsError[newsletter.id]}</div>
-                        )}
-                        {commentsLoading[newsletter.id] ? (
-                          <div className="flex items-center gap-2 text-sm text-gray-500">
-                            <Loader2 className="h-4 w-4 animate-spin" />
-                            Loading comments...
-                          </div>
-                        ) : (commentsByNewsletter[newsletter.id] || []).length === 0 ? (
-                          <div className="rounded-md border border-dashed bg-gray-50 p-4 text-sm text-gray-600">
-                            No comments yet. Be the first to share your take.
-                          </div>
-                        ) : (
-                          <div className="space-y-3">
-                            {(commentsByNewsletter[newsletter.id] || []).map((comment) => (
-                              <div key={comment.id} className="rounded-md border bg-white p-4 shadow-sm">
-                                <div className="flex flex-wrap items-center justify-between gap-2 text-xs text-muted-foreground">
-                                  <span className="text-sm font-semibold text-gray-900">
-                                    {comment.author_display_name || comment.author_name || 'Loan Army supporter'}
-                                  </span>
-                                  <span>{formatRelativeTime(comment.created_at)}</span>
-                                </div>
-                                <div className="mt-2 whitespace-pre-wrap text-sm text-gray-700">
-                                  {comment.body}
-                                </div>
-                              </div>
-                            ))}
-                          </div>
-                        )}
-                        <div className="rounded-lg border bg-white p-4 shadow-sm space-y-3">
-                          {canComment ? (
-                            <>
-                              <div className="flex flex-wrap items-center gap-2 text-sm text-gray-600">
-                                <span>Commenting as</span>
-                                <span className="font-semibold text-gray-900">{auth.displayName || 'Loan Army supporter'}</span>
-                                {auth.isAdmin && auth.hasApiKey && (
-                                  <Badge variant="outline" className="border-blue-200 text-blue-600">Admin</Badge>
-                                )}
-                                {!auth.displayNameConfirmed && (
-                                  <Badge variant="outline" className="border-amber-300 text-amber-700">Name pending</Badge>
-                                )}
-                                <Button type="button" variant="ghost" size="xs" onClick={toggleDisplayNameEdit}>
-                                  {displayNameEditing ? 'Cancel name edit' : 'Edit display name'}
-                                </Button>
-                              </div>
-                              {displayNameEditing && (
-                                <form
-                                  className="space-y-2"
-                                  onSubmit={(event) => {
-                                    event.preventDefault()
-                                    handleDisplayNameSave()
-                                  }}
-                                >
-                                  <Input
-                                    value={displayNameInput}
-                                    onChange={(e) => setDisplayNameInput(e.target.value)}
-                                    maxLength={40}
-                                    placeholder="Choose a display name"
-                                  />
-                                  <div className="flex flex-wrap items-center gap-2">
-                                    <Button size="sm" type="submit" disabled={displayNameBusy}>
-                                      {displayNameBusy && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
-                                      Save
-                                    </Button>
-                                    <Button
-                                      size="sm"
-                                      variant="ghost"
-                                      type="button"
-                                      onClick={() => {
-                                        setDisplayNameEditing(false)
-                                        setDisplayNameInput(auth.displayName || '')
-                                        setDisplayNameStatus(null)
-                                      }}
-                                    >
-                                      Cancel
-                                    </Button>
-                                  </div>
-                                  {displayNameStatus && (
-                                    <p className={`text-xs ${displayNameStatus.type === 'error' ? 'text-red-600' : 'text-emerald-600'}`}>
-                                      {displayNameStatus.message}
-                                    </p>
+                                    </div>
                                   )}
-                                </form>
-                              )}
-                              {!displayNameEditing && displayNameStatus && (
-                                <p className={`text-xs ${displayNameStatus.type === 'error' ? 'text-red-600' : 'text-emerald-600'}`}>
-                                  {displayNameStatus.message}
-                                </p>
-                              )}
-                              <Textarea
-                                value={commentDrafts[newsletter.id] || ''}
-                                onChange={(e) => handleDraftChange(newsletter.id, e.target.value)}
-                                placeholder="What stood out to you this week?"
-                                rows={3}
-                              />
-                              <div className="flex flex-wrap items-center justify-between gap-2">
-                                <Button size="sm" onClick={() => handleSubmitComment(newsletter.id)} disabled={commentBusy[newsletter.id]}>
-                                  {commentBusy[newsletter.id] ? (
-                                    <>
-                                      <Loader2 className="mr-2 h-4 w-4 animate-spin" /> Posting...
-                                    </>
-                                  ) : (
-                                    'Post Comment'
+                                  {/* Journalist Commentaries */}
+                                  {newsletter.commentaries && newsletter.commentaries.length > 0 && (
+                                    <div className="space-y-6 border-t pt-8 mt-8">
+                                      <h3 className="text-2xl font-bold text-gray-900 flex items-center gap-2">
+                                        <UserCog className="h-6 w-6 text-blue-600" />
+                                        Journalist Analysis
+                                      </h3>
+                                      <div className="grid gap-6">
+                                        {newsletter.commentaries.map(commentary => {
+                                          const isSubscribed = mySubscriptions.some(sub => sub.journalist_user_id === commentary.author_id)
+                                          const isLocked = commentary.is_premium && !isSubscribed
+
+                                          return (
+                                            <Card key={commentary.id} className={isLocked ? "bg-gray-50 border-dashed" : "bg-white"}>
+                                              <CardHeader>
+                                                <div className="flex items-center justify-between">
+                                                  <div className="space-y-1">
+                                                    <CardTitle className="text-xl">{commentary.title || 'Expert Analysis'}</CardTitle>
+                                                    <CardDescription className="flex items-center gap-2">
+                                                      By <span className="font-semibold text-gray-900">{commentary.author_name}</span>
+                                                    </CardDescription>
+                                                  </div>
+                                                  {isLocked && (
+                                                    <Badge variant="secondary" className="flex items-center gap-1">
+                                                      <KeyRound className="w-3 h-3" /> Premium
+                                                    </Badge>
+                                                  )}
+                                                </div>
+                                              </CardHeader>
+                                              <CardContent>
+                                                {isLocked ? (
+                                                  <div className="text-center py-8 px-4">
+                                                    <div className="bg-gray-100 w-16 h-16 rounded-full flex items-center justify-center mx-auto mb-4">
+                                                      <KeyRound className="w-8 h-8 text-gray-400" />
+                                                    </div>
+                                                    <h4 className="text-lg font-semibold text-gray-900 mb-2">Subscriber Only Content</h4>
+                                                    <p className="text-gray-500 mb-6 max-w-md mx-auto">
+                                                      Subscribe to {commentary.author_name} to unlock this exclusive analysis and support their work.
+                                                    </p>
+                                                    <Button onClick={() => navigate('/journalists')}>
+                                                      Find Journalists
+                                                    </Button>
+                                                  </div>
+                                                ) : (
+                                                  <div dangerouslySetInnerHTML={{ __html: commentary.content }} className="prose max-w-none" />
+                                                )}
+                                              </CardContent>
+                                            </Card>
+                                          )
+                                        })}
+                                      </div>
+                                    </div>
                                   )}
-                                </Button>
-                                <span className="text-xs text-muted-foreground">Keep it friendly—no spam or spoilers.</span>
-                              </div>
-                            </>
+
+                                  {/* Fan Pulse Section */}
+                                </div>
+                              )
+                            } catch {
+                              return (
+                                <div className="prose max-w-none">
+                                  <div className="bg-gray-50 p-4 rounded-lg">
+                                    <h3 className="text-lg font-medium text-gray-900 mb-2">Newsletter Content</h3>
+                                    <div className="whitespace-pre-wrap text-gray-700">{newsletter.content}</div>
+                                  </div>
+                                </div>
+                              )
+                            }
+                          })()
+                        )}
+
+                        <div className="mt-10 space-y-4 border-t pt-6">
+                          <div className="flex flex-wrap items-center justify-between gap-2">
+                            <div className="flex items-center gap-2">
+                              <MessageCircle className="h-5 w-5 text-blue-600" />
+                              <h3 className="text-lg font-semibold">Comments</h3>
+                              {(commentsByNewsletter[newsletter.id] || []).length > 0 && (
+                                <Badge variant="secondary">{(commentsByNewsletter[newsletter.id] || []).length}</Badge>
+                              )}
+                            </div>
+                            <Button
+                              size="sm"
+                              variant="ghost"
+                              onClick={() => loadComments(newsletter.id, { force: true })}
+                              disabled={commentsLoading[newsletter.id]}
+                            >
+                              {commentsLoading[newsletter.id] && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
+                              Refresh
+                            </Button>
+                          </div>
+                          {commentsError[newsletter.id] && (
+                            <div className="text-sm text-red-600">{commentsError[newsletter.id]}</div>
+                          )}
+                          {commentsLoading[newsletter.id] ? (
+                            <div className="flex items-center gap-2 text-sm text-gray-500">
+                              <Loader2 className="h-4 w-4 animate-spin" />
+                              Loading comments...
+                            </div>
+                          ) : (commentsByNewsletter[newsletter.id] || []).length === 0 ? (
+                            <div className="rounded-md border border-dashed bg-gray-50 p-4 text-sm text-gray-600">
+                              No comments yet. Be the first to share your take.
+                            </div>
                           ) : (
-                            <div className="flex flex-col items-start gap-2 text-sm text-gray-600">
-                              <p>Sign in to share your thoughts.</p>
-                              <Button size="sm" onClick={() => { setExpandedId(newsletter.id); openLoginModal() }}>
-                                <LogIn className="mr-2 h-4 w-4" /> Sign in to comment
-                              </Button>
+                            <div className="space-y-3">
+                              {(commentsByNewsletter[newsletter.id] || []).map((comment) => (
+                                <div key={comment.id} className="rounded-md border bg-white p-4 shadow-sm">
+                                  <div className="flex flex-wrap items-center justify-between gap-2 text-xs text-muted-foreground">
+                                    <span className="text-sm font-semibold text-gray-900">
+                                      {comment.author_display_name || comment.author_name || 'GOL supporter'}
+                                    </span>
+                                    <span>{formatRelativeTime(comment.created_at)}</span>
+                                  </div>
+                                  <div className="mt-2 whitespace-pre-wrap text-sm text-gray-700">
+                                    {comment.body}
+                                  </div>
+                                </div>
+                              ))}
                             </div>
                           )}
-                        </div>
-                      </div>
-                    </div>
-                  ) : (
-                    <>
-                      <div className="prose max-w-none">
-                        {(() => {
-                          try {
-                            const obj = JSON.parse(newsletter.content)
-                            return (
-                              <div className="space-y-3">
-                              {/* Summary */}
-                              {obj.summary && (
-                                <div className="text-gray-700 leading-relaxed">
-                                  {obj.summary}
-                                </div>
-                              )}
-                              
-                              {/* Key Highlights */}
-                              {obj.highlights && Array.isArray(obj.highlights) && obj.highlights.length > 0 && (
-                                <div>
-                                  <div className="text-sm font-semibold text-gray-900 mb-2">Key Highlights:</div>
-                                  <ul className="list-disc ml-5 space-y-1">
-                                    {obj.highlights.slice(0, 3).map((highlight, idx) => (
-                                      <li key={idx} className="text-sm text-gray-700">{highlight}</li>
-                                    ))}
-                                  </ul>
-                                </div>
-                              )}
-                              
-                              {/* Top Performers */}
-                              {obj.by_numbers && (
-                                <div className="grid grid-cols-1 md:grid-cols-2 gap-4 mt-3">
-                                  {obj.by_numbers.minutes_leaders && obj.by_numbers.minutes_leaders.length > 0 && (
-                                    <div className="bg-gray-50 p-3 rounded-lg">
-                                      <div className="text-sm font-semibold text-gray-900 mb-2">Minutes Leaders:</div>
-                                      <div className="space-y-1">
-                                        {obj.by_numbers.minutes_leaders.slice(0, 2).map((player, idx) => (
-                                          <div key={idx} className="text-sm text-gray-700">
-                                            <span className="font-medium">{player.player}</span>: {player.minutes}'
-                                          </div>
-                                        ))}
-                                      </div>
-                                    </div>
+                          <div className="rounded-lg border bg-white p-4 shadow-sm space-y-3">
+                            {canComment ? (
+                              <>
+                                <div className="flex flex-wrap items-center gap-2 text-sm text-gray-600">
+                                  <span>Commenting as</span>
+                                  <span className="font-semibold text-gray-900">{auth.displayName || 'GOL supporter'}</span>
+                                  {auth.isAdmin && auth.hasApiKey && (
+                                    <Badge variant="outline" className="border-blue-200 text-blue-600">Admin</Badge>
                                   )}
-                                  
-                                  {obj.by_numbers.ga_leaders && obj.by_numbers.ga_leaders.length > 0 && (
-                                    <div className="bg-gray-50 p-3 rounded-lg">
-                                      <div className="text-sm font-semibold text-gray-900 mb-2">Goal Contributors:</div>
-                                      <div className="space-y-1">
-                                        {obj.by_numbers.ga_leaders.slice(0, 2).map((player, idx) => (
-                                          <div key={idx} className="text-sm text-gray-700">
-                                            <span className="font-medium">{player.player}</span>: {player.g}G {player.a}A
-                                          </div>
-                                        ))}
-                                      </div>
-                                    </div>
+                                  {!auth.displayNameConfirmed && (
+                                    <Badge variant="outline" className="border-amber-300 text-amber-700">Name pending</Badge>
                                   )}
+                                  <Button type="button" variant="ghost" size="xs" onClick={toggleDisplayNameEdit}>
+                                    {displayNameEditing ? 'Cancel name edit' : 'Edit display name'}
+                                  </Button>
                                 </div>
-                              )}
-                              
-                              {/* Preview of sections */}
-                              {obj.sections && obj.sections.length > 0 && (
-                                <div className="mt-3">
-                                  <div className="text-sm font-semibold text-gray-900 mb-2">This Week's Activity:</div>
-                                  <div className="space-y-2">
-                                    {obj.sections.slice(0, 2).map((section, idx) => (
-                                      <div key={idx} className="border-l-2 border-blue-200 pl-3">
-                                        <div className="text-sm font-medium text-gray-800">{section.title}</div>
-                                        {section.items && section.items.length > 0 && (
-                                          <div className="text-sm text-gray-600 mt-1">
-                                            {section.items.length} player{section.items.length !== 1 ? 's' : ''} featured
-                                          </div>
-                                        )}
-                                      </div>
-                                    ))}
-                                  </div>
+                                {displayNameEditing && (
+                                  <form
+                                    className="space-y-2"
+                                    onSubmit={(event) => {
+                                      event.preventDefault()
+                                      handleDisplayNameSave()
+                                    }}
+                                  >
+                                    <Input
+                                      value={displayNameInput}
+                                      onChange={(e) => setDisplayNameInput(e.target.value)}
+                                      maxLength={40}
+                                      placeholder="Choose a display name"
+                                    />
+                                    <div className="flex flex-wrap items-center gap-2">
+                                      <Button size="sm" type="submit" disabled={displayNameBusy}>
+                                        {displayNameBusy && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
+                                        Save
+                                      </Button>
+                                      <Button
+                                        size="sm"
+                                        variant="ghost"
+                                        type="button"
+                                        onClick={() => {
+                                          setDisplayNameEditing(false)
+                                          setDisplayNameInput(auth.displayName || '')
+                                          setDisplayNameStatus(null)
+                                        }}
+                                      >
+                                        Cancel
+                                      </Button>
+                                    </div>
+                                    {displayNameStatus && (
+                                      <p className={`text-xs ${displayNameStatus.type === 'error' ? 'text-red-600' : 'text-emerald-600'}`}>
+                                        {displayNameStatus.message}
+                                      </p>
+                                    )}
+                                  </form>
+                                )}
+                                {!displayNameEditing && displayNameStatus && (
+                                  <p className={`text-xs ${displayNameStatus.type === 'error' ? 'text-red-600' : 'text-emerald-600'}`}>
+                                    {displayNameStatus.message}
+                                  </p>
+                                )}
+                                <Textarea
+                                  value={commentDrafts[newsletter.id] || ''}
+                                  onChange={(e) => handleDraftChange(newsletter.id, e.target.value)}
+                                  placeholder="What stood out to you this week?"
+                                  rows={3}
+                                />
+                                <div className="flex flex-wrap items-center justify-between gap-2">
+                                  <Button size="sm" onClick={() => handleSubmitComment(newsletter.id)} disabled={commentBusy[newsletter.id]}>
+                                    {commentBusy[newsletter.id] ? (
+                                      <>
+                                        <Loader2 className="mr-2 h-4 w-4 animate-spin" /> Posting...
+                                      </>
+                                    ) : (
+                                      'Post Comment'
+                                    )}
+                                  </Button>
+                                  <span className="text-xs text-muted-foreground">Keep it friendly—no spam or spoilers.</span>
                                 </div>
-                              )}
-                              
-                              {/* Read More indicator */}
-                              <div className="mt-4 pt-3 border-t border-gray-200">
-                                <Button
-                                  variant="link"
-                                  size="sm"
-                                  className="px-0"
-                                  onClick={() => setExpandedId(newsletter.id)}
-                                >
-                                  Open quick preview
+                              </>
+                            ) : (
+                              <div className="flex flex-col items-start gap-2 text-sm text-gray-600">
+                                <p>Sign in to share your thoughts.</p>
+                                <Button size="sm" onClick={() => { setExpandedId(newsletter.id); openLoginModal() }}>
+                                  <LogIn className="mr-2 h-4 w-4" /> Sign in to comment
                                 </Button>
                               </div>
-                              </div>
-                            )
-                          } catch {
-                            // Fallback to showing content summary if JSON parsing fails
-                            const content = newsletter.content || newsletter.structured_content || ''
-                            if (content.length > 200) {
+                            )}
+                          </div>
+                        </div>
+                      </div >
+                    ) : (
+                      <>
+                        <div className="prose max-w-none">
+                          {(() => {
+                            try {
+                              const obj = JSON.parse(newsletter.content)
+                              return (
+                                <div className="space-y-3">
+                                  {/* Summary */}
+                                  {obj.summary && (
+                                    <div className="text-gray-700 leading-relaxed">
+                                      {obj.summary}
+                                    </div>
+                                  )}
+
+                                  {/* Key Highlights */}
+                                  {obj.highlights && Array.isArray(obj.highlights) && obj.highlights.length > 0 && (
+                                    <div>
+                                      <div className="text-sm font-semibold text-gray-900 mb-2">Key Highlights:</div>
+                                      <ul className="list-disc ml-5 space-y-1">
+                                        {obj.highlights.slice(0, 3).map((highlight, idx) => (
+                                          <li key={idx} className="text-sm text-gray-700">{highlight}</li>
+                                        ))}
+                                      </ul>
+                                    </div>
+                                  )}
+
+                                  {/* Top Performers */}
+                                  {obj.by_numbers && (
+                                    <div className="grid grid-cols-1 md:grid-cols-2 gap-4 mt-3">
+                                      {obj.by_numbers.minutes_leaders && obj.by_numbers.minutes_leaders.length > 0 && (
+                                        <div className="bg-gray-50 p-3 rounded-lg">
+                                          <div className="text-sm font-semibold text-gray-900 mb-2">Minutes Leaders:</div>
+                                          <div className="space-y-1">
+                                            {obj.by_numbers.minutes_leaders.slice(0, 2).map((player, idx) => (
+                                              <div key={idx} className="text-sm text-gray-700">
+                                                <span className="font-medium">{player.player}</span>: {player.minutes}'
+                                              </div>
+                                            ))}
+                                          </div>
+                                        </div>
+                                      )}
+
+                                      {obj.by_numbers.ga_leaders && obj.by_numbers.ga_leaders.length > 0 && (
+                                        <div className="bg-gray-50 p-3 rounded-lg">
+                                          <div className="text-sm font-semibold text-gray-900 mb-2">Goal Contributors:</div>
+                                          <div className="space-y-1">
+                                            {obj.by_numbers.ga_leaders.slice(0, 2).map((player, idx) => (
+                                              <div key={idx} className="text-sm text-gray-700">
+                                                <span className="font-medium">{player.player}</span>: {player.g}G {player.a}A
+                                              </div>
+                                            ))}
+                                          </div>
+                                        </div>
+                                      )}
+                                    </div>
+                                  )}
+
+                                  {/* Preview of sections */}
+                                  {obj.sections && obj.sections.length > 0 && (
+                                    <div className="mt-3">
+                                      <div className="text-sm font-semibold text-gray-900 mb-2">This Week's Activity:</div>
+                                      <div className="space-y-2">
+                                        {obj.sections.slice(0, 2).map((section, idx) => (
+                                          <div key={idx} className="border-l-2 border-blue-200 pl-3">
+                                            <div className="text-sm font-medium text-gray-800">{section.title}</div>
+                                            {section.items && section.items.length > 0 && (
+                                              <div className="text-sm text-gray-600 mt-1">
+                                                {section.items.length} player{section.items.length !== 1 ? 's' : ''} featured
+                                              </div>
+                                            )}
+                                          </div>
+                                        ))}
+                                      </div>
+                                    </div>
+                                  )}
+
+                                  {/* Read More indicator */}
+                                  <div className="mt-4 pt-3 border-t border-gray-200">
+                                    <Button
+                                      variant="link"
+                                      size="sm"
+                                      className="px-0"
+                                      onClick={() => setExpandedId(newsletter.id)}
+                                    >
+                                      Open quick preview
+                                    </Button>
+                                  </div>
+                                </div>
+                              )
+                            } catch {
+                              // Fallback to showing content summary if JSON parsing fails
+                              const content = newsletter.content || newsletter.structured_content || ''
+                              if (content.length > 200) {
+                                return (
+                                  <div className="space-y-3">
+                                    <div className="text-gray-700 leading-relaxed">
+                                      {content.substring(0, 200)}...
+                                    </div>
+                                    <div className="pt-3 border-t border-gray-200">
+                                      <Button
+                                        variant="link"
+                                        size="sm"
+                                        className="px-0"
+                                        onClick={() => setExpandedId(newsletter.id)}
+                                      >
+                                        Open quick preview
+                                      </Button>
+                                    </div>
+                                  </div>
+                                )
+                              }
                               return (
                                 <div className="space-y-3">
                                   <div className="text-gray-700 leading-relaxed">
-                                    {content.substring(0, 200)}...
+                                    {content}
                                   </div>
                                   <div className="pt-3 border-t border-gray-200">
                                     <Button
@@ -8936,80 +9508,64 @@ function NewslettersPage() {
                                 </div>
                               )
                             }
-                            return (
-                              <div className="space-y-3">
-                                <div className="text-gray-700 leading-relaxed">
-                                  {content}
-                                </div>
-                                <div className="pt-3 border-t border-gray-200">
-                                  <Button
-                                    variant="link"
-                                    size="sm"
-                                    className="px-0"
-                                    onClick={() => setExpandedId(newsletter.id)}
-                                  >
-                                    Open quick preview
-                                  </Button>
-                                </div>
+                          })()}
+                        </div>
+                        {(() => {
+                          const preview = (commentsByNewsletter[newsletter.id] || []).slice(0, 3)
+                          if (!preview.length) return null
+                          return (
+                            <div className="mt-6 rounded-lg border bg-white p-4 shadow-sm space-y-2">
+                              <div className="text-xs font-semibold text-gray-500 uppercase tracking-wide">Top comments</div>
+                              <div className="space-y-2">
+                                {preview.map((comment) => (
+                                  <div key={comment.id} className="rounded border bg-gray-50 px-3 py-2">
+                                    <div className="text-xs text-gray-500">{comment.author_display_name || comment.author_name || 'GOL supporter'}</div>
+                                    <div className="mt-1 text-sm text-gray-700 line-clamp-3">{comment.body}</div>
+                                  </div>
+                                ))}
                               </div>
-                            )
-                          }
-                        })()}
-                      </div>
-                      {(() => {
-                        const preview = (commentsByNewsletter[newsletter.id] || []).slice(0, 3)
-                        if (!preview.length) return null
-                        return (
-                          <div className="mt-6 rounded-lg border bg-white p-4 shadow-sm space-y-2">
-                            <div className="text-xs font-semibold text-gray-500 uppercase tracking-wide">Top comments</div>
-                            <div className="space-y-2">
-                              {preview.map((comment) => (
-                                <div key={comment.id} className="rounded border bg-gray-50 px-3 py-2">
-                                  <div className="text-xs text-gray-500">{comment.author_display_name || comment.author_name || 'Loan Army supporter'}</div>
-                                  <div className="mt-1 text-sm text-gray-700 line-clamp-3">{comment.body}</div>
-                                </div>
-                              ))}
                             </div>
-                          </div>
-                        )
-                      })()}
-                    </>
-                  )}
-                  </CardContent>
-              </Card>
+                          )
+                        })()}
+                      </>
+                    )}
+                  </CardContent >
+                </Card >
               )
             })}
-            {!focusedViewActive && totalPages > 1 && (
-              <div className="flex flex-wrap items-center justify-between gap-3 border-t border-gray-200 pt-4">
-                <span className="text-sm text-gray-600">
-                  Page {currentPage} of {totalPages}
-                  {pageStart > 0 && pageEnd >= pageStart ? ` • Showing ${pageStart}–${pageEnd} of ${filteredTotal}` : ''}
-                </span>
-                <div className="flex gap-2">
-                  <Button
-                    variant="outline"
-                    size="sm"
-                    onClick={() => setCurrentPage((page) => Math.max(1, page - 1))}
-                    disabled={currentPage === 1}
-                  >
-                    Previous
-                  </Button>
-                  <Button
-                    variant="outline"
-                    size="sm"
-                    onClick={() => setCurrentPage((page) => Math.min(totalPages, page + 1))}
-                    disabled={currentPage === totalPages}
-                  >
-                    Next
-                  </Button>
+            {
+              !focusedViewActive && totalPages > 1 && (
+                <div className="flex flex-wrap items-center justify-between gap-3 border-t border-gray-200 pt-4">
+                  <span className="text-sm text-gray-600">
+                    Page {currentPage} of {totalPages}
+                    {pageStart > 0 && pageEnd >= pageStart ? ` • Showing ${pageStart}–${pageEnd} of ${filteredTotal}` : ''}
+                  </span>
+                  <div className="flex gap-2">
+                    <Button
+                      variant="outline"
+                      size="sm"
+                      onClick={() => setCurrentPage((page) => Math.max(1, page - 1))}
+                      disabled={currentPage === 1}
+                    >
+                      Previous
+                    </Button>
+                    <Button
+                      variant="outline"
+                      size="sm"
+                      onClick={() => setCurrentPage((page) => Math.min(totalPages, page + 1))}
+                      disabled={currentPage === totalPages}
+                    >
+                      Next
+                    </Button>
+                  </div>
                 </div>
-              </div>
-            )}
-          </div>
+              )
+            }
+          </div >
         )}
-      </div>
+      </div >
       <BuyMeCoffeeButton className="mt-12" />
-    </div>
+    </div >
   )
 }
 
@@ -9021,6 +9577,11 @@ function SettingsPage() {
   const [displayNameInput, setDisplayNameInput] = useState(auth.displayName || '')
   const [displayNameStatus, setDisplayNameStatus] = useState(null)
   const [displayNameBusy, setDisplayNameBusy] = useState(false)
+
+  // Journalist Profile State
+  const [journalistProfile, setJournalistProfile] = useState({ bio: '', profile_image_url: '' })
+  const [journalistSaving, setJournalistSaving] = useState(false)
+  const [journalistStatus, setJournalistStatus] = useState(null)
 
   const [teams, setTeams] = useState([])
   const [selectedTeamIds, setSelectedTeamIds] = useState([])
@@ -9049,10 +9610,20 @@ function SettingsPage() {
       setLoading(true)
       setInitialError(null)
       try {
-        const [teamData, subscriptionData] = await Promise.all([
+        const promises = [
           APIService.getTeams({ is_active: 'true' }),
           APIService.getMySubscriptions(),
-        ])
+        ]
+
+        if (auth.isJournalist) {
+          promises.push(APIService.request('/writer/profile').catch(() => ({})))
+        }
+
+        const results = await Promise.all(promises)
+        const teamData = results[0]
+        const subscriptionData = results[1]
+        const writerData = results[2]
+
         if (cancelled) return
 
         const teamList = Array.isArray(teamData) ? teamData.slice() : []
@@ -9062,6 +9633,13 @@ function SettingsPage() {
         const subs = Array.isArray(subscriptionData) ? subscriptionData : []
         setSubscriptions(subs)
         setSelectedTeamIds(subs.map((sub) => sub.team_id))
+
+        if (writerData) {
+          setJournalistProfile({
+            bio: writerData.bio || '',
+            profile_image_url: writerData.profile_image_url || ''
+          })
+        }
       } catch (error) {
         if (cancelled) return
         console.error('Failed to load account settings', error)
@@ -9121,6 +9699,26 @@ function SettingsPage() {
     }
   }
 
+  const handleJournalistSave = async (e) => {
+    e.preventDefault()
+    if (!auth.token || !auth.isJournalist) return
+
+    setJournalistStatus(null)
+    setJournalistSaving(true)
+    try {
+      await APIService.request('/writer/profile', {
+        method: 'POST',
+        body: JSON.stringify(journalistProfile)
+      })
+      setJournalistStatus({ type: 'success', message: 'Profile updated successfully.' })
+    } catch (error) {
+      console.error('Failed to update profile', error)
+      setJournalistStatus({ type: 'error', message: error?.message || 'Failed to update profile.' })
+    } finally {
+      setJournalistSaving(false)
+    }
+  }
+
   const handleSaveSubscriptions = async () => {
     if (!auth.token) {
       setMessage({ type: 'error', text: 'Sign in to manage subscriptions.' })
@@ -9142,7 +9740,16 @@ function SettingsPage() {
       if (ignored) parts.push(`${ignored} ignored`)
       const suffix = parts.length ? ` (${parts.join(', ')})` : ''
 
-      setMessage({ type: 'success', text: `Subscription preferences saved${suffix}.` })
+      let text = `Subscription preferences saved${suffix}.`
+
+      // Add waitlist notification if applicable
+      const teamsWithoutNewsletters = res?.teams_without_newsletters || []
+      if (teamsWithoutNewsletters.length > 0) {
+        const teamNames = teamsWithoutNewsletters.map(t => t.team_name).join(', ')
+        text += ` Note: ${teamNames} ${teamsWithoutNewsletters.length === 1 ? "doesn't have" : "don't have"} active newsletters yet. We'll notify you once we start generating them!`
+      }
+
+      setMessage({ type: 'success', text })
     } catch (error) {
       console.error('Failed to update subscriptions', error)
       setMessage({ type: 'error', text: error?.body?.error || error.message || 'Failed to update subscriptions.' })
@@ -9234,6 +9841,68 @@ function SettingsPage() {
                 </form>
               </CardContent>
             </Card>
+
+            {/* Journalist Profile Settings */}
+            {auth.isJournalist && (
+              <Card>
+                <CardHeader>
+                  <CardTitle>Journalist Profile</CardTitle>
+                  <CardDescription>Manage your public profile appearing on the Journalist page.</CardDescription>
+                </CardHeader>
+                <CardContent>
+                  <form className="space-y-4" onSubmit={handleJournalistSave}>
+                    <div className="space-y-2">
+                      <Label htmlFor="journalist-bio">Bio</Label>
+                      <Textarea
+                        id="journalist-bio"
+                        value={journalistProfile.bio}
+                        onChange={(e) => setJournalistProfile(prev => ({ ...prev, bio: e.target.value }))}
+                        placeholder="Tell subscribers about yourself..."
+                        className="resize-none min-h-[100px]"
+                      />
+                      <p className="text-xs text-muted-foreground">Brief description of your background and coverage focus.</p>
+                    </div>
+
+                    <div className="space-y-2">
+                      <Label htmlFor="journalist-image">Profile Image URL</Label>
+                      <div className="flex gap-4 items-start">
+                        <div className="flex-1 space-y-2">
+                          <Input
+                            id="journalist-image"
+                            value={journalistProfile.profile_image_url}
+                            onChange={(e) => setJournalistProfile(prev => ({ ...prev, profile_image_url: e.target.value }))}
+                            placeholder="https://..."
+                          />
+                          <div className="text-xs text-muted-foreground space-y-1">
+                            <p>Enter the URL of your profile picture.</p>
+                            <p><strong>Tip:</strong> You can right-click your photo on LinkedIn or Twitter, select "Copy Image Link", and paste it here. Or upload to a free host like <a href="https://postimages.org/" target="_blank" rel="noopener noreferrer" className="underline hover:text-primary">PostImages</a>.</p>
+                          </div>
+                        </div>
+                        <Avatar className="h-16 w-16 border-2 border-muted">
+                          <AvatarImage src={journalistProfile.profile_image_url} />
+                          <AvatarFallback>
+                            {auth.displayName?.substring(0, 2).toUpperCase() || 'JP'}
+                          </AvatarFallback>
+                        </Avatar>
+                      </div>
+                    </div>
+
+                    {journalistStatus && (
+                      <Alert className={journalistStatus.type === 'error' ? 'border-red-500 text-red-600' : 'border-green-500 text-green-600'}>
+                        <AlertDescription>{journalistStatus.message}</AlertDescription>
+                      </Alert>
+                    )}
+
+                    <div className="flex justify-end">
+                      <Button type="submit" disabled={journalistSaving}>
+                        {journalistSaving && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
+                        Save Profile
+                      </Button>
+                    </div>
+                  </form>
+                </CardContent>
+              </Card>
+            )}
 
             <Card>
               <CardHeader>
@@ -9510,7 +10179,7 @@ function StatsPage() {
             System Statistics
           </h1>
           <p className="text-lg text-gray-600">
-            Overview of the Loan Army platform
+            Overview of the Go On Loan platform
           </p>
         </div>
 
@@ -9533,7 +10202,7 @@ function StatsPage() {
                 </p>
               </CardContent>
             </Card>
-            
+
             <Card>
               <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
                 <CardTitle className="text-sm font-medium">Teams with Loans</CardTitle>
@@ -9546,7 +10215,7 @@ function StatsPage() {
                 </p>
               </CardContent>
             </Card>
-            
+
             <Card>
               <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
                 <CardTitle className="text-sm font-medium">Active Loans</CardTitle>
@@ -9559,7 +10228,7 @@ function StatsPage() {
                 </p>
               </CardContent>
             </Card>
-            
+
             <Card>
               <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
                 <CardTitle className="text-sm font-medium">Published Newsletters</CardTitle>
@@ -9572,7 +10241,7 @@ function StatsPage() {
                 </p>
               </CardContent>
             </Card>
-            
+
             <Card>
               <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
                 <CardTitle className="text-sm font-medium">Active Subscriptions</CardTitle>
@@ -9585,7 +10254,7 @@ function StatsPage() {
                 </p>
               </CardContent>
             </Card>
-            
+
             <Card>
               <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
                 <CardTitle className="text-sm font-medium">European Leagues</CardTitle>
@@ -9640,7 +10309,7 @@ function App() {
 
   useEffect(() => {
     if (!authSnapshot.token) return
-    APIService.refreshProfile().catch(() => {})
+    APIService.refreshProfile().catch(() => { })
   }, [authSnapshot.token])
 
   const openLoginModal = useCallback(() => setLoginModalOpen(true), [])
@@ -9652,66 +10321,120 @@ function App() {
   }, [syncAuth])
 
   return (
-    <AuthContext.Provider value={authSnapshot}>
-      <AuthUIContext.Provider value={{
-        openLoginModal,
-        closeLoginModal,
-        logout: handleLogout,
-        isLoginModalOpen: loginModalOpen,
-      }}>
-        <Router>
-          <div className="min-h-screen bg-gray-50">
-            <Navigation />
-            <main>
-              <Routes>
-                <Route path="/" element={<HomePage />} />
-                <Route path="/teams" element={<TeamsPage />} />
-                <Route path="/newsletters" element={<NewslettersPage />} />
-                <Route path="/newsletters/:newsletterId" element={<NewslettersPage />} />
-                <Route path="/newsletters/historical" element={<HistoricalNewslettersPage />} />
-                <Route
-                  path="/settings"
-                  element={(
-                    <RequireAuth>
-                      <SettingsPage />
-                    </RequireAuth>
-                  )}
-                />
-                {/* Hidden in nav, used only via email links */}
-                <Route path="/manage" element={<ManagePage />} />
-                <Route path="/unsubscribe" element={<UnsubscribePage />} />
-                <Route path="/verify" element={<VerifyPage />} />
-                <Route
-                  path="/admin"
-                  element={(
-                    <RequireAdmin>
-                      <AdminPage />
-                    </RequireAdmin>
-                  )}
-                />
-                <Route
-                  path="/admin/sandbox"
-                  element={(
-                    <RequireAdmin>
-                      <AdminSandboxPage />
-                    </RequireAdmin>
-                  )}
-                />
-                <Route
-                  path="/admin/newsletters/:newsletterId"
-                  element={(
-                    <RequireAdmin>
-                      <AdminNewsletterDetailPage />
-                    </RequireAdmin>
-                  )}
-                />
-              </Routes>
-            </main>
-          </div>
-        </Router>
-        <AuthModal />
-      </AuthUIContext.Provider>
-    </AuthContext.Provider>
+    <StripeProvider>
+      <AuthContext.Provider value={authSnapshot}>
+        <AuthUIContext.Provider value={{
+          openLoginModal,
+          closeLoginModal,
+          logout: handleLogout,
+          isLoginModalOpen: loginModalOpen,
+        }}>
+          <Router>
+            <div className="min-h-screen bg-gray-50">
+              <Navigation />
+              <main>
+                <Routes>
+                  <Route path="/" element={<HomePage />} />
+                  <Route path="/teams" element={<TeamsPage />} />
+                  <Route path="/newsletters" element={<NewslettersPage />} />
+                  <Route path="/newsletters/:newsletterId" element={<NewslettersPage />} />
+                  <Route path="/newsletters/historical" element={<HistoricalNewslettersPage />} />
+                  <Route path="/writeups/:commentaryId" element={<WriteupPage />} />
+                  <Route path="/journalists" element={<JournalistList apiService={APIService} />} />
+                  <Route
+                    path="/settings"
+                    element={(
+                      <RequireAuth>
+                        <SettingsPage />
+                      </RequireAuth>
+                    )}
+                  />
+                  {/* Hidden in nav, used only via email links */}
+                  <Route path="/manage" element={<ManagePage />} />
+                  <Route path="/unsubscribe" element={<UnsubscribePage />} />
+                  <Route path="/verify" element={<VerifyPage />} />
+                  <Route path="/admin" element={<AdminLayout />}>
+                    <Route index element={<Navigate to="/admin/dashboard" replace />} />
+                    <Route path="dashboard" element={<AdminDashboard />} />
+                    <Route path="newsletters" element={<AdminNewsletters />} />
+                    <Route path="users" element={<AdminUsers />} />
+                    <Route path="loans" element={<AdminLoans />} />
+                    <Route path="players" element={<AdminPlayers />} />
+                    <Route path="settings" element={<AdminSettings />} />
+                    <Route path="revenue" element={<AdminRevenueDashboard />} />
+                  </Route>
+                  <Route
+                    path="/admin/old"
+                    element={(
+                      <RequireAdmin>
+                        <AdminPage includeSandbox />
+                      </RequireAdmin>
+                    )}
+                  />
+                  <Route
+                    path="/admin/newsletters/:newsletterId"
+                    element={(
+                      <RequireAdmin>
+                        <AdminNewsletterDetailPage />
+                      </RequireAdmin>
+                    )}
+                  />
+                  <Route path="/journalists/:id" element={<JournalistProfile />} />
+                  <Route path="/newsletters/:newsletterId/writer/:journalistId" element={<JournalistNewsletterView />} />
+
+                  {/* Writer Portal Routes */}
+                  <Route path="/writer/login" element={<WriterLogin />} />
+                  <Route
+                    path="/writer/dashboard"
+                    element={
+                      <RequireAuth>
+                        <WriterDashboard />
+                      </RequireAuth>
+                    }
+                  />
+                  <Route
+                    path="/writer/writeup-editor"
+                    element={
+                      <RequireAuth>
+                        <WriteupEditor />
+                      </RequireAuth>
+                    }
+                  />
+
+                  {/* Stripe Subscription Routes */}
+                  <Route
+                    path="/journalist/stripe-setup"
+                    element={
+                      <RequireAuth>
+                        <JournalistStripeSetup />
+                      </RequireAuth>
+                    }
+                  />
+                  <Route
+                    path="/journalist/pricing"
+                    element={
+                      <RequireAuth>
+                        <JournalistPricing />
+                      </RequireAuth>
+                    }
+                  />
+                  <Route
+                    path="/subscriptions"
+                    element={
+                      <RequireAuth>
+                        <MySubscriptions />
+                      </RequireAuth>
+                    }
+                  />
+
+                </Routes>
+              </main>
+            </div>
+          </Router>
+          <AuthModal />
+        </AuthUIContext.Provider>
+      </AuthContext.Provider>
+    </StripeProvider>
   )
 }
 
