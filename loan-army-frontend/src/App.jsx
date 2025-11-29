@@ -7384,11 +7384,14 @@ function HomePage() {
         <div className="flex-1 min-w-0 px-4 py-6 sm:px-0">
           {/* Hero Section */}
           <div className="text-center mb-12">
+            <p className="inline-flex items-center gap-2 text-sm font-medium text-blue-700 bg-blue-50 border border-blue-100 rounded-full px-3 py-1">
+              Go On Loan · <span className="font-semibold">goonloan.com</span>
+            </p>
             <h1 className="text-4xl font-bold text-gray-900 mb-4">
-              Track European Football Loans
+              Go On Loan — Track European Football Loans
             </h1>
             <p className="text-xl text-gray-600 mb-8">
-              Stay updated with AI-powered newsletters about your favorite teams' loaned players
+              AI-powered newsletters and dashboards that help you follow every loan spell in Europe's top leagues.
             </p>
             <div className="flex justify-center space-x-4">
               <Link to="/teams">
