@@ -336,7 +336,7 @@ class APIFootballClient:
             )
             return {}
 
-        totals = {"games_played": 0, "minutes": 0, "goals": 0, "assists": 0}
+        totals = {"games_played": 0, "minutes": 0, "goals": 0, "assists": 0, "saves": 0, "goals_conceded": 0}
 
         for item in response:
             for stat in item.get("statistics", []) or []:
@@ -358,11 +358,17 @@ class APIFootballClient:
                 minutes = games_block.get("minutes") or 0
                 goals = goals_block.get("total", 0) or 0
                 assists = goals_block.get("assists", 0) or 0
+                goals_conceded = goals_block.get("conceded", 0) or 0
+                
+                # Goalkeeper saves are in their own block
+                saves = goals_block.get("saves", 0) or 0
 
                 totals["games_played"] += apps
                 totals["minutes"] += minutes
                 totals["goals"] += goals
                 totals["assists"] += assists
+                totals["saves"] += saves
+                totals["goals_conceded"] += goals_conceded
 
         self._player_team_season_cache[cache_key] = (totals, now)
         return totals

@@ -1650,6 +1650,56 @@ def resolve_team_ids(id_or_api_id: int, season: int = None) -> tuple[int | None,
     # 3 – not found
     return None, None, None
 
+
+def resolve_team_name_and_logo(team_api_id: int, season: int = None) -> tuple[str, str | None]:
+    """
+    Resolve team name and logo from multiple sources with fallback chain.
+    
+    Returns (team_name, team_logo) tuple. Always returns a non-empty team_name.
+    
+    Fallback order:
+    1. Team table (any season, prefer current)
+    2. TeamProfile table (stores canonical team info)
+    3. API Football client (fetch from API)
+    4. Final fallback: "Team {id}"
+    """
+    from src.models.league import Team, TeamProfile
+    
+    if not team_api_id:
+        return "Unknown", None
+    
+    # 1. Try Team table - first with season if provided, then any season
+    if season:
+        team = Team.query.filter_by(team_id=team_api_id, season=season).first()
+    else:
+        team = Team.query.filter_by(team_id=team_api_id).first()
+    
+    if team and team.name:
+        return team.name, team.logo
+    
+    # 2. Try TeamProfile table (stores canonical team info without season)
+    try:
+        profile = TeamProfile.query.filter_by(team_id=team_api_id).first()
+        if profile and profile.name:
+            return profile.name, profile.logo_url
+    except Exception:
+        pass  # Table might not exist in some environments
+    
+    # 3. Try API Football client as last resort
+    try:
+        team_name = api_client.get_team_name(team_api_id, season)
+        if team_name and team_name != f"Team {team_api_id}":
+            # Also get team info for logo
+            team_info = api_client._team_profile_cache.get(team_api_id) or {}
+            team_logo = team_info.get('team', {}).get('logo')
+            return team_name, team_logo
+    except Exception as e:
+        logger.warning(f"Failed to resolve team name from API for team_id={team_api_id}: {e}")
+    
+    # 4. Final fallback
+    return f"Team {team_api_id}", None
+
+
 # Loan endpoints
 @api_bp.route('/loans', methods=['GET'])
 def get_loans():
@@ -2763,34 +2813,29 @@ def get_public_player_stats(player_id: int):
 
         result = []
         for stats, fixture in stats_query:
-            # Get opponent name
-            opponent_name = "Unknown"
+            # Get opponent name using robust resolution with fallbacks
             is_home = (stats.team_api_id == fixture.home_team_api_id)
             opponent_api_id = fixture.away_team_api_id if is_home else fixture.home_team_api_id
-            
-            opponent = Team.query.filter_by(team_id=opponent_api_id).first()
-            if opponent:
-                opponent_name = opponent.name
+            opponent_name, _ = resolve_team_name_and_logo(opponent_api_id, season)
             
             # Get loan team info for this stat
             team_info = loan_teams_info.get(stats.team_api_id, {})
             
-            # Fallback: lookup team directly from Team table if not in loan_teams_info
-            if not team_info:
-                direct_team = Team.query.filter_by(team_id=stats.team_api_id).first()
-                if direct_team:
-                    team_info = {
-                        'name': direct_team.name,
-                        'logo': direct_team.logo,
-                        'window_type': 'Summer',
-                    }
+            # Fallback: use robust team name resolution if not in loan_teams_info
+            if not team_info or not team_info.get('name'):
+                loan_team_name, loan_team_logo = resolve_team_name_and_logo(stats.team_api_id, season)
+                team_info = {
+                    'name': loan_team_name,
+                    'logo': loan_team_logo,
+                    'window_type': 'Summer',
+                }
             
             stats_dict = stats.to_dict()
             stats_dict['fixture_date'] = fixture.date_utc.isoformat() if fixture.date_utc else None
             stats_dict['opponent'] = opponent_name
             stats_dict['is_home'] = is_home
             stats_dict['competition'] = fixture.competition_name
-            stats_dict['loan_team_name'] = team_info.get('name', 'Unknown')
+            stats_dict['loan_team_name'] = team_info.get('name') or "Unknown"
             stats_dict['loan_team_logo'] = team_info.get('logo')
             stats_dict['loan_window'] = team_info.get('window_type', 'Summer')
             
@@ -3097,6 +3142,9 @@ def get_public_player_season_stats(player_id: int):
             'yellows': 0,
             'reds': 0,
             'avg_rating': None,
+            'saves': 0,
+            'goals_conceded': 0,
+            'clean_sheets': 0,
             'source': 'none',
             'loan_clubs_only': True,  # Stats are only from loan clubs (not international)
             'clubs': [],  # Per-club breakdown
@@ -3166,6 +3214,8 @@ def get_public_player_season_stats(player_id: int):
                         'minutes': api_totals.get('minutes', 0),
                         'goals': api_totals.get('goals', 0),
                         'assists': api_totals.get('assists', 0),
+                        'saves': api_totals.get('saves', 0),
+                        'goals_conceded': api_totals.get('goals_conceded', 0),
                     }
                     clubs_breakdown.append(club_stats)
                     total_appearances += club_stats['appearances']
@@ -3196,6 +3246,7 @@ def get_public_player_season_stats(player_id: int):
             func.sum(FixturePlayerStats.passes_key).label('total_key_passes'),
             func.sum(FixturePlayerStats.tackles_total).label('total_tackles'),
             func.sum(FixturePlayerStats.saves).label('total_saves'),
+            func.sum(FixturePlayerStats.goals_conceded).label('total_goals_conceded'),
         ).join(
             Fixture, FixturePlayerStats.fixture_id == Fixture.id
         ).filter(
@@ -3213,6 +3264,7 @@ def get_public_player_season_stats(player_id: int):
             result['key_passes'] = int(stats_query.total_key_passes or 0)
             result['tackles'] = int(stats_query.total_tackles or 0)
             result['saves'] = int(stats_query.total_saves or 0)
+            result['goals_conceded'] = int(stats_query.total_goals_conceded or 0)
             result['local_appearances'] = stats_query.appearances or 0
             
             # If API-Football didn't work, use local DB
@@ -3222,6 +3274,21 @@ def get_public_player_season_stats(player_id: int):
                 result['goals'] = int(stats_query.total_goals or 0)
                 result['assists'] = int(stats_query.total_assists or 0)
                 result['source'] = 'local-db'
+        
+        # Calculate clean sheets for goalkeepers (games with 0 goals conceded and >= 45 mins)
+        clean_sheets_query = db.session.query(
+            func.count(FixturePlayerStats.id).label('clean_sheets')
+        ).join(
+            Fixture, FixturePlayerStats.fixture_id == Fixture.id
+        ).filter(
+            FixturePlayerStats.player_api_id == player_id,
+            FixturePlayerStats.team_api_id.in_(loan_team_api_ids),
+            Fixture.date_utc >= season_start,
+            FixturePlayerStats.goals_conceded == 0,
+            FixturePlayerStats.minutes >= 45
+        ).first()
+        
+        result['clean_sheets'] = clean_sheets_query.clean_sheets if clean_sheets_query else 0
         
         return jsonify(result)
 

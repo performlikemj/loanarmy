@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react'
-import { useParams, Link } from 'react-router-dom'
+import { useParams, Link, useNavigate } from 'react-router-dom'
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/card'
 import { Button } from '@/components/ui/button'
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
@@ -78,6 +78,7 @@ const DEFAULT_POSITION = 'Midfielder'
 
 export function PlayerPage() {
     const { playerId } = useParams()
+    const navigate = useNavigate()
     const [profile, setProfile] = useState(null)
     const [stats, setStats] = useState([])
     const [seasonStats, setSeasonStats] = useState(null)
@@ -91,6 +92,17 @@ export function PlayerPage() {
     const [drawerOpen, setDrawerOpen] = useState(false)
     const [teamPlayers, setTeamPlayers] = useState([])
     const [loadingTeamPlayers, setLoadingTeamPlayers] = useState(false)
+
+    // Smart back navigation - goes to previous page, or home if no history
+    const handleBack = () => {
+        // Check if we have navigation history within the app
+        if (window.history.length > 1) {
+            navigate(-1)
+        } else {
+            // Fallback to home page if no history (direct link/bookmark)
+            navigate('/')
+        }
+    }
 
     useEffect(() => {
         if (playerId) {
@@ -254,6 +266,10 @@ export function PlayerPage() {
             ? (stats.reduce((acc, s) => acc + (parseFloat(s.rating) || 0), 0) / stats.filter(s => s.rating).length).toFixed(2)
             : '-'),
         appearances: seasonStats?.appearances ?? stats.length,
+        // Goalkeeper stats
+        saves: seasonStats?.saves ?? stats.reduce((acc, s) => acc + (s.saves || 0), 0),
+        goalsConceded: seasonStats?.goals_conceded ?? stats.reduce((acc, s) => acc + (s.goals_conceded || 0), 0),
+        cleanSheets: seasonStats?.clean_sheets ?? 0,
     }
 
     if (loading) {
@@ -273,12 +289,10 @@ export function PlayerPage() {
                 <Card className="max-w-md">
                     <CardContent className="pt-6 text-center">
                         <p className="text-red-500 mb-4">{error}</p>
-                        <Link to="/newsletters">
-                            <Button variant="outline">
-                                <ArrowLeft className="mr-2 h-4 w-4" />
-                                Back to Newsletters
-                            </Button>
-                        </Link>
+                        <Button variant="outline" onClick={handleBack}>
+                            <ArrowLeft className="mr-2 h-4 w-4" />
+                            Go Back
+                        </Button>
                     </CardContent>
                 </Card>
             </div>
@@ -291,12 +305,10 @@ export function PlayerPage() {
             <div className="bg-white border-b sticky top-0 z-10">
                 <div className="max-w-6xl mx-auto px-4 py-4">
                     <div className="flex items-center gap-4">
-                        <Link to="/newsletters">
-                            <Button variant="ghost" size="sm">
-                                <ArrowLeft className="mr-2 h-4 w-4" />
-                                Back
-                            </Button>
-                        </Link>
+                        <Button variant="ghost" size="sm" onClick={handleBack}>
+                            <ArrowLeft className="mr-2 h-4 w-4" />
+                            Back
+                        </Button>
                         <div className="flex items-center gap-4">
                             {profile?.photo ? (
                                 <img 
@@ -397,7 +409,7 @@ export function PlayerPage() {
                     </Card>
                 ) : (
                     <div className="space-y-6">
-                        {/* Season Summary Cards */}
+                        {/* Season Summary Cards - Position-aware */}
                         <div className="grid grid-cols-2 md:grid-cols-5 gap-4">
                             <Card>
                                 <CardContent className="pt-4 text-center">
@@ -411,18 +423,37 @@ export function PlayerPage() {
                                     <div className="text-xs text-gray-500 uppercase tracking-wider mt-1">Minutes</div>
                                 </CardContent>
                             </Card>
-                            <Card>
-                                <CardContent className="pt-4 text-center">
-                                    <div className="text-3xl font-bold text-blue-600">{seasonTotals.goals}</div>
-                                    <div className="text-xs text-gray-500 uppercase tracking-wider mt-1">Goals</div>
-                                </CardContent>
-                            </Card>
-                            <Card>
-                                <CardContent className="pt-4 text-center">
-                                    <div className="text-3xl font-bold text-green-600">{seasonTotals.assists}</div>
-                                    <div className="text-xs text-gray-500 uppercase tracking-wider mt-1">Assists</div>
-                                </CardContent>
-                            </Card>
+                            {position === 'Goalkeeper' ? (
+                                <>
+                                    <Card>
+                                        <CardContent className="pt-4 text-center">
+                                            <div className="text-3xl font-bold text-blue-600">{seasonTotals.saves}</div>
+                                            <div className="text-xs text-gray-500 uppercase tracking-wider mt-1">Saves</div>
+                                        </CardContent>
+                                    </Card>
+                                    <Card>
+                                        <CardContent className="pt-4 text-center">
+                                            <div className="text-3xl font-bold text-orange-600">{seasonTotals.goalsConceded}</div>
+                                            <div className="text-xs text-gray-500 uppercase tracking-wider mt-1">Conceded</div>
+                                        </CardContent>
+                                    </Card>
+                                </>
+                            ) : (
+                                <>
+                                    <Card>
+                                        <CardContent className="pt-4 text-center">
+                                            <div className="text-3xl font-bold text-blue-600">{seasonTotals.goals}</div>
+                                            <div className="text-xs text-gray-500 uppercase tracking-wider mt-1">Goals</div>
+                                        </CardContent>
+                                    </Card>
+                                    <Card>
+                                        <CardContent className="pt-4 text-center">
+                                            <div className="text-3xl font-bold text-green-600">{seasonTotals.assists}</div>
+                                            <div className="text-xs text-gray-500 uppercase tracking-wider mt-1">Assists</div>
+                                        </CardContent>
+                                    </Card>
+                                </>
+                            )}
                             <Card>
                                 <CardContent className="pt-4 text-center">
                                     <div className="text-3xl font-bold text-purple-600">{seasonTotals.avgRating}</div>
@@ -471,14 +502,29 @@ export function PlayerPage() {
                                                         <div className="text-lg font-bold text-gray-900">{club.minutes}</div>
                                                         <div className="text-xs text-gray-500">Mins</div>
                                                     </div>
-                                                    <div>
-                                                        <div className="text-lg font-bold text-blue-600">{club.goals}</div>
-                                                        <div className="text-xs text-gray-500">Goals</div>
-                                                    </div>
-                                                    <div>
-                                                        <div className="text-lg font-bold text-green-600">{club.assists}</div>
-                                                        <div className="text-xs text-gray-500">Assists</div>
-                                                    </div>
+                                                    {position === 'Goalkeeper' ? (
+                                                        <>
+                                                            <div>
+                                                                <div className="text-lg font-bold text-blue-600">{club.saves ?? 0}</div>
+                                                                <div className="text-xs text-gray-500">Saves</div>
+                                                            </div>
+                                                            <div>
+                                                                <div className="text-lg font-bold text-orange-600">{club.goals_conceded ?? 0}</div>
+                                                                <div className="text-xs text-gray-500">Conceded</div>
+                                                            </div>
+                                                        </>
+                                                    ) : (
+                                                        <>
+                                                            <div>
+                                                                <div className="text-lg font-bold text-blue-600">{club.goals}</div>
+                                                                <div className="text-xs text-gray-500">Goals</div>
+                                                            </div>
+                                                            <div>
+                                                                <div className="text-lg font-bold text-green-600">{club.assists}</div>
+                                                                <div className="text-xs text-gray-500">Assists</div>
+                                                            </div>
+                                                        </>
+                                                    )}
                                                 </div>
                                             </div>
                                         ))}
@@ -611,7 +657,7 @@ export function PlayerPage() {
                                                         <th className="p-3 font-medium text-gray-500">Match</th>
                                                         <th className="p-3 font-medium text-gray-500">Min</th>
                                                         <th className="p-3 font-medium text-gray-500">Rating</th>
-                                                        <th className="p-3 font-medium text-gray-500">G/A</th>
+                                                        <th className="p-3 font-medium text-gray-500">{position === 'Goalkeeper' ? 'Saves/GA' : 'G/A'}</th>
                                                         <th className="p-3 font-medium text-gray-500">Key Stats</th>
                                                     </tr>
                                                 </thead>
@@ -650,9 +696,20 @@ export function PlayerPage() {
                                                                 </span>
                                                             </td>
                                                             <td className="p-3">
-                                                                {s.goals > 0 && <span className="mr-2">⚽ {s.goals}</span>}
-                                                                {s.assists > 0 && <span>🅰️ {s.assists}</span>}
-                                                                {s.goals === 0 && s.assists === 0 && <span className="text-gray-300">-</span>}
+                                                                {position === 'Goalkeeper' ? (
+                                                                    <>
+                                                                        {s.saves > 0 && <span className="mr-2">🧤 {s.saves}</span>}
+                                                                        {s.goals_conceded > 0 && <span className="text-orange-600">{s.goals_conceded} GA</span>}
+                                                                        {s.goals_conceded === 0 && <span className="text-green-600">CS</span>}
+                                                                        {!s.saves && s.goals_conceded === undefined && <span className="text-gray-300">-</span>}
+                                                                    </>
+                                                                ) : (
+                                                                    <>
+                                                                        {s.goals > 0 && <span className="mr-2">⚽ {s.goals}</span>}
+                                                                        {s.assists > 0 && <span>🅰️ {s.assists}</span>}
+                                                                        {s.goals === 0 && s.assists === 0 && <span className="text-gray-300">-</span>}
+                                                                    </>
+                                                                )}
                                                             </td>
                                                             <td className="p-3 text-xs text-gray-500">
                                                                 {s.passes?.key > 0 && <div>{s.passes.key} Key Passes</div>}
@@ -839,9 +896,11 @@ export function PlayerPage() {
                                                 )}
                                                 <span className="truncate">{player.loan_team_name}</span>
                                             </div>
-                                            {(player.appearances > 0 || player.goals > 0 || player.assists > 0) && (
+                                            {(player.appearances > 0 || player.goals > 0 || player.assists > 0 || player.saves > 0) && (
                                                 <div className="text-xs text-gray-400 mt-0.5">
-                                                    {player.appearances || 0} apps · {player.goals || 0}G · {player.assists || 0}A
+                                                    {player.appearances || 0} apps · {player.position === 'G' || player.position === 'Goalkeeper' 
+                                                        ? `${player.saves || 0} saves · ${player.goals_conceded || 0} GA`
+                                                        : `${player.goals || 0}G · ${player.assists || 0}A`}
                                                 </div>
                                             )}
                                         </div>
