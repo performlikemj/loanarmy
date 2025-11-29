@@ -858,7 +858,10 @@ export function PlayerPage() {
                             <div>
                                 <DrawerTitle>{profile?.parent_team_name} Loanees</DrawerTitle>
                                 <DrawerDescription>
-                                    {teamPlayers.length} player{teamPlayers.length !== 1 ? 's' : ''} currently out on loan
+                                    {loadingTeamPlayers 
+                                        ? "Loading players..." 
+                                        : `${teamPlayers.length} player${teamPlayers.length !== 1 ? 's' : ''} currently out on loan`
+                                    }
                                 </DrawerDescription>
                             </div>
                         </div>
