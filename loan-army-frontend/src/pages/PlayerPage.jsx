@@ -325,6 +325,11 @@ export function PlayerPage() {
                                 <h1 className="text-2xl font-bold text-gray-900">{playerName}</h1>
                                 <div className="flex flex-wrap items-center gap-2 mt-1">
                                     <Badge variant="secondary">{position}</Badge>
+                                    {profile?.age && (
+                                        <Badge variant="outline" className="bg-blue-50 text-blue-700 border-blue-200">
+                                            {profile.age} yrs
+                                        </Badge>
+                                    )}
                                     {profile?.nationality && (
                                         <Badge variant="outline" className="text-gray-600">{profile.nationality}</Badge>
                                     )}
