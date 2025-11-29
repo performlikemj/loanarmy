@@ -9,6 +9,7 @@ import subprocess
 import logging
 import re
 import unicodedata
+import uuid
 from urllib.parse import urlparse
 from datetime import date, timedelta, datetime, timezone
 from typing import Any, Dict, Annotated
@@ -25,11 +26,12 @@ from agents import (Agent,
                     )
 from agents.run_context import RunContextWrapper
 
-from src.models.league import db, Team, LoanedPlayer, Newsletter, Player, TeamProfile
+from src.models.league import db, Team, LoanedPlayer, Newsletter, Player, TeamProfile, LeagueLocalization
 from sqlalchemy import func
 from src.agents.errors import NoActiveLoaneesError
 from jinja2 import Environment, FileSystemLoader, select_autoescape
 from src.api_football_client import APIFootballClient
+from src.utils.newsletter_slug import compose_newsletter_public_slug
 import dotenv
 dotenv.load_dotenv(dotenv.find_dotenv())
 
@@ -596,53 +598,130 @@ class PersistNewsletterArgs(BaseModel):
     player_lookup: Json[Any] | None = Field(None, description="Optional mapping of player aliases to metadata")
 
 SYSTEM_INSTRUCTIONS = """
-You are a football newsletter editor. Tools available: Python tools. The search context is precomputed using the Brave Search API.
+You are a football newsletter editor creating comprehensive weekly loan reports. Tools available: Python tools. The search context is precomputed using the Brave Search API.
 
 Workflow:
-1) Call fetch_weekly_report(team, date). You get week_start/week_end, per-player matches, minutes, G/A, cards.
-2) The search context is now pre-computed with enhanced Brave Search results including:
-   - Localized searches based on league (country, language)
-   - Multi-language queries for better coverage
-   - Categorized results: web articles, news, discussions, videos
-   - Sentiment analysis for each result
-   - Summaries when available
+1) Call fetch_weekly_report(team, date). You get comprehensive data per player:
+   - Week totals: minutes, goals, assists, cards, rating, shots, passes, tackles, duels, dribbles
+   - Per-match breakdown with 'match_notes' containing ALL stats for each specific game
+   - Each match_notes entry shows: "vs [Opponent]: [detailed stats]"
+   
+   CRITICAL: match_notes tie EVERY stat to a specific opponent. Always reference the exact opponent when mentioning any performance detail.
+
+2) The search context provides rich external data:
+   - Localized searches (country, language)
+   - Categorized: web articles, news, discussions, videos
+   - Sentiment analysis + summaries
    - Deduplicated and ranked results
 
-Identity & naming (STRICT):
-- Include the API-Football player_id on each item.
-- Use first-initial + last-name for player_name (e.g., "H. Mejbri", "Á. Fernández").
+DATA STRUCTURE EXPLANATION:
+Each player has:
+- matches[]: array of games with 'match_notes', 'opponent', 'competition', 'date', 'player' (all stats for that game)
+- totals: aggregated weekly stats across all matches
+- season_context: cumulative season stats and trends for narrative depth
+  - season_stats: total games, goals, assists, minutes, ratings, etc. for the entire season
+  - recent_form: last 5 games with goals/assists/ratings
+  - trends: goals_per_90, assists_per_90, shot_accuracy, goals_last_5, duels_win_rate, etc.
+- The 'player' field in each match contains: minutes, goals, assists, rating, shots_total, shots_on, passes_key, 
+  dribbles_success, dribbles_attempts, tackles_total, tackles_interceptions, duels_won, duels_total, saves, etc.
 
-The search_context now provides rich, organized data for each player:
-{
-  "web": [articles with sentiment],
-  "news": [news articles with sentiment], 
-  "discussions": [forum/social media posts],
-  "videos": [video content],
-  "summaries": [AI-generated summaries],
-  "sentiment_breakdown": {"positive": X, "negative": Y, "neutral": Z}
-}
+WRITING COMPREHENSIVE SUMMARIES (CRITICAL):
+Your week_summary for each player MUST be in-depth and use ALL available data:
 
-When calling persist_newsletter, pass content_json as a JSON object (NOT a JSON-encoded string).
-Include up to 3 links per player from search_context (news > web > discussions) and add a concise fan_pulse list drawn from notable forum items.
+⚠️ CRITICAL: ONLY write about stats that ACTUALLY EXIST in the stats object for THIS player_id!
+   - If stats.assists = 0, DO NOT mention any assists
+   - If stats.goals = 0, DO NOT mention any goals
+   - ALWAYS check the stats object before writing any performance claims
+   - NEVER assume a player contributed something based on match context
+
+1. START with match-by-match narrative using match_notes:
+   - Match notes are PRE-VERIFIED and tie stats to specific opponents
+   - "Started and scored vs Arsenal (Rating: 8.2, 3/5 shots on target, 4 key passes)"
+   - "Came off the bench vs City to provide the assist in added time"
+   - If match_notes say "Assisted vs Real Madrid" but stats.assists = 0, DO NOT MENTION THE ASSIST
+   
+2. INCLUDE specific performance metrics (ONLY IF THEY EXIST IN STATS):
+   - Goals/assists with opponent names from match_notes
+   - Ratings when notable (7.5+)
+   - Shot accuracy for attackers (e.g., "3/7 shots on target")
+   - Key passes and creativity metrics (e.g., "created 6 chances")
+   - Dribbles for wingers (e.g., "completed 8/12 dribbles")
+   - Defensive work (e.g., "won 12/15 duels, 5 tackles, 3 interceptions")
+   - Goalkeeper stats (e.g., "made 8 saves in the 2-1 win")
+
+3. ADD SEASON CONTEXT for depth (CRITICAL - use season_context data):
+   - Season totals: "brings his tally to 8 goals in 15 appearances"
+   - Recent form: "his fourth goal in the last 5 games" or "ended a 6-game goalless drought"
+   - Trends: "now averaging 0.7 goals per 90 minutes this season"
+   - Comparisons: "his best performance of the season" or "matching his season average rating of 7.2"
+   - Milestones: "reached 10 assists for the season" or "first goal since September"
+   - Clean sheets: "his 6th clean sheet in 12 games"
+   - Consistency: "scored in 3 consecutive matches" or "yet to score this season"
+   
+4. TELL A STORY across the week:
+   - Contrast between performances (e.g., "quiet against Brighton but dominated vs Leeds")
+   - Emerging patterns (e.g., "continues his scoring run", "fourth clean sheet in five games")
+   - Position-specific insights (e.g., "patrolled the midfield", "terrorized the left flank")
+   - Season progression (e.g., "finding his rhythm after a slow start", "maintaining excellent form")
+
+5. USE COMPARATIVE LANGUAGE:
+   - "man of the match performance"
+   - "dominated physically"
+   - "orchestrated attacks"
+   - "solid defensively"
+   - "clinical finishing"
+
+EXAMPLE GOOD SUMMARY (with season context):
+"Started both matches. Scored the opener vs Arsenal (Rating: 8.5, 2/4 shots on target, 5 key passes) in Saturday's 3-1 win, then assisted vs Brighton (Rating: 7.3, 3 key passes, 7/10 dribbles completed). Created 8 chances across the week, completed 74% of dribbles, and won 15/19 duels. This brings his season tally to 7 goals and 9 assists in 14 appearances, now averaging 0.6 goals per 90 minutes. His fourth goal contribution in the last 5 games, establishing himself as a key creative outlet."
+
+EXAMPLE BAD SUMMARY (too simple, no context):
+"Played two games this week. Scored one goal and had one assist."
+
+Identity & naming (CRITICAL - MUST FOLLOW):
+- **ALWAYS include player_id** from the source data on each item - this is MANDATORY
+- The player_id field is the PRIMARY KEY that ties stats to the correct player
+- Use first-initial + last-name for player_name (e.g., "H. Mejbri", "Á. Fernández")
+- NEVER mix up players or stats between different player_ids
+
+Manual/Untracked Players (can_fetch_stats=False):
+- These are manually added players where our data provider (API-Football) doesn't track them yet
+- Write: "This player is not currently tracked by our data provider. We've requested they be added to improve future coverage."
+- If any news links/articles were found, ALWAYS include them - they provide valuable context
+- Example: "This player is not currently tracked by our data provider. We've requested they be added to improve future coverage. [Player] remains on loan with [Team]."
 
 Quality rules (STRICT):
-- If minutes==0 and role!=startXI → write "unused substitute" (not "appeared").
-- If text says "started", minutes MUST be >0; otherwise rewrite as "did not play".
-- Highlights must come from the same week’s stats.
-- Use display_name (e.g., "Charlie Wellens") not full legal/middle names.
+- If minutes==0 and role=='substitutes' → write "unused substitute"
+- If minutes==0 and role is null/None → write "was not in the matchday squad" (player was injured, not selected, etc.)
+- If text says "started", minutes MUST be >0; otherwise rewrite as "did not play"
+- Highlights must come from the same week's stats
+- ALWAYS reference the specific opponent when mentioning goals/assists/performances
+- Use display_name (e.g., "Charlie Wellens") not full legal/middle names
 
 Scoring (for highlights):
 score = goals*5 + assists*3 + (minutes/90)*1 - yellow*1 - red*3
 Use top 3 for "highlights". Always include a "Loanee of the Week" in the summary.
 
+Overall newsletter summary:
+Write 3-4 sentences highlighting:
+- Top performer(s) with specific stats
+- Notable team performances (e.g., "Three loanees found the net")
+- Standout individual performance details
+- Any concerning trends (injuries, red cards, losing runs)
+
 Output JSON ONLY:
 {
   "title": "...",
-  "summary": "2–3 sentences: hero, clutch moment, narrative contrast.",
+  "summary": "3-4 sentences: top performers with specific stats, notable moments, narrative threads",
   "season": "YYYY-YY",
   "range": ["YYYY-MM-DD","YYYY-MM-DD"],
-  "highlights": ["..."],
-  "sections": [{"title":"Active Loans","items":[{...}]}],
+  "highlights": ["Player: detailed stats and performance summary"],
+  "sections": [{"title":"Active Loans","items":[{
+    "player_id": 12345,  // REQUIRED - must match source data
+    "player_name": "H. Player",
+    "week_summary": "IN-DEPTH multi-sentence summary using ALL stats and match_notes",
+    "stats": {...},  // Must match source data for this player_id exactly
+    "match_notes": [...]
+  }]}],
   "by_numbers": {"minutes_leaders":[...], "ga_leaders":[...]},
   "fan_pulse": [{"player":"...","forum":"...","quote":"...","url":"..."}]
 }
@@ -857,12 +936,14 @@ async def persist_newsletter(ctx, args) -> Dict[str, Any]:
     except Exception:
         pass
 
+    placeholder_slug = f"tmp-{uuid.uuid4().hex}"
     nl = Newsletter(
         team_id=team_db_id,
         newsletter_type="weekly",
         title=content_json.get("title") or f"{t.name} Loan Update",
         content=content_str,
         structured_content=content_str,
+        public_slug=placeholder_slug,
         week_start_date=week_start,
         week_end_date=week_end,
         issue_date=issue,
@@ -871,6 +952,16 @@ async def persist_newsletter(ctx, args) -> Dict[str, Any]:
         published_date=issue if is_final else None,
     )
     db.session.add(nl)
+    db.session.flush()
+    team_name_for_slug = (t.name if t else None)
+    nl.public_slug = compose_newsletter_public_slug(
+        team_name=team_name_for_slug,
+        newsletter_type=nl.newsletter_type,
+        week_start=nl.week_start_date,
+        week_end=nl.week_end_date,
+        issue_date=nl.issue_date,
+        identifier=nl.id,
+    )
     db.session.commit()
     return nl.to_dict()
 # ------------------------
@@ -1003,10 +1094,14 @@ def build_weekly_agent() -> Agent:
 
 # ---------- Orchestration entrypoint ----------
 
-async def generate_weekly_newsletter(team_db_id: int, target_date: date) -> Dict[str, Any]:
+async def generate_weekly_newsletter(team_db_id: int, target_date: date, force_refresh: bool = False) -> Dict[str, Any]:
     # Precompute week window and report
     week_start, week_end = monday_range(target_date)
     news_end = week_end + timedelta(days=1)
+    
+    if force_refresh:
+        api_client.clear_stats_cache()
+        
     report = await fetch_weekly_report(ctx=None, args={
         "parent_team_db_id": team_db_id,
         "target_date": target_date.isoformat(),
@@ -1265,6 +1360,17 @@ async def generate_weekly_newsletter(team_db_id: int, target_date: date) -> Dict
                 content_json = lint_and_enrich(content_json)
             except Exception:
                 pass
+            # Validate player stats match source data
+            try:
+                validation_warnings = _validate_player_stats_match(content_json, report)
+                if validation_warnings:
+                    logger.warning(f"⚠️  Player stats validation warnings:")
+                    for warning in validation_warnings:
+                        logger.warning(f"   {warning}")
+                else:
+                    logger.info("✅ Player stats validation passed - all stats match source data")
+            except Exception as e:
+                logger.warning(f"Failed to validate player stats: {e}")
             args = {
                 "team_db_id": team_db_id,
                 "content_json": content_json,
@@ -1286,11 +1392,11 @@ async def generate_weekly_newsletter(team_db_id: int, target_date: date) -> Dict
     # end generate_weekly_newsletter
 
 # Compatibility wrappers (legacy names)
-async def generate_weekly_newsletter_with_mcp(team_db_id: int, target_date: date) -> Dict[str, Any]:
-    return await generate_weekly_newsletter(team_db_id, target_date)
+async def generate_weekly_newsletter_with_mcp(team_db_id: int, target_date: date, force_refresh: bool = False) -> Dict[str, Any]:
+    return await generate_weekly_newsletter(team_db_id, target_date, force_refresh)
 
-def generate_weekly_newsletter_with_mcp_sync(team_db_id: int, target_date: date) -> Dict[str, Any]:
-    return asyncio.run(generate_weekly_newsletter(team_db_id, target_date))
+def generate_weekly_newsletter_with_mcp_sync(team_db_id: int, target_date: date, force_refresh: bool = False) -> Dict[str, Any]:
+    return asyncio.run(generate_weekly_newsletter(team_db_id, target_date, force_refresh))
 
 # ------------------------
 # Lint + enrichment helpers
@@ -1585,21 +1691,42 @@ def _team_logo_for_player(player_id: Any, loan_team_name: str | None = None) -> 
     return _team_logo_for_team(team_api_id, fallback_name=loan_team_name)
 
 def _fix_minutes_language(item: dict) -> None:
-    """Normalize phrasing based on minutes to avoid contradictions."""
+    """Normalize phrasing based on minutes to avoid contradictions.
+    
+    Note: If the summary already contains "not in the matchday squad" or 
+    similar language, we preserve it - don't blindly replace with "unused substitute".
+    """
     s = item.get("stats", {}) or {}
     mins = int(s.get("minutes", 0) or 0)
     wsum = item.get("week_summary", "") or ""
     notes = item.get("match_notes", []) or []
 
     if mins == 0:
-        # common phrasings → Unused substitute / did not play
-        for token in ["Appeared", "Used as substitute", "Came on", "Substitute in"]:
-            if token in wsum:
-                wsum = wsum.replace(token, "Unused substitute")
+        # Check if summary already indicates player was not in squad
+        # If so, don't replace with "unused substitute"
+        not_in_squad_phrases = [
+            "not in the matchday squad",
+            "not in matchday squad",
+            "not selected",
+            "not in the squad",
+            "unavailable",
+            "injured",
+            "out injured",
+        ]
+        already_indicates_not_in_squad = any(phrase in wsum.lower() for phrase in not_in_squad_phrases)
+        
+        if not already_indicates_not_in_squad:
+            # Only replace misleading phrases if we haven't already indicated non-selection
+            for token in ["Appeared", "Used as substitute", "Came on", "Substitute in"]:
+                if token in wsum:
+                    wsum = wsum.replace(token, "Unused substitute")
+        
+        # Always fix "Started" claims when minutes=0
         if "Started" in wsum or "Started and played" in wsum:
             wsum = wsum.replace("Started and played", "Did not play")
             wsum = wsum.replace("Started", "Did not play")
-        # notes too
+        
+        # Fix notes too
         new_notes = []
         for n in notes:
             n2 = n
@@ -1684,15 +1811,116 @@ def _sanitize_with_count(obj: Any) -> tuple[Any, int]:
     return obj, 0
 
 def _canonicalize_name(name: str) -> str:
+    """
+    Canonicalize player names to fix common misidentifications.
+    Maps incorrect/alternate names to the correct canonical names.
+    """
     mapping = {
         "Ellis Galbraith": "Ethan Galbraith",
         "Harry Mejbri": "Hannibal Mejbri",
+        "Hakeem Amass": "Harry Amass",  # Fix AI hallucination of "Hakeem" from "H. Amass"
     }
     return mapping.get(name, name)
 
 def _score_player(item: dict) -> float:
     s = item.get("stats", {}) or {}
     return 5*(s.get("goals",0) or 0) + 3*(s.get("assists",0) or 0) + (s.get("minutes",0) or 0)/90.0 - 1*(s.get("yellows",0) or 0) - 3*(s.get("reds",0) or 0)
+
+def _validate_player_stats_match(news: dict, report: dict) -> list[str]:
+    """
+    Validate that each player's stats in the newsletter match the source data.
+    Returns list of validation warnings.
+    """
+    warnings = []
+    
+    # Build lookup of source stats by player_id
+    source_stats = {}
+    for loanee in report.get("loanees", []) or []:
+        pid = loanee.get("player_api_id")
+        if pid:
+            source_stats[int(pid)] = {
+                "player_name": loanee.get("player_name"),
+                "totals": loanee.get("totals", {}),
+            }
+    
+    # Track stats to detect duplicates (same stats for different players)
+    stats_signatures = {}  # signature -> list of player_ids
+    
+    # Check each item in newsletter
+    for sec in news.get("sections", []) or []:
+        for it in sec.get("items", []) or []:
+            pid = it.get("player_id")
+            if not pid:
+                warnings.append(f"Player '{it.get('player_name')}' missing player_id - cannot validate")
+                continue
+            
+            try:
+                pid_int = int(pid)
+            except (TypeError, ValueError):
+                warnings.append(f"Player '{it.get('player_name')}' has invalid player_id: {pid}")
+                continue
+            
+            # Check if stats match source
+            source = source_stats.get(pid_int)
+            if source:
+                item_stats = it.get("stats", {})
+                source_totals = source["totals"]
+                
+                # Validate key metrics
+                for key in ["goals", "assists", "minutes"]:
+                    item_val = item_stats.get(key, 0)
+                    source_val = source_totals.get(key, 0)
+                    if item_val != source_val:
+                        warnings.append(
+                            f"MISMATCH: Player '{it.get('player_name')}' (ID:{pid}) has {key}={item_val} "
+                            f"but source has {key}={source_val}"
+                        )
+                
+                # Check if match_notes mention stats that don't exist
+                match_notes = it.get("match_notes", [])
+                for note in match_notes:
+                    note_lower = note.lower()
+                    # Check for assist mentions when assists = 0
+                    if "assist" in note_lower and item_stats.get("assists", 0) == 0:
+                        warnings.append(
+                            f"CONTRADICTION: '{it.get('player_name')}' (ID:{pid}) match_notes say '{note}' "
+                            f"but stats show 0 assists"
+                        )
+                    # Check for goal mentions when goals = 0
+                    if "goal" in note_lower and "conceded" not in note_lower and item_stats.get("goals", 0) == 0:
+                        warnings.append(
+                            f"CONTRADICTION: '{it.get('player_name')}' (ID:{pid}) match_notes say '{note}' "
+                            f"but stats show 0 goals"
+                        )
+            
+            # Check for duplicate stats (identical stats for different players)
+            item_stats = it.get("stats", {})
+            if item_stats and item_stats.get("minutes", 0) > 0:
+                # Create signature from key stats
+                sig = (
+                    item_stats.get("minutes", 0),
+                    item_stats.get("goals", 0),
+                    item_stats.get("assists", 0),
+                    item_stats.get("shots_total", 0),
+                    item_stats.get("passes_total", 0),
+                )
+                if sig != (0, 0, 0, 0, 0):  # Ignore all-zero stats
+                    player_name = it.get("player_name", "Unknown")
+                    if sig in stats_signatures:
+                        stats_signatures[sig].append((pid_int, player_name))
+                    else:
+                        stats_signatures[sig] = [(pid_int, player_name)]
+    
+    # Report duplicate stats
+    for sig, players in stats_signatures.items():
+        if len(players) > 1:
+            player_list = ", ".join([f"{name} (ID:{pid})" for pid, name in players])
+            warnings.append(
+                f"DUPLICATE STATS: Multiple players have identical stats {sig}: {player_list}. "
+                f"This likely indicates a data error where one player's stats were assigned to another."
+            )
+    
+    return warnings
 
 def lint_and_enrich(news: dict) -> dict:
     if not isinstance(news, dict):
@@ -1819,8 +2047,9 @@ def lint_and_enrich(news: dict) -> dict:
     items = [it for sec in news.get("sections", []) or [] for it in sec.get("items", []) or []]
     top = sorted(items, key=_score_player, reverse=True)[:3]
     news["highlights"] = [
-        f"{_display_name(it['player_name'])}: {int(it['stats'].get('goals',0))}G {int(it['stats'].get('assists',0))}A, {int(it['stats'].get('minutes',0))}’"
+        f"{_display_name(it.get('player_name',''))}: {int(it.get('stats',{}).get('goals',0))}G {int(it.get('stats',{}).get('assists',0))}A, {int(it.get('stats',{}).get('minutes',0))}'"
         for it in top
+        if it.get('stats')  # Only include items that have stats
     ]
 
     # by-numbers blocks
@@ -1895,8 +2124,8 @@ def _default_manage_url() -> str | None:
     return f"{base}{manage_path}"
 
 
-def _build_template_context(news: dict, team_name: str | None) -> dict:
-    return {
+def _build_template_context(news: dict, team_name: str | None, **kwargs) -> dict:
+    ctx = {
         'team_name': team_name or '',
         'team_logo': news.get('team_logo'),
         'title': news.get('title'),
@@ -1910,6 +2139,73 @@ def _build_template_context(news: dict, team_name: str | None) -> dict:
         'manage_url': _default_manage_url(),
         'meta': {},
     }
+    ctx.update(kwargs)
+    return ctx
+
+def _render_variants_custom(news: dict, team_name: str | None, commentaries: list, use_snippets: bool = False, render_mode: str = 'web') -> dict:
+    """
+    Custom renderer that injects specific commentaries into the context.
+    Supports 'snippet' mode for emails to keep them short.
+    """
+    intro = []
+    summary = []
+    player_map = {}
+    headlines = []
+    
+    # Process commentaries
+    for c in commentaries:
+        c_dict = c.to_dict()
+        if use_snippets and render_mode == 'email':
+            # Create snippet
+            from src.utils.sanitize import sanitize_plain_text
+            # Strip HTML for the excerpt
+            plain = sanitize_plain_text(c.content or "")
+            snippet = (plain[:280] + '...') if len(plain) > 280 else plain
+            
+            headlines.append({
+                'id': c.id,
+                'title': c.title or f"{c.commentary_type.title()} Commentary",
+                'author_name': c.author_name,
+                'snippet': snippet,
+                'type': c.commentary_type,
+                # We'll need a proper URL builder eventually, but for now:
+                'read_more_url': f"{_default_manage_url() or ''}/newsletters/{news.get('public_slug', 'preview')}#commentary-{c.id}"
+            })
+        else:
+            # Full content
+            if c.commentary_type == 'intro':
+                intro.append(c_dict)
+            elif c.commentary_type == 'summary':
+                summary.append(c_dict)
+            elif c.commentary_type == 'player' and c.player_id:
+                if c.player_id not in player_map:
+                    player_map[c.player_id] = []
+                player_map[c.player_id].append(c_dict)
+
+    extra_ctx = {
+        'intro_commentary': intro,
+        'summary_commentary': summary,
+        'player_commentary_map': player_map,
+        'headlines_commentary': headlines,
+        'is_preview': True
+    }
+
+    try:
+        env = _render_env()
+        ctx = _build_template_context(news, team_name, **extra_ctx)
+        
+        if render_mode == 'email':
+            tmpl = env.get_template('newsletter_email.html')
+            html = tmpl.render(**ctx)
+            return {'email_html': html}
+        else:
+            tmpl = env.get_template('newsletter_web.html')
+            html = tmpl.render(**ctx)
+            return {'web_html': html}
+            
+    except Exception as e:
+        logging.getLogger(__name__).error(f"Render custom failed: {e}")
+        return {f'{render_mode}_html': ''}
 
 def _plain_text_from_news_only(news: dict) -> str:
     lines = []
@@ -1939,6 +2235,12 @@ def _render_variants(news: dict, team_name: str | None) -> dict:
     try:
         env = _render_env()
         ctx = _build_template_context(news, team_name)
+        # NOTE: Standard _render_variants does NOT inject commentaries from DB.
+        # Commentaries are usually injected by the API endpoint or caller if needed.
+        # If we want default newsletters to have commentaries, we should modify this 
+        # or rely on the caller to pass them via kwargs if we extended the signature.
+        # For now, we keep legacy behavior (no auto-fetch here).
+        
         web_t = env.get_template('newsletter_web.html')
         email_t = env.get_template('newsletter_email.html')
         web_html = web_t.render(**ctx)
@@ -1960,5 +2262,5 @@ def _render_variants(news: dict, team_name: str | None) -> dict:
     }
 
 # Synchronous convenience wrapper (for cron or Flask endpoint)
-def generate_weekly_newsletter_with_mcp_sync(team_db_id: int, target_date: date) -> Dict[str, Any]:
-    return asyncio.run(generate_weekly_newsletter_with_mcp(team_db_id, target_date))
+def generate_weekly_newsletter_with_mcp_sync(team_db_id: int, target_date: date, force_refresh: bool = False) -> Dict[str, Any]:
+    return asyncio.run(generate_weekly_newsletter_with_mcp(team_db_id, target_date, force_refresh))

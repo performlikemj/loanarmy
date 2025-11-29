@@ -16,10 +16,13 @@ from flask import Flask
 import sqlalchemy as sa
 
 if 'bleach' not in sys.modules:
-    def _clean(value, tags=None, attributes=None, strip=False):
+    def _clean(value, *args, **kwargs):
         return value
 
-    sys.modules['bleach'] = SimpleNamespace(clean=_clean)
+    def _linkify(value, *args, **kwargs):
+        return value
+
+    sys.modules['bleach'] = SimpleNamespace(clean=_clean, linkify=_linkify)
 
 
 if 'flask_limiter' not in sys.modules:
@@ -76,7 +79,9 @@ def app():
 
     db.init_app(app)
     limiter.init_app(app)
-    app.register_blueprint(api_bp)
+    app.register_blueprint(api_bp, url_prefix='/api')
+    from src.routes.journalist import journalist_bp
+    app.register_blueprint(journalist_bp, url_prefix='/api')
 
     ctx = app.app_context()
     ctx.push()

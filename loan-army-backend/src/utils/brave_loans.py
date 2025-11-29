@@ -246,10 +246,38 @@ def collect_loans_from_brave(
             f"Team: {team}\nSeason: {season}\nTitle: {title}\nSnippet: {snippet}\n"
             "Respond as JSON with fields: relevant (bool), confidence (0-1), reason."
         )
-        groq_client = _get_groq_client()
-        if groq_client is not None:
+        # Prefer Responses API if available (OpenAI)
+        if hasattr(client, "responses"):
             try:
-                resp = groq_client.chat.completions.create(
+                model_name = os.getenv("BRAVE_LLM_MODEL", "gpt-4.1-mini")
+                resp = client.responses.create(
+                    model=model_name,
+                    input=[
+                        {"role": "system", "content": system},
+                        {"role": "user", "content": user},
+                    ],
+                    response_format={
+                        "type": "json_schema",
+                        "json_schema": {
+                            "name": "loan_title_score",
+                            "schema": TitleScoreModel.model_json_schema(),
+                        },
+                    },
+                )
+                content = _read_output_text(resp)
+                if content.strip():
+                    parsed = TitleScoreModel.model_validate(json.loads(content))
+                    conf = float(parsed.confidence or 0)
+                    rel = bool(parsed.relevant)
+                    reason = (parsed.reason or "").strip()
+                    return rel, (conf if rel else 0.0), reason
+            except Exception as exc:
+                logger.debug("[brave-loans] title score via Responses failed: %s", exc)
+
+        # Groq-style chat client
+        if hasattr(client, "chat"):
+            try:
+                resp = client.chat.completions.create(
                     model="openai/gpt-oss-120b",
                     messages=[
                         {"role": "system", "content": system},
@@ -285,7 +313,7 @@ def collect_loans_from_brave(
             except TypeError as exc:
                 logger.info("[brave-loans] Responses schema unsupported; falling back to plain JSON parse: %s", exc)
                 try:
-                    resp = groq_client.chat.completions.create(
+                    resp = client.chat.completions.create(
                         model="openai/gpt-oss-120b",
                         messages=[
                             {"role": "system", "content": system + " Always answer with a single JSON object."},
@@ -328,40 +356,43 @@ def collect_loans_from_brave(
         if client is None:
             return False, 0.0, "openai client unavailable"
         try:
+            # Fallback: client exposes a Groq-like interface but was not caught above
             model_name = "openai/gpt-oss-120b"
-            resp = client.chat.completions.create(
-                model=model_name,
-                messages=[
-                    {"role": "system", "content": system},
-                    {"role": "user", "content": user},
-                ],
-                response_format={
-                    'type': 'json_schema',
-                    "json_schema": {
-                        "name": 'loan_title_score',
-                        "schema": TitleScoreModel.model_json_schema()
-                    }
-                },
-            )
-            content = resp.choices[0].message.content or ""
-            logger.debug(
-                "[brave-loans] OpenAI(title-score) raw output=%s",
-                (content[:400] + "…") if len(content) > 400 else content,
-            )
-            if not content.strip():
-                return False, 0.0, "empty response from model"
-            data = json.loads(content)
-            parsed = TitleScoreModel.model_validate(data)
-            conf = float(parsed.confidence or 0)
-            rel = bool(parsed.relevant)
-            reason = (parsed.reason or "").strip()
-            logger.info(
-                "[brave-loans] title score parsed (OpenAI) rel=%s conf=%.2f reason=%s",
-                rel,
-                conf,
-                (reason[:160] + "…") if len(reason) > 160 else reason,
-            )
-            return rel, (conf if rel else 0.0), reason
+            chat = getattr(client, "chat", None)
+            if chat and hasattr(chat, "completions"):
+                resp = chat.completions.create(
+                    model=model_name,
+                    messages=[
+                        {"role": "system", "content": system},
+                        {"role": "user", "content": user},
+                    ],
+                    response_format={
+                        'type': 'json_schema',
+                        "json_schema": {
+                            "name": 'loan_title_score',
+                            "schema": TitleScoreModel.model_json_schema()
+                        }
+                    },
+                )
+                content = resp.choices[0].message.content or ""
+                logger.debug(
+                    "[brave-loans] OpenAI(title-score) raw output=%s",
+                    (content[:400] + "…") if len(content) > 400 else content,
+                )
+                if not content.strip():
+                    return False, 0.0, "empty response from model"
+                data = json.loads(content)
+                parsed = TitleScoreModel.model_validate(data)
+                conf = float(parsed.confidence or 0)
+                rel = bool(parsed.relevant)
+                reason = (parsed.reason or "").strip()
+                logger.info(
+                    "[brave-loans] title score parsed (OpenAI) rel=%s conf=%.2f reason=%s",
+                    rel,
+                    conf,
+                    (reason[:160] + "…") if len(reason) > 160 else reason,
+                )
+                return rel, (conf if rel else 0.0), reason
         except Exception as exc:
             logger.debug("[brave-loans] title score OpenAI fallback failed: %s", exc)
             return False, 0.0, f"error: {exc}"
@@ -390,12 +421,12 @@ def collect_loans_from_brave(
             f"Team: {team}\nSeason: {season}\nText:\n{trimmed}\n"
             "Respond with JSON matching the schema."
         )
-        groq_client = _get_groq_client()
-        if groq_client is not None:
+        if hasattr(client, "responses"):
             try:
-                resp = groq_client.chat.completions.create(
-                    model="openai/gpt-oss-120b",
-                    messages=[
+                model_name = os.getenv("BRAVE_LLM_MODEL", "gpt-4.1-mini")
+                resp = client.responses.create(
+                    model=model_name,
+                    input=[
                         {"role": "system", "content": system},
                         {"role": "user", "content": user},
                     ],
@@ -406,16 +437,10 @@ def collect_loans_from_brave(
                             "schema": ExtractedRowsModel.model_json_schema()
                         }
                     },
-                    max_tokens=600,
                 )
-                content = resp.choices[0].message.content
-                logger.debug(
-                    "[brave-loans] Responses(page-extract) raw output=%s",
-                    (content[:600] + "…") if len(content) > 600 else content,
-                )
+                content = _read_output_text(resp)
                 if content.strip():
-                    video_data = json.loads(content)
-                    parsed = ExtractedRowsModel.model_validate(video_data)
+                    parsed = ExtractedRowsModel.model_validate(json.loads(content))
                     out: List[Dict[str, str]] = []
                     for r in parsed.rows:
                         player = (r.player_name or "").strip()
@@ -430,114 +455,67 @@ def collect_loans_from_brave(
                             "evidence": (r.evidence or "").strip(),
                         })
                     logger.info(
-                        "[brave-loans] page extract parsed rows=%s",
+                        "[brave-loans] page extract parsed rows (Responses)=%s",
                         len(out),
                     )
                     return out
-            except TypeError as exc:
-                logger.info("[brave-loans] Responses schema unsupported for page extract; fallback: %s", exc)
-                try:
-                    resp = groq_client.chat.completions.create(
-                        model="openai/gpt-oss-120b",
-                        messages=[
-                            {"role": "system", "content": system + " Always answer with a JSON object {\"rows\": [...]} only."},
-                            {"role": "user", "content": user},
-                        ],
-                        response_format={
-                            "type": 'json_schema',
-                            "json_schema": {
-                                "name": 'loan_rows',
-                                "schema": ExtractedRowsModel.model_json_schema()
-                            }
-                        },
-                        max_tokens=800,
-                    )
-                    content = resp.choices[0].message.content
-                    logger.debug(
-                        "[brave-loans] Responses(page-extract:fallback) raw output=%s",
-                        (content[:600] + "…") if len(content) > 600 else content,
-                    )
-                    if content.strip():
-                        m = re.search(r"\{[\s\S]*\}", content)
-                        raw = m.group(0) if m else content
-                        video_data = json.loads(raw)
-                        parsed = ExtractedRowsModel.model_validate(video_data)
-                        out: List[Dict[str, str]] = []
-                        for r in parsed.rows:
-                            player = (r.player_name or "").strip()
-                            club = (r.loan_team or "").strip()
-                            if not player or not club:
-                                continue
-                            out.append({
-                                "player_name": player,
-                                "loan_team": club,
-                                "season_year": int(r.season_year or season),
-                                "confidence": float(r.confidence or 0.0),
-                                "evidence": (r.evidence or "").strip(),
-                            })
-                        logger.info(
-                            "[brave-loans] page extract fallback parsed rows=%s",
-                            len(out),
-                        )
-                        return out
-                except Exception as inner:
-                    logger.debug("[brave-loans] page extract fallback failed: %s", inner)
             except Exception as exc:
-                logger.debug("[brave-loans] page extract via Groq failed: %s", exc)
+                logger.debug("[brave-loans] page extract via Responses failed: %s", exc)
 
-        if client is None:
-            return []
-        try:
-            model_name = "openai/gpt-oss-120b"
-            resp = groq_client.chat.completions.create(
-                model=model_name,
-                messages=[
-                    {"role": "system", "content": system},
-                    {"role": "user", "content": user},
-                ],
-                response_format={
-                    "type": 'json_schema',
-                    "json_schema": {
-                        "name": 'loan_rows',
-                        "schema": ExtractedRowsModel.model_json_schema()
-                    }
-                },
-            )
-            content = resp.choices[0].message.content or ""
-            logger.debug(
-                "[brave-loans] OpenAI(page-extract) raw output=%s",
-                (content[:600] + "…") if len(content) > 600 else content,
-            )
-            if not content.strip():
-                return []
-            data = json.loads(content)
-            parsed = ExtractedRowsModel.model_validate(data)
-            out: List[Dict[str, str]] = []
-            for r in parsed.rows:
-                player = (r.player_name or "").strip()
-                club = (r.loan_team or "").strip()
-                if not player or not club:
-                    continue
-                out.append({
-                    "player_name": player,
-                    "loan_team": club,
-                    "season_year": int(r.season_year or season),
-                    "confidence": float(r.confidence or 0.0),
-                    "evidence": (r.evidence or "").strip(),
-                })
-            logger.info(
-                "[brave-loans] page extract parsed rows (OpenAI)=%s",
-                len(out),
-            )
-            return out
-        except Exception as exc:
-            logger.debug("[brave-loans] page extract OpenAI fallback failed: %s", exc)
-            return []
+        if hasattr(client, "chat"):
+            try:
+                resp = client.chat.completions.create(
+                    model="openai/gpt-oss-120b",
+                    messages=[
+                        {"role": "system", "content": system},
+                        {"role": "user", "content": user},
+                    ],
+                    response_format={
+                        "type": 'json_schema',
+                        "json_schema": {
+                            "name": 'loan_rows',
+                            "schema": ExtractedRowsModel.model_json_schema()
+                        }
+                    },
+                    max_tokens=600,
+                )
+                content = resp.choices[0].message.content or ""
+                logger.debug(
+                    "[brave-loans] page extract raw output=%s",
+                    (content[:600] + "…") if len(content) > 600 else content,
+                )
+                if content.strip():
+                    data = json.loads(content)
+                    parsed = ExtractedRowsModel.model_validate(data)
+                    out: List[Dict[str, str]] = []
+                    for r in parsed.rows:
+                        player = (r.player_name or "").strip()
+                        club = (r.loan_team or "").strip()
+                        if not player or not club:
+                            continue
+                        out.append({
+                            "player_name": player,
+                            "loan_team": club,
+                            "season_year": int(r.season_year or season),
+                            "confidence": float(r.confidence or 0.0),
+                            "evidence": (r.evidence or "").strip(),
+                        })
+                    logger.info(
+                        "[brave-loans] page extract parsed rows (Chat)=%s",
+                        len(out),
+                    )
+                    return out
+            except Exception as exc:
+                logger.debug("[brave-loans] page extract via Chat failed: %s", exc)
+
+        return []
 
     rows: List[Dict[str, str]] = []
     seen: set[tuple[str, str]] = set()
+    openai_client = _get_client()
     groq_client = _get_groq_client()
-    if groq_client is None:
+    llm_client = openai_client or groq_client
+    if llm_client is None:
         logger.info("[brave-loans] OPENAI client not available; LLM scoring/extract disabled")
     # Domain allowlist disabled; accept all domains for deep read (user-approved risk)
     allow: tuple[str, ...] = ()
@@ -552,7 +530,7 @@ def collect_loans_from_brave(
         player, club = _extract_player_club(title, snippet)
         if not player or not club:
             # Stage 1: score title/snippet and shortlisting
-            rel, score, reason = _score_title_detail(groq_client, title, snippet, team_name, season_year)
+            rel, score, reason = _score_title_detail(llm_client, title, snippet, team_name, season_year)
             host = ''
             try:
                 host = urlparse(url).netloc.lower()
@@ -594,7 +572,7 @@ def collect_loans_from_brave(
             except Exception as exc:
                 logger.debug("[brave-loans] fetch error for %s: %s", url, exc)
                 continue
-            llm_rows = _extract_from_text_with_llm(groq_client, text, team_name, season_year)
+            llm_rows = _extract_from_text_with_llm(llm_client, text, team_name, season_year)
             logger.info("[brave-loans] LLM extracted rows=%s from url=%s", len(llm_rows), url)
             for r in llm_rows:
                 key = (r['player_name'].lower(), r['loan_team'].lower())

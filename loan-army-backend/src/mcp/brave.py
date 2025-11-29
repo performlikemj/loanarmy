@@ -16,12 +16,16 @@ _DEF_HEADERS = {
     "Accept-Encoding": "gzip",
 }
 
+_DEBUG_BRAVE = os.getenv("BRAVE_DEBUG", "0").lower() in ("1", "true", "yes", "on")
+
 class BraveApiError(Exception):
     pass
 
 
 # Always-on debug output during development
 def _dbg(msg: str):
+    if not _DEBUG_BRAVE:
+        return
     try:
         print(f"[BRAVE DBG] {msg}")
     except Exception:
@@ -121,6 +125,11 @@ def brave_search(
     """
     q = (query or "").strip()
     if not q:
+        return []
+
+    # Check if Brave Search is enabled
+    if os.getenv("ENABLE_BRAVE_SEARCH", "false").lower() not in ("true", "1", "yes", "on"):
+        _dbg("Brave Search disabled via ENABLE_BRAVE_SEARCH env var")
         return []
 
     freshness = None

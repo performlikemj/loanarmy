@@ -1,10 +1,31 @@
+export function parseNewsletterId(value) {
+  if (value === null || typeof value === 'undefined') return null
+  const str = String(value).trim()
+  if (!str) return null
+  if (str.startsWith('-')) return null
+
+  const trailingDigits = str.match(/(\d+)(?:\D*)$/)
+  if (trailingDigits && trailingDigits[1]) {
+    const parsed = Number(trailingDigits[1])
+    if (Number.isInteger(parsed) && parsed > 0) {
+      return parsed
+    }
+  }
+
+  const direct = Number(str)
+  if (Number.isInteger(direct) && direct > 0) {
+    return direct
+  }
+  return null
+}
+
 export function normalizeNewsletterIds(input) {
   const source = Array.isArray(input) ? input : [input]
   const seen = new Set()
   const result = []
   for (const candidate of source) {
-    const value = Number(candidate)
-    if (!Number.isInteger(value) || value <= 0) continue
+    const value = parseNewsletterId(candidate)
+    if (!value) continue
     if (seen.has(value)) continue
     seen.add(value)
     result.push(value)
@@ -131,5 +152,23 @@ export function getReviewModalSizing({
     maxWidth: resolvedMaxWidth,
     maxHeight: resolvedMaxHeight,
     resize: 'both',
+  }
+}
+
+export function buildAdminPreviewSendOptions({
+  renderMode = 'web',
+  useSnippets = false,
+  simulateSubscription = false,
+  selectedJournalists = [],
+} = {}) {
+  const mode = renderMode === 'email' ? 'email' : 'web'
+  const normalizedJournalists = simulateSubscription
+    ? normalizeNewsletterIds(selectedJournalists)
+    : null
+
+  return {
+    render_mode: mode,
+    use_snippets: mode === 'email' ? Boolean(useSnippets) : false,
+    journalist_ids: simulateSubscription ? normalizedJournalists : null,
   }
 }

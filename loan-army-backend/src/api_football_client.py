@@ -3,14 +3,16 @@ import os
 import json
 from typing import Dict, List, Optional, Any, Iterable
 import logging
-from datetime import datetime, date, timedelta
+from datetime import datetime, date, timedelta, time as dt_time
 import time
 from collections import defaultdict
 from functools import lru_cache
 from itertools import chain
 from copy import deepcopy
 from concurrent.futures import ThreadPoolExecutor, as_completed
+from sqlalchemy.exc import IntegrityError, DataError
 from src.data.transfer_windows import WINDOWS
+from src.utils.external_stats import fetch_external_stats
 import dotenv
 dotenv.load_dotenv(dotenv.find_dotenv())
 
@@ -91,7 +93,6 @@ class APIFootballClient:
         # Check team filter from environment
         # self.enable_team_filter = os.getenv("TEST_ONLY_MANU", "false").lower() == "true"
         self.enable_team_filter = False
-        print(f"TEST_ONLY_MANU: {self.enable_team_filter}")
         # Log team filter status
         if self.enable_team_filter:
             logger.warning(f"🧪 TEAM FILTER ACTIVE: Only processing teams {ONLY_TEST_TEAM_IDS}")
@@ -122,6 +123,9 @@ class APIFootballClient:
         # Player statistics cache: {(player_id, season): (data, timestamp)} - 24hr TTL
         self._stats_cache: Dict[tuple[int, int], tuple[List[Dict[str, Any]], datetime]] = {}
         self._stats_cache_ttl = timedelta(hours=24)
+        # Player-season totals cache (players endpoint) scoped to team
+        self._player_team_season_cache: Dict[tuple[int, int, int], tuple[Dict[str, Any], datetime]] = {}
+        self._player_team_season_cache_ttl = timedelta(hours=24)
         
         logger.info("🚀 Performance caches initialized (24hr TTL)")
         
@@ -241,9 +245,9 @@ class APIFootballClient:
     
     def _make_request(self, endpoint: str, params: Dict[str, Any] = None) -> Dict[str, Any]:
         """Make authenticated request to API-Football."""
-        logger.info(f"🏈 Making API-Football request to endpoint: {endpoint}")
-        logger.info(f"📝 Request params: {params}")
-        logger.info(f"🔑 API key configured: {'Yes' if self.api_key else 'No'}")
+        # logger.info(f"🏈 Making API-Football request to endpoint: {endpoint}")
+        # logger.info(f"📝 Request params: {params}")
+        # logger.info(f"🔑 API key configured: {'Yes' if self.api_key else 'No'}")
 
         # NOTE: The transfers endpoint does **not** accept a `season` query parameter (see API‑Football v3 docs).
 
@@ -259,8 +263,8 @@ class APIFootballClient:
 
         try:
             url = f"{self.base_url}/{endpoint}"
-            logger.info(f"🌐 Full request URL: {url}")
-            logger.info(f"📡 Request headers: {self.headers}")
+            # logger.info(f"🌐 Full request URL: {url}")
+            # logger.info(f"📡 Request headers: {self.headers}")
 
             response = requests.get(url, headers=self.headers, params=params or {}, timeout=15)
 
@@ -282,7 +286,7 @@ class APIFootballClient:
                     f"Errors: {data.get('errors')} - Response: {response.text[:200]}"
                 )
 
-            logger.info(f"📦 Response data keys: {list(data.keys()) if isinstance(data, dict) else 'Not a dict'}")
+            # logger.info(f"📦 Response data keys: {list(data.keys()) if isinstance(data, dict) else 'Not a dict'}")
 
             # Warn if no results (might indicate plan/season coverage issues)
             results_count = data.get("results", 0)
@@ -299,6 +303,69 @@ class APIFootballClient:
             import traceback
             logger.error(f"❌ Traceback: {traceback.format_exc()}")
             return {'response': [], 'errors': [str(e)]}
+
+    def _fetch_player_team_season_totals_api(
+        self,
+        player_id: int,
+        team_id: int,
+        season: int,
+    ) -> Dict[str, Any]:
+        """
+        Fetch season totals (games played, minutes, goals, assists) for a player with a specific team.
+        Uses the /players endpoint; cached for 24h to reduce quota.
+        """
+        cache_key = (player_id, team_id, season)
+        now = datetime.utcnow()
+        cached = self._player_team_season_cache.get(cache_key)
+        if cached and (now - cached[1]) < self._player_team_season_cache_ttl:
+            return cached[0]
+
+        # Avoid network calls in stub mode
+        if self.mode == "stub":
+            return {}
+
+        try:
+            payload = self._make_request(
+                "players",
+                params={"id": player_id, "team": team_id, "season": season},
+            )
+            response = payload.get("response", []) or []
+        except Exception as exc:
+            logger.warning(
+                f"Failed to fetch player totals from API for player={player_id}, team={team_id}, season={season}: {exc}"
+            )
+            return {}
+
+        totals = {"games_played": 0, "minutes": 0, "goals": 0, "assists": 0}
+
+        for item in response:
+            for stat in item.get("statistics", []) or []:
+                team_block = stat.get("team") or {}
+                league_block = stat.get("league") or {}
+                if team_block.get("id") != team_id:
+                    continue
+                if league_block.get("season") != season:
+                    continue
+                games_block = stat.get("games") or {}
+                goals_block = stat.get("goals") or {}
+
+                apps = (
+                    games_block.get("appearences")
+                    or games_block.get("appearances")
+                    or games_block.get("appearences")  # API occasionally returns misspelled key
+                    or 0
+                )
+                minutes = games_block.get("minutes") or 0
+                goals = goals_block.get("total", 0) or 0
+                assists = goals_block.get("assists", 0) or 0
+
+                totals["games_played"] += apps
+                totals["minutes"] += minutes
+                totals["goals"] += goals
+                totals["assists"] += assists
+
+        self._player_team_season_cache[cache_key] = (totals, now)
+        return totals
     
     def _get_sample_data(self, endpoint: str, params: Dict[str, Any] = None) -> Dict[str, Any]:
         """Return comprehensive sample data when API key is not available."""
@@ -770,13 +837,77 @@ class APIFootballClient:
     # ---------------------------------------------------------------------
     # ⚽️  Fixture & statistics helpers (weekly reports)
     # ---------------------------------------------------------------------
+    def check_pending_games(self, team_id: int, days: int = 2) -> Dict[str, Any]:
+        """
+        Check if a team has any pending games in the next `days` days.
+        Returns a dict with 'pending': bool and 'games': list.
+        """
+        try:
+            start_date = self.current_date
+            end_date = self.current_date + timedelta(days=days)
+            
+            # Use current season
+            season = self.current_season_start_year
+            
+            print(f"[DEBUG] Checking pending games for team {team_id} from {start_date} to {end_date}")
+
+            fixtures = self.get_fixtures_for_team(
+                team_id, 
+                season, 
+                start_date.strftime('%Y-%m-%d'), 
+                end_date.strftime('%Y-%m-%d')
+            )
+            
+            pending_games = []
+            for f in fixtures:
+                status = (f.get('fixture') or {}).get('status', {}).get('short')
+                print(f"[DEBUG] Found fixture: {(f.get('fixture') or {}).get('date')} - Status: {status}")
+                
+                # NS = Not Started, TBD = Time To Be Defined
+                if status in ['NS', 'TBD']:
+                    pending_games.append({
+                        'fixture_id': (f.get('fixture') or {}).get('id'),
+                        'date': (f.get('fixture') or {}).get('date'),
+                        'opponent': (f.get('teams') or {}).get('away', {}).get('name') 
+                                    if (f.get('teams') or {}).get('home', {}).get('id') == team_id 
+                                    else (f.get('teams') or {}).get('home', {}).get('name'),
+                        'league': (f.get('league') or {}).get('name'),
+                        'status': status
+                    })
+
+            is_pending = len(pending_games) > 0
+            
+            return {
+                'pending': is_pending,
+                'games': pending_games
+            }
+        except Exception as e:
+            logger.error(f"Error checking pending games for team {team_id}: {e}")
+            return {'pending': False, 'games': [], 'error': str(e)}
+
+
     def get_fixtures_for_team(self, team_id: int, season: int, start: str, end: str) -> List[Dict[str, Any]]:
         """
         Fetch fixtures for a team within a date range (YYYY‑MM‑DD).
         """
         try:
+            normalized_team_id = int(team_id)
+        except (TypeError, ValueError):
+            normalized_team_id = None
+
+        if normalized_team_id is None or normalized_team_id <= 0:
+            logger.warning(
+                "Skipping fixtures fetch: invalid team_id=%s (season=%s, range=%s..%s)",
+                team_id,
+                season,
+                start,
+                end,
+            )
+            raise ValueError("team_id must be a positive integer when fetching fixtures")
+
+        try:
             resp = self._make_request('fixtures', {
-                'team': team_id,
+                'team': normalized_team_id,
                 'season': season,
                 'from': start,
                 'to': end
@@ -801,7 +932,44 @@ class APIFootballClient:
             logger.error(f"Error fetching fixtures for team {team_id}: {e}")
             return []
 
-    def get_player_stats_for_fixture(self, player_id: int, season: int, fixture_id: int) -> Dict[str, Any]:
+    def get_fixture_result(self, fixture_id: int) -> Dict[str, Any]:
+        """
+        Fetch result for a specific fixture by ID.
+        
+        Returns dict with:
+        - status: 'FT' (finished), 'NS' (not started), etc.
+        - home_team_id, away_team_id
+        - home_score, away_score (None if not played)
+        - date
+        """
+        try:
+            resp = self._make_request('fixtures', {'id': fixture_id})
+            fixtures = resp.get('response', [])
+            if not fixtures:
+                logger.warning(f"No fixture found for id={fixture_id}")
+                return {}
+            
+            fx = fixtures[0]
+            fixture_info = fx.get('fixture', {})
+            teams = fx.get('teams', {})
+            goals = fx.get('goals', {})
+            
+            status = fixture_info.get('status', {}).get('short', '')
+            
+            return {
+                'fixture_id': fixture_id,
+                'status': status,
+                'date': fixture_info.get('date'),
+                'home_team_id': teams.get('home', {}).get('id'),
+                'away_team_id': teams.get('away', {}).get('id'),
+                'home_score': goals.get('home'),
+                'away_score': goals.get('away'),
+            }
+        except Exception as e:
+            logger.error(f"Error fetching fixture result for id={fixture_id}: {e}")
+            return {}
+
+    def get_player_stats_for_fixture(self, player_id: int, season: int, fixture_id: int, fixture_obj: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
         """
         Fetch player stats for a specific fixture. Returns {} if not found.
 
@@ -860,12 +1028,97 @@ class APIFootballClient:
                             "fouls": fouls,      # NEW: fouls drawn/committed
                             "penalty": penalty,  # NEW: penalty stats
                             "offsides": st.get('offsides'),  # NEW: offsides
+                            "saves": st.get('saves'),  # Goalkeeper saves (direct field in API-Football)
                         }],
                         "played": played_flag,
                         "role": role,
                     }
         # 2️⃣ Fallback – original line‑ups + events logic
-        return self._get_player_stats_from_lineups_and_events(player_id, fixture_id)
+        stats = self._get_player_stats_from_lineups_and_events(player_id, fixture_id)
+        
+        # 3️⃣ External Stats Fallback (Brave Search + LLM)
+        # If we have no stats or very basic stats (no shots/passes), try external search
+        has_detailed_stats = False
+        if stats and stats.get('statistics'):
+            s = stats['statistics'][0]
+            # Check for presence of detailed metrics
+            if (s.get('shots', {}).get('total') is not None or 
+                s.get('passes', {}).get('total') is not None or
+                s.get('rating') is not None):
+                has_detailed_stats = True
+                
+        if not has_detailed_stats:
+            try:
+                # We need player name and team name. 
+                # If fixture_obj is provided, we can get team names.
+                # Player name we might need to fetch if not cached.
+                
+                # Get player name
+                player_profile = self.get_player_by_id(player_id, season)
+                player_name = player_profile.get('player', {}).get('name')
+                
+                # Get team name and match details
+                team_name = None
+                match_date = None
+                competition = None
+                
+                if fixture_obj:
+                    # Extract from passed object
+                    teams = fixture_obj.get('teams', {})
+                    # We don't know which team the player is on easily without more logic,
+                    # but we can search using both or just the player name + "match stats"
+                    # Better: find which team the player belongs to in this fixture.
+                    # But we don't have that info easily here unless we check lineups again.
+                    # Let's just use the player name and the fixture title (Home vs Away)
+                    home = teams.get('home', {}).get('name')
+                    away = teams.get('away', {}).get('name')
+                    team_name = f"{home} vs {away}"
+                    
+                    fx_info = fixture_obj.get('fixture', {})
+                    if fx_info.get('date'):
+                        match_date = datetime.fromisoformat(fx_info['date'].replace('Z', '+00:00')).date()
+                        
+                    competition = (fixture_obj.get('league') or {}).get('name')
+                
+                if player_name and match_date:
+                    logger.info(f"⚠️ Triggering external stats fetch for {player_name} in {team_name}")
+                    external_stats = fetch_external_stats(player_name, team_name, match_date, competition)
+                    
+                    if external_stats:
+                        # Merge external stats into our basic stats
+                        if not stats:
+                            stats = {
+                                "statistics": [{"games": {}, "goals": {}, "cards": {}}],
+                                "played": True, # Assume played if we found stats
+                                "role": "unknown"
+                            }
+                        
+                        st_entry = stats['statistics'][0]
+                        
+                        # Map external fields to our structure
+                        if external_stats.get('rating'):
+                            st_entry['rating'] = external_stats['rating']
+                        if external_stats.get('shots_total') is not None:
+                            st_entry['shots'] = {'total': external_stats['shots_total'], 'on': external_stats.get('shots_on')}
+                        if external_stats.get('passes_total') is not None:
+                            st_entry['passes'] = {'total': external_stats['passes_total'], 'key': external_stats.get('passes_key')}
+                        if external_stats.get('tackles_total') is not None:
+                            st_entry['tackles'] = {'total': external_stats['tackles_total']}
+                        if external_stats.get('duels_total') is not None:
+                            st_entry['duels'] = {'total': external_stats['duels_total'], 'won': external_stats.get('duels_won')}
+                        if external_stats.get('dribbles_attempts') is not None:
+                            st_entry['dribbles'] = {'attempts': external_stats['dribbles_attempts'], 'success': external_stats.get('dribbles_success')}
+                            
+                        # Update minutes if missing
+                        if external_stats.get('minutes') and (not st_entry['games'].get('minutes')):
+                             st_entry['games']['minutes'] = external_stats['minutes']
+                             
+                        logger.info(f"✅ Merged external stats for {player_name}")
+                        
+            except Exception as e:
+                logger.error(f"Error in external stats fallback: {e}")
+
+        return stats
 
 
     def _get_player_stats_from_lineups_and_events(self, player_id: int, fixture_id: int) -> Dict[str, Any]:
@@ -907,26 +1160,34 @@ class APIFootballClient:
             minutes = 90
         minutes = minutes or 0
 
-        # Enrich from events endpoint when available
+        # Enrich from events endpoint when available, but avoid double-counting
+        # Only use events data if lineup stats are missing (0 or None)
         events = self.get_fixture_events(fixture_id).get("response", [])
         if events:
-            goals_total += sum(
-                1 for ev in events
-                if ev.get("type") == "Goal" and (ev.get("player") or {}).get("id") == player_id
-            )
-            assists_total += sum(
-                1 for ev in events
-                if ev.get("type") == "Goal" and (ev.get("assist") or {}).get("id") == player_id
-            )
-            yellows += sum(
-                1 for ev in events
-                if ev.get("detail") == "Yellow Card" and (ev.get("player") or {}).get("id") == player_id
-            )
-            reds += sum(
-                1 for ev in events
-                if ev.get("detail") in ("Red Card", "Second Yellow card") and
-                   (ev.get("player") or {}).get("id") == player_id
-            )
+            # Only add goals from events if lineup didn't already include them
+            if goals_total == 0:
+                goals_total = sum(
+                    1 for ev in events
+                    if ev.get("type") == "Goal" and (ev.get("player") or {}).get("id") == player_id
+                )
+            # Only add assists from events if lineup didn't already include them
+            if assists_total == 0:
+                assists_total = sum(
+                    1 for ev in events
+                    if ev.get("type") == "Goal" and (ev.get("assist") or {}).get("id") == player_id
+                )
+            # Cards can be safely added as lineup data often doesn't include them
+            if yellows == 0:
+                yellows = sum(
+                    1 for ev in events
+                    if ev.get("detail") == "Yellow Card" and (ev.get("player") or {}).get("id") == player_id
+                )
+            if reds == 0:
+                reds = sum(
+                    1 for ev in events
+                    if ev.get("detail") in ("Red Card", "Second Yellow card") and
+                       (ev.get("player") or {}).get("id") == player_id
+                )
 
         return {
             "statistics": [{
@@ -1036,6 +1297,61 @@ class APIFootballClient:
         
         start_str, end_str = week_start.isoformat(), week_end.isoformat()
 
+        def _initial_totals() -> Dict[str, Any]:
+            return {
+                'games_played': 0,
+                'minutes': 0,
+                'goals': 0,
+                'assists': 0,
+                'yellows': 0,
+                'reds': 0,
+                'position': None,
+                'rating': None,
+                'saves': 0,
+                'goals_conceded': 0,
+                'shots_total': 0,
+                'shots_on': 0,
+                'passes_total': 0,
+                'passes_key': 0,
+                'tackles_total': 0,
+                'tackles_interceptions': 0,
+                'duels_total': 0,
+                'duels_won': 0,
+                'dribbles_attempts': 0,
+                'dribbles_success': 0,
+                'fouls_drawn': 0,
+                'fouls_committed': 0,
+                'offsides': 0,
+            }
+
+        normalized_team_id: Optional[int] = None
+        if loan_team_id is not None:
+            try:
+                normalized_team_id = int(loan_team_id)
+            except (TypeError, ValueError):
+                normalized_team_id = None
+
+        if normalized_team_id is None or normalized_team_id <= 0:
+            logger.warning(
+                "summarize_loanee_week: skipping player=%s because loan_team_id is missing/invalid (value=%s) for range %s..%s",
+                player_id,
+                loan_team_id,
+                start_str,
+                end_str,
+            )
+            return {
+                'player_id': player_id,
+                'player_api_id': player_id,
+                'loan_team_id': loan_team_id,
+                'loan_team_name': None,
+                'season': season,
+                'range': [start_str, end_str],
+                'totals': _initial_totals(),
+                'matches': [],
+            }
+
+        loan_team_id = normalized_team_id
+
         logger.info(
             f"summarize_loanee_week: player={player_id}, loan_team={loan_team_id}, season={season}, range={start_str}..{end_str}"
         )
@@ -1046,31 +1362,7 @@ class APIFootballClient:
         loan_team_name = self.get_team_name(loan_team_id, season)
 
         # Initialize totals with comprehensive stats
-        totals = {
-            'games_played': 0,
-            'minutes': 0,
-            'goals': 0,
-            'assists': 0,
-            'yellows': 0,
-            'reds': 0,
-            'position': None,  # Use most recent position
-            'rating': None,  # Average rating
-            'saves': 0,
-            'goals_conceded': 0,
-            'shots_total': 0,
-            'shots_on': 0,
-            'passes_total': 0,
-            'passes_key': 0,
-            'tackles_total': 0,
-            'tackles_interceptions': 0,
-            'duels_total': 0,
-            'duels_won': 0,
-            'dribbles_attempts': 0,
-            'dribbles_success': 0,
-            'fouls_drawn': 0,
-            'fouls_committed': 0,
-            'offsides': 0,
-        }
+        totals = _initial_totals()
         
         rating_sum = 0
         rating_count = 0
@@ -1098,24 +1390,40 @@ class APIFootballClient:
             if db_session:
                 db_fixture = db_session.query(Fixture).filter_by(fixture_id_api=fixture_id).first()
                 if db_fixture:
+                    # 🔍 TROUBLESHOOTING: Log DB query parameters
+                    logger.debug(
+                        f"🔍 [DB_QUERY] Querying FixturePlayerStats: "
+                        f"db_fixture_id={db_fixture.id}, player_api_id={player_id}, "
+                        f"fixture_api_id={fixture_id}"
+                    )
+                    
                     player_stats_row = db_session.query(FixturePlayerStats).filter_by(
                         fixture_id=db_fixture.id,
                         player_api_id=player_id
                     ).first()
+                    
+                    if player_stats_row:
+                        logger.debug(f"🔍 [DB_QUERY] Found DB row id={player_stats_row.id}")
+                    else:
+                        logger.debug(f"🔍 [DB_QUERY] No DB row found, will use API fallback")
             
             # Fetch from API (for stats aggregation and potential storage)
-            pstats = self.get_player_stats_for_fixture(player_id, season, fixture_id)
+            pstats = self.get_player_stats_for_fixture(player_id, season, fixture_id, fixture_obj=fx)
             played = pstats.get('played', False) if pstats else False
             
-            # If we have a db_session and stats from API, store them for future use
-            if db_session and pstats and not player_stats_row:
+            # Always update DB with fresh API stats when available
+            if db_session and pstats:
                 try:
                     # Create/get fixture record
                     if not db_fixture:
                         db_fixture = self._get_or_create_fixture(db_session, fx, season)
                     
-                    # Store player stats
+                    # Store/update player stats with fresh API data
                     if db_fixture and pstats:
+                        logger.info(
+                            f"{'Updating' if player_stats_row else 'Creating'} fixture stats: "
+                            f"fixture_id={fixture_id}, player_id={player_id}"
+                        )
                         self._upsert_player_fixture_stats(
                             db_session,
                             db_fixture.id,
@@ -1123,13 +1431,13 @@ class APIFootballClient:
                             loan_team_id,
                             pstats
                         )
-                        # Refresh the player_stats_row from what we just stored
+                        # Refresh the player_stats_row from what we just stored/updated
                         player_stats_row = db_session.query(FixturePlayerStats).filter_by(
                             fixture_id=db_fixture.id,
                             player_api_id=player_id
                         ).first()
                 except Exception as e:
-                    logger.warning(f"Failed to store fixture/player stats for fixture {fixture_id}, player {player_id}: {e}")
+                    logger.warning(f"Failed to store/update fixture/player stats for fixture {fixture_id}, player {player_id}: {e}")
                     # Continue processing even if storage fails
             
             # Initialize comprehensive player line stats
@@ -1160,6 +1468,13 @@ class APIFootballClient:
 
             # Use database stats if available (preferred source)
             if player_stats_row:
+                # 🔍 TROUBLESHOOTING: Log DB stats before processing
+                logger.debug(
+                    f"🔍 [DB_SOURCE] fixture_id={fixture_id}, player_id={player_id}, "
+                    f"db_assists={player_stats_row.assists}, db_goals={player_stats_row.goals}, "
+                    f"db_minutes={player_stats_row.minutes}, db_row_id={player_stats_row.id}"
+                )
+                
                 minutes = player_stats_row.minutes or 0
                 if minutes > 0:
                     played = True
@@ -1227,6 +1542,9 @@ class APIFootballClient:
             
             # Fallback to API stats if DB doesn't have them
             elif pstats:
+                # 🔍 TROUBLESHOOTING: Using API fallback (no DB data)
+                logger.debug(f"🔍 [API_FALLBACK] fixture_id={fixture_id}, player_id={player_id} - using API data (no DB entry)")
+                
                 stats = pstats.get('statistics', [])
                 if stats:
                     stats_block = stats[0]
@@ -1243,6 +1561,13 @@ class APIFootballClient:
                     fouls = stats_block.get('fouls', {}) or {}
                     
                     minutes = g.get('minutes', 0) or 0
+                    
+                    # 🔍 TROUBLESHOOTING: Log API stats before processing
+                    logger.debug(
+                        f"🔍 [API_FALLBACK] API raw data: minutes={minutes}, "
+                        f"goals={goals.get('total', 0)}, assists={goals.get('assists', 0)}"
+                    )
+                    
                     if minutes and minutes > 0:
                         played = True
                         player_line.update({
@@ -1312,7 +1637,103 @@ class APIFootballClient:
             home = teams.get('home', {}) or {}
             away = teams.get('away', {}) or {}
             is_home = loan_team_id == home.get('id')
-            opponent = away.get('name') if is_home else home.get('name')
+            opponent_team = away if is_home else home
+            opponent = opponent_team.get('name')
+            opponent_id = opponent_team.get('id')
+            opponent_logo = opponent_team.get('logo')
+
+            # Build comprehensive match-specific notes with ALL stats for better AI summaries
+            match_notes = []
+            performance_details = []
+            
+            # 🔍 TROUBLESHOOTING: Log player_line data to trace phantom assists
+            logger.debug(
+                f"🔍 [MATCH_NOTES] fixture_id={fixture_id}, player_id={player_id}, "
+                f"opponent={opponent}, player_line_assists={player_line.get('assists', 0)}, "
+                f"player_line_goals={player_line.get('goals', 0)}"
+            )
+            
+            # Core stats (goals/assists)
+            if player_line.get('goals', 0) > 0:
+                goal_count = player_line['goals']
+                goal_str = f"{goal_count} goal{'s' if goal_count > 1 else ''}"
+                match_notes.append(f"{goal_str} vs {opponent}")
+                performance_details.append(f"{goal_count}G")
+                logger.debug(f"🔍 [MATCH_NOTES] Added goal note: '{goal_str} vs {opponent}'")
+            if player_line.get('assists', 0) > 0:
+                assist_count = player_line['assists']
+                assist_str = f"{assist_count} assist{'s' if assist_count > 1 else ''}"
+                match_notes.append(f"{assist_str} vs {opponent}")
+                performance_details.append(f"{assist_count}A")
+                logger.debug(f"🔍 [MATCH_NOTES] Added assist note: '{assist_str} vs {opponent}'")
+            else:
+                logger.debug(f"🔍 [MATCH_NOTES] No assists for player_id={player_id} vs {opponent}")
+            
+            # Rating
+            rating = player_line.get('rating')
+            if rating:
+                try:
+                    rating_val = float(rating)
+                    performance_details.append(f"Rating: {rating_val}")
+                except (TypeError, ValueError):
+                    pass
+            
+            # Shots
+            shots_total = player_line.get('shots_total', 0)
+            shots_on = player_line.get('shots_on', 0)
+            if shots_total > 0:
+                performance_details.append(f"{shots_on}/{shots_total} shots on target")
+            
+            # Key passes
+            key_passes = player_line.get('passes_key', 0)
+            if key_passes > 0:
+                performance_details.append(f"{key_passes} key passes")
+            
+            # Dribbles
+            dribbles_success = player_line.get('dribbles_success', 0)
+            dribbles_attempts = player_line.get('dribbles_attempts', 0)
+            if dribbles_attempts > 0:
+                performance_details.append(f"{dribbles_success}/{dribbles_attempts} dribbles")
+            
+            # Tackles + Interceptions (defensive contribution)
+            tackles = player_line.get('tackles_total', 0)
+            interceptions = player_line.get('tackles_interceptions', 0)
+            if tackles > 0 or interceptions > 0:
+                defensive_parts = []
+                if tackles > 0:
+                    defensive_parts.append(f"{tackles} tackles")
+                if interceptions > 0:
+                    defensive_parts.append(f"{interceptions} interceptions")
+                performance_details.append(", ".join(defensive_parts))
+            
+            # Duels won (physical presence)
+            duels_won = player_line.get('duels_won', 0)
+            duels_total = player_line.get('duels_total', 0)
+            if duels_total > 0:
+                duels_pct = round((duels_won / duels_total) * 100) if duels_total > 0 else 0
+                performance_details.append(f"{duels_won}/{duels_total} duels won ({duels_pct}%)")
+            
+            # Goalkeeper stats
+            saves = player_line.get('saves', 0)
+            goals_conceded = player_line.get('goals_conceded', 0)
+            if saves > 0 or goals_conceded > 0:
+                gk_parts = []
+                if saves > 0:
+                    gk_parts.append(f"{saves} saves")
+                if goals_conceded > 0:
+                    gk_parts.append(f"{goals_conceded} conceded")
+                performance_details.append(", ".join(gk_parts))
+            
+            # Cards
+            if player_line.get('yellows', 0) > 0:
+                performance_details.append("yellow card")
+            if player_line.get('reds', 0) > 0:
+                performance_details.append("RED CARD")
+            
+            # Create a comprehensive match summary line
+            if performance_details:
+                summary = f"vs {opponent}: {', '.join(performance_details)}"
+                match_notes.append(summary)
 
             match_row = {
                 'fixture_id': fixture_id,
@@ -1320,11 +1741,14 @@ class APIFootballClient:
                 'competition': fx.get('league', {}).get('name'),
                 'home': is_home,
                 'opponent': opponent,
+                'opponent_id': opponent_id,
+                'opponent_logo': opponent_logo,
                 'score': fx.get('goals', {}),
                 'result': self._compute_fixture_result_for_team(fx, loan_team_id),
                 'played': played,
                 'player': player_line,
                 'role': pstats.get('role') if pstats else None,
+                'match_notes': match_notes,  # Explicit attribution to prevent AI misattribution
             }
 
             if include_team_stats:
@@ -1337,19 +1761,278 @@ class APIFootballClient:
         if rating_count > 0:
             totals['rating'] = round(rating_sum / rating_count, 2)
         
+        # 🔍 TROUBLESHOOTING: Log final totals after all matches processed
+        logger.debug(
+            f"🔍 [FINAL_TOTALS] player_id={player_id}, loan_team_id={loan_team_id}, "
+            f"total_assists={totals['assists']}, total_goals={totals['goals']}, "
+            f"total_minutes={totals['minutes']}, games_played={totals['games_played']}, "
+            f"num_matches={len(matches)}"
+        )
+        
+        # ------------------------------------------------------------------
+        # 📅 Fetch upcoming fixtures (next 7 days after week_end)
+        # ------------------------------------------------------------------
+        upcoming_fixtures = []
+        try:
+            from datetime import timedelta
+            upcoming_start = week_end + timedelta(days=1)
+            upcoming_end = week_end + timedelta(days=7)
+            upcoming_start_str = upcoming_start.isoformat()
+            upcoming_end_str = upcoming_end.isoformat()
+            
+            logger.debug(
+                f"Fetching upcoming fixtures for player_id={player_id}, loan_team_id={loan_team_id}, "
+                f"range={upcoming_start_str}..{upcoming_end_str}"
+            )
+            
+            upcoming_raw = self.get_fixtures_for_team(
+                loan_team_id, season, upcoming_start_str, upcoming_end_str
+            )
+            
+            for fx in upcoming_raw:
+                fixture_info = fx.get('fixture', {})
+                fixture_status = fixture_info.get('status', {}).get('short', '')
+                
+                # Only include unplayed fixtures (NS = Not Started, TBD = To Be Defined)
+                if fixture_status not in ('NS', 'TBD'):
+                    continue
+                
+                teams = fx.get('teams', {})
+                home = teams.get('home', {}) or {}
+                away = teams.get('away', {}) or {}
+                is_home = loan_team_id == home.get('id')
+                opponent_team = away if is_home else home
+                opponent_name = opponent_team.get('name')
+                opponent_logo = opponent_team.get('logo')
+                opponent_id = opponent_team.get('id')
+                
+                upcoming_fixtures.append({
+                    'fixture_id': fixture_info.get('id'),  # For looking up results later
+                    'loan_team_id': loan_team_id,  # To determine W/L/D
+                    'date': fixture_info.get('date'),
+                    'opponent': opponent_name,
+                    'opponent_id': opponent_id,
+                    'opponent_logo': opponent_logo,
+                    'competition': fx.get('league', {}).get('name'),
+                    'is_home': is_home
+                })
+            
+            logger.debug(f"Found {len(upcoming_fixtures)} upcoming fixtures for player_id={player_id}")
+            
+        except Exception as e:
+            logger.warning(f"Failed to fetch upcoming fixtures for player_id={player_id}: {e}")
+            upcoming_fixtures = []
+        
         return {
             'player_id': player_id,
+            'player_api_id': player_id,
             'loan_team_id': loan_team_id,
             'loan_team_name': loan_team_name,
             'season': season,
             'range': [start_str, end_str],
             'totals': totals,
-            'matches': matches
+            'matches': matches,
+            'upcoming_fixtures': upcoming_fixtures
         }
 
     # ------------------------------------------------------------------
     #  🔎  WEEKLY SUMMARY OF A PARENT CLUB'S LOANEES
     # ------------------------------------------------------------------
+    def get_player_season_context(
+        self,
+        player_id: int,
+        loan_team_id: int,
+        season: int,
+        up_to_date: date,
+        db_session=None,
+    ) -> Dict[str, Any]:
+        """
+        Get season-to-date context for a player to add narrative depth to weekly reports.
+        Returns cumulative stats, recent form, and trends.
+        """
+        from src.models.weekly import Fixture, FixturePlayerStats
+        from datetime import timedelta
+        
+        season_start = date(season, 8, 1)  # European season starts Aug 1
+        
+        # Initialize season totals
+        season_stats = {
+            'games_played': 0,
+            'minutes': 0,
+            'goals': 0,
+            'assists': 0,
+            'yellows': 0,
+            'reds': 0,
+            'rating_sum': 0.0,
+            'rating_count': 0,
+            'shots_total': 0,
+            'shots_on': 0,
+            'passes_key': 0,
+            'tackles_total': 0,
+            'duels_won': 0,
+            'duels_total': 0,
+            'clean_sheets': 0,
+        }
+        
+        # Recent form (last 5 games)
+        recent_games = []
+        cutoff_dt = (
+            up_to_date
+            if isinstance(up_to_date, datetime)
+            else datetime.combine(up_to_date, dt_time.max)
+        )
+        
+        logger.debug(
+            f"get_player_season_context: player_id={player_id}, loan_team_id={loan_team_id}, "
+            f"season={season}, up_to_date={up_to_date}"
+        )
+
+        try:
+            # Get all fixtures for this player this season up to the report date
+            # IMPORTANT: Filter by team to only count games for the LOAN TEAM,
+            # not all teams the player appeared for in the season
+            # ONLY count games where player actually featured (minutes > 0)
+            if db_session:
+                from sqlalchemy import or_
+                
+                fixtures = (
+                    db_session.query(Fixture)
+                    .join(FixturePlayerStats)
+                    .filter(
+                        FixturePlayerStats.player_api_id == player_id,
+                        FixturePlayerStats.minutes > 0,  # Only games where player actually played
+                        Fixture.season == season,
+                        Fixture.date_utc <= cutoff_dt,
+                        # Only fixtures where player's loan team was playing
+                        or_(
+                            Fixture.home_team_api_id == loan_team_id,
+                            Fixture.away_team_api_id == loan_team_id
+                        )
+                    )
+                    .order_by(Fixture.date_utc.desc())
+                    .limit(100)  # Safety limit
+                    .all()
+                )
+                
+                logger.debug(
+                    f"get_player_season_context: Found {len(fixtures)} fixtures for player {player_id} "
+                    f"with loan team {loan_team_id} in season {season}"
+                )
+                
+                for fixture in fixtures:
+                    player_stats = (
+                        db_session.query(FixturePlayerStats)
+                        .filter_by(fixture_id=fixture.id, player_api_id=player_id)
+                        .first()
+                    )
+                    
+                    if not player_stats or not player_stats.minutes:
+                        continue
+                    
+                    # Accumulate season totals
+                    season_stats['games_played'] += 1
+                    season_stats['minutes'] += player_stats.minutes or 0
+                    season_stats['goals'] += player_stats.goals or 0
+                    season_stats['assists'] += player_stats.assists or 0
+                    season_stats['yellows'] += player_stats.yellows or 0
+                    season_stats['reds'] += player_stats.reds or 0
+                    season_stats['shots_total'] += player_stats.shots_total or 0
+                    season_stats['shots_on'] += player_stats.shots_on or 0
+                    season_stats['passes_key'] += player_stats.passes_key or 0
+                    season_stats['tackles_total'] += player_stats.tackles_total or 0
+                    season_stats['duels_won'] += player_stats.duels_won or 0
+                    season_stats['duels_total'] += player_stats.duels_total or 0
+                    
+                    # Rating
+                    if player_stats.rating:
+                        try:
+                            season_stats['rating_sum'] += float(player_stats.rating)
+                            season_stats['rating_count'] += 1
+                        except (TypeError, ValueError):
+                            pass
+                    
+                    # Clean sheets (for defenders/GKs)
+                    if player_stats.goals_conceded == 0 and player_stats.minutes >= 45:
+                        season_stats['clean_sheets'] += 1
+                    
+                    # Track recent form (last 5 games)
+                    if len(recent_games) < 5:
+                        recent_games.append({
+                            'date': fixture.date_utc.isoformat() if fixture.date_utc else None,
+                            'competition': fixture.competition_name,
+                            'goals': player_stats.goals or 0,
+                            'assists': player_stats.assists or 0,
+                            'minutes': player_stats.minutes or 0,
+                            'rating': player_stats.rating,
+                        })
+
+            # Overlay with API-Football season totals for this team/season (more complete across competitions)
+            try:
+                api_totals = self._fetch_player_team_season_totals_api(
+                    player_id=player_id,
+                    team_id=loan_team_id,
+                    season=season,
+                )
+            except Exception as api_exc:
+                logger.warning(f"Failed to overlay API season totals for player {player_id}: {api_exc}")
+                api_totals = {}
+
+            if api_totals:
+                season_stats['games_played'] = max(api_totals.get('games_played', 0), season_stats['games_played'])
+                season_stats['minutes'] = max(api_totals.get('minutes', 0), season_stats['minutes'])
+                season_stats['goals'] = max(api_totals.get('goals', 0), season_stats['goals'])
+                season_stats['assists'] = max(api_totals.get('assists', 0), season_stats['assists'])
+
+            # Calculate average rating
+            if season_stats['rating_count'] > 0:
+                season_stats['avg_rating'] = round(season_stats['rating_sum'] / season_stats['rating_count'], 2)
+            else:
+                season_stats['avg_rating'] = None
+            
+            # Calculate trends
+            trends = {}
+            
+            # Goals per 90
+            if season_stats['minutes'] > 0:
+                trends['goals_per_90'] = round((season_stats['goals'] / season_stats['minutes']) * 90, 2)
+                trends['assists_per_90'] = round((season_stats['assists'] / season_stats['minutes']) * 90, 2)
+            
+            # Shot accuracy
+            if season_stats['shots_total'] > 0:
+                trends['shot_accuracy'] = round((season_stats['shots_on'] / season_stats['shots_total']) * 100, 1)
+            
+            # Recent scoring form
+            if recent_games:
+                recent_goals = sum(g['goals'] for g in recent_games)
+                recent_assists = sum(g['assists'] for g in recent_games)
+                trends['goals_last_5'] = recent_goals
+                trends['assists_last_5'] = recent_assists
+                trends['g_a_last_5'] = recent_goals + recent_assists
+            
+            # Duels win rate
+            if season_stats['duels_total'] > 0:
+                trends['duels_win_rate'] = round((season_stats['duels_won'] / season_stats['duels_total']) * 100, 1)
+            
+            logger.debug(
+                f"get_player_season_context: Final stats for player {player_id} - "
+                f"games_played={season_stats['games_played']}, minutes={season_stats['minutes']}, "
+                f"goals={season_stats['goals']}, assists={season_stats['assists']}"
+            )
+            
+            # Remove temporary fields
+            del season_stats['rating_sum']
+            del season_stats['rating_count']
+            
+            return {
+                'season_stats': season_stats,
+                'recent_form': recent_games,
+                'trends': trends,
+            }
+            
+        except Exception as e:
+            logger.warning(f"Failed to get season context for player {player_id}: {e}")
+            return {'season_stats': season_stats, 'recent_form': [], 'trends': {}}
+    
     def summarize_parent_loans_week(
         self,
         *,
@@ -1362,7 +2045,7 @@ class APIFootballClient:
         db_session=None,
     ) -> Dict[str, Any]:
         """Generate match-week summaries for all active loanees of one parent club."""
-        from src.models.league import LoanedPlayer, SupplementalLoan, Team
+        from src.models.league import LoanedPlayer, Team, SupplementalLoan
 
         start_str, end_str = week_start.isoformat(), week_end.isoformat()
         logger.info(
@@ -1371,24 +2054,13 @@ class APIFootballClient:
         parent_name = self.get_team_name(parent_team_api_id, season)
 
         # ------------------------------------------------------------------
-        # 1️⃣ Fetch active loanees for this parent from DB (+ supplemental)
+        # 1️⃣ Fetch active loanees for this parent from DB
         # ------------------------------------------------------------------
         loanee_rows = (
             db_session.query(LoanedPlayer)
             .filter(
                 LoanedPlayer.primary_team_id == parent_team_db_id,
                 LoanedPlayer.is_active.is_(True),
-            )
-            .all()
-            if db_session
-            else []
-        )
-        # Supplemental entries for the season: do NOT rely on API-Football stats
-        supp_rows = (
-            db_session.query(SupplementalLoan)
-            .filter(
-                SupplementalLoan.parent_team_id == parent_team_db_id,
-                SupplementalLoan.season_year == season,
             )
             .all()
             if db_session
@@ -1411,6 +2083,7 @@ class APIFootballClient:
             return ''.join(ch for ch in disp.lower() if ch.isalnum())
 
         loanees, skipped_missing_team = [], 0
+        existing_keys: set[str] = set()
         team_country_cache: dict[int, str | None] = {}
 
         def _resolve_team_country(team_row: Team | None, api_team_id: int | None) -> str | None:
@@ -1443,108 +2116,119 @@ class APIFootballClient:
             return country_val or None
 
         for lp in loanee_rows:
-            loan_team_row = db_session.query(Team).get(lp.loan_team_id)
-            if not loan_team_row or not loan_team_row.team_id:
-                skipped_missing_team += 1
-                continue
+            # Handle both database teams and custom teams
+            loan_team_row = None
+            loan_team_api_id = None
+            loan_team_name = None
+            loan_team_country = None
+            
+            if lp.loan_team_id:
+                # Team is in database - fetch it
+                loan_team_row = db_session.query(Team).get(lp.loan_team_id)
+                if not loan_team_row or not loan_team_row.team_id:
+                    logger.debug(f"Skipping {lp.player_name}: loan_team_id={lp.loan_team_id} not found or has no API ID")
+                    skipped_missing_team += 1
+                    continue
+                loan_team_api_id = loan_team_row.team_id
+                loan_team_name = loan_team_row.name
+                loan_team_country = _resolve_team_country(loan_team_row, loan_team_api_id)
+            else:
+                # Custom team not in database - use the team name directly
+                loan_team_name = lp.loan_team_name
+                if not loan_team_name or not loan_team_name.strip():
+                    logger.debug(f"Skipping {lp.player_name}: no loan_team_id and no loan_team_name")
+                    skipped_missing_team += 1
+                    continue
+                loan_team_api_id = None  # No API ID for custom teams
+                loan_team_country = None  # Unknown country for custom teams
+                logger.debug(f"Including {lp.player_name} with custom team: {loan_team_name}")
+            
+            # Get sofascore_id if available
+            sofa_id = None
+            try:
+                if lp.player_id and lp.player_id > 0:
+                    # Look up sofascore_id from Player table for tracked players
+                    from src.models.league import Player
+                    player_rec = db_session.query(Player).filter_by(player_id=lp.player_id).first()
+                    if player_rec and hasattr(player_rec, 'sofascore_id'):
+                        sofa_id = player_rec.sofascore_id
+            except Exception:
+                pass
+            
             loanees.append(
                 dict(
                     player_api_id=lp.player_id,
                     player_name=lp.player_name or "",
-                    loan_team_api_id=loan_team_row.team_id,
-                    loan_team_name=loan_team_row.name,
-                    loan_team_country=_resolve_team_country(loan_team_row, loan_team_row.team_id),
-                )
-            )
-
-        # Build a set of normalized name+team keys to avoid duplicate supplemental
-        seen_keys = set()
-        for info in loanees:
-            k = (_name_key(info.get('player_name')), (info.get('loan_team_name') or '').lower())
-            if k[0]:
-                seen_keys.add(k)
-
-        supplemental_infos: list[dict] = []
-        for s in supp_rows:
-            nm = (s.player_name or '').strip()
-            team_name = (s.loan_team_name or '').strip()
-            if not nm or not team_name:
-                continue
-            k = (_name_key(nm), team_name.lower())
-            if k[0] and k in seen_keys:
-                # Already represented by a core LoanedPlayer row
-                continue
-            team_api_id = None
-            team_row = None
-            try:
-                if s.loan_team_id:
-                    team_row = db_session.query(Team).get(s.loan_team_id)
-                    if team_row and team_row.team_id:
-                        team_api_id = team_row.team_id
-            except Exception:
-                team_api_id = None
-            try:
-                sofa_id = int(s.sofascore_player_id) if getattr(s, 'sofascore_player_id', None) else None
-            except Exception:
-                sofa_id = None
-            supplemental_infos.append(
-                dict(
-                    player_api_id=(int(s.api_player_id) if getattr(s, 'api_player_id', None) else None),
-                    player_name=nm,
-                    loan_team_api_id=team_api_id,
-                    loan_team_name=team_name,
-                    loan_team_country=_resolve_team_country(team_row, team_api_id),
-                    supplemental_id=getattr(s, 'id', None),
+                    loan_team_api_id=loan_team_api_id,
+                    loan_team_name=loan_team_name,
+                    loan_team_country=loan_team_country,
+                    can_fetch_stats=lp.can_fetch_stats,
+                    data_source=lp.data_source,
                     sofascore_player_id=sofa_id,
-                    _source='supplemental',
                 )
             )
+            key = f"{_name_key(lp.player_name)}::{loan_team_api_id or loan_team_name}"
+            existing_keys.add(key)
+
+        # Include legacy supplemental loans if present
+        supplemental_rows = (
+            db_session.query(SupplementalLoan)
+            .filter(
+                SupplementalLoan.parent_team_id == parent_team_db_id,
+                SupplementalLoan.season_year == season,
+            )
+            .all()
+            if db_session
+            else []
+        )
+        for supp in supplemental_rows:
+            loan_team_row = db_session.query(Team).get(supp.loan_team_id) if db_session and supp.loan_team_id else None
+            loan_team_api_id = loan_team_row.team_id if loan_team_row and getattr(loan_team_row, "team_id", None) else None
+            loan_team_name = supp.loan_team_name or (loan_team_row.name if loan_team_row else None)
+            loan_team_country = _resolve_team_country(loan_team_row, loan_team_api_id)
+            key = f"{_name_key(supp.player_name)}::{loan_team_api_id or loan_team_name}"
+            if key in existing_keys:
+                continue
+            loanees.append(
+                dict(
+                    player_api_id=supp.api_player_id if supp.api_player_id is not None else -abs(supp.id or 0),
+                    player_name=supp.player_name or "",
+                    loan_team_api_id=loan_team_api_id,
+                    loan_team_name=loan_team_name,
+                    loan_team_country=loan_team_country,
+                    can_fetch_stats=False,
+                    data_source=supp.data_source or "supplemental",
+                    sofascore_player_id=supp.sofascore_player_id,
+                    source="supplemental",
+                )
+            )
+            existing_keys.add(key)
 
         # ------------------------------------------------------------------
         # 2️⃣ Summarise each loanee via API-Football
         # ------------------------------------------------------------------
         summaries: list[dict] = []
         for info in loanees:
-            try:
-                s = self.summarize_loanee_week(
-                    player_id=info["player_api_id"],
-                    loan_team_id=info["loan_team_api_id"],
-                    season=season,
-                    week_start=week_start,
-                    week_end=week_end,
-                    include_team_stats=include_team_stats,
-                    db_session=db_session,
+            player_id = info["player_api_id"]
+            can_fetch = info.get("can_fetch_stats", True)
+            
+            # Check if this is a manual player (negative ID or cannot fetch stats)
+            is_manual = player_id < 0 or not can_fetch
+            
+            if is_manual:
+                # Manual player: create summary without API calls
+                logger.debug(
+                    f"Skipping API calls for manual player {info['player_name']} "
+                    f"(player_id={player_id}, can_fetch_stats={can_fetch})"
                 )
-                s["player_name"] = info["player_name"]
-                s["loan_team_name"] = info["loan_team_name"]
-                if info.get("loan_team_country"):
-                    s["loan_team_country"] = info.get("loan_team_country")
-                try:
-                    logger.info(
-                        f"Loanee weekly summary: player={s.get('player_name')} team={s.get('loan_team_name')} matches={len(s.get('matches') or [])} totals={s.get('totals')}"
-                    )
-                    # Log first fixture date and league.season to spot season drift
-                    if s.get('matches'):
-                        m0 = s['matches'][0]
-                        logger.debug(
-                            f"  first_match: fixture_id={m0.get('fixture_id')} date={m0.get('date')} comp={m0.get('competition')}"
-                        )
-                except Exception:
-                    pass
-                summaries.append(s)
-            except Exception as exc:
-                logger.warning(f"Loanee summary failed for {info}: {exc}")
-
-        # 2b️⃣ Add supplemental entries without API-Football calls
-        for info in supplemental_infos:
-            try:
                 s = {
-                    'player_id': info.get('player_api_id'),
-                    'player_name': info.get('player_name'),
-                    'loan_team_id': info.get('loan_team_api_id'),
-                    'loan_team_name': info.get('loan_team_name'),
-                    'loan_team_country': info.get('loan_team_country'),
-                    'supplemental_id': info.get('supplemental_id'),
+                    'player_api_id': player_id,
+                    'player_id': player_id,
+                    'player_name': info["player_name"],
+                    'loan_team_id': info["loan_team_api_id"],
+                    'loan_team_api_id': info["loan_team_api_id"],
+                    'loan_team_name': info["loan_team_name"],
+                    'loan_team_country': info.get("loan_team_country"),
                     'season': season,
                     'range': [start_str, end_str],
                     'totals': {
@@ -1573,15 +2257,66 @@ class APIFootballClient:
                         'offsides': 0,
                     },
                     'matches': [],
-                    'source': 'supplemental',
+                    'upcoming_fixtures': [],
+                    'source': info.get("source", info.get("data_source", "manual")),
                     'can_fetch_stats': False,
+                    'season_context': {'season_stats': {}, 'recent_form': [], 'trends': {}},
                 }
+                # Add sofascore_player_id if available
                 sofa_val = info.get('sofascore_player_id')
                 if sofa_val:
                     s['sofascore_player_id'] = sofa_val
                 summaries.append(s)
-            except Exception:
-                continue
+            else:
+                # Existing API-Football processing for tracked players
+                try:
+                    s = self.summarize_loanee_week(
+                        player_id=info["player_api_id"],
+                        loan_team_id=info["loan_team_api_id"],
+                        season=season,
+                        week_start=week_start,
+                        week_end=week_end,
+                        include_team_stats=include_team_stats,
+                        db_session=db_session,
+                    )
+                    s["player_name"] = info["player_name"]
+                    s["loan_team_name"] = info["loan_team_name"]
+                    if info.get("loan_team_country"):
+                        s["loan_team_country"] = info.get("loan_team_country")
+                    
+                    # Add season context for narrative depth
+                    try:
+                        season_context = self.get_player_season_context(
+                            player_id=info["player_api_id"],
+                            loan_team_id=info["loan_team_api_id"],
+                            season=season,
+                            up_to_date=week_end,
+                            db_session=db_session,
+                        )
+                        s["season_context"] = season_context
+                        logger.debug(
+                            f"  season_context: {season_context['season_stats']['games_played']} games, "
+                            f"{season_context['season_stats']['goals']}G {season_context['season_stats']['assists']}A"
+                        )
+                    except Exception as e:
+                        logger.warning(f"Failed to add season context for {info['player_name']}: {e}")
+                        s["season_context"] = {'season_stats': {}, 'recent_form': [], 'trends': {}}
+                    
+                    try:
+                        logger.info(
+                            f"Loanee weekly summary: player={s.get('player_name')} team={s.get('loan_team_name')} matches={len(s.get('matches') or [])} totals={s.get('totals')}"
+                        )
+                        # Log first fixture date and league.season to spot season drift
+                        if s.get('matches'):
+                            m0 = s['matches'][0]
+                            logger.debug(
+                                f"  first_match: fixture_id={m0.get('fixture_id')} date={m0.get('date')} comp={m0.get('competition')}"
+                            )
+                    except Exception:
+                        pass
+                    summaries.append(s)
+                except Exception as exc:
+                    logger.warning(f"Loanee summary failed for {info}: {exc}")
 
         if not loanees:
             logger.info(
@@ -1602,10 +2337,9 @@ class APIFootballClient:
             "range": [start_str, end_str],
             "loanees": summaries,
             "counts": {
-                "loanees_found": len(loanees) + len(supplemental_infos),
+                "loanees_found": len(loanees),
                 "loanees_summarized": len(summaries),
                 "skipped_missing_team": skipped_missing_team,
-                "supplemental_included": len(supplemental_infos),
             },
         }
     
@@ -1642,7 +2376,16 @@ class APIFootballClient:
     def get_team_transfers(self, team_id: int) -> List[Dict[str, Any]]:
         """Get transfers for a specific team (transfers endpoint has no season param)."""
         try:
-            params = {'team': team_id}
+            normalized_team_id = int(team_id)
+        except (TypeError, ValueError):
+            normalized_team_id = None
+
+        if normalized_team_id is None or normalized_team_id <= 0:
+            logger.warning("get_team_transfers: invalid team_id=%s", team_id)
+            raise ValueError("team_id must be a positive integer when fetching transfers")
+
+        try:
+            params = {'team': normalized_team_id}
             response = self._make_request('transfers', params)
             return response.get('response', [])
         except Exception as e:
@@ -1877,6 +2620,17 @@ class APIFootballClient:
     def get_team_by_id(self, team_id: int, season: int = None) -> Dict[str, Any]:
         """Get team information by ID from API‑Football, with multiple fallbacks."""
         try:
+            normalized_team_id = int(team_id)
+        except (TypeError, ValueError):
+            normalized_team_id = None
+
+        if normalized_team_id is None or normalized_team_id <= 0:
+            logger.warning("get_team_by_id: invalid team_id=%s", team_id)
+            raise ValueError("team_id must be a positive integer when fetching team data")
+
+        team_id = normalized_team_id
+
+        try:
             # First try to get team info from teams endpoint
             params = {'id': team_id}
             response = self._make_request('teams', params)
@@ -1920,8 +2674,17 @@ class APIFootballClient:
     def get_team_seasons(self, team_id: int) -> Dict[str, Any]:
         """Get team information by ID from API-Football."""
         try:
+            normalized_team_id = int(team_id)
+        except (TypeError, ValueError):
+            normalized_team_id = None
+
+        if normalized_team_id is None or normalized_team_id <= 0:
+            logger.warning("get_team_seasons: invalid team_id=%s", team_id)
+            raise ValueError("team_id must be a positive integer when fetching team seasons")
+
+        try:
             # First try to get team info from teams endpoint
-            params = {'id': team_id}
+            params = {'id': normalized_team_id}
             response = self._make_request('teams/seasons', params)
             seasons_data = response.get('response', [])
             
@@ -2856,13 +3619,28 @@ class APIFootballClient:
         row = db_session.query(Fixture).filter_by(fixture_id_api=fixture_api_id).first()
         if row:
             return row
+
         teams = fx.get('teams', {}) or {}
         goals = fx.get('goals', {}) or {}
         home = teams.get('home') or {}
         away = teams.get('away') or {}
+
+        raw_date = ((fx.get('fixture') or {}).get('date'))
+        date_utc = None
+        if raw_date:
+            try:
+                normalized = raw_date.replace('Z', '+00:00')
+                date_utc = datetime.fromisoformat(normalized)
+            except ValueError:
+                try:
+                    date_utc = datetime.strptime(raw_date, '%Y-%m-%d %H:%M:%S')
+                except Exception:
+                    logger.warning("⚠️ Unable to parse fixture date '%s' for fixture_id=%s", raw_date, fixture_api_id)
+                    date_utc = None
+
         row = Fixture(
             fixture_id_api=fixture_api_id,
-            date_utc=((fx.get('fixture') or {}).get('date')),
+            date_utc=date_utc,
             season=season,
             competition_name=((fx.get('league') or {}).get('name')),
             home_team_api_id=home.get('id'),
@@ -2872,7 +3650,16 @@ class APIFootballClient:
             raw_json=json.dumps(fx),
         )
         db_session.add(row)
-        db_session.flush()
+        try:
+            db_session.flush()
+        except IntegrityError:
+            logger.debug("Fixture %s already exists, reusing", fixture_api_id)
+            db_session.rollback()
+            row = db_session.query(Fixture).filter_by(fixture_id_api=fixture_api_id).first()
+        except DataError as exc:
+            logger.warning("⚠️ Failed to persist fixture %s: %s", fixture_api_id, exc)
+            db_session.rollback()
+            row = db_session.query(Fixture).filter_by(fixture_id_api=fixture_api_id).first()
         return row
 
     def _upsert_player_fixture_stats(self, db_session, fixture_pk, player_api_id, team_api_id, pstats_row):

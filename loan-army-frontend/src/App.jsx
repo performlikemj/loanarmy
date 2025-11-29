@@ -70,32 +70,38 @@ import {
   X,
   Copy,
   ChevronDown,
-  ChevronRight
+  ChevronRight,
+  Search,
+  CreditCard,
+  XCircle,
+  RotateCcw
 } from 'lucide-react'
 import { AdminLayout } from '@/components/layouts/AdminLayout'
+import { SponsorSidebar, SponsorStrip } from '@/components/SponsorSidebar'
 import { AdminDashboard } from '@/pages/admin/AdminDashboard'
 import { AdminNewsletters } from '@/pages/admin/AdminNewsletters'
 import { AdminLoans } from '@/pages/admin/AdminLoans'
 import { AdminPlayers } from '@/pages/admin/AdminPlayers'
 import { AdminSettings } from '@/pages/admin/AdminSettings'
 import { AdminUsers } from '@/pages/admin/AdminUsers'
+import { AdminTeams } from '@/pages/admin/AdminTeams'
+import { AdminSponsors } from '@/pages/admin/AdminSponsors'
 import { WriterLogin } from '@/pages/writer/WriterLogin'
 import { WriterDashboard } from '@/pages/writer/WriterDashboard'
 import { WriteupEditor } from '@/pages/writer/WriteupEditor'
 import { WriteupPage } from '@/pages/WriteupPage'
+import { PlayerPage } from '@/pages/PlayerPage'
 import { JournalistProfile } from '@/pages/JournalistProfile'
 import { JournalistNewsletterView } from '@/components/JournalistNewsletterView'
 import { 
   NewsletterWriterOverlay, 
-  WriterDiscoveryBar, 
-  WriterSummarySection, 
-  PlayerWriterCommentary,
-  useNewsletterWriters,
-  getPlayerCommentaries 
+  NewsletterWriterProvider,
+  WriterHeaderSection,
+  InlinePlayerWriteups,
+  useWriterCommentaries
 } from '@/components/NewsletterWriterOverlay'
 import JournalistStripeSetup from '@/pages/JournalistStripeSetup'
 import JournalistPricing from '@/pages/JournalistPricing'
-import MySubscriptions from '@/pages/MySubscriptions'
 import AdminRevenueDashboard from '@/pages/admin/AdminRevenueDashboard'
 import { StripeProvider } from '@/context/StripeContext'
 
@@ -616,19 +622,82 @@ function AdminNewsletterDetailPage() {
                 <div className="space-y-4">
                   {items.map((item, itemIdx) => (
                     <div key={itemIdx} className="border rounded-lg p-4 bg-white shadow-sm">
-                      <div className="flex flex-wrap items-start justify-between gap-3">
-                        <div>
-                          <div className="text-lg font-semibold text-gray-900">{item.player_name}</div>
-                          <div className="text-sm text-gray-600">{item.loan_team || item.loan_team_name}</div>
-                        </div>
-                        <div className="text-sm text-gray-500">
-                          {item.competition || item.match_name}
+                      <div className="flex items-start gap-3">
+                        {/* Player Photo */}
+                        {item.player_photo && (
+                          <img
+                            src={item.player_photo}
+                            alt={item.player_name}
+                            className="w-14 h-14 rounded-full object-cover bg-gray-100 flex-shrink-0 border-2 border-white shadow-sm"
+                          />
+                        )}
+                        <div className="flex-1">
+                          <div className="flex flex-wrap items-start justify-between gap-3">
+                            <div>
+                              {(item.player_api_id || item.player_id) ? (
+                                <Link 
+                                  to={`/players/${item.player_api_id || item.player_id}`}
+                                  className="text-lg font-semibold text-gray-900 hover:text-blue-600 hover:underline transition-colors"
+                                >
+                                  {item.player_name}
+                                </Link>
+                              ) : (
+                                <div className="text-lg font-semibold text-gray-900">{item.player_name}</div>
+                              )}
+                              {/* Loan Team with Logo */}
+                              <div className="flex items-center gap-2 text-sm text-gray-600">
+                                {item.loan_team_logo && (
+                                  <img
+                                    src={item.loan_team_logo}
+                                    alt={item.loan_team || item.loan_team_name}
+                                    className="w-5 h-5 rounded-full object-cover bg-gray-100"
+                                  />
+                                )}
+                                <span>{item.loan_team || item.loan_team_name}</span>
+                              </div>
+                            </div>
+                            <div className="text-sm text-gray-500">
+                              {item.competition || item.match_name}
+                            </div>
+                          </div>
                         </div>
                       </div>
                       {item.week_summary && (
                         <p className="mt-3 text-gray-700 leading-relaxed">{item.week_summary}</p>
                       )}
-                      {item.match_notes && Array.isArray(item.match_notes) && item.match_notes.length > 0 && (
+                      {/* This Week's Matches with Opponent Logos */}
+                      {item.matches && Array.isArray(item.matches) && item.matches.length > 0 && (
+                        <div className="mt-3 p-3 bg-gray-50 rounded-lg border border-gray-200">
+                          <h5 className="text-sm font-semibold text-gray-700 mb-2">⚽ This Week's Matches</h5>
+                          <div className="space-y-2">
+                            {item.matches.map((match, mIdx) => (
+                              <div key={mIdx} className="flex items-center gap-3 p-2 bg-white rounded border border-gray-100">
+                                {match.opponent_logo && (
+                                  <img
+                                    src={match.opponent_logo}
+                                    alt={match.opponent}
+                                    className="w-7 h-7 rounded-full object-cover bg-gray-100 flex-shrink-0"
+                                  />
+                                )}
+                                <div className="flex-1">
+                                  <span className="font-medium text-sm">{match.home ? 'vs' : '@'} {match.opponent}</span>
+                                  {match.competition && <span className="text-xs text-gray-500 ml-2">({match.competition})</span>}
+                                </div>
+                                {match.score && (
+                                  <span className={`px-2 py-1 rounded text-xs font-bold ${
+                                    match.result === 'W' ? 'bg-green-100 text-green-800' :
+                                    match.result === 'D' ? 'bg-gray-100 text-gray-700' :
+                                    'bg-red-100 text-red-800'
+                                  }`}>
+                                    {match.score.home ?? 0}-{match.score.away ?? 0}
+                                  </span>
+                                )}
+                              </div>
+                            ))}
+                          </div>
+                        </div>
+                      )}
+                      {item.match_notes && Array.isArray(item.match_notes) && item.match_notes.length > 0 && !item.matches && (
                         <ul className="mt-3 list-disc space-y-1 pl-5 text-sm text-gray-600">
                           {item.match_notes.map((note, noteIndex) => (
                             <li key={noteIndex}>{note}</li>
@@ -7042,7 +7111,7 @@ function Navigation() {
   }, [adminUnlocked, isJournalist, token])
 
   const linkClasses = (isActive) => (
-    `inline-flex items-center gap-2 rounded-full px-3 py-2 text-sm font-medium transition-colors sm:px-3 whitespace-nowrap no-underline ` +
+    `inline-flex items-center gap-2 rounded-full px-3 py-2 text-sm font-medium transition-colors sm:px-3 whitespace-nowrap no-underline hover:no-underline ` +
     (isActive
       ? 'text-blue-700 bg-blue-50 shadow-inner'
       : 'text-gray-700 hover:text-gray-900 hover:bg-gray-100'
@@ -7082,7 +7151,7 @@ function Navigation() {
   return (
     <nav className="border-b bg-white/90 backdrop-blur supports-[backdrop-filter]:bg-white/70">
       <div className="mx-auto flex h-16 max-w-7xl items-center justify-between px-4 sm:px-6 lg:px-8 gap-4">
-        <Link to="/" className="flex items-center gap-2 text-gray-900 sm:gap-3 shrink-0">
+        <Link to="/" className="flex items-center gap-2 text-gray-900 no-underline hover:no-underline sm:gap-3 shrink-0">
           <span className="inline-flex h-10 w-10 items-center justify-center rounded bg-slate-900 shadow">
             <img src={BRAND_LOGO_SRC} alt="Go On Loan logo" className="h-7 w-7" />
           </span>
@@ -7309,33 +7378,35 @@ function HomePage() {
   }
 
   return (
-    <div className="max-w-7xl mx-auto py-6 sm:px-6 lg:px-8">
-      <div className="px-4 py-6 sm:px-0">
-        {/* Hero Section */}
-        <div className="text-center mb-12">
-          <h1 className="text-4xl font-bold text-gray-900 mb-4">
-            Track European Football Loans
-          </h1>
-          <p className="text-xl text-gray-600 mb-8">
-            Stay updated with AI-powered newsletters about your favorite teams' loaned players
-          </p>
-          <div className="flex justify-center space-x-4">
-            <Link to="/teams">
-              <Button size="lg" variant="outline">
-                <Users className="h-5 w-5 mr-2" />
-                Browse Teams
-              </Button>
-            </Link>
-            {adminUnlocked && (
-              <Link to="/admin">
-                <Button size="lg">
-                  <Settings className="h-5 w-5 mr-2" />
-                  Admin
+    <div className="max-w-[1400px] mx-auto py-6 sm:px-6 lg:px-8">
+      <div className="flex flex-col lg:flex-row gap-6">
+        {/* Main Content */}
+        <div className="flex-1 min-w-0 px-4 py-6 sm:px-0">
+          {/* Hero Section */}
+          <div className="text-center mb-12">
+            <h1 className="text-4xl font-bold text-gray-900 mb-4">
+              Track European Football Loans
+            </h1>
+            <p className="text-xl text-gray-600 mb-8">
+              Stay updated with AI-powered newsletters about your favorite teams' loaned players
+            </p>
+            <div className="flex justify-center space-x-4">
+              <Link to="/teams">
+                <Button size="lg" variant="outline">
+                  <Users className="h-5 w-5 mr-2" />
+                  Browse Teams
                 </Button>
               </Link>
-            )}
+              {adminUnlocked && (
+                <Link to="/admin">
+                  <Button size="lg">
+                    <Settings className="h-5 w-5 mr-2" />
+                    Admin
+                  </Button>
+                </Link>
+              )}
+            </div>
           </div>
-        </div>
 
         {/* Stats Cards */}
         {loading ? (
@@ -7430,6 +7501,15 @@ function HomePage() {
             </p>
           </div>
         </div>
+        </div>
+
+        {/* Sponsor Sidebar - visible on larger screens */}
+        <SponsorSidebar className="hidden lg:block" />
+      </div>
+
+      {/* Mobile Sponsor Strip - visible on smaller screens */}
+      <div className="lg:hidden px-4 pb-6">
+        <SponsorStrip />
       </div>
     </div>
   )
@@ -7676,9 +7756,13 @@ function TeamsPage() {
   const [flagState, setFlagState] = useState({ open: false, team: null, loan: null, reason: '', email: '' })
   const [submittingFlag, setSubmittingFlag] = useState(false)
   const [selectedTeams, setSelectedTeams] = useState([])
+  const [trackingRequestState, setTrackingRequestState] = useState({ open: false, team: null, reason: '', email: '' })
+  const [submittingTrackingRequest, setSubmittingTrackingRequest] = useState(false)
   const [email, setEmail] = useState('')
   const [submitting, setSubmitting] = useState(false)
   const [message, setMessage] = useState(null)
+  const [teamSearch, setTeamSearch] = useState('')
+  const [showSubscribeSection, setShowSubscribeSection] = useState(false)
 
   useEffect(() => {
     const loadTeams = async () => {
@@ -7766,6 +7850,38 @@ function TeamsPage() {
       setSubmittingFlag(false)
     }
   }
+
+  // Tracking Request handlers
+  const openRequestTracking = (team) => {
+    setTrackingRequestState({ open: true, team, reason: '', email: '' })
+  }
+  const closeRequestTracking = () => setTrackingRequestState(prev => ({ ...prev, open: false }))
+  const submitTrackingRequest = async () => {
+    if (!trackingRequestState.team) return
+    setSubmittingTrackingRequest(true)
+    try {
+      await APIService.submitTrackingRequest(trackingRequestState.team.id, {
+        reason: trackingRequestState.reason || undefined,
+        email: trackingRequestState.email || undefined,
+      })
+      setMessage({ type: 'success', text: `Tracking request submitted for ${trackingRequestState.team.name}. We'll review it soon!` })
+      closeRequestTracking()
+    } catch (error) {
+      console.error('Tracking request failed', error)
+      if (error.message?.includes('already pending')) {
+        setMessage({ type: 'info', text: 'A tracking request for this team is already pending.' })
+        closeRequestTracking()
+      } else if (error.message?.includes('already being tracked')) {
+        setMessage({ type: 'info', text: 'Good news - this team is already being tracked!' })
+        closeRequestTracking()
+      } else {
+        setMessage({ type: 'error', text: 'Failed to submit tracking request. Please try again.' })
+      }
+    } finally {
+      setSubmittingTrackingRequest(false)
+    }
+  }
+
   const handleTeamToggle = (teamId) => {
     setSelectedTeams((prev) => prev.includes(teamId) ? prev.filter((id) => id !== teamId) : [...prev, teamId])
   }
@@ -7795,7 +7911,28 @@ function TeamsPage() {
     }
   }
 
-  // Group teams by league
+  // Filter teams by search query
+  const searchQuery = teamSearch.trim().toLowerCase()
+  const searchedTeams = searchQuery
+    ? teams
+        .filter(team => team.name.toLowerCase().startsWith(searchQuery))
+        .sort((a, b) => a.name.localeCompare(b.name))
+    : []
+  
+  // Also include teams that contain (but don't start with) the query, sorted after
+  const containsTeams = searchQuery
+    ? teams
+        .filter(team => 
+          !team.name.toLowerCase().startsWith(searchQuery) && 
+          team.name.toLowerCase().includes(searchQuery)
+        )
+        .sort((a, b) => a.name.localeCompare(b.name))
+    : []
+  
+  const allSearchResults = [...searchedTeams, ...containsTeams]
+  const isSearching = searchQuery.length > 0
+
+  // Group teams by league (used when not searching)
   const teamsByLeague = teams.reduce((acc, team) => {
     const league = team.league_name || 'Other'
     if (!acc[league]) acc[league] = []
@@ -7810,62 +7947,198 @@ function TeamsPage() {
           <div className="flex justify-between items-center">
             <div>
               <h1 className="text-3xl font-bold text-gray-900 mb-2">European Teams</h1>
-              <div className="flex items-center space-x-2 mb-2">
-                <Badge variant="secondary" className="bg-green-100 text-green-800 border-green-300">
-                  <Calendar className="h-3 w-3 mr-1" />
-                  Current Season
-                </Badge>
-              </div>
-              <p className="text-lg text-gray-600">Browse current season teams from Europe's top 5 leagues</p>
+              <Badge variant="secondary" className="bg-green-100 text-green-800 border-green-300">
+                <Calendar className="h-3 w-3 mr-1" />
+                Current Season
+              </Badge>
             </div>
-            <Select value={filter} onValueChange={setFilter}>
-              <SelectTrigger className="w-48">
-                <SelectValue />
-              </SelectTrigger>
-              <SelectContent>
-                <SelectItem value="all">All Teams</SelectItem>
-                <SelectItem value="with_loans">Teams with Loans</SelectItem>
-              </SelectContent>
-            </Select>
+            <div className="flex items-center gap-2">
+              <Select value={filter} onValueChange={setFilter}>
+                <SelectTrigger className="w-40">
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="all">All Teams</SelectItem>
+                  <SelectItem value="with_loans">With Loans</SelectItem>
+                </SelectContent>
+              </Select>
+            </div>
           </div>
-          <TeamMultiSelect
-            teams={teams}
-            value={selectedTeams}
-            onChange={setSelectedTeams}
-            placeholder="Search and select teams…"
-            className="w-full"
-          />
-          <Card>
-            <CardHeader>
-              <CardTitle>Subscribe to Team Updates</CardTitle>
-              <CardDescription>Select multiple teams using the selector above, then subscribe.</CardDescription>
-            </CardHeader>
-            <CardContent>
-              {message && (
-                <Alert className={`mb-4 ${message.type === 'error' ? 'border-red-500' : 'border-green-500'}`}>
-                  <AlertCircle className="h-4 w-4" />
-                  <AlertDescription>{message.text}</AlertDescription>
-                </Alert>
-              )}
-              <div className="flex flex-col sm:flex-row gap-3 items-stretch sm:items-end">
-                <div className="flex-1">
-                  <Label htmlFor="bulk-email">Email Address</Label>
-                  <Input id="bulk-email" type="email" value={email} onChange={(e) => setEmail(e.target.value)} placeholder="your.email@example.com" required />
-                </div>
-                <Button onClick={handleBulkSubscribe} disabled={submitting || selectedTeams.length === 0} className="bg-blue-600 hover:bg-blue-700">
-                  {submitting ? 'Subscribing…' : `Subscribe to ${selectedTeams.length} Team${selectedTeams.length !== 1 ? 's' : ''}`}
-                </Button>
+          
+          {/* Compact Search Bar */}
+          <div className="relative">
+            <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 h-4 w-4 text-gray-400" />
+            <Input
+              type="text"
+              placeholder="Search teams by name..."
+              value={teamSearch}
+              onChange={(e) => setTeamSearch(e.target.value)}
+              className="pl-10 pr-10"
+            />
+            {teamSearch && (
+              <button
+                onClick={() => setTeamSearch('')}
+                className="absolute right-3 top-1/2 transform -translate-y-1/2 text-gray-400 hover:text-gray-600"
+              >
+                <X className="h-4 w-4" />
+              </button>
+            )}
+          </div>
+          
+          {/* Collapsible Subscribe Section */}
+          <div className="border rounded-lg bg-white">
+            <button
+              onClick={() => setShowSubscribeSection(!showSubscribeSection)}
+              className="w-full flex items-center justify-between p-3 text-left hover:bg-gray-50 transition-colors"
+            >
+              <div className="flex items-center gap-2">
+                <Mail className="h-4 w-4 text-blue-600" />
+                <span className="font-medium text-sm">Subscribe to Team Updates</span>
+                {selectedTeams.length > 0 && (
+                  <Badge variant="secondary" className="bg-blue-100 text-blue-800">
+                    {selectedTeams.length} selected
+                  </Badge>
+                )}
               </div>
-            </CardContent>
-          </Card>
+              <ChevronDown className={`h-4 w-4 text-gray-400 transition-transform ${showSubscribeSection ? 'rotate-180' : ''}`} />
+            </button>
+            
+            {showSubscribeSection && (
+              <div className="px-3 pb-3 border-t">
+                <div className="pt-3 space-y-3">
+                  <TeamMultiSelect
+                    teams={teams}
+                    value={selectedTeams}
+                    onChange={setSelectedTeams}
+                    placeholder="Search and select teams…"
+                    className="w-full"
+                  />
+                  {message && (
+                    <Alert className={`${message.type === 'error' ? 'border-red-500' : message.type === 'info' ? 'border-blue-500' : 'border-green-500'}`}>
+                      <AlertCircle className="h-4 w-4" />
+                      <AlertDescription>{message.text}</AlertDescription>
+                    </Alert>
+                  )}
+                  <div className="flex flex-col sm:flex-row gap-2 items-stretch sm:items-end">
+                    <div className="flex-1">
+                      <Label htmlFor="bulk-email" className="text-xs">Email Address</Label>
+                      <Input id="bulk-email" type="email" value={email} onChange={(e) => setEmail(e.target.value)} placeholder="your.email@example.com" className="h-9" required />
+                    </div>
+                    <Button onClick={handleBulkSubscribe} disabled={submitting || selectedTeams.length === 0} className="bg-blue-600 hover:bg-blue-700 h-9">
+                      {submitting ? 'Subscribing…' : `Subscribe (${selectedTeams.length})`}
+                    </Button>
+                  </div>
+                </div>
+              </div>
+            )}
+          </div>
         </div>
-
-        <BuyMeCoffeeButton />
-
         {loading ? (
           <div className="text-center py-12">
             <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-blue-600 mx-auto"></div>
             <p className="mt-4 text-gray-600">Loading teams...</p>
+          </div>
+        ) : isSearching ? (
+          /* Search Results View - flat list of matching teams */
+          <div className="space-y-4">
+            <div className="flex items-center justify-between px-1">
+              <h2 className="text-lg font-semibold text-gray-900">
+                {allSearchResults.length === 0 
+                  ? 'No teams found' 
+                  : `${allSearchResults.length} team${allSearchResults.length !== 1 ? 's' : ''} matching "${teamSearch}"`
+                }
+              </h2>
+              <Button variant="ghost" size="sm" onClick={() => setTeamSearch('')}>
+                Clear search
+              </Button>
+            </div>
+            {allSearchResults.length > 0 && (
+              <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-4">
+                {allSearchResults.map((team) => (
+                  <Card key={team.id} className={`hover:shadow-lg transition-shadow cursor-pointer ${selectedTeams.includes(team.id) ? 'ring-2 ring-blue-400' : ''}`} onClick={(e) => handleCardClick(e, team.id)}>
+                    <CardHeader className="pb-3">
+                      <div className="flex flex-col sm:flex-row items-center sm:items-start gap-2 sm:gap-3 mb-2">
+                        {team.logo ? (
+                          <Avatar className="h-10 w-10 sm:h-12 sm:w-12 shrink-0">
+                            <AvatarImage src={team.logo} alt={`${team.name} logo`} />
+                            <AvatarFallback className="text-xs bg-gray-200">
+                              {team.name.split(' ').map(n => n[0]).join('').slice(0, 2).toUpperCase()}
+                            </AvatarFallback>
+                          </Avatar>
+                        ) : (
+                          <Avatar className="h-10 w-10 sm:h-12 sm:w-12 shrink-0 bg-gray-200">
+                            <AvatarFallback className="text-xs">
+                              {team.name.split(' ').map(n => n[0]).join('').slice(0, 2).toUpperCase()}
+                            </AvatarFallback>
+                          </Avatar>
+                        )}
+                        <div className="flex-1 min-w-0 text-center sm:text-left">
+                          <CardTitle className="text-base sm:text-lg truncate">{team.name}</CardTitle>
+                          <CardDescription className="text-xs break-words sm:break-normal">
+                            {team.league_name && <span className="text-blue-600">{team.league_name}</span>}
+                            {team.league_name && ' • '}
+                            {team.country} • Founded {team.founded || 'N/A'}
+                          </CardDescription>
+                        </div>
+                      </div>
+                    </CardHeader>
+                    <CardContent>
+                      {/* Tracking Status Badge */}
+                      {team.is_tracked === false && (
+                        <div className="mb-3 p-2 bg-amber-50 border border-amber-200 rounded-md">
+                          <div className="flex items-center justify-between gap-2">
+                            <div className="flex items-center gap-1.5">
+                              <AlertCircle className="h-3.5 w-3.5 text-amber-600" />
+                              <span className="text-xs text-amber-700 font-medium">Not currently tracked</span>
+                            </div>
+                            <Button 
+                              size="sm" 
+                              variant="ghost" 
+                              className="h-6 px-2 text-xs text-amber-700 hover:text-amber-900 hover:bg-amber-100"
+                              onClick={(e) => { e.stopPropagation(); openRequestTracking(team) }}
+                            >
+                              Request Tracking
+                            </Button>
+                          </div>
+                        </div>
+                      )}
+                      <div className="flex items-center gap-2 mb-3">
+                        <input type="checkbox" checked={selectedTeams.includes(team.id)} onChange={() => handleTeamToggle(team.id)} className="rounded border-gray-300 text-blue-600 focus:ring-blue-500" />
+                        <span className="text-sm">{selectedTeams.includes(team.id) ? 'Selected' : 'Select team'}</span>
+                      </div>
+                      <div className="flex justify-between items-center">
+                        <div className="text-sm text-gray-600">
+                          <div className="flex items-center">
+                            <TrendingUp className="h-4 w-4 mr-1" />
+                            {team.is_tracked ? `${team.current_loaned_out_count} active loans` : 'No loan data'}
+                          </div>
+                        </div>
+                        {team.is_tracked !== false && (
+                          <Button size="sm" variant="outline" onClick={(e) => { e.stopPropagation(); toggleExpand(team.id) }}>
+                            {expandedTeamId === team.id ? 'Hide Loans' : 'Show Loans'}
+                            <ArrowRight className="h-4 w-4 ml-1" />
+                          </Button>
+                        )}
+                      </div>
+                      {expandedTeamId === team.id && (
+                        <div className="mt-4 space-y-3">
+                          {loadingLoans[team.id] ? (
+                            <div className="flex items-center justify-center py-8">
+                              <Loader2 className="h-5 w-5 animate-spin text-gray-400 mr-2" />
+                              <span className="text-sm text-gray-500">Loading loans...</span>
+                            </div>
+                          ) : (teamLoans[team.id] || []).length === 0 ? (
+                            <div className="text-sm text-gray-500 text-center py-4">No loans found.</div>
+                          ) : (
+                            <div className="text-sm text-gray-600">{teamLoans[team.id]?.length || 0} players on loan</div>
+                          )}
+                        </div>
+                      )}
+                    </CardContent>
+                  </Card>
+                ))}
+              </div>
+            )}
           </div>
         ) : (
           <Accordion type="single" collapsible className="space-y-4">
@@ -8093,7 +8366,72 @@ function TeamsPage() {
           </Accordion>
         )}
 
-        <BuyMeCoffeeButton className="mt-10" />
+        {/* Tracking Request Dialog */}
+        <Dialog open={trackingRequestState.open} onOpenChange={(open) => !open && closeRequestTracking()}>
+          <DialogContent className="sm:max-w-md">
+            <DialogHeader>
+              <DialogTitle className="flex items-center gap-2">
+                <TrendingUp className="h-5 w-5 text-blue-600" />
+                Request Team Tracking
+              </DialogTitle>
+              <DialogDescription>
+                {trackingRequestState.team && (
+                  <span>Request to track loan players for <strong>{trackingRequestState.team.name}</strong></span>
+                )}
+              </DialogDescription>
+            </DialogHeader>
+            <div className="space-y-4 py-4">
+              <div className="flex items-center gap-3 p-3 bg-muted/50 rounded-lg">
+                {trackingRequestState.team?.logo && (
+                  <Avatar className="h-12 w-12">
+                    <AvatarImage src={trackingRequestState.team.logo} alt={trackingRequestState.team.name} />
+                    <AvatarFallback className="bg-gray-200 text-xs">
+                      {trackingRequestState.team?.name?.split(' ').map(n => n[0]).join('').slice(0, 2).toUpperCase()}
+                    </AvatarFallback>
+                  </Avatar>
+                )}
+                <div>
+                  <p className="font-medium">{trackingRequestState.team?.name}</p>
+                  <p className="text-sm text-muted-foreground">{trackingRequestState.team?.league_name || trackingRequestState.team?.country}</p>
+                </div>
+              </div>
+              <div className="space-y-2">
+                <Label htmlFor="tracking-reason">Why are you interested in this team? (optional)</Label>
+                <Textarea
+                  id="tracking-reason"
+                  placeholder="e.g., I'm a fan of this club and want to follow their loan players..."
+                  value={trackingRequestState.reason}
+                  onChange={(e) => setTrackingRequestState(prev => ({ ...prev, reason: e.target.value }))}
+                  rows={3}
+                />
+              </div>
+              <div className="space-y-2">
+                <Label htmlFor="tracking-email">Your email (optional)</Label>
+                <Input
+                  id="tracking-email"
+                  type="email"
+                  placeholder="you@example.com"
+                  value={trackingRequestState.email}
+                  onChange={(e) => setTrackingRequestState(prev => ({ ...prev, email: e.target.value }))}
+                />
+                <p className="text-xs text-muted-foreground">We'll notify you when we start tracking this team.</p>
+              </div>
+            </div>
+            <DialogFooter className="gap-2 sm:gap-0">
+              <Button variant="outline" onClick={closeRequestTracking}>Cancel</Button>
+              <Button onClick={submitTrackingRequest} disabled={submittingTrackingRequest}>
+                {submittingTrackingRequest ? (
+                  <>
+                    <Loader2 className="h-4 w-4 mr-2 animate-spin" />
+                    Submitting...
+                  </>
+                ) : (
+                  'Submit Request'
+                )}
+              </Button>
+            </DialogFooter>
+          </DialogContent>
+        </Dialog>
       </div>
     </div>
   )
@@ -8115,6 +8453,8 @@ function NewslettersPage() {
   const location = useLocation()
   const searchParams = new URLSearchParams(location.search)
   const journalistIdParam = searchParams.get('journalist_id')
+  const teamIdParam = searchParams.get('team')
+  const teamNameParam = searchParams.get('team_name')
   const { newsletterId: newsletterIdParam } = useParams()
   const buildNewsletterUrl = useCallback((item) => {
     if (!item) return null
@@ -8154,6 +8494,20 @@ function NewslettersPage() {
       setViewingJournalist(found)
     }).catch(console.error)
   }, [journalistIdParam])
+
+  // Set team filter from URL param
+  useEffect(() => {
+    if (teamIdParam) {
+      setTeamFilter(teamIdParam)
+      // Also set the league filter if we can find the team's league
+      if (allTeams.length > 0) {
+        const team = allTeams.find(t => String(t.id) === teamIdParam)
+        if (team && team.league_name) {
+          setLeagueFilter(team.league_name)
+        }
+      }
+    }
+  }, [teamIdParam, allTeams])
 
   useEffect(() => {
     if (auth.token) {
@@ -8364,6 +8718,16 @@ function NewslettersPage() {
         }
         const detail = await APIService.getNewsletter(focusedNewsletterId, params)
         if (cancelled) return
+
+        // Refresh fixture results (updates any past fixtures with scores)
+        try {
+          const refreshResult = await APIService.refreshNewsletterFixtures(focusedNewsletterId)
+          if (refreshResult?.enriched_content) {
+            detail.enriched_content = refreshResult.enriched_content
+          }
+        } catch (_) {
+          // ignore refresh errors - continue with original data
+        }
 
         // If a specific commentary is requested and missing, fetch and merge it
         if (commentaryIdParam && (!detail.commentaries || !detail.commentaries.some(c => String(c.id) === String(commentaryIdParam)))) {
@@ -8667,10 +9031,10 @@ function NewslettersPage() {
 
 
   return (
-    <div className="max-w-4xl mx-auto py-6 sm:px-6 lg:px-8">
-      <div className="px-4 py-6 sm:px-0">
+    <div className="max-w-4xl mx-auto py-6 px-4 sm:px-6 lg:px-8 overflow-x-hidden">
+      <div className="py-6 sm:px-0 overflow-hidden">
         <div className="text-center mb-8">
-          <h1 className="text-3xl font-bold text-gray-900 mb-4">
+          <h1 className="text-2xl sm:text-3xl font-bold text-gray-900 mb-4">
             Published Newsletters
           </h1>
           <p className="text-lg text-gray-600">
@@ -8682,9 +9046,6 @@ function NewslettersPage() {
             </p>
           )}
         </div>
-
-        <BuyMeCoffeeButton className="mb-8" />
-
         {focusedViewActive && (
           <div className="mb-4 flex flex-col gap-4">
             <div className="flex justify-start">
@@ -8715,6 +9076,49 @@ function NewslettersPage() {
             )}
           </div>
         )}
+
+        {/* Team filter from URL param banner */}
+        {!focusedViewActive && teamIdParam && (() => {
+          const filteredTeam = allTeams.find(t => String(t.id) === teamIdParam)
+          const teamName = teamNameParam ? decodeURIComponent(teamNameParam) : filteredTeam?.name || 'this team'
+          return (
+            <div className="mb-6 rounded-xl bg-gradient-to-r from-slate-900 to-slate-800 p-4 sm:p-5 shadow-lg">
+              <div className="flex flex-col sm:flex-row sm:items-center gap-4">
+                {/* Team info */}
+                <div className="flex items-center gap-3 flex-1 min-w-0">
+                  {filteredTeam?.logo && (
+                    <div className="shrink-0 w-12 h-12 sm:w-14 sm:h-14 bg-white rounded-lg p-2 shadow-sm">
+                      <img 
+                        src={filteredTeam.logo} 
+                        alt={teamName}
+                        className="w-full h-full object-contain"
+                      />
+                    </div>
+                  )}
+                  <div className="min-w-0">
+                    <h3 className="text-white font-semibold text-lg sm:text-xl truncate">
+                      {teamName}
+                    </h3>
+                    <p className="text-slate-400 text-sm">
+                      Viewing all newsletters for this team
+                    </p>
+                  </div>
+                </div>
+                
+                {/* Action button */}
+                <Button 
+                  variant="secondary"
+                  size="sm"
+                  className="w-full sm:w-auto bg-white/10 hover:bg-white/20 text-white border-0 backdrop-blur-sm"
+                  onClick={() => navigate('/newsletters')}
+                >
+                  <XCircle className="w-4 h-4 mr-2" />
+                  Clear Filter
+                </Button>
+              </div>
+            </div>
+          )
+        })()}
 
         {!focusedViewActive && (
           <Card className="mb-6">
@@ -8871,15 +9275,15 @@ function NewslettersPage() {
               const isTrackedTeam = trackedTeamIdSet.size > 0 && typeof newsletter.team_id !== 'undefined' && trackedTeamIdSet.has(String(newsletter.team_id))
               return (
                 <Card key={newsletter.id}>
-                  <CardHeader>
-                    <div className="flex justify-between items-start gap-4">
-                      <div>
-                        <CardTitle className="text-xl">{newsletter.title}</CardTitle>
+                  <CardHeader className="space-y-3">
+                    <div className="flex flex-col sm:flex-row sm:justify-between sm:items-start gap-3">
+                      <div className="min-w-0 flex-1">
+                        <CardTitle className="text-lg sm:text-xl break-words">{newsletter.title}</CardTitle>
                         <CardDescription className="mt-1">
                           {newsletter.team_name} • {newsletter.newsletter_type} newsletter
                         </CardDescription>
                       </div>
-                      <div className="flex items-center gap-2">
+                      <div className="flex flex-wrap items-center gap-2">
                         {isTrackedTeam && (
                           <Badge variant="outline" className="border-green-300 bg-green-50 text-green-700">
                             Tracking
@@ -8911,7 +9315,7 @@ function NewslettersPage() {
                       </div>
                     </div>
                   </CardHeader>
-                  <CardContent>
+                  <CardContent className="overflow-hidden">
                     <div className="text-sm text-gray-500 mb-2">
                       <Calendar className="h-4 w-4 inline mr-1" />
                       {newsletter.week_start_date && newsletter.week_end_date && (
@@ -8919,15 +9323,15 @@ function NewslettersPage() {
                       )}
                     </div>
                     {(expandedId === newsletter.id || focusedViewActive) ? (
+                      <NewsletterWriterProvider newsletterId={focusedNewsletterId || newsletter.id}>
                       <div className="max-w-none space-y-6">
-                        {/* Writer Commentary Section - Always show in focused view */}
-                        {focusedViewActive && focusedNewsletterId && (
-                          <NewsletterWriterOverlay newsletterId={focusedNewsletterId} />
+                        {/* Writer Bar & Summary Commentaries - Always show in focused view */}
+                        {focusedViewActive && (
+                          <WriterHeaderSection />
                         )}
                         
-                        {newsletter.rendered?.web_html ? (
-                          <div dangerouslySetInnerHTML={{ __html: newsletter.rendered.web_html }} className="prose max-w-none" />
-                        ) : (
+                        {/* Prefer JSON-parsed content over pre-rendered HTML so InlinePlayerWriteups can render inside player cards */}
+                        {(newsletter.enriched_content && typeof newsletter.enriched_content === 'object') || newsletter.content ? (
                           (() => {
                             try {
                               const obj = (newsletter.enriched_content && typeof newsletter.enriched_content === 'object')
@@ -8937,17 +9341,17 @@ function NewslettersPage() {
                                 ? obj.sections.filter((section) => ((section?.title || '').trim().toLowerCase()) !== 'what the internet is saying')
                                 : []
                               return (
-                                <div className="space-y-6">
+                                <div className="space-y-6 newsletter-content overflow-hidden">
                                   {/* Newsletter Header */}
-                                  <div className="bg-gradient-to-r from-blue-50 to-gray-50 p-6 rounded-lg border-l-4 border-blue-500">
-                                    <h2 className="text-2xl font-bold text-gray-900 mb-3">{obj.title || newsletter.title}</h2>
+                                  <div className="bg-gradient-to-r from-blue-50 to-gray-50 p-4 sm:p-6 rounded-lg border-l-4 border-blue-500">
+                                    <h2 className="text-xl sm:text-2xl font-bold text-gray-900 mb-3 break-words">{obj.title || newsletter.title}</h2>
                                     {obj.range && (
                                       <div className="text-sm text-gray-600 mb-3">
                                         📅 Week: {obj.range[0]} - {obj.range[1]}
                                       </div>
                                     )}
                                     {obj.summary && (
-                                      <div className="text-gray-700 leading-relaxed text-lg">
+                                      <div className="text-gray-700 leading-relaxed text-base sm:text-lg break-words">
                                         {obj.summary}
                                       </div>
                                     )}
@@ -9040,60 +9444,167 @@ function NewslettersPage() {
                                             {sec.content && (
                                               <div className="text-gray-700 mb-4">{sec.content}</div>
                                             )}
-                                            {sec.items && Array.isArray(sec.items) && (
+                                                {sec.items && Array.isArray(sec.items) && (
                                               <div className="space-y-4">
                                                 {sec.items.map((it, j) => (
                                                   <div key={j} className="border-l-4 border-blue-200 pl-4 py-2">
-                                                    <div className="flex flex-wrap items-center gap-2 mb-2">
-                                                      {it.player_name && (
-                                                        <span className="font-semibold text-lg text-gray-900">
-                                                          {it.player_name}
-                                                        </span>
+                                                    <div className="flex items-start gap-3 mb-3">
+                                                      {/* Player Photo */}
+                                                      {it.player_photo && (
+                                                        <img
+                                                          src={it.player_photo}
+                                                          alt={it.player_name}
+                                                          className="w-14 h-14 rounded-full object-cover bg-gray-100 flex-shrink-0 border-2 border-white shadow-sm"
+                                                        />
                                                       )}
-                                                      {it.loan_team && (
-                                                        <span className="bg-blue-100 text-blue-800 px-2 py-1 rounded text-sm font-medium">
-                                                          → {it.loan_team}
-                                                        </span>
-                                                      )}
-                                                      {it.stats && (
-                                                        <div className="flex gap-1">
-                                                          {it.stats.goals > 0 && (
-                                                            <span className="bg-green-100 text-green-800 px-2 py-1 rounded text-xs">
-                                                              {it.stats.goals}G
-                                                            </span>
+                                                      <div className="flex-1">
+                                                        <div className="flex flex-wrap items-center gap-2 mb-1">
+                                                          {it.player_name && (
+                                                            (it.player_api_id || it.player_id) ? (
+                                                              <Link 
+                                                                to={`/players/${it.player_api_id || it.player_id}`}
+                                                                className="font-semibold text-lg text-gray-900 hover:text-blue-600 hover:underline transition-colors"
+                                                              >
+                                                                {it.player_name}
+                                                              </Link>
+                                                            ) : (
+                                                              <span className="font-semibold text-lg text-gray-900">
+                                                                {it.player_name}
+                                                              </span>
+                                                            )
                                                           )}
-                                                          {it.stats.assists > 0 && (
-                                                            <span className="bg-purple-100 text-purple-800 px-2 py-1 rounded text-xs">
-                                                              {it.stats.assists}A
-                                                            </span>
-                                                          )}
-                                                          {it.stats.minutes > 0 && (
-                                                            <span className="bg-blue-100 text-blue-800 px-2 py-1 rounded text-xs">
-                                                              {it.stats.minutes}'
-                                                            </span>
+                                                          {it.stats && (
+                                                            <div className="flex gap-1">
+                                                              {it.stats.goals > 0 && (
+                                                                <span className="bg-green-100 text-green-800 px-2 py-1 rounded text-xs">
+                                                                  {it.stats.goals}G
+                                                                </span>
+                                                              )}
+                                                              {it.stats.assists > 0 && (
+                                                                <span className="bg-purple-100 text-purple-800 px-2 py-1 rounded text-xs">
+                                                                  {it.stats.assists}A
+                                                                </span>
+                                                              )}
+                                                              {it.stats.minutes > 0 && (
+                                                                <span className="bg-blue-100 text-blue-800 px-2 py-1 rounded text-xs">
+                                                                  {it.stats.minutes}'
+                                                                </span>
+                                                              )}
+                                                            </div>
                                                           )}
                                                         </div>
-                                                      )}
+                                                        {/* Loan Team with Logo */}
+                                                        {(it.loan_team || it.loan_team_name) && (
+                                                          <div className="flex items-center gap-2 text-sm text-gray-600">
+                                                            {it.loan_team_logo && (
+                                                              <img
+                                                                src={it.loan_team_logo}
+                                                                alt={it.loan_team || it.loan_team_name}
+                                                                className="w-5 h-5 rounded-full object-cover bg-gray-100"
+                                                              />
+                                                            )}
+                                                            <span>→ {it.loan_team || it.loan_team_name}</span>
+                                                          </div>
+                                                        )}
+                                                      </div>
                                                     </div>
                                                     {it.week_summary && (
                                                       <p className="text-gray-700 leading-relaxed">{it.week_summary}</p>
                                                     )}
 
-                                                    {/* Upcoming Fixtures */}
-                                                    {it.upcoming_fixtures && Array.isArray(it.upcoming_fixtures) && it.upcoming_fixtures.length > 0 && (
-                                                      <div className="mt-4 p-3 bg-blue-50 border-l-4 border-blue-400 rounded">
-                                                        <h5 className="text-sm font-semibold text-blue-900 mb-2">📅 Upcoming Fixtures</h5>
+                                                    {/* This Week's Matches with Opponent Logos */}
+                                                    {it.matches && Array.isArray(it.matches) && it.matches.length > 0 && (
+                                                      <div className="mt-4 p-3 bg-gray-50 rounded-lg border border-gray-200">
+                                                        <h5 className="text-sm font-semibold text-gray-700 mb-3 flex items-center gap-1">
+                                                          ⚽ This Week's Matches
+                                                        </h5>
                                                         <div className="space-y-2">
-                                                          {it.upcoming_fixtures.map((fixture, fIdx) => (
-                                                            <div key={fIdx} className="text-sm text-gray-700">
-                                                              <span className="font-medium">{new Date(fixture.date).toLocaleDateString()}</span>
-                                                              <span className="mx-1 text-gray-400">•</span>
-                                                              <span>{fixture.is_home ? 'vs' : '@'} {fixture.opponent}</span>
-                                                              {fixture.competition && (
-                                                                <span className="text-gray-500"> ({fixture.competition})</span>
+                                                          {it.matches.map((match, mIdx) => (
+                                                            <div key={mIdx} className="flex items-center gap-3 p-2 bg-white rounded border border-gray-100">
+                                                              {match.opponent_logo && (
+                                                                <img
+                                                                  src={match.opponent_logo}
+                                                                  alt={match.opponent}
+                                                                  className="w-8 h-8 rounded-full object-cover bg-gray-100 flex-shrink-0"
+                                                                />
+                                                              )}
+                                                              <div className="flex-1 min-w-0">
+                                                                <div className="font-medium text-gray-900 text-sm">
+                                                                  {match.home ? 'vs' : '@'} {match.opponent}
+                                                                </div>
+                                                                <div className="text-xs text-gray-500">
+                                                                  {match.competition}{match.date && ` • ${new Date(match.date).toLocaleDateString()}`}
+                                                                </div>
+                                                              </div>
+                                                              {match.score && (
+                                                                <span className={`px-2 py-1 rounded text-sm font-bold flex-shrink-0 ${
+                                                                  match.result === 'W' ? 'bg-green-100 text-green-800' :
+                                                                  match.result === 'D' ? 'bg-gray-100 text-gray-700' :
+                                                                  'bg-red-100 text-red-800'
+                                                                }`}>
+                                                                  {match.score.home ?? 0}-{match.score.away ?? 0}
+                                                                </span>
                                                               )}
                                                             </div>
                                                           ))}
+                                                        </div>
+                                                      </div>
+                                                    )}
+
+                                                    {/* Fixtures (Upcoming & Results) */}
+                                                    {it.upcoming_fixtures && Array.isArray(it.upcoming_fixtures) && it.upcoming_fixtures.length > 0 && (
+                                                      <div className="mt-4 p-3 bg-blue-50 rounded-lg border border-blue-200">
+                                                        <h5 className="text-sm font-semibold text-blue-900 mb-3 flex items-center gap-1">
+                                                          📅 Fixtures
+                                                        </h5>
+                                                        <div className="space-y-2">
+                                                          {it.upcoming_fixtures.map((fixture, fIdx) => {
+                                                            const isCompleted = fixture.status === 'completed' && fixture.result
+                                                            const resultColors = {
+                                                              W: 'bg-green-50 border-green-200',
+                                                              L: 'bg-red-50 border-red-200',
+                                                              D: 'bg-gray-100 border-gray-300'
+                                                            }
+                                                            const badgeColors = {
+                                                              W: 'bg-green-500 text-white',
+                                                              L: 'bg-red-500 text-white',
+                                                              D: 'bg-gray-500 text-white'
+                                                            }
+                                                            const baseClass = isCompleted 
+                                                              ? resultColors[fixture.result] || 'bg-white/60 border-blue-100'
+                                                              : 'bg-white/60 border-blue-100'
+                                                            
+                                                            return (
+                                                              <div key={fIdx} className={`flex items-center gap-3 p-2 rounded border ${baseClass}`}>
+                                                                {fixture.opponent_logo && (
+                                                                  <img
+                                                                    src={fixture.opponent_logo}
+                                                                    alt={fixture.opponent}
+                                                                    className="w-7 h-7 rounded-full object-cover bg-gray-100 flex-shrink-0"
+                                                                  />
+                                                                )}
+                                                                <div className="flex-1 min-w-0">
+                                                                  <div className="font-medium text-gray-900 text-sm flex items-center gap-2">
+                                                                    {fixture.is_home ? 'vs' : '@'} {fixture.opponent}
+                                                                    {isCompleted && (
+                                                                      <span className="text-sm font-bold">
+                                                                        {fixture.team_score}-{fixture.opponent_score}
+                                                                      </span>
+                                                                    )}
+                                                                  </div>
+                                                                  <div className="text-xs text-gray-500">
+                                                                    {fixture.competition && `${fixture.competition} • `}
+                                                                    {fixture.date && new Date(fixture.date).toLocaleDateString()}
+                                                                  </div>
+                                                                </div>
+                                                                {isCompleted && (
+                                                                  <span className={`text-xs font-bold px-2 py-0.5 rounded ${badgeColors[fixture.result] || 'bg-gray-400 text-white'}`}>
+                                                                    {fixture.result}
+                                                                  </span>
+                                                                )}
+                                                              </div>
+                                                            )
+                                                          })}
                                                         </div>
                                                       </div>
                                                     )}
@@ -9161,6 +9672,14 @@ function NewslettersPage() {
                                                         </ul>
                                                       </div>
                                                     )}
+                                                    
+                                                    {/* Inline Writer Commentaries for this player */}
+                                                    {focusedViewActive && (
+                                                      <InlinePlayerWriteups 
+                                                        playerId={it.player_id} 
+                                                        playerName={it.player_name}
+                                                      />
+                                                    )}
                                                   </div>
                                                 ))}
                                               </div>
@@ -9170,60 +9689,6 @@ function NewslettersPage() {
                                       ))}
                                     </div>
                                   )}
-                                  {/* Journalist Commentaries */}
-                                  {newsletter.commentaries && newsletter.commentaries.length > 0 && (
-                                    <div className="space-y-6 border-t pt-8 mt-8">
-                                      <h3 className="text-2xl font-bold text-gray-900 flex items-center gap-2">
-                                        <UserCog className="h-6 w-6 text-blue-600" />
-                                        Journalist Analysis
-                                      </h3>
-                                      <div className="grid gap-6">
-                                        {newsletter.commentaries.map(commentary => {
-                                          const isSubscribed = mySubscriptions.some(sub => sub.journalist_user_id === commentary.author_id)
-                                          const isLocked = commentary.is_premium && !isSubscribed
-
-                                          return (
-                                            <Card key={commentary.id} className={isLocked ? "bg-gray-50 border-dashed" : "bg-white"}>
-                                              <CardHeader>
-                                                <div className="flex items-center justify-between">
-                                                  <div className="space-y-1">
-                                                    <CardTitle className="text-xl">{commentary.title || 'Expert Analysis'}</CardTitle>
-                                                    <CardDescription className="flex items-center gap-2">
-                                                      By <span className="font-semibold text-gray-900">{commentary.author_name}</span>
-                                                    </CardDescription>
-                                                  </div>
-                                                  {isLocked && (
-                                                    <Badge variant="secondary" className="flex items-center gap-1">
-                                                      <KeyRound className="w-3 h-3" /> Premium
-                                                    </Badge>
-                                                  )}
-                                                </div>
-                                              </CardHeader>
-                                              <CardContent>
-                                                {isLocked ? (
-                                                  <div className="text-center py-8 px-4">
-                                                    <div className="bg-gray-100 w-16 h-16 rounded-full flex items-center justify-center mx-auto mb-4">
-                                                      <KeyRound className="w-8 h-8 text-gray-400" />
-                                                    </div>
-                                                    <h4 className="text-lg font-semibold text-gray-900 mb-2">Subscriber Only Content</h4>
-                                                    <p className="text-gray-500 mb-6 max-w-md mx-auto">
-                                                      Subscribe to {commentary.author_name} to unlock this exclusive analysis and support their work.
-                                                    </p>
-                                                    <Button onClick={() => navigate('/journalists')}>
-                                                      Find Journalists
-                                                    </Button>
-                                                  </div>
-                                                ) : (
-                                                  <div dangerouslySetInnerHTML={{ __html: commentary.content }} className="prose max-w-none" />
-                                                )}
-                                              </CardContent>
-                                            </Card>
-                                          )
-                                        })}
-                                      </div>
-                                    </div>
-                                  )}
-
                                   {/* Fan Pulse Section */}
                                 </div>
                               )
@@ -9238,7 +9703,13 @@ function NewslettersPage() {
                               )
                             }
                           })()
-                        )}
+                        ) : newsletter.rendered?.web_html ? (
+                          /* Fallback to pre-rendered HTML only when no JSON content exists */
+                          <div 
+                            dangerouslySetInnerHTML={{ __html: newsletter.rendered.web_html }} 
+                            className="prose max-w-none newsletter-content"
+                          />
+                        ) : null}
 
                         <div className="mt-10 space-y-4 border-t pt-6">
                           <div className="flex flex-wrap items-center justify-between gap-2">
@@ -9377,7 +9848,8 @@ function NewslettersPage() {
                             )}
                           </div>
                         </div>
-                      </div >
+                      </div>
+                      </NewsletterWriterProvider>
                     ) : (
                       <>
                         <div className="prose max-w-none">
@@ -9564,7 +10036,6 @@ function NewslettersPage() {
           </div >
         )}
       </div >
-      <BuyMeCoffeeButton className="mt-12" />
     </div >
   )
 }
@@ -9578,6 +10049,11 @@ function SettingsPage() {
   const [displayNameStatus, setDisplayNameStatus] = useState(null)
   const [displayNameBusy, setDisplayNameBusy] = useState(false)
 
+  // Email delivery preference state
+  const [emailPreference, setEmailPreference] = useState('individual')
+  const [emailPrefLoading, setEmailPrefLoading] = useState(false)
+  const [emailPrefStatus, setEmailPrefStatus] = useState(null)
+
   // Journalist Profile State
   const [journalistProfile, setJournalistProfile] = useState({ bio: '', profile_image_url: '' })
   const [journalistSaving, setJournalistSaving] = useState(false)
@@ -9590,6 +10066,11 @@ function SettingsPage() {
   const [initialError, setInitialError] = useState(null)
   const [message, setMessage] = useState(null)
   const [savingSubs, setSavingSubs] = useState(false)
+
+  // Paid subscriptions and journalist follows state
+  const [paidSubscriptions, setPaidSubscriptions] = useState([])
+  const [journalistFollows, setJournalistFollows] = useState([])
+  const [processingSubId, setProcessingSubId] = useState(null)
 
   useEffect(() => {
     setDisplayNameInput(auth.displayName || '')
@@ -9613,6 +10094,8 @@ function SettingsPage() {
         const promises = [
           APIService.getTeams({ is_active: 'true' }),
           APIService.getMySubscriptions(),
+          APIService.getUserEmailPreferences().catch(() => ({ email_delivery_preference: 'individual' })),
+          APIService.getAllSubscriptions().catch(() => ({ free_subscriptions: [], paid_subscriptions: [] })),
         ]
 
         if (auth.isJournalist) {
@@ -9622,7 +10105,9 @@ function SettingsPage() {
         const results = await Promise.all(promises)
         const teamData = results[0]
         const subscriptionData = results[1]
-        const writerData = results[2]
+        const emailPrefData = results[2]
+        const allSubsData = results[3]
+        const writerData = results[4]
 
         if (cancelled) return
 
@@ -9633,6 +10118,9 @@ function SettingsPage() {
         const subs = Array.isArray(subscriptionData) ? subscriptionData : []
         setSubscriptions(subs)
         setSelectedTeamIds(subs.map((sub) => sub.team_id))
+        setEmailPreference(emailPrefData?.email_delivery_preference || 'individual')
+        setPaidSubscriptions(allSubsData?.paid_subscriptions || [])
+        setJournalistFollows(allSubsData?.journalist_follows || [])
 
         if (writerData) {
           setJournalistProfile({
@@ -9673,6 +10161,59 @@ function SettingsPage() {
       }
     })
   }, [selectedTeamIds, subscriptions, teams])
+
+  const handleEmailPreferenceChange = async (newPreference) => {
+    if (!auth.token) return
+    setEmailPrefLoading(true)
+    setEmailPrefStatus(null)
+    try {
+      await APIService.updateUserEmailPreferences(newPreference)
+      setEmailPreference(newPreference)
+      setEmailPrefStatus({ type: 'success', message: 'Email preference updated.' })
+    } catch (error) {
+      console.error('Failed to update email preference', error)
+      setEmailPrefStatus({ type: 'error', message: error?.message || 'Failed to update preference.' })
+    } finally {
+      setEmailPrefLoading(false)
+    }
+  }
+
+  const handleCancelPaidSubscription = async (subscriptionId) => {
+    if (!confirm('Are you sure you want to cancel this subscription? You will still have access until the end of your billing period.')) {
+      return
+    }
+    setProcessingSubId(subscriptionId)
+    setMessage(null)
+    try {
+      await APIService.request(`/stripe/cancel-subscription/${subscriptionId}`, { method: 'POST' })
+      // Refresh paid subscriptions
+      const allSubs = await APIService.getAllSubscriptions().catch(() => ({ paid_subscriptions: [] }))
+      setPaidSubscriptions(allSubs?.paid_subscriptions || [])
+      setMessage({ type: 'success', text: 'Subscription canceled. You will have access until the end of your billing period.' })
+    } catch (error) {
+      console.error('Failed to cancel subscription', error)
+      setMessage({ type: 'error', text: error?.message || 'Failed to cancel subscription.' })
+    } finally {
+      setProcessingSubId(null)
+    }
+  }
+
+  const handleReactivatePaidSubscription = async (subscriptionId) => {
+    setProcessingSubId(subscriptionId)
+    setMessage(null)
+    try {
+      await APIService.request(`/stripe/reactivate-subscription/${subscriptionId}`, { method: 'POST' })
+      // Refresh paid subscriptions
+      const allSubs = await APIService.getAllSubscriptions().catch(() => ({ paid_subscriptions: [] }))
+      setPaidSubscriptions(allSubs?.paid_subscriptions || [])
+      setMessage({ type: 'success', text: 'Subscription reactivated successfully!' })
+    } catch (error) {
+      console.error('Failed to reactivate subscription', error)
+      setMessage({ type: 'error', text: error?.message || 'Failed to reactivate subscription.' })
+    } finally {
+      setProcessingSubId(null)
+    }
+  }
 
   const handleDisplayNameSave = async (event) => {
     event?.preventDefault?.()
@@ -9842,6 +10383,79 @@ function SettingsPage() {
               </CardContent>
             </Card>
 
+            {/* Email Delivery Preferences */}
+            <Card>
+              <CardHeader>
+                <CardTitle className="flex items-center gap-2">
+                  <Mail className="h-5 w-5" />
+                  Email Delivery
+                </CardTitle>
+                <CardDescription>Choose how you want to receive newsletters when subscribed to multiple teams.</CardDescription>
+              </CardHeader>
+              <CardContent className="space-y-4">
+                <div className="space-y-3">
+                  <div
+                    className={`flex items-start gap-3 p-4 rounded-lg border-2 cursor-pointer transition-colors ${
+                      emailPreference === 'individual' 
+                        ? 'border-blue-500 bg-blue-50' 
+                        : 'border-gray-200 hover:border-gray-300'
+                    } ${emailPrefLoading ? 'opacity-50 pointer-events-none' : ''}`}
+                    onClick={() => handleEmailPreferenceChange('individual')}
+                  >
+                    <div className={`mt-0.5 w-4 h-4 rounded-full border-2 flex items-center justify-center ${
+                      emailPreference === 'individual' ? 'border-blue-500' : 'border-gray-400'
+                    }`}>
+                      {emailPreference === 'individual' && (
+                        <div className="w-2 h-2 rounded-full bg-blue-500" />
+                      )}
+                    </div>
+                    <div className="flex-1">
+                      <div className="font-medium text-gray-900">Individual emails</div>
+                      <div className="text-sm text-gray-600">
+                        Receive each newsletter as a separate email when it's published (typically once per week per team).
+                      </div>
+                    </div>
+                  </div>
+
+                  <div
+                    className={`flex items-start gap-3 p-4 rounded-lg border-2 cursor-pointer transition-colors ${
+                      emailPreference === 'digest' 
+                        ? 'border-blue-500 bg-blue-50' 
+                        : 'border-gray-200 hover:border-gray-300'
+                    } ${emailPrefLoading ? 'opacity-50 pointer-events-none' : ''}`}
+                    onClick={() => handleEmailPreferenceChange('digest')}
+                  >
+                    <div className={`mt-0.5 w-4 h-4 rounded-full border-2 flex items-center justify-center ${
+                      emailPreference === 'digest' ? 'border-blue-500' : 'border-gray-400'
+                    }`}>
+                      {emailPreference === 'digest' && (
+                        <div className="w-2 h-2 rounded-full bg-blue-500" />
+                      )}
+                    </div>
+                    <div className="flex-1">
+                      <div className="font-medium text-gray-900">Weekly digest</div>
+                      <div className="text-sm text-gray-600">
+                        Combine all your subscribed newsletters into one weekly email. Best if you follow multiple teams.
+                      </div>
+                    </div>
+                  </div>
+                </div>
+
+                {emailPrefStatus && (
+                  <p className={`text-sm ${emailPrefStatus.type === 'error' ? 'text-red-600' : 'text-emerald-600'}`}>
+                    {emailPrefStatus.message}
+                  </p>
+                )}
+
+                {emailPrefLoading && (
+                  <div className="flex items-center gap-2 text-sm text-gray-500">
+                    <Loader2 className="h-4 w-4 animate-spin" />
+                    Saving preference...
+                  </div>
+                )}
+              </CardContent>
+            </Card>
+
             {/* Journalist Profile Settings */}
             {auth.isJournalist && (
               <Card>
@@ -9904,10 +10518,166 @@ function SettingsPage() {
               </Card>
             )}
 
+            {/* Premium Journalist Subscriptions */}
+            {paidSubscriptions.length > 0 && (
+              <Card>
+                <CardHeader>
+                  <CardTitle className="flex items-center gap-2">
+                    <CreditCard className="h-5 w-5" />
+                    Premium Subscriptions
+                  </CardTitle>
+                  <CardDescription>Manage your paid journalist subscriptions.</CardDescription>
+                </CardHeader>
+                <CardContent className="space-y-4">
+                  {paidSubscriptions.map((sub) => (
+                    <div key={sub.id} className="border rounded-lg p-4 space-y-3">
+                      <div className="flex items-start justify-between gap-4">
+                        <div className="flex items-center gap-3">
+                          <Avatar className="h-12 w-12">
+                            <AvatarImage src={sub.journalist_profile_image} />
+                            <AvatarFallback>
+                              {sub.journalist_name?.substring(0, 2).toUpperCase() || 'JN'}
+                            </AvatarFallback>
+                          </Avatar>
+                          <div>
+                            <div className="font-semibold">{sub.journalist_name || 'Unknown Journalist'}</div>
+                            <div className="text-sm text-gray-500">{sub.journalist_email}</div>
+                            {sub.assigned_teams && sub.assigned_teams.length > 0 && (
+                              <div className="flex items-center gap-1 mt-1">
+                                {sub.assigned_teams.slice(0, 3).map((team) => (
+                                  <img key={team.id} src={team.logo} alt={team.name} className="w-4 h-4" title={team.name} />
+                                ))}
+                                {sub.assigned_teams.length > 3 && (
+                                  <span className="text-xs text-gray-400">+{sub.assigned_teams.length - 3}</span>
+                                )}
+                              </div>
+                            )}
+                          </div>
+                        </div>
+                        <Badge 
+                          variant="outline" 
+                          className={sub.cancel_at_period_end 
+                            ? 'bg-yellow-50 text-yellow-700 border-yellow-200' 
+                            : sub.status === 'active' 
+                              ? 'bg-green-50 text-green-700 border-green-200' 
+                              : 'bg-gray-50'
+                          }
+                        >
+                          {sub.cancel_at_period_end ? 'Canceling' : sub.status}
+                        </Badge>
+                      </div>
+                      
+                      {sub.current_period_end && (
+                        <div className="text-sm text-gray-600">
+                          <Calendar className="h-4 w-4 inline mr-1" />
+                          {sub.cancel_at_period_end ? 'Ends' : 'Renews'}: {new Date(sub.current_period_end).toLocaleDateString()}
+                        </div>
+                      )}
+
+                      {sub.cancel_at_period_end && (
+                        <Alert className="bg-yellow-50 border-yellow-200">
+                          <AlertDescription className="text-yellow-800">
+                            This subscription will end on {new Date(sub.current_period_end).toLocaleDateString()}. 
+                            You can reactivate it anytime before then.
+                          </AlertDescription>
+                        </Alert>
+                      )}
+
+                      <div className="flex gap-2">
+                        {sub.status === 'active' && !sub.cancel_at_period_end && (
+                          <Button
+                            variant="outline"
+                            size="sm"
+                            onClick={() => handleCancelPaidSubscription(sub.id)}
+                            disabled={processingSubId === sub.id}
+                          >
+                            {processingSubId === sub.id ? (
+                              <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                            ) : (
+                              <XCircle className="mr-2 h-4 w-4" />
+                            )}
+                            Cancel Subscription
+                          </Button>
+                        )}
+                        {sub.cancel_at_period_end && (
+                          <Button
+                            size="sm"
+                            onClick={() => handleReactivatePaidSubscription(sub.id)}
+                            disabled={processingSubId === sub.id}
+                          >
+                            {processingSubId === sub.id ? (
+                              <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                            ) : (
+                              <RotateCcw className="mr-2 h-4 w-4" />
+                            )}
+                            Reactivate
+                          </Button>
+                        )}
+                      </div>
+                    </div>
+                  ))}
+                </CardContent>
+              </Card>
+            )}
+
+            {/* Journalists You Follow (free) */}
+            {journalistFollows.length > 0 && (
+              <Card>
+                <CardHeader>
+                  <CardTitle className="flex items-center gap-2">
+                    <UserPlus className="h-5 w-5" />
+                    Journalists You Follow
+                  </CardTitle>
+                  <CardDescription>Writers whose free content and updates you receive.</CardDescription>
+                </CardHeader>
+                <CardContent>
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                    {journalistFollows.map((follow) => (
+                      <Link 
+                        key={follow.id} 
+                        to={`/journalists/${follow.journalist_id}`}
+                        className="flex items-center gap-3 p-3 border rounded-lg bg-gray-50 hover:bg-gray-100 hover:border-gray-300 transition-colors group"
+                      >
+                        <Avatar className="h-10 w-10">
+                          <AvatarImage src={follow.journalist_profile_image} />
+                          <AvatarFallback>
+                            {follow.journalist_name?.substring(0, 2).toUpperCase() || 'JN'}
+                          </AvatarFallback>
+                        </Avatar>
+                        <div className="flex-1 min-w-0">
+                          <div className="font-medium text-gray-900 truncate group-hover:text-blue-600 transition-colors">{follow.journalist_name || 'Unknown'}</div>
+                          {follow.assigned_teams && follow.assigned_teams.length > 0 && (
+                            <div className="flex items-center gap-1 mt-0.5">
+                              {follow.assigned_teams.slice(0, 3).map((team) => (
+                                <img key={team.id} src={team.logo} alt={team.name} className="w-4 h-4" title={team.name} />
+                              ))}
+                              {follow.assigned_teams.length > 3 && (
+                                <span className="text-xs text-gray-400">+{follow.assigned_teams.length - 3}</span>
+                              )}
+                            </div>
+                          )}
+                        </div>
+                        <div className="flex items-center gap-2">
+                          <Badge variant="outline" className="bg-blue-50 text-blue-700 border-blue-200">Following</Badge>
+                          <ChevronRight className="h-4 w-4 text-gray-400 group-hover:text-blue-500 transition-colors" />
+                        </div>
+                      </Link>
+                    ))}
+                  </div>
+                  <p className="text-xs text-gray-500 mt-3">
+                    Click on a journalist to view their profile or unfollow.
+                  </p>
+                </CardContent>
+              </Card>
+            )}
+
             <Card>
               <CardHeader>
-                <CardTitle>Newsletter Subscriptions</CardTitle>
-                <CardDescription>Select the teams you want weekly updates for.</CardDescription>
+                <CardTitle className="flex items-center gap-2">
+                  <Users className="h-5 w-5" />
+                  Team Newsletter Subscriptions
+                </CardTitle>
+                <CardDescription>Select the teams you want weekly updates for (free).</CardDescription>
               </CardHeader>
               <CardContent className="space-y-4">
                 <TeamMultiSelect
@@ -10340,6 +11110,7 @@ function App() {
                   <Route path="/newsletters/:newsletterId" element={<NewslettersPage />} />
                   <Route path="/newsletters/historical" element={<HistoricalNewslettersPage />} />
                   <Route path="/writeups/:commentaryId" element={<WriteupPage />} />
+                  <Route path="/players/:playerId" element={<PlayerPage />} />
                   <Route path="/journalists" element={<JournalistList apiService={APIService} />} />
                   <Route
                     path="/settings"
@@ -10360,6 +11131,8 @@ function App() {
                     <Route path="users" element={<AdminUsers />} />
                     <Route path="loans" element={<AdminLoans />} />
                     <Route path="players" element={<AdminPlayers />} />
+                    <Route path="teams" element={<AdminTeams />} />
+                    <Route path="sponsors" element={<AdminSponsors />} />
                     <Route path="settings" element={<AdminSettings />} />
                     <Route path="revenue" element={<AdminRevenueDashboard />} />
                   </Route>
@@ -10418,17 +11191,15 @@ function App() {
                       </RequireAuth>
                     }
                   />
-                  <Route
-                    path="/subscriptions"
-                    element={
-                      <RequireAuth>
-                        <MySubscriptions />
-                      </RequireAuth>
-                    }
-                  />
 
                 </Routes>
               </main>
+              <footer className="bg-gray-100 border-t border-gray-200 py-8 mt-auto">
+                <div className="max-w-6xl mx-auto px-4 text-center">
+                  <BuyMeCoffeeButton />
+                  <p className="text-sm text-gray-500 mt-4">© {new Date().getFullYear()} Go On Loan. All rights reserved.</p>
+                </div>
+              </footer>
             </div>
           </Router>
           <AuthModal />

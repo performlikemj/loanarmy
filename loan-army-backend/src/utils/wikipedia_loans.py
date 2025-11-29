@@ -10,6 +10,8 @@ from functools import lru_cache
 from typing import Callable, Dict, Iterable, List, Optional
 
 import requests
+from src.mcp.brave import brave_search
+from src.services.wikipedia_classifier import classify_loan_row
 
 
 logger = logging.getLogger(__name__)
@@ -413,6 +415,46 @@ def collect_player_loans_from_wikipedia(
             player_name=player_name,
             parent_club_hint=parent_club,
         )
+        
+        # Fallback: If no loans found on Wikipedia, try Brave Search
+        if not rows:
+            try:
+                logger.info("[wiki-loans] No Wikipedia loans found for %s, trying Brave Search...", player_name)
+                # Search query: "Player Name loan {season_year}"
+                # We pass empty strings for since/until to ignore date filtering for now, 
+                # relying on the snippet content and classifier.
+                search_results = brave_search(f"{player_name} loan {season_year}", "", "", count=3)
+                
+                for res in search_results:
+                    snippet = res.get('snippet', '')
+                    if not snippet:
+                        continue
+                        
+                    # Classify the snippet
+                    # We use the classifier designed for Wiki rows, but it works on text snippets too.
+                    data = classify_loan_row(
+                        snippet,
+                        default_player=player_name,
+                        default_parent=parent_club,
+                        season_year=season_year
+                    )
+                    
+                    if data.get('valid') and data.get('loan_club'):
+                        # Map classifier output to our expected format
+                        rows.append({
+                            'player_name': data.get('player_name') or player_name,
+                            'parent_club': data.get('parent_club') or parent_club,
+                            'loan_team': data.get('loan_club'),
+                            'season_year': data.get('season_start_year') or season_year,
+                            'raw_row': snippet[:200], # Store snippet as raw row for reference
+                            'source': 'brave_search',
+                            'source_url': res.get('url')
+                        })
+                        logger.info(f"✅ Found loan via Brave: {player_name} -> {data.get('loan_club')}")
+                        
+            except Exception as e:
+                logger.warning(f"[wiki-loans] Brave search fallback failed for {player_name}: {e}")
+
         for row in rows:
             row.setdefault('player_name', player_name)
             row['parent_club'] = parent_club

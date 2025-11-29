@@ -1,17 +1,22 @@
 import os
 import json
 import re
+import uuid
 import requests
 from urllib.parse import urlparse, urlunparse
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from datetime import date, timedelta, datetime, timezone
-from typing import Any, Dict, List, Annotated
+from typing import Any, Dict, List, Annotated, Optional
 from pydantic import BaseModel, Field
 from agents import (
     set_default_openai_client
 )
 from openai import OpenAI  # OpenAI Agents SDK
-from src.models.league import db, Team, LoanedPlayer, Newsletter, AdminSetting
+try:  # Optional Groq dependency for newsletter summaries
+    from groq import Groq
+except ImportError:  # pragma: no cover
+    Groq = None
+from src.models.league import db, Team, LoanedPlayer, Newsletter, AdminSetting, NewsletterCommentary
 from src.api_football_client import APIFootballClient
 from src.agents.errors import NoActiveLoaneesError
 from src.agents.weekly_agent import (
@@ -22,6 +27,8 @@ from src.agents.weekly_agent import (
     to_initial_last,
     _render_variants,
 )
+from src.utils.newsletter_slug import compose_newsletter_public_slug
+from src.services.graph_service import GraphService
 
 # If you have an MCP client already for Brave (Model Context Protocol), import it here.
 # This is a thin wrapper that exposes a Python function brave_search(query: str, since: str, until: str) -> List[dict]
@@ -36,15 +43,58 @@ dotenv.load_dotenv(dotenv.find_dotenv())
 # )
 client = OpenAI(api_key=os.getenv("OPENAI_API_KEY"))
 set_default_openai_client(client)
-print(f'newsletter client: {client}')
 api_client = APIFootballClient()
+graph_service = GraphService()
+_GROQ_CLIENT: Optional["Groq"] = None
+
+def _get_groq_client() -> Groq:
+    global _GROQ_CLIENT
+    if _GROQ_CLIENT is not None:
+        return _GROQ_CLIENT
+    api_key = os.getenv("GROQ_API_KEY")
+    if not api_key or Groq is None:
+        raise RuntimeError("GROQ_API_KEY is not configured")
+    _GROQ_CLIENT = Groq(api_key=api_key)
+    return _GROQ_CLIENT
 
 # Always-on debug output during development
 def _nl_dbg(*args):
+    # Temporarily disabled to reduce noise during commentary testing
+    # try:
+    #     print("[NEWSLETTER DBG]", *args)
+    # except Exception:
+    #     pass
+    pass
+
+
+def _llm_dbg(event: str, payload: dict | None = None) -> None:
+    """Lightweight helper to keep LLM instrumentation consistent."""
+    if payload:
+        _nl_dbg(f"[LLM] {event}", payload)
+    else:
+        _nl_dbg(f"[LLM] {event}")
+
+
+def _coerce_text(value: Any, *, fallback: str = "") -> str:
+    if isinstance(value, str):
+        return value
+    if isinstance(value, (int, float)):
+        return str(value)
+    if isinstance(value, dict):
+        for key in ("text", "title", "name", "value", "label"):
+            candidate = value.get(key)
+            if isinstance(candidate, str):
+                return candidate
+    if value is None:
+        return fallback
     try:
-        print("[NEWSLETTER DBG]", *args)
+        return str(value)
     except Exception:
-        pass
+        return fallback
+
+
+def _strip_text(value: Any, *, fallback: str = "") -> str:
+    return _coerce_text(value, fallback=fallback).strip()
 
 # 
 # Feature toggles (soft ranking, site boosts, cup synonyms)
@@ -55,9 +105,16 @@ ENV_USE_CUP_SYNS = os.getenv("BRAVE_CUP_SYNONYMS", "1").lower() in ("1", "true",
 ENV_STRICT_RANGE = os.getenv("BRAVE_STRICT_RANGE", "0").lower() in ("1", "true", "yes")
 ENV_CHECK_LINKS = os.getenv("NEWSLETTER_CHECK_LINKS", "1").lower() in ("1", "true", "yes")
 ENV_VALIDATE_FINAL_LINKS = os.getenv("NEWSLETTER_VALIDATE_FINAL_LINKS", "1").lower() in ("1", "true", "yes")
+ENV_ENABLE_GROQ_SUMMARIES = os.getenv("NEWSLETTER_USE_GROQ", "1").lower() in ("1", "true", "yes", "on")
+ENV_ENABLE_GROQ_TEAM_SUMMARIES = os.getenv(
+    "NEWSLETTER_USE_GROQ_TEAM",
+    os.getenv("NEWSLETTER_USE_GROQ", "1"),
+).lower() in ("1", "true", "yes", "on")
 LINK_TIMEOUT_SEC = float(os.getenv("NEWSLETTER_LINK_TIMEOUT", "6"))
 LINK_MAX_WORKERS = int(os.getenv("NEWSLETTER_LINK_MAX_WORKERS", "8"))
 LINKS_MAX_PER_ITEM = int(os.getenv("NEWSLETTER_LINKS_MAX_PER_ITEM", "3"))
+
+UNTRACKED_MESSAGE = "We can’t track detailed stats for this player yet."
 
 # Minimal localization (GB defaults). We keep this simple here to avoid importing heavy modules.
 LOCALIZATION_DEFAULT = {"country": "GB", "search_lang": "en", "ui_lang": "en-GB"}
@@ -126,8 +183,10 @@ def _enforce_loanee_metadata(
         return content
 
     internet_links: dict[str, list[Any]] = {}
-    supplemental_items: list[dict[str, Any]] = []
+    manual_player_items: list[dict[str, Any]] = []
     new_sections: list[dict[str, Any]] = []
+    tracked_pids: set[int] = set()
+    tracked_keys: set[str] = set()
 
     for sec in sections:
         if not isinstance(sec, dict):
@@ -135,7 +194,7 @@ def _enforce_loanee_metadata(
         raw_items = sec.get('items')
         if not isinstance(raw_items, list):
             continue
-        title = (sec.get('title') or '').strip().lower()
+        title = _strip_text(sec.get('title')).lower()
         if title == 'what the internet is saying':
             for item in raw_items:
                 if not isinstance(item, dict):
@@ -154,21 +213,26 @@ def _enforce_loanee_metadata(
         for item in raw_items:
             if not isinstance(item, dict):
                 continue
-
             meta = None
             pid = item.get('player_id')
             try:
                 pid_int = int(pid)
             except (TypeError, ValueError):
                 pid_int = None
+            player_key = _normalize_player_key(item.get('player_name'))
             if pid_int is not None and pid_int in meta_by_pid:
                 meta = meta_by_pid[pid_int]
             else:
-                key = _normalize_player_key(item.get('player_name'))
-                if key:
-                    meta = meta_by_key.get(key)
+                if player_key:
+                    meta = meta_by_key.get(player_key)
 
-            can_track = bool(meta.get('can_fetch_stats', True) if meta else item.get('can_fetch_stats', True))
+            explicit_can_fetch = item.get('can_fetch_stats')
+            if explicit_can_fetch is False:
+                can_track = False
+            elif explicit_can_fetch is True:
+                can_track = True
+            else:
+                can_track = bool(meta.get('can_fetch_stats', True) if meta else True)
             item['can_fetch_stats'] = can_track
             if not can_track:
                 item.pop('stats', None)
@@ -178,20 +242,36 @@ def _enforce_loanee_metadata(
                 if sofa and not item.get('sofascore_player_id'):
                     item['sofascore_player_id'] = sofa
 
-            is_supplemental = item.get('source') == 'supplemental' or (not can_track and not item.get('player_id'))
-            if is_supplemental:
-                item['week_summary'] = "We can’t track detailed stats for this player yet."
-                supplemental_items.append(item)
+            # Identify untracked players (manually entered, not in API) by can_fetch_stats flag
+            is_untracked = not can_track
+            if is_untracked:
+                # Dedup: skip untracked copies when a tracked record exists or meta allows tracking
+                if pid_int is not None:
+                    meta_pid = meta_by_pid.get(pid_int)
+                    if (meta_pid and meta_pid.get('can_fetch_stats', True)) or pid_int in tracked_pids:
+                        continue
+                if player_key:
+                    meta_key = meta_by_key.get(player_key)
+                    if (meta_key and meta_key.get('can_fetch_stats', True)) or player_key in tracked_keys:
+                        continue
+
+                if not _strip_text(item.get('week_summary')):
+                    item['week_summary'] = UNTRACKED_MESSAGE
+                manual_player_items.append(item)
                 continue
 
             filtered_items.append(item)
+            if pid_int is not None:
+                tracked_pids.add(pid_int)
+            if player_key:
+                tracked_keys.add(player_key)
 
         if filtered_items:
             sec['items'] = filtered_items
             new_sections.append(sec)
 
-    if supplemental_items:
-        new_sections.append({'title': 'Supplemental Loans', 'items': supplemental_items})
+    if manual_player_items:
+        new_sections.append({'title': 'Manual Player Entries', 'items': manual_player_items})
 
     if internet_links:
         for sec in new_sections:
@@ -209,10 +289,10 @@ def _enforce_loanee_metadata(
 
                 def _push(link: Any) -> None:
                     if isinstance(link, str):
-                        url = link.strip()
+                        url = _strip_text(link)
                         payload = url
                     elif isinstance(link, dict):
-                        url = str(link.get('url') or '').strip()
+                        url = _strip_text(link.get('url'))
                         if not url:
                             return
                         payload = {k: v for k, v in link.items()}
@@ -247,7 +327,7 @@ def _admin_bool(key: str, default: bool) -> bool:
     try:
         row = db.session.query(AdminSetting).filter_by(key=key).first()
         if row and row.value_json:
-            return row.value_json.strip().lower() in ("1","true","yes","y")
+            return _strip_text(row.value_json).lower() in ("1","true","yes","y")
     except Exception:
         pass
     return default
@@ -297,7 +377,7 @@ def _strip_diacritics(s: str) -> str:
 def _parse_any_date(s: str):
     if not s or not isinstance(s, str):
         return None
-    st = s.strip()
+    st = _strip_text(s)
     try:
         from datetime import datetime
         iso = st.replace('Z', '+00:00')
@@ -381,8 +461,12 @@ def _safe_float(value: Any) -> float | None:
         return None
 
 
-def _combine_phrases(parts: list[str]) -> str:
-    cleaned = [p.strip() for p in parts if p and p.strip()]
+def _combine_phrases(parts: list[Any]) -> str:
+    cleaned: list[str] = []
+    for part in parts:
+        text = _strip_text(part)
+        if text:
+            cleaned.append(text)
     if not cleaned:
         return ""
     if len(cleaned) == 1:
@@ -443,10 +527,11 @@ def _match_result_phrase(loanee: dict | None) -> str | None:
         chosen = matches[0] if isinstance(matches[0], dict) else None
     if not isinstance(chosen, dict):
         return None
-    opponent = (chosen.get("opponent") or "").strip()
-    score = (chosen.get("score") or chosen.get("scoreline") or "").strip()
-    competition = (chosen.get("competition") or "").strip()
-    result_code = (chosen.get("result") or "").strip().upper()
+    opponent = _strip_text(chosen.get("opponent"))
+    raw_score = chosen.get("score") or chosen.get("scoreline")
+    score = _format_score(raw_score, chosen)
+    competition = _strip_text(chosen.get("competition"))
+    result_code = _strip_text(chosen.get("result")).upper()
     result_word = {"W": "win", "D": "draw", "L": "defeat"}.get(result_code)
 
     parts: list[str] = []
@@ -502,18 +587,20 @@ def _merge_links_from_hits(item: dict, hits: list[dict[str, Any]]) -> None:
     seen_urls: set[str] = set()
     for link in existing_links:
         if isinstance(link, str):
-            seen_urls.add(link.strip())
+            url = _strip_text(link)
+            if url:
+                seen_urls.add(url)
         elif isinstance(link, dict):
-            url = (link.get("url") or "").strip()
+            url = _strip_text(link.get("url"))
             if url:
                 seen_urls.add(url)
     for hit in hits:
         if not isinstance(hit, dict):
             continue
-        url = (hit.get("url") or "").strip()
+        url = _strip_text(hit.get("url"))
         if not url or url in seen_urls:
             continue
-        title = (hit.get("title") or "").strip() or url
+        title = _strip_text(hit.get("title")) or url
         existing_links.append({"title": title, "url": url})
         seen_urls.add(url)
         if len(existing_links) >= LINKS_MAX_PER_ITEM:
@@ -524,33 +611,89 @@ def _merge_links_from_hits(item: dict, hits: list[dict[str, Any]]) -> None:
 def _ensure_period(text: str) -> str:
     if not text:
         return text
-    stripped = text.strip()
+    stripped = _strip_text(text)
     if not stripped:
         return stripped
-    if stripped[-1] in ".!?":
+    last = stripped[-1]
+    if last in ".!?":
         return stripped
+    if last in ",;:":
+        stripped = stripped[:-1].rstrip()
+        if not stripped:
+            return ""
     return stripped + "."
 
 
 def _build_player_summary(item: dict, loanee: dict | None, stats: dict, match_phrase: str | None, hits: list[dict[str, Any]]) -> tuple[str, str, str | None]:
-    player_display = item.get("player_name") or (loanee.get("player_name") if isinstance(loanee, dict) else "")
+    player_display = _strip_text(item.get("player_name")) or (
+        _strip_text(loanee.get("player_name")) if isinstance(loanee, dict) else ""
+    )
     minutes = _to_int(stats.get("minutes"))
-    team_label = item.get("loan_team") or (loanee.get("loan_team_name") if isinstance(loanee, dict) else None) or "his loan side"
+    team_label = (
+        _strip_text(item.get("loan_team"))
+        or (_strip_text(loanee.get("loan_team_name")) if isinstance(loanee, dict) else "")
+        or "his loan side"
+    )
     can_track = bool(item.get("can_fetch_stats", loanee.get("can_fetch_stats", True) if isinstance(loanee, dict) else True))
 
+    matches = loanee.get("matches") if isinstance(loanee, dict) else item.get("matches") if isinstance(item, dict) else []
+    played_matches = [m for m in matches or [] if isinstance(m, dict) and m.get("played") is not False]
+    match_count = len(played_matches) or len([m for m in matches or [] if isinstance(m, dict)])
+    multi_match_week = match_count > 1
+    if multi_match_week:
+        match_phrase = None
+    elif match_phrase is None:
+        match_phrase = _match_result_phrase(loanee)
+
+    # Check if player was in matchday squad by looking at role field
+    # role can be: 'startXI', 'substitutes', or None (not in squad)
+    def _was_in_squad(match_list: list) -> bool:
+        for m in match_list or []:
+            if isinstance(m, dict) and m.get("role") in ("startXI", "substitutes"):
+                return True
+        return False
+    
+    def _was_unused_sub(match_list: list) -> bool:
+        for m in match_list or []:
+            if isinstance(m, dict) and m.get("role") == "substitutes":
+                return True
+        return False
+    
+    was_in_squad = _was_in_squad(matches)
+    was_unused_sub = _was_unused_sub(matches)
+
     if not can_track:
-        base = "We can’t track detailed stats for this player yet."
+        base = UNTRACKED_MESSAGE
         if player_display and team_label:
             base += f" {player_display} remains on loan with {team_label}."
     else:
-        if minutes > 0:
-            base = f"Played {minutes}’ for {team_label}"
-        elif minutes == 0:
-            base = f"Was an unused substitute for {team_label}"
+        if multi_match_week and minutes > 0:
+            if match_count:
+                base = f"Played {minutes}' across {match_count} matches for {team_label}"
+            else:
+                base = f"Played {minutes}' across multiple matches for {team_label}"
+        elif multi_match_week and minutes == 0:
+            if was_in_squad:
+                if match_count:
+                    base = f"Was an unused substitute across {match_count} matches for {team_label}"
+                else:
+                    base = f"Was an unused substitute across this week's fixtures for {team_label}"
+            else:
+                if match_count:
+                    base = f"Was not in the matchday squad across {match_count} matches for {team_label}"
+                else:
+                    base = f"Was not in the matchday squad for {team_label}'s fixtures this week"
         else:
-            base = f"Featured for {team_label}"
+            if minutes > 0:
+                base = f"Played {minutes}' for {team_label}"
+            elif minutes == 0 and was_unused_sub:
+                base = f"Was an unused substitute for {team_label}"
+            elif minutes == 0 and not was_in_squad:
+                base = f"Was not in the matchday squad for {team_label}"
+            else:
+                base = f"Featured for {team_label}"
 
-        if match_phrase:
+        if match_phrase and not multi_match_week:
             connector = " in " if minutes > 0 else " during "
             base += connector + match_phrase
 
@@ -561,12 +704,12 @@ def _build_player_summary(item: dict, loanee: dict | None, stats: dict, match_ph
         else:
             base += f"; notable numbers: {_combine_phrases(stat_phrases)}"
 
-    base_sentence = _ensure_period(base.rstrip(", "))
+    base_sentence = _ensure_period(base)
 
     first_title = None
     if isinstance(hits, list):
         for hit in hits:
-            title = (hit.get("title") or "").strip()
+            title = _strip_text(hit.get("title"))
             if title:
                 first_title = title
                 break
@@ -576,12 +719,12 @@ def _build_player_summary(item: dict, loanee: dict | None, stats: dict, match_ph
         if isinstance(existing_links, list):
             for link in existing_links:
                 if isinstance(link, dict):
-                    title = (link.get("title") or "").strip()
+                    title = _strip_text(link.get("title"))
                     if title:
                         first_title = title
                         break
                 elif isinstance(link, str):
-                    url_title = link.strip()
+                    url_title = _strip_text(link)
                     if url_title:
                         first_title = url_title
                         break
@@ -597,23 +740,631 @@ def _build_player_summary(item: dict, loanee: dict | None, stats: dict, match_ph
     summary_parts = [base_sentence]
     if article_sentence:
         summary_parts.append(article_sentence)
-    summary_text = " ".join(p for p in summary_parts if p)
+    summary_text = " ".join(filter(None, ( _strip_text(part) for part in summary_parts )))
 
     headline_fragments: list[str] = []
     if can_track:
-        if minutes > 0:
-            headline_fragments.append(f"logged {minutes}’ for {team_label}")
-        elif minutes == 0:
-            headline_fragments.append(f"was unused for {team_label}")
+        if multi_match_week:
+            if minutes > 0:
+                label = f"{match_count} matches" if match_count else "multiple matches"
+                headline_fragments.append(f"logged {minutes}’ across {label} for {team_label}")
+            elif minutes == 0:
+                label = f"{match_count} matches" if match_count else "multiple matches"
+                headline_fragments.append(f"unused across {label} for {team_label}")
+        else:
+            if minutes > 0:
+                headline_fragments.append(f"logged {minutes}’ for {team_label}")
+            elif minutes == 0:
+                headline_fragments.append(f"was unused for {team_label}")
         if stat_phrases:
             headline_fragments.append(_combine_phrases(stat_phrases))
-        if match_phrase:
+        if match_phrase and not multi_match_week:
             headline_fragments.append(match_phrase)
     else:
         headline_fragments.append("stats unavailable; monitoring media chatter")
     headline_text = _combine_phrases(headline_fragments) or ""
 
     return summary_text, headline_text, first_title
+
+
+def _season_context_sentence(full_name: str, season_stats: dict | None, trends: dict | None) -> str:
+    stats = season_stats or {}
+    name = _strip_text(full_name)
+    if not name:
+        return ""
+
+    games = _to_int(stats.get("games_played"))
+    minutes = _to_int(stats.get("minutes"))
+    goals = _to_int(stats.get("goals"))
+    assists = _to_int(stats.get("assists"))
+    yellows = _to_int(stats.get("yellows"))
+    reds = _to_int(stats.get("reds"))
+
+    parts: list[str] = []
+    if games:
+        parts.append(f"{games} {_pluralize(games, 'appearance')}")
+    if minutes:
+        parts.append(f"{minutes} {_pluralize(minutes, 'minute')}")
+    if goals or assists:
+        goal_phrase = f"{goals} {_pluralize(goals, 'goal')}"
+        assist_phrase = f"{assists} {_pluralize(assists, 'assist')}"
+        parts.append(f"{goal_phrase} and {assist_phrase}")
+    if yellows:
+        parts.append(f"{yellows} yellow {_pluralize(yellows, 'card')}")
+    if reds:
+        parts.append(f"{reds} red {_pluralize(reds, 'card')}")
+
+    if parts:
+        sentence = f"Season to date, {name} has {', '.join(parts)}."
+    else:
+        sentence = f"Season to date, {name} has limited recorded minutes."
+
+    trend_bits: list[str] = []
+    trends = trends or {}
+    if trends.get("goals_per_90"):
+        trend_bits.append(f"{trends['goals_per_90']} goals/90")
+    if trends.get("assists_per_90"):
+        trend_bits.append(f"{trends['assists_per_90']} assists/90")
+    if trends.get("shot_accuracy"):
+        trend_bits.append(f"{trends['shot_accuracy']}% shot accuracy")
+    if trends.get("goals_last_5"):
+        trend_bits.append(f"{trends['goals_last_5']} goals in the last five")
+    if trends.get("assists_last_5"):
+        trend_bits.append(f"{trends['assists_last_5']} assists in the last five")
+    if trends.get("duels_win_rate"):
+        trend_bits.append(f"{trends['duels_win_rate']}% duels win rate")
+
+    if trend_bits:
+        sentence += f" Trends: {', '.join(trend_bits)}."
+
+    return _ensure_period(sentence)
+
+
+def _extract_hits_for_loanee(loanee: dict, hits_by_player: dict[str, list[dict[str, Any]]]) -> list[dict[str, Any]]:
+    aliases = [
+        loanee.get("player_name"),
+        loanee.get("player_full_name"),
+        to_initial_last(loanee.get("player_full_name") or ""),
+        to_initial_last(loanee.get("player_name") or ""),
+    ]
+    for alias in filter(None, aliases):
+        key = _normalize_player_key(alias)
+        if key and key in hits_by_player:
+            return hits_by_player[key]
+    return []
+
+
+def _build_links_from_hits(hits: list[dict[str, Any]], *, limit: int = LINKS_MAX_PER_ITEM) -> list[dict[str, str]]:
+    links: list[dict[str, str]] = []
+    seen: set[str] = set()
+    for hit in hits or []:
+        if not isinstance(hit, dict):
+            continue
+        url = _strip_text(hit.get("url"))
+        title = _strip_text(hit.get("title")) or url
+        if not url or url in seen:
+            continue
+        links.append({"title": title, "url": url})
+        seen.add(url)
+        if len(links) >= limit:
+            break
+    return links
+
+
+def _format_score(value: Any, match: dict | None = None) -> str:
+    def _coerce_goal(goal_value: Any) -> str | None:
+        if goal_value is None:
+            return None
+        try:
+            if isinstance(goal_value, (int, float)):
+                return str(int(goal_value))
+            goal_text = _strip_text(goal_value)
+            if goal_text:
+                return goal_text
+        except Exception:
+            pass
+        return None
+
+    def _pick(*candidates):
+        for candidate in candidates:
+            if candidate is not None:
+                return candidate
+        return None
+
+    if isinstance(value, dict):
+        home = _coerce_goal(_pick(value.get("home"), value.get("home_goals")))
+        away = _coerce_goal(_pick(value.get("away"), value.get("away_goals")))
+        if home is not None and away is not None:
+            return f"{home}-{away}"
+    if isinstance(value, (list, tuple)) and len(value) >= 2:
+        home = _coerce_goal(value[0])
+        away = _coerce_goal(value[1])
+        if home is not None and away is not None:
+            return f"{home}-{away}"
+
+    text = _strip_text(value)
+    if text:
+        return text
+
+    if match and isinstance(match, dict):
+        home = _coerce_goal(match.get("home_goals"))
+        away = _coerce_goal(match.get("away_goals"))
+        if home is not None and away is not None:
+            return f"{home}-{away}"
+    return "score unavailable"
+
+
+def _media_spotlight_sentence(player_name: str, links: list[dict[str, str]]) -> str | None:
+    titles: list[str] = []
+    for link in links or []:
+        if not isinstance(link, dict):
+            continue
+        title = _strip_text(link.get("title")) or _strip_text(link.get("url"))
+        if not title:
+            continue
+        titles.append(title)
+        if len(titles) >= 3:
+            break
+    if not titles:
+        return None
+    if len(titles) == 1:
+        coverage = titles[0]
+    elif len(titles) == 2:
+        coverage = f"{titles[0]} and {titles[1]}"
+    else:
+        coverage = f"{titles[0]}, {titles[1]} and more coverage"
+    return _ensure_period(f"Media spotlight on {player_name or 'this loanee'}: {coverage}.")
+
+
+PLAYER_SUMMARY_SYSTEM_PROMPT = (
+    "You are a football journalist writing engaging weekly loan reports. "
+    "Write in a warm, narrative style—like a knowledgeable fan updating friends at the pub. "
+    "You receive stats and a 'draft_summary' with the raw facts. Transform this into compelling prose that:\n"
+    "- Weaves stats naturally into sentences (not just listing them)\n"
+    "- Uses vivid verbs: 'bagged', 'delivered', 'anchored', 'orchestrated', 'struggled'\n"
+    "- Contextualizes performances using ONLY the provided stats\n"
+    "- Varies sentence rhythm—mix short punchy lines with flowing observations\n\n"
+    "POSITION DATA (critical for accuracy):\n"
+    "- Each match includes 'position' showing what role they played THAT game (G=Goalkeeper, D=Defender, M=Midfielder, F=Forward)\n"
+    "- A player registered as midfielder may play forward in some matches—use the per-match position\n"
+    "- When describing goals/assists, reference the position they played IN THAT MATCH\n"
+    "- Example: If position='F' and they scored, say 'found the net from his advanced role', not 'scored from midfield'\n\n"
+    "STRICT RULES (never break these):\n"
+    "- ONLY use facts from the provided data—never invent goals, assists, or events\n"
+    "- Keep ALL numbers exactly as given (minutes, goals, assists, cards, ratings)\n"
+    "- Never claim 'debut', 'first goal', 'milestone' unless explicitly in draft_summary\n"
+    "- Never compare to 'average strikers' or generic benchmarks—only this player's data\n"
+    "- NEVER invent atmospheric/contextual details: no weather (rain, sun, cold), no crowd size, no time of day, no pitch conditions\n"
+    "- NEVER invent match narrative: no 'late equalizer', 'opening minutes', 'second half surge' unless the data says so\n"
+    "- If draft_summary is missing, write 1–2 paragraphs from the stats alone\n\n"
+    "Aim for 2–3 sentences that feel like a scout's notebook entry, not a spreadsheet."
+)
+
+TEAM_SUMMARY_SYSTEM_PROMPT = (
+    "You are a football journalist writing the opening hook for a weekly loan watch newsletter. "
+    "Capture the week's story in 2–3 punchy sentences that make readers want to dive into the player details. "
+    "Use the provided player summaries to highlight standout performers, surprising results, or emerging themes. "
+    "Keep every stat and fact accurate—do not invent or embellish. "
+    "Write like you're teasing the best bits to a fellow fan, not reading a match report."
+)
+
+def _summarize_player_with_groq(
+    loanee: dict,
+    stats: dict,
+    season_context: dict | None,
+    links: list[dict[str, str]] | None,
+    draft_summary: str | None = None,
+) -> str:
+    model = os.getenv("NEWSLETTER_GROQ_MODEL", "openai/gpt-oss-120b")
+    client = _get_groq_client()
+    # Build per-match breakdown with positions for accurate role attribution
+    matches_data = []
+    for m in (loanee.get("matches") or [])[:3]:
+        if isinstance(m, dict):
+            player_match = m.get("player") or {}
+            matches_data.append({
+                "opponent": m.get("opponent"),
+                "competition": m.get("competition"),
+                "position": player_match.get("position"),  # G/D/M/F for THIS match
+                "goals": player_match.get("goals", 0),
+                "assists": player_match.get("assists", 0),
+                "minutes": player_match.get("minutes", 0),
+                "result": m.get("result"),
+            })
+    
+    payload = {
+        "player": {
+            "name": loanee.get("player_full_name") or loanee.get("player_name"),
+            "loan_team": loanee.get("loan_team_name") or loanee.get("loan_team"),
+            "position": stats.get("position"),  # Most recent/primary position
+        },
+        "matches": matches_data,  # Per-match breakdown with positions
+        "week": stats,
+        "season": (season_context or {}).get("season_stats"),
+        "trends": (season_context or {}).get("trends"),
+        "recent_form": (season_context or {}).get("recent_form"),
+        "media_links": links or [],
+    }
+    if draft_summary:
+        payload["draft_summary"] = draft_summary
+    player_meta = {
+        "player": payload["player"]["name"],
+        "loan_team": payload["player"]["loan_team"],
+        "model": model,
+        "link_count": len(links or []),
+        "minutes": stats.get("minutes"),
+        "goals": stats.get("goals"),
+        "assists": stats.get("assists"),
+        "has_draft": bool(draft_summary),
+    }
+    _llm_dbg("player.start", player_meta)
+    try:
+        response = client.chat.completions.create(
+            model=model,
+            messages=[
+                {"role": "system", "content": PLAYER_SUMMARY_SYSTEM_PROMPT},
+                {"role": "user", "content": json.dumps(payload, ensure_ascii=False)},
+            ],
+            temperature=0.3,
+            max_tokens=240,
+        )
+    except Exception as exc:
+        _llm_dbg("player.error", {**player_meta, "error": str(exc)})
+        raise
+    content = response.choices[0].message.content if response.choices else ""
+    usage = getattr(response, "usage", None)
+    usage_payload = None
+    if usage:
+        usage_payload = {
+            "prompt_tokens": getattr(usage, "prompt_tokens", None),
+            "completion_tokens": getattr(usage, "completion_tokens", None),
+        }
+    has_content = bool(content)
+    event_payload = {**player_meta, "has_content": has_content, "chars": len(content or "")}
+    if usage_payload:
+        event_payload["usage"] = usage_payload
+    _llm_dbg("player.finish", event_payload)
+    if not has_content:
+        _llm_dbg("player.empty-output", player_meta)
+    content = (content or "").strip()
+    if content:
+        last_stop = max(content.rfind("."), content.rfind("!"), content.rfind("?"))
+        if last_stop != -1:
+            content = content[: last_stop + 1].strip()
+    return _ensure_period(content) if content else ""
+
+
+def _summarize_team_with_groq(
+    team_name: str,
+    week_range: list[str] | tuple[str, str],
+    player_items: list[dict[str, Any]],
+    draft_summary: str | None = None,
+) -> str:
+    model = os.getenv("NEWSLETTER_GROQ_MODEL", "openai/gpt-oss-120b")
+    client = _get_groq_client()
+    payload = {
+        "team": team_name,
+        "range": week_range,
+        "players": [
+            {
+                "name": item.get("player_full_name") or item.get("player_name"),
+                "summary": item.get("week_summary"),
+                "stats": item.get("stats"),
+            }
+            for item in player_items
+        ],
+    }
+    if draft_summary:
+        payload["draft_summary"] = draft_summary
+    _llm_dbg("team.start", {"team": team_name, "model": model, "players": len(player_items), "has_draft": bool(draft_summary)})
+    try:
+        response = client.chat.completions.create(
+            model=model,
+            messages=[
+                {"role": "system", "content": TEAM_SUMMARY_SYSTEM_PROMPT},
+                {"role": "user", "content": json.dumps(payload, ensure_ascii=False)},
+            ],
+            temperature=0.4,
+            max_tokens=200,
+        )
+    except Exception as exc:
+        _llm_dbg("team.error", {"team": team_name, "error": str(exc)})
+        raise
+    content = response.choices[0].message.content if response.choices else ""
+    _llm_dbg("team.finish", {"team": team_name, "has_content": bool(content), "chars": len(content or "")})
+    content = (content or "").strip()
+    if content:
+        last_stop = max(content.rfind("."), content.rfind("!"), content.rfind("?"))
+        if last_stop != -1:
+            content = content[: last_stop + 1].strip()
+    return _ensure_period(content) if content else ""
+
+
+def _build_player_report_item(loanee: dict, hits: list[dict[str, Any]], *, week_start: date, week_end: date) -> dict:
+    display_name = to_initial_last(_strip_text(loanee.get("player_full_name")) or _strip_text(loanee.get("player_name"))) or _strip_text(loanee.get("player_name")) or ""
+    full_name = _strip_text(loanee.get("player_full_name")) or _strip_text(loanee.get("player_name")) or display_name
+    loan_team = _strip_text(loanee.get("loan_team_name") or loanee.get("loan_team") or "their loan side")
+    can_track = bool(loanee.get("can_fetch_stats", True))
+    stats_src = loanee.get("totals") or {}
+
+    stats: dict[str, Any] = {
+        "minutes": _to_int(stats_src.get("minutes")),
+        "goals": _to_int(stats_src.get("goals")),
+        "assists": _to_int(stats_src.get("assists")),
+        "yellows": _to_int(stats_src.get("yellows") or stats_src.get("yellow_cards")),
+        "reds": _to_int(stats_src.get("reds") or stats_src.get("red_cards")),
+    }
+    for key, value in (stats_src or {}).items():
+        if key in stats and stats[key]:
+            continue
+        stats[key] = value
+
+    minutes = _to_int(stats.get("minutes"))
+    meaningful_minutes = minutes > 0
+    assists = _to_int(stats.get("assists"))
+    matches = loanee.get("matches") if isinstance(loanee, dict) else []
+    played_matches = [m for m in matches or [] if isinstance(m, dict) and m.get("played") is not False]
+    match_count = len(played_matches) or len([m for m in matches or [] if isinstance(m, dict)])
+    multi_match_week = match_count > 1
+    match_phrase = None if multi_match_week else _match_result_phrase(loanee)
+    stat_phrases = _stat_highlights(stats_src if can_track else {})
+    paragraphs: list[str] = []
+    links = _build_links_from_hits(hits)
+    media_sentence = _media_spotlight_sentence(display_name, links)
+
+    # Determine if player was in matchday squad by checking role in matches
+    # role can be: 'startXI', 'substitutes', or None (not in squad)
+    def _player_was_in_squad(match_list: list) -> bool:
+        """Check if player was in at least one matchday squad this week."""
+        for m in match_list or []:
+            if isinstance(m, dict) and m.get("role") in ("startXI", "substitutes"):
+                return True
+        return False
+    
+    def _player_was_unused_sub(match_list: list) -> bool:
+        """Check if player was on the bench but didn't play in any match."""
+        for m in match_list or []:
+            if isinstance(m, dict) and m.get("role") == "substitutes":
+                return True
+        return False
+    
+    was_in_squad = _player_was_in_squad(matches)
+    was_unused_sub = _player_was_unused_sub(matches)
+    
+    if not can_track:
+        base_sentence = f"{UNTRACKED_MESSAGE} {display_name} remains on loan with {loan_team}."
+        paragraphs.append(_ensure_period(base_sentence))
+    else:
+        if multi_match_week and minutes > 0:
+            if match_count:
+                action = f"logged {minutes} minutes across {match_count} matches for {loan_team}"
+            else:
+                action = f"logged {minutes} minutes across multiple matches for {loan_team}"
+        elif multi_match_week and minutes == 0:
+            if was_in_squad:
+                if match_count:
+                    action = f"was an unused substitute across {match_count} matches for {loan_team}"
+                else:
+                    action = f"was an unused substitute across this week's fixtures for {loan_team}"
+            else:
+                if match_count:
+                    action = f"was not in the matchday squad across {match_count} matches for {loan_team}"
+                else:
+                    action = f"was not in the matchday squad for {loan_team}'s fixtures this week"
+        else:
+            if minutes >= 60:
+                action = f"logged {minutes} minutes for {loan_team}"
+            elif minutes > 0:
+                action = f"came off the bench for {loan_team}, playing {minutes} minutes"
+            elif minutes == 0 and was_unused_sub:
+                action = f"was an unused substitute for {loan_team}"
+            elif minutes == 0 and not was_in_squad:
+                action = f"was not in the matchday squad for {loan_team}"
+            else:
+                action = f"featured for {loan_team}"
+
+        sentence = f"{display_name} {action}"
+        if match_phrase and not multi_match_week:
+            connector = " in " if minutes != 0 else " during "
+            sentence += connector + match_phrase
+
+        remaining_phrases = list(stat_phrases)
+        if minutes > 0 and assists > 0 and minutes < 60:
+            sentence += f", delivering {assists} {_pluralize(assists, 'assist')} off the bench"
+            remaining_phrases = [p for p in remaining_phrases if "assist" not in p.lower()]
+            if remaining_phrases:
+                sentence += f" alongside {_combine_phrases(remaining_phrases)}"
+        elif remaining_phrases:
+            if minutes > 0:
+                sentence += f", finishing with {_combine_phrases(remaining_phrases)}"
+            else:
+                sentence += f"; notable numbers: {_combine_phrases(remaining_phrases)}"
+
+        paragraphs.append(_ensure_period(sentence))
+
+    season_context = loanee.get("season_context") or {}
+    season_sentence = _season_context_sentence(full_name, season_context.get("season_stats"), season_context.get("trends"))
+    if season_sentence:
+        paragraphs.append(season_sentence)
+
+    draft_summary = "\n\n".join(paragraphs)
+    week_summary = ""
+    summary_origin = "template"
+    fallback_reason = None
+    should_use_llm = can_track and ENV_ENABLE_GROQ_SUMMARIES and meaningful_minutes and bool(draft_summary.strip())
+    if should_use_llm:
+        try:
+            try:
+                llm_summary = _summarize_player_with_groq(loanee, stats_src, season_context, links, draft_summary=draft_summary)
+            except TypeError:
+                llm_summary = _summarize_player_with_groq(loanee, stats_src, season_context, links)
+        except Exception as groq_error:
+            _nl_dbg("player-summary-groq-error", str(groq_error))
+            llm_summary = ""
+            fallback_reason = "groq_error"
+        if llm_summary:
+            clean_llm = (llm_summary or "").strip()
+            too_short = len(clean_llm) < 40 or len(clean_llm.split()) < 6
+            if too_short:
+                _llm_dbg(
+                    "player.summary.too-short",
+                    {
+                        "player": full_name,
+                        "loan_team": loan_team,
+                        "chars": len(clean_llm),
+                        "words": len(clean_llm.split()),
+                        "minutes": minutes,
+                    },
+                )
+                fallback_reason = "llm_too_short"
+                llm_summary = ""
+            else:
+                llm_paragraphs = [clean_llm]
+                if links:
+                    llm_paragraphs.append(_ensure_period(f"Latest coverage: {links[0]['title']}"))
+                week_summary = "\n\n".join(llm_paragraphs)
+                summary_origin = "groq"
+        else:
+            fallback_reason = fallback_reason or "empty_llm_response"
+    elif can_track and not ENV_ENABLE_GROQ_SUMMARIES:
+        fallback_reason = "llm_disabled"
+    elif not can_track:
+        fallback_reason = "stats_unavailable"
+    else:
+        fallback_reason = "no_minutes"
+
+    appended_media_spotlight = False
+    if not meaningful_minutes and media_sentence:
+        paragraphs.append(media_sentence)
+        summary_origin = summary_origin or "media"
+        appended_media_spotlight = True
+
+    if not week_summary:
+        if links and not appended_media_spotlight:
+            paragraphs.append(_ensure_period(f"Latest coverage: {links[0]['title']}"))
+        week_summary = "\n\n".join(paragraphs)
+        summary_origin = summary_origin or "template"
+
+    item: dict[str, Any] = {
+        "player_name": display_name or full_name,
+        "player_full_name": full_name,
+        "loan_team": loan_team,
+        "loan_team_name": loan_team,
+        "player_id": loanee.get("player_api_id") or loanee.get("player_id"),
+        "player_api_id": loanee.get("player_api_id"),
+        "loan_team_api_id": loanee.get("loan_team_api_id") or loanee.get("loan_team_id"),
+        "loan_team_id": loanee.get("loan_team_id"),
+        "loan_team_country": loanee.get("loan_team_country"),
+        "can_fetch_stats": can_track,
+        "stats": stats,
+        "season_stats": season_context.get("season_stats"),
+        "season_trends": season_context.get("trends"),
+        "recent_form": season_context.get("recent_form"),
+        "week_summary": week_summary,
+        "links": links,
+        "source": loanee.get("source"),
+        "upcoming_fixtures": list(loanee.get("upcoming_fixtures") or []),
+    }
+    if isinstance(matches, list):
+        formatted_notes: list[str] = []
+        structured_matches: list[dict] = []
+        for match in matches[:3]:
+            if not isinstance(match, dict):
+                continue
+            comp = _strip_text(match.get("competition")) or "Match"
+            opponent = _strip_text(match.get("opponent")) or "opponent"
+            score_text = _format_score(match.get("score") or match.get("scoreline"), match)
+            formatted_notes.append(_ensure_period(f"{comp} vs {opponent}: {score_text}"))
+            # Build structured match data with opponent visuals and per-match stats
+            player_stats_this_match = match.get("player") or {}
+            structured_matches.append({
+                "opponent": opponent,
+                "opponent_id": match.get("opponent_id"),
+                "opponent_logo": match.get("opponent_logo"),
+                "competition": comp,
+                "date": match.get("date"),
+                "home": match.get("home"),
+                "score": match.get("score"),
+                "result": match.get("result"),
+                "played": match.get("played"),
+                "position": player_stats_this_match.get("position"),  # Position played THIS match
+                "goals": player_stats_this_match.get("goals", 0),
+                "assists": player_stats_this_match.get("assists", 0),
+                "minutes": player_stats_this_match.get("minutes", 0),
+            })
+        if formatted_notes:
+            item["match_notes"] = formatted_notes
+        if structured_matches:
+            item["matches"] = structured_matches
+    if summary_origin == "groq":
+        _llm_dbg(
+            "player.summary.groq",
+            {
+                "player": full_name,
+                "loan_team": loan_team,
+                "paragraphs": week_summary.count("\n\n") + 1,
+                "links_used": bool(links),
+            },
+        )
+    else:
+        _llm_dbg(
+            "player.summary.fallback",
+            {
+                "player": full_name,
+                "loan_team": loan_team,
+                "reason": fallback_reason or summary_origin or "template",
+                "has_links": bool(links),
+            },
+        )
+    return item
+
+
+def _compose_team_summary_from_player_items(team_name: str, week_range: list[str] | tuple[str, str], player_items: list[dict[str, Any]]) -> str:
+    if not player_items:
+        return f"No active loan updates for {team_name} this week."
+
+    start, end = week_range
+    sentences: list[str] = []
+    for item in player_items:
+        summary = (item.get("week_summary") or "").split("\n\n")[0]
+        full_name = _strip_text(item.get("player_full_name") or item.get("player_name"))
+        display_name = item.get("player_name") or ""
+        if summary and full_name:
+            if display_name and display_name in summary:
+                summary = summary.replace(display_name, full_name, 1)
+            sentences.append(_ensure_period(summary))
+
+    key_players = sentences[:3]
+    summary_text = f"{team_name} loan watch ({start} to {end}): " + " ".join(key_players)
+
+    total_goals = sum(_to_int(item.get("stats", {}).get("goals")) for item in player_items)
+    total_assists = sum(_to_int(item.get("stats", {}).get("assists")) for item in player_items)
+    total_minutes = sum(_to_int(item.get("stats", {}).get("minutes")) for item in player_items)
+
+    summary_text += _ensure_period(f" Combined output: {total_goals} {_pluralize(total_goals, 'goal')}, {total_assists} {_pluralize(total_assists, 'assist')} and {total_minutes} {_pluralize(total_minutes, 'minute')}.")
+    if ENV_ENABLE_GROQ_SUMMARIES and ENV_ENABLE_GROQ_TEAM_SUMMARIES:
+        try:
+            try:
+                llm_summary = _summarize_team_with_groq(team_name, week_range, player_items, draft_summary=summary_text)
+            except TypeError:
+                llm_summary = _summarize_team_with_groq(team_name, week_range, player_items)
+        except Exception as groq_error:
+            _nl_dbg("team-summary-groq-error", str(groq_error))
+            llm_summary = ""
+        if llm_summary:
+            _llm_dbg("team.summary.groq", {"team": team_name, "players": len(player_items)})
+            return llm_summary
+
+    fallback_reason = "llm_disabled" if not (ENV_ENABLE_GROQ_SUMMARIES and ENV_ENABLE_GROQ_TEAM_SUMMARIES) else "llm_empty"
+    _llm_dbg(
+        "team.summary.fallback",
+        {
+            "team": team_name,
+            "players": len(player_items),
+            "reason": fallback_reason,
+        },
+    )
+    return summary_text
 
 
 def _merge_stats_into_item(item: dict, totals: dict | None) -> dict:
@@ -645,6 +1396,7 @@ def _apply_stat_driven_summaries(content: dict, report: dict, brave_ctx: dict) -
         return content
 
     loanee_lookup: dict[str, dict[str, Any]] = {}
+    loanee_lookup_by_id: dict[int, dict[str, Any]] = {}
     for loanee in report.get("loanees") or []:
         if not isinstance(loanee, dict):
             continue
@@ -658,6 +1410,17 @@ def _apply_stat_driven_summaries(content: dict, report: dict, brave_ctx: dict) -
             key = _normalize_player_key(alias)
             if key:
                 loanee_lookup.setdefault(key, loanee)
+        pid_candidates = [
+            loanee.get("player_id"),
+            loanee.get("player_api_id"),
+        ]
+        for candidate in pid_candidates:
+            try:
+                pid = int(candidate)
+            except (TypeError, ValueError):
+                continue
+            if pid not in loanee_lookup_by_id:
+                loanee_lookup_by_id[pid] = loanee
 
     hits_by_player = _hits_by_player(brave_ctx)
     player_entries: list[dict[str, Any]] = []
@@ -665,40 +1428,124 @@ def _apply_stat_driven_summaries(content: dict, report: dict, brave_ctx: dict) -
     for sec in sections:
         if not isinstance(sec, dict):
             continue
-        title = (sec.get("title") or "").strip().lower()
-        if title not in ("active loans", "supplemental loans"):
+        title = _strip_text(sec.get("title")).lower()
+        if title not in ("active loans", "manual player entries"):
             continue
-        is_supplemental_section = title == "supplemental loans"
+        is_manual_section = title == "manual player entries"
         items = sec.get("items")
         if not isinstance(items, list):
             continue
         for item in items:
             if not isinstance(item, dict):
                 continue
-            player_name = item.get("player_name") or ""
-            key = _normalize_player_key(player_name)
-            loanee = loanee_lookup.get(key)
-            stats = item.get("stats") if isinstance(item.get("stats"), dict) else {}
+            original_player_name = _strip_text(item.get("player_name"))
+            name_key = _normalize_player_key(original_player_name)
+
+            loanee = None
+            canonical_pid = None
+            pid_candidates = [item.get("player_id"), item.get("player_api_id")]
+            for candidate in pid_candidates:
+                try:
+                    canonical_pid = int(candidate)
+                except (TypeError, ValueError):
+                    canonical_pid = None
+                    continue
+                loanee = loanee_lookup_by_id.get(canonical_pid)
+                if loanee:
+                    break
+            if loanee is None and name_key:
+                loanee = loanee_lookup.get(name_key)
+
+            if loanee:
+                if canonical_pid is None:
+                    pid_source = loanee.get("player_id") or loanee.get("player_api_id")
+                    try:
+                        canonical_pid = int(pid_source)
+                    except (TypeError, ValueError):
+                        canonical_pid = None
+                    if canonical_pid is not None:
+                        item["player_id"] = canonical_pid
+                full_name = _strip_text(loanee.get("player_full_name")) or _strip_text(loanee.get("player_name"))
+                if full_name:
+                    item["player_full_name"] = full_name
+                    display = to_initial_last(full_name) or full_name
+                    item["player_name"] = display
+
+                if canonical_pid:
+                    try:
+                        rating_graph = graph_service.generate_player_rating_graph(canonical_pid, item.get("player_name"))
+                        if rating_graph:
+                            item["rating_graph_url"] = rating_graph
+                        minutes_graph = graph_service.generate_player_minutes_graph(canonical_pid, item.get("player_name"))
+                        if minutes_graph:
+                            item["minutes_graph_url"] = minutes_graph
+                    except Exception as e:
+                        _nl_dbg(f"Graph generation failed for {canonical_pid}: {e}")
+                loan_team_name = _strip_text(loanee.get("loan_team_name"))
+                if loan_team_name:
+                    item.setdefault("loan_team", loan_team_name)
+                    item.setdefault("loan_team_name", loan_team_name)
+                loan_team_api_id = loanee.get("loan_team_api_id")
+                if loan_team_api_id:
+                    item.setdefault("loan_team_api_id", loan_team_api_id)
+                loan_team_db_id = loanee.get("loan_team_id")
+                if loan_team_db_id:
+                    item.setdefault("loan_team_id", loan_team_db_id)
+
+            # Determine canonical tracking flag before merging stats
+            if isinstance(loanee, dict):
+                can_track = bool(loanee.get("can_fetch_stats", True))
+            else:
+                can_track = bool(item.get("can_fetch_stats", True))
+            item["can_fetch_stats"] = can_track
+
             totals = loanee.get("totals") if isinstance(loanee, dict) else None
-            if totals:
+            if can_track and totals:
                 stats = _merge_stats_into_item(item, totals)
             else:
+                if not can_track:
+                    item["stats"] = {}
+                stats = item.get("stats") if isinstance(item.get("stats"), dict) else {}
                 item["stats"] = stats
-            hits = hits_by_player.get(key, [])
+
+            lookup_keys: list[str] = []
+            display_key = _normalize_player_key(_strip_text(item.get("player_name")))
+            if display_key:
+                lookup_keys.append(display_key)
+            if name_key and name_key not in lookup_keys:
+                lookup_keys.append(name_key)
+            if isinstance(loanee, dict):
+                loanee_aliases = [
+                    _strip_text(loanee.get("player_name")),
+                    _strip_text(loanee.get("player_full_name")),
+                    to_initial_last(_strip_text(loanee.get("player_name")) or ""),
+                    to_initial_last(_strip_text(loanee.get("player_full_name")) or ""),
+                ]
+                for alias in filter(None, loanee_aliases):
+                    alias_key = _normalize_player_key(alias)
+                    if alias_key and alias_key not in lookup_keys:
+                        lookup_keys.append(alias_key)
+
+            hits: list[dict[str, Any]] = []
+            for lk in lookup_keys:
+                hits = hits_by_player.get(lk, [])
+                if hits:
+                    break
             if hits:
                 _merge_links_from_hits(item, hits)
+
             summary_text, headline_text, article_title = _build_player_summary(
                 item,
                 loanee,
                 stats,
-                None if is_supplemental_section else _match_result_phrase(loanee),
+                None if is_manual_section else _match_result_phrase(loanee),
                 hits,
             )
             if summary_text:
                 item["week_summary"] = summary_text
             player_entries.append(
                 {
-                    "player": player_name or (loanee.get("player_name") if isinstance(loanee, dict) else ""),
+                    "player": item.get("player_name") or (loanee.get("player_name") if isinstance(loanee, dict) else ""),
                     "headline": headline_text,
                     "score": _impact_score(stats),
                     "article_title": article_title,
@@ -709,7 +1556,7 @@ def _apply_stat_driven_summaries(content: dict, report: dict, brave_ctx: dict) -
         player_entries.sort(key=lambda entry: entry["score"], reverse=True)
         summary_bits: list[str] = []
         for entry in player_entries[:2]:
-            phrase = f"{entry['player']} {entry['headline']}".strip()
+            phrase = _strip_text(f"{entry['player']} {entry['headline']}")
             if phrase:
                 summary_bits.append(_ensure_period(phrase))
         article_title = next((entry["article_title"] for entry in player_entries if entry.get("article_title")), None)
@@ -720,127 +1567,6 @@ def _apply_stat_driven_summaries(content: dict, report: dict, brave_ctx: dict) -
 
     return content
 
-
-SYSTEM_PROMPT = """You are an editorial assistant for a football club newsletter.
-- Input: a weekly loan report JSON (player + loan team context for the exact week) and a search context (articles/notes). The report.loanees[*] include per‑match data (result, home/away, opponent, minutes, goals, assists, cards) and comprehensive statistics (position, rating, saves, tackles, passes, shots, dribbles, duels, fouls), plus team_statistics when present.
-- Output: a concise, fan-friendly newsletter as JSON. Keep it factual, readable, with short paragraphs and bullet lists where helpful. Base all stats and match details strictly on the provided weekly report; only use search_context for quotes/links and external color, never for stats.
-- Required JSON shape:
-{
-  "title": "...",
-  "summary": "...",
-  "season": "YYYY-YY",
-  "range": ["YYYY-MM-DD","YYYY-MM-DD"],
-  "highlights": ["...","..."],
-  "sections": [
-    {
-      "title": "Active Loans",
-      "items": [
-        {
-          "player_name": "...",
-          "loan_team": "...",
-          "week_summary": "...",             // 1–3 sentences: synthesize player + team context
-          "stats": {
-            "minutes": 0, "goals": 0, "assists": 0, "yellows": 0, "reds": 0,
-            "position": "...", "rating": 0.0, "saves": 0, "goals_conceded": 0,
-            "shots_total": 0, "shots_on": 0, "passes_total": 0, "passes_key": 0,
-            "tackles_total": 0, "tackles_interceptions": 0, "duels_total": 0, "duels_won": 0,
-            "dribbles_attempts": 0, "dribbles_success": 0, "fouls_drawn": 0, "fouls_committed": 0, "offsides": 0
-          },
-          "match_notes": ["..."],            // 0–3 bullets
-          "links": ["https://...", "..."]    // from search results, 0–3 links
-        }
-      ]
-    },
-    {
-      "title": "What the Internet is Saying",
-      "items": [
-        {"player_name": "J. Sancho", "links": [{"title": "...","url":"..."}]},
-        {"player_name": "H. Mejbri", "links": [{"title": "...","url":"..."}]}
-      ]
-    }
-  ]
-}
- - Guidance:
-   - Use report.parent_team.name and report.range to frame the issue.
-   - For each loanee, copy ALL fields from report.loanees[*].totals directly into the stats object. This includes position, rating, saves, tackles, passes, shots, and all other available stats.
-   - Weave in notable per‑match details from report.loanees[*].matches. If team_statistics exist, reference key metrics that explain performance (e.g., shots, xG, possession) without dumping raw tables.
-   - If a player had no minutes, note squad involvement (bench/not in squad) if role or played=false implies it.
-   - Do not invent stats, fixtures, or opponents. Prefer brevity and clarity over speculation.
-"""
-
-# Structured output schema for strict Responses API validation
-class NLLink(BaseModel):
-    model_config = dict(extra='forbid')
-    title: str
-    url: str
-
-
-class NLStats(BaseModel):
-    model_config = dict(extra='forbid')
-    minutes: int
-    goals: int
-    assists: int
-    yellows: int
-    reds: int
-
-
-class NLSectionItem(BaseModel):
-    model_config = dict(extra='forbid')
-    player_name: str
-    loan_team: str | None = None
-    week_summary: str | None = None
-    stats: NLStats | None = None
-    match_notes: List[str] | None = None
-    links: List[str | NLLink] | None = None
-
-
-class NLSection(BaseModel):
-    model_config = dict(extra='forbid')
-    title: str
-    items: List[NLSectionItem]
-
-
-class NewsletterModel(BaseModel):
-    model_config = dict(extra='forbid')
-    title: str
-    summary: str
-    season: str
-    range: Annotated[List[str], Field(min_items=2, max_items=2)]
-    highlights: List[str] | None = None
-    sections: List[NLSection]
-
-
-def _newsletter_json_schema() -> dict:
-    try:
-        schema = NewsletterModel.model_json_schema()
-        # Remove $schema to avoid draft-version conflicts with validators
-        schema.pop("$schema", None)
-        return schema
-    except Exception:
-        # Fallback to a minimal permissive schema if generation fails
-        return {
-            "type": "object",
-            "properties": {
-                "title": {"type": "string"},
-                "summary": {"type": "string"},
-                "season": {"type": "string"},
-                "range": {"type": "array", "minItems": 2, "maxItems": 2, "items": {"type": "string"}},
-                "highlights": {"type": "array", "items": {"type": "string"}},
-                "sections": {"type": "array"}
-            },
-            "required": ["title", "summary", "season", "range", "sections"],
-            "additionalProperties": False
-        }
-
-
-NEWSLETTER_RESPONSE_FORMAT = {
-    "type": "json_schema",
-    "name": "newsletter_response_format",
-    "schema": _newsletter_json_schema(),
-    # Use non-strict to allow optional fields like loan_team, week_summary, etc.
-    # Strict mode in the Responses API requires 'required' to include all keys in 'properties'.
-    "strict": False,
-}
 
 def _monday_range(target: date) -> tuple[date, date]:
     # Monday–Sunday window for weekly issues
@@ -911,9 +1637,9 @@ def brave_context_for_team_and_loans(team_name: str, report: Dict[str, Any], *, 
     use_cup_syns = flags['cup_synonyms']
     strict_range = flags['strict_range']
     for loanee in report.get("loanees", []):
-        pname = (loanee.get("player_name") or "").strip()
-        loan_team = (loanee.get("loan_team_name") or "").strip()
-        loan_country = (loanee.get("loan_team_country") or "").strip()
+        pname = _strip_text(loanee.get("player_name"))
+        loan_team = _strip_text(loanee.get("loan_team_name"))
+        loan_country = _strip_text(loanee.get("loan_team_country"))
         loan_team_api_id = loanee.get("loan_team_api_id") or loanee.get("loan_team_id")
         if not pname or not loan_team:
             continue
@@ -931,8 +1657,8 @@ def brave_context_for_team_and_loans(team_name: str, report: Dict[str, Any], *, 
             }
         # Match-specific queries
         for m in loanee.get("matches", []):
-            opponent = (m.get("opponent") or "").strip()
-            comp = (m.get("competition") or "").strip()
+            opponent = _strip_text(m.get("opponent"))
+            comp = _strip_text(m.get("competition"))
             if opponent:
                 o = f'"{opponent}"'
                 if comp:
@@ -1082,7 +1808,7 @@ def brave_context_for_team_and_loans(team_name: str, report: Dict[str, Any], *, 
             url_set = set()
             for arr in results.values():
                 for h in arr:
-                    u = (h.get("url") or "").strip()
+                    u = _strip_text(h.get("url"))
                     if u:
                         url_set.add(u)
 
@@ -1092,7 +1818,11 @@ def brave_context_for_team_and_loans(team_name: str, report: Dict[str, Any], *, 
 
             # Filter per-query hits based on ok_urls
             for q, arr in list(results.items()):
-                filtered = [h for h in (arr or []) if (h.get("url") or "") in ok_urls]
+                filtered = []
+                for h in (arr or []):
+                    url_value = _strip_text(h.get("url"))
+                    if url_value and url_value in ok_urls:
+                        filtered.append(h)
                 if len(filtered) != len(arr or []):
                     _nl_dbg("Pruned dead links for query:", q, f"{len(arr or [])}->{len(filtered)}")
                 results[q] = filtered
@@ -1251,46 +1981,47 @@ def persist_newsletter(team_db_id: int, content_json_str: str, week_start: date,
             items = first_section.get('items', [])
             if items:
                 first_item = items[0]
-                print(f"📊 [persist_newsletter] Sample item stats BEFORE rendering:")
-                print(f"   Player: {first_item.get('player_name')}")
-                print(f"   Stats keys: {list(first_item.get('stats', {}).keys())}")
-                print(f"   Position: {first_item.get('stats', {}).get('position')}")
-                print(f"   Rating: {first_item.get('stats', {}).get('rating')}")
-                print(f"   Shots: {first_item.get('stats', {}).get('shots_total')}")
-                print(f"   Passes: {first_item.get('stats', {}).get('passes_total')}")
+                stats_snapshot = {
+                    "player": first_item.get('player_name'),
+                    "stats_keys": list(first_item.get('stats', {}).keys()),
+                    "position": first_item.get('stats', {}).get('position'),
+                    "rating": first_item.get('stats', {}).get('rating'),
+                    "shots": first_item.get('stats', {}).get('shots_total'),
+                    "passes": first_item.get('stats', {}).get('passes_total'),
+                }
+                _nl_dbg("[persist_newsletter] sample_item_stats", stats_snapshot)
     except Exception as e:
-        print(f"⚠️  Error logging sample stats: {e}")
+        _nl_dbg("[persist_newsletter] sample_item_stats_error", str(e))
 
     # Render and embed variants (web_html, email_html, text) for convenience
     try:
-        print(f"🎨 [persist_newsletter] Calling _render_variants for team: {team_name}")
+        _nl_dbg("[persist_newsletter] rendering_variants", {"team": team_name})
         variants = _render_variants(parsed, team_name)
-        print(f"✅ [persist_newsletter] Generated variants - web_html length: {len(variants.get('web_html', ''))}, email_html length: {len(variants.get('email_html', ''))}")
-        
-        # Check if rendered HTML contains position-specific stats
-        web_html = variants.get('web_html', '')
-        if 'Shots' in web_html or 'Saves' in web_html or 'Key Passes' in web_html:
-            print(f"✅ [persist_newsletter] Rendered HTML contains expanded stats!")
-        else:
-            print(f"⚠️  [persist_newsletter] Rendered HTML might not contain expanded stats")
-        
+        web_html = variants.get('web_html', '') or ''
+        render_meta = {
+            "web_html_len": len(web_html),
+            "email_html_len": len(variants.get('email_html', '') or ''),
+            "has_expanded_stats": any(token in web_html for token in ("Shots", "Saves", "Key Passes")),
+        }
+        _nl_dbg("[persist_newsletter] rendered_variants", render_meta)
         parsed['rendered'] = variants
         content_json_str = json.dumps(parsed, ensure_ascii=False)
-        print(f"✅ [persist_newsletter] Updated content_json_str with rendered variants")
     except Exception as e:
         # Non-fatal; continue without rendered variants
-        print(f"❌ [persist_newsletter] Error generating rendered variants: {e}")
+        _nl_dbg("[persist_newsletter] render_variants_error", str(e))
         import traceback
         traceback.print_exc()
         pass
 
     now = datetime.now(timezone.utc)
+    placeholder_slug = f"tmp-{uuid.uuid4().hex}"
     newsletter = Newsletter(
         team_id=team_db_id,
         newsletter_type=newsletter_type,
         title=title,
         content=content_json_str,           # store JSON with rendered variants
         structured_content=content_json_str,
+        public_slug=placeholder_slug,
         week_start_date=week_start,
         week_end_date=week_end,
         issue_date=issue_date,
@@ -1301,6 +2032,16 @@ def persist_newsletter(team_db_id: int, content_json_str: str, week_start: date,
     )
     db.session.add(newsletter)
     try:
+        db.session.flush()
+        team_name_for_slug = team_name or (newsletter.team.name if newsletter.team else None)
+        newsletter.public_slug = compose_newsletter_public_slug(
+            team_name=team_name_for_slug,
+            newsletter_type=newsletter.newsletter_type,
+            week_start=newsletter.week_start_date,
+            week_end=newsletter.week_end_date,
+            issue_date=newsletter.issue_date,
+            identifier=newsletter.id,
+        )
         db.session.commit()
     except Exception:
         # Ensure session usable for subsequent requests
@@ -1308,7 +2049,7 @@ def persist_newsletter(team_db_id: int, content_json_str: str, week_start: date,
         raise
     return newsletter
 
-def compose_team_weekly_newsletter(team_db_id: int, target_date: date) -> dict:
+def compose_team_weekly_newsletter(team_db_id: int, target_date: date, force_refresh: bool = False) -> dict:
     """Compose (but do not persist) a weekly newsletter.
     Returns a dict with keys: content_json (str), week_start (date), week_end (date), season_start_year (int).
     """
@@ -1317,6 +2058,10 @@ def compose_team_weekly_newsletter(team_db_id: int, target_date: date) -> dict:
 
     # Derive season from the week we are processing (European season starts Aug 1)
     season_start_year = week_start.year if week_start.month >= 8 else week_start.year - 1
+    
+    if force_refresh:
+        api_client.clear_stats_cache(season=season_start_year)
+        
     api_client.set_season_year(season_start_year)
     try:
         # Log current season view on the client after setting
@@ -1354,6 +2099,14 @@ def compose_team_weekly_newsletter(team_db_id: int, target_date: date) -> dict:
     loanees = report.get("loanees") or []
     if len(loanees) == 0:
         raise NoActiveLoaneesError(team_db_id, week_start, week_end)
+    _llm_dbg(
+        "compose.start",
+        {
+            "team_db_id": team_db_id,
+            "loanees": len(loanees),
+            "groq_enabled": ENV_ENABLE_GROQ_SUMMARIES,
+        },
+    )
 
     # Build player lookup to help post-processing attach player_id + sofascore ids later
     player_lookup: dict[str, list[dict[str, Any]]] = {}
@@ -1420,100 +2173,146 @@ def compose_team_weekly_newsletter(team_db_id: int, target_date: date) -> dict:
     except Exception:
         pass
 
-    # Compose agent input
-    user_payload = {
-        "task": "compose_weekly_newsletter",
-        "team": report["parent_team"],
-        "report": report,
-        "search_context": brave_ctx
+    hits_by_player = _hits_by_player(brave_ctx)
+    player_items: list[dict[str, Any]] = []
+    for loanee in loanees:
+        hits = _extract_hits_for_loanee(loanee, hits_by_player)
+        item = _build_player_report_item(loanee, hits, week_start=week_start, week_end=week_end)
+        player_items.append(item)
+    missing_summaries = sum(1 for item in player_items if not _strip_text(item.get("week_summary")))
+    _nl_dbg(
+        "compose.player_items",
+        {
+            "player_items": len(player_items),
+
+            "missing_summaries": missing_summaries,
+        },
+    )
+    if missing_summaries:
+        _llm_dbg(
+            "player.summary.empty_count",
+            {
+                "team_db_id": team_db_id,
+                "count": missing_summaries,
+            },
+        )
+
+    team_name = report.get("parent_team", {}).get("name") or "Loan Watch"
+    range_window = report.get("range") or [week_start.isoformat(), week_end.isoformat()]
+    summary_text = _compose_team_summary_from_player_items(team_name, range_window, player_items)
+
+    # Fetch journalist commentaries for this week
+    # ROBUST FIX: Query by API Team ID (e.g. 33) instead of DB ID (e.g. 234)
+    # This ensures we find commentaries even if they are linked to an older season's team record
+    current_team = Team.query.get(team_db_id)
+    api_team_id = current_team.team_id if current_team else None
+    
+    print(f"\n{'='*60}")
+    print(f"[COMMENTARY QUERY DEBUG - ROBUST MODE]")
+    print(f"{'='*60}")
+    print(f"Searching for commentaries with:")
+    print(f"  API Team ID: {api_team_id} (derived from DB ID {team_db_id})")
+    print(f"  week_start_date: {week_start}")
+    print(f"  week_end_date: {week_end}")
+    print(f"  is_active: True")
+    print(f"{'='*60}\n")
+    
+    if api_team_id:
+        commentaries = db.session.query(NewsletterCommentary)\
+            .join(Team, NewsletterCommentary.team_id == Team.id)\
+            .filter(
+                Team.team_id == api_team_id,
+                NewsletterCommentary.week_start_date == week_start,
+                NewsletterCommentary.week_end_date == week_end,
+                NewsletterCommentary.is_active == True
+            )\
+            .order_by(NewsletterCommentary.position.asc(), NewsletterCommentary.created_at.asc())\
+            .all()
+    else:
+        print("[ERROR] Could not resolve API Team ID, falling back to simple query")
+        commentaries = NewsletterCommentary.query.filter(
+            NewsletterCommentary.team_id == team_db_id,
+            NewsletterCommentary.week_start_date == week_start,
+            NewsletterCommentary.week_end_date == week_end,
+            NewsletterCommentary.is_active == True
+        ).order_by(NewsletterCommentary.position.asc(), NewsletterCommentary.created_at.asc()).all()
+    
+    print(f"[COMMENTARY QUERY RESULT] Found {len(commentaries)} matching commentaries")
+    
+    # Show ALL commentaries in DB for debugging
+    all_commentaries = NewsletterCommentary.query.filter(NewsletterCommentary.is_active == True).all()
+    print(f"\n[ALL ACTIVE COMMENTARIES IN DB] Total: {len(all_commentaries)}")
+    for ac in all_commentaries:
+        # Resolve team info for debug
+        t = Team.query.get(ac.team_id)
+        t_info = f"API:{t.team_id}/S:{t.season}" if t else "Unknown"
+        print(f"  ID:{ac.id} | TeamDB:{ac.team_id}({t_info}) | Week:{ac.week_start_date} to {ac.week_end_date} | Title:{ac.title}")
+    print("")
+
+    intro_commentary = []
+    summary_commentary = []
+    player_commentary_map = {}
+
+    for c in commentaries:
+        c_dict = c.to_dict()
+        if c.commentary_type == 'intro':
+            intro_commentary.append(c_dict)
+        elif c.commentary_type == 'summary':
+            summary_commentary.append(c_dict)
+        elif c.commentary_type == 'player' and c.player_id:
+            if c.player_id not in player_commentary_map:
+                player_commentary_map[c.player_id] = []
+            player_commentary_map[c.player_id].append(c_dict)
+
+    print(f"[DEBUG] Found {len(commentaries)} active commentaries for team {team_db_id} week {week_start}-{week_end}")
+    print(f"[DEBUG] Intro: {len(intro_commentary)}, Summary: {len(summary_commentary)}, Player-specific: {sum(len(v) for v in player_commentary_map.values())}")
+    if player_commentary_map:
+        print(f"[DEBUG] Player IDs with commentary: {list(player_commentary_map.keys())}")
+        
+        # Inject commentary into player items
+        for item in player_items:
+            pid = item.get("player_id")
+            if pid and pid in player_commentary_map:
+                # Take the first commentary for this player (or join multiple if needed)
+                # For now, we'll just take the content of the first one
+                coms = player_commentary_map[pid]
+                if coms:
+                    # Inject the commentary content directly into the player item
+                    # This ensures it appears in the JSON output
+                    item["commentary"] = coms[0].get("content")
+                    item["commentary_title"] = coms[0].get("title")
+                    print(f"[DEBUG] Injected commentary for player {pid} ({item.get('player_name')})")
+
+    content_payload: dict[str, Any] = {
+        "title": f"{team_name} Loan Watch",
+        "summary": summary_text,
+        "season": report.get("season"),
+        "range": range_window,
+        "highlights": [],
+        "sections": [
+            {"title": "Player Reports", "items": player_items},
+        ],
+        "intro_commentary": intro_commentary,
+        "summary_commentary": summary_commentary,
+        "player_commentary_map": player_commentary_map,
     }
 
-    # Try strict structured output; fall back to plain JSON extraction if schema not supported
     try:
-        completion = client.responses.create(
-            model="gpt-4.1-mini",
-            input=[
-                {"role": "system", "content": SYSTEM_PROMPT},
-                {"role": "user", "content": json.dumps(user_payload)}
-            ],
-            temperature=0.3,
-            text={
-                "format": NEWSLETTER_RESPONSE_FORMAT
-            }
-        )
-    except Exception as e:
-        _nl_dbg("Responses.create (structured) failed:", str(e))
-        completion = client.responses.create(
-            model="gpt-4.1-mini",
-            input=[
-                {"role": "system", "content": SYSTEM_PROMPT},
-                {"role": "user", "content": json.dumps(user_payload)}
-            ],
-            temperature=0.4,
-            text={
-                "format": {"type": "json_object"}
-            }
-        )
-
-    # Extract JSON payload robustly
-    def _extract_json(resp_obj) -> dict:
-        # 1) Try output_text
-        try:
-            txt = getattr(resp_obj, "output_text", None)
-            if isinstance(txt, str) and txt.strip():
-                return json.loads(txt)
-        except Exception:
-            pass
-        # 2) Walk response.output
-        try:
-            out = getattr(resp_obj, "output", None)
-            if out and isinstance(out, list):
-                for item in out:
-                    content = getattr(item, "content", None) or (item.get("content") if isinstance(item, dict) else None)
-                    if content and isinstance(content, list):
-                        for c in content:
-                            if isinstance(c, dict):
-                                if c.get("type") in ("output_json", "json"):
-                                    j = c.get("json") or c.get("input_json")
-                                    if j:
-                                        return j
-                                if "text" in c and isinstance(c["text"], str):
-                                    try:
-                                        return json.loads(c["text"])
-                                    except Exception:
-                                        continue
-        except Exception:
-            pass
-        # 3) Regex last resort
-        try:
-            m = re.search(r"\{(?:.|\n)*\}", str(resp_obj))
-            if m:
-                return json.loads(m.group(0))
-        except Exception:
-            pass
-        raise ValueError("Unable to parse model JSON")
-
-    parsed = _extract_json(completion)
-
-    # Apply lookup + enrichment to ensure player ids and sofascore ids propagate
-    try:
-        if isinstance(parsed, dict):
-            parsed, _ = _apply_player_lookup(parsed, player_lookup)
-            parsed = legacy_lint_and_enrich(parsed)
-            parsed = _enforce_loanee_metadata(parsed, loanee_meta_by_pid, loanee_meta_by_key)
-            parsed = _apply_stat_driven_summaries(parsed, report, brave_ctx)
+        content_payload, _ = _apply_player_lookup(content_payload, player_lookup)
+        content_payload = legacy_lint_and_enrich(content_payload)
+        content_payload = _enforce_loanee_metadata(content_payload, loanee_meta_by_pid, loanee_meta_by_key)
     except Exception as enrich_error:
         _nl_dbg("lint-and-enrich failed:", str(enrich_error))
 
     # Post-process: validate outbound links in the final content
     if ENV_VALIDATE_FINAL_LINKS:
         try:
-            parsed = _sanitize_links_in_content(parsed)
+            content_payload = _sanitize_links_in_content(content_payload)
         except Exception as e:
             _nl_dbg("final-link-sanitize failed:", str(e))
 
-    content = json.dumps(parsed, ensure_ascii=False)
-    _nl_dbg("LLM content length:", len(content))
+    content = json.dumps(content_payload, ensure_ascii=False)
+    _nl_dbg("Structured content length:", len(content))
 
     return {
         "content_json": content,
@@ -1522,11 +2321,11 @@ def compose_team_weekly_newsletter(team_db_id: int, target_date: date) -> dict:
         "season_start_year": season_start_year,
     }
 
-def generate_team_weekly_newsletter(team_db_id: int, target_date: date) -> dict:
+def generate_team_weekly_newsletter(team_db_id: int, target_date: date, force_refresh: bool = False) -> dict:
     """Compose and persist a weekly newsletter; returns row.to_dict().
     Used by batch jobs. For API routes, prefer composing then persisting at the route level.
     """
-    out = compose_team_weekly_newsletter(team_db_id, target_date)
+    out = compose_team_weekly_newsletter(team_db_id, target_date, force_refresh=force_refresh)
     row = persist_newsletter(
         team_db_id=team_db_id,
         content_json_str=out["content_json"],

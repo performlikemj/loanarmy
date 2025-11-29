@@ -1,0 +1,325 @@
+<!doctype html>
+<html lang="en">
+
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Your Weekly Loan Army Digest</title>
+  <style>
+    /* Monochrome email layout tuned for broad client support */
+    body {
+      margin: 0;
+      padding: 0;
+      background: #040404;
+      color: #ffffff;
+    }
+
+    .wrapper {
+      width: 100%;
+      table-layout: fixed;
+      background: #040404;
+      padding: 24px 0;
+    }
+
+    .main {
+      width: 100%;
+      max-width: 680px;
+      margin: 0 auto;
+      background: #111111;
+      border: 1px solid #303030;
+      border-radius: 10px;
+      overflow: hidden;
+    }
+
+    .content {
+      padding: 28px 26px 32px;
+      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif;
+      color: #f0f0f0;
+      line-height: 1.55;
+    }
+
+    .brand {
+      font-size: 13px;
+      letter-spacing: 3px;
+      text-transform: uppercase;
+      color: #bebebe;
+      margin-bottom: 18px;
+    }
+
+    h1 {
+      font-size: 26px;
+      margin: 0 0 12px;
+      color: #ffffff;
+    }
+
+    .meta {
+      font-size: 13px;
+      color: #c9c9c9;
+      text-transform: uppercase;
+      letter-spacing: 1.2px;
+      margin-bottom: 18px;
+    }
+
+    .divider {
+      width: 48px;
+      height: 2px;
+      background: #ffffff;
+      margin: 10px 0 22px;
+    }
+
+    .intro-text {
+      font-size: 16px;
+      color: #e0e0e0;
+      margin-bottom: 24px;
+      line-height: 1.6;
+    }
+
+    .newsletter-card {
+      background: #0a0a0a;
+      border: 1px solid #2a2a2a;
+      border-radius: 10px;
+      margin-bottom: 20px;
+      overflow: hidden;
+    }
+
+    .newsletter-header {
+      padding: 16px 18px;
+      border-bottom: 1px solid #2a2a2a;
+    }
+
+    .newsletter-title-row {
+      display: flex;
+      align-items: center;
+      gap: 12px;
+    }
+
+    .team-logo {
+      width: 40px;
+      height: 40px;
+      border-radius: 50%;
+      object-fit: cover;
+      background: #1f1f1f;
+    }
+
+    .newsletter-title {
+      font-size: 18px;
+      font-weight: 600;
+      color: #ffffff;
+      margin: 0;
+    }
+
+    .newsletter-meta {
+      font-size: 12px;
+      color: #888888;
+      margin-top: 4px;
+    }
+
+    .newsletter-body {
+      padding: 16px 18px;
+    }
+
+    .newsletter-summary {
+      font-size: 15px;
+      color: #d0d0d0;
+      margin-bottom: 14px;
+      line-height: 1.5;
+    }
+
+    .highlights-mini {
+      background: #141414;
+      border-radius: 6px;
+      padding: 12px 14px;
+      margin-bottom: 14px;
+    }
+
+    .highlights-label {
+      font-size: 11px;
+      text-transform: uppercase;
+      letter-spacing: 1px;
+      color: #888888;
+      margin-bottom: 8px;
+    }
+
+    .highlights-list {
+      margin: 0;
+      padding-left: 16px;
+      color: #c0c0c0;
+      font-size: 14px;
+    }
+
+    .highlights-list li {
+      margin-bottom: 4px;
+    }
+
+    .read-more-btn {
+      display: inline-block;
+      padding: 10px 20px;
+      background: #ffffff;
+      color: #000000;
+      text-decoration: none;
+      border-radius: 6px;
+      font-weight: 600;
+      font-size: 14px;
+    }
+
+    .digest-count {
+      background: #1a1a1a;
+      border: 1px solid #303030;
+      border-radius: 8px;
+      padding: 12px 16px;
+      margin-bottom: 24px;
+      text-align: center;
+    }
+
+    .digest-count-number {
+      font-size: 28px;
+      font-weight: 700;
+      color: #ffffff;
+    }
+
+    .digest-count-label {
+      font-size: 12px;
+      color: #888888;
+      text-transform: uppercase;
+      letter-spacing: 1px;
+    }
+
+    .footer {
+      margin-top: 32px;
+      padding-top: 24px;
+      border-top: 1px solid #2a2a2a;
+      font-size: 13px;
+      color: #888888;
+      text-align: center;
+    }
+
+    .footer a {
+      color: #ffffff;
+    }
+
+    .support-cta {
+      text-align: center;
+      margin: 0 0 18px;
+    }
+
+    .preference-note {
+      background: #0d1117;
+      border: 1px solid #30363d;
+      border-radius: 6px;
+      padding: 12px 16px;
+      margin-top: 20px;
+      font-size: 13px;
+      color: #8b949e;
+    }
+
+    .preference-note a {
+      color: #58a6ff;
+    }
+  </style>
+</head>
+
+<body>
+  <table role="presentation" class="wrapper" cellspacing="0" cellpadding="0" border="0">
+    <tr>
+      <td align="center">
+        <table role="presentation" class="main" cellspacing="0" cellpadding="0" border="0">
+          <tr>
+            <td class="content">
+              <div class="brand">GO ON LOAN</div>
+              <h1>Your Weekly Digest</h1>
+              <div class="meta">
+                {% if week_range %}
+                <span>{{ week_range }}</span>
+                {% endif %}
+              </div>
+              <div class="divider"></div>
+
+              <p class="intro-text">
+                Here's your weekly roundup of all the loan army newsletters you're subscribed to.
+                {% if newsletter_count > 1 %}
+                We've combined {{ newsletter_count }} newsletters into this single digest.
+                {% endif %}
+              </p>
+
+              <div class="digest-count">
+                <div class="digest-count-number">{{ newsletter_count }}</div>
+                <div class="digest-count-label">Newsletter{{ 's' if newsletter_count != 1 else '' }} This Week</div>
+              </div>
+
+              {% for newsletter in newsletters %}
+              <div class="newsletter-card">
+                <div class="newsletter-header">
+                  <div class="newsletter-title-row">
+                    {% if newsletter.team_logo %}
+                    <img class="team-logo" src="{{ newsletter.team_logo }}" alt="{{ newsletter.team_name }} crest" />
+                    {% endif %}
+                    <div>
+                      <div class="newsletter-title">{{ newsletter.title }}</div>
+                      <div class="newsletter-meta">
+                        {% if newsletter.team_name %}{{ newsletter.team_name }}{% endif %}
+                        {% if newsletter.journalist_name %} · {{ newsletter.journalist_name }}{% endif %}
+                      </div>
+                    </div>
+                  </div>
+                </div>
+                <div class="newsletter-body">
+                  {% if newsletter.summary %}
+                  <p class="newsletter-summary">{{ newsletter.summary }}</p>
+                  {% endif %}
+
+                  {% if newsletter.highlights and newsletter.highlights|length > 0 %}
+                  <div class="highlights-mini">
+                    <div class="highlights-label">Key Highlights</div>
+                    <ul class="highlights-list">
+                      {% for highlight in newsletter.highlights[:3] %}
+                      <li>{{ highlight }}</li>
+                      {% endfor %}
+                      {% if newsletter.highlights|length > 3 %}
+                      <li style="color:#666;">+{{ newsletter.highlights|length - 3 }} more...</li>
+                      {% endif %}
+                    </ul>
+                  </div>
+                  {% endif %}
+
+                  {% if newsletter.web_url %}
+                  <a href="{{ newsletter.web_url }}" class="read-more-btn" target="_blank" rel="noopener">
+                    Read Full Newsletter →
+                  </a>
+                  {% endif %}
+                </div>
+              </div>
+              {% endfor %}
+
+              <div class="footer">
+                <div class="support-cta">
+                  <a href="https://www.buymeacoffee.com/GoOnLoan" target="_blank" rel="noopener">
+                    <img src="{{ bmc_button_url or 'https://cdn.buymeacoffee.com/buttons/v2/default-yellow.png' }}" 
+                         alt="Buy me a coffee" 
+                         style="height:48px;border-radius:8px;" />
+                  </a>
+                  <div style="font-size:12px;color:#b3b3b3;margin-top:8px;">Enjoying the digest? A coffee keeps it
+                    going.</div>
+                </div>
+
+                <div class="preference-note">
+                  You're receiving this digest because you chose weekly digest delivery.
+                  {% if manage_url %}
+                  <a href="{{ manage_url }}" target="_blank" rel="noopener">Change your preference</a> to receive
+                  individual emails instead.
+                  {% endif %}
+                </div>
+
+                <p style="margin-top:16px;">
+                  You are receiving this email because you subscribed to Go On Loan newsletters.
+                </p>
+              </div>
+            </td>
+          </tr>
+        </table>
+      </td>
+    </tr>
+  </table>
+</body>
+
+</html>
+

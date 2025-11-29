@@ -1,0 +1,192 @@
+import React, { useState, useEffect } from 'react'
+import { Card, CardContent } from '@/components/ui/card'
+import { Button } from '@/components/ui/button'
+import { Badge } from '@/components/ui/badge'
+import { Lock, Loader2 } from 'lucide-react'
+import { APIService } from '@/lib/api'
+import { 
+  MatchPerformanceCards, 
+  PlayerRadarChart, 
+  PlayerBarChart, 
+  PlayerLineChart, 
+  PlayerStatTable 
+} from '@/components/charts'
+import { cn } from '@/lib/utils'
+
+// Render a single chart block
+function ChartBlock({ block, playerId, weekRange }) {
+  const [data, setData] = useState(null)
+  const [loading, setLoading] = useState(true)
+  const [error, setError] = useState(null)
+
+  // Use player_id from props OR from block's chart_config (for intro/summary commentaries)
+  const effectivePlayerId = playerId || block?.chart_config?.player_id
+
+  useEffect(() => {
+    const fetchData = async () => {
+      if (!effectivePlayerId || !block?.chart_type) {
+        setLoading(false)
+        return
+      }
+
+      setLoading(true)
+      try {
+        const params = {
+          player_id: effectivePlayerId,
+          chart_type: block.chart_type,
+          stat_keys: block.chart_config?.stat_keys?.join(',') || 'goals,assists,rating',
+          date_range: block.chart_config?.date_range || 'week',
+        }
+
+        if (params.date_range === 'week' && weekRange?.start && weekRange?.end) {
+          params.week_start = weekRange.start
+          params.week_end = weekRange.end
+        }
+
+        const result = await APIService.getChartData(params)
+        setData(result)
+      } catch (err) {
+        console.error('Failed to fetch chart data:', err)
+        setError('Failed to load chart')
+      } finally {
+        setLoading(false)
+      }
+    }
+
+    fetchData()
+  }, [block, effectivePlayerId, weekRange])
+
+  if (loading) {
+    return (
+      <div className="flex items-center justify-center py-8">
+        <Loader2 className="h-6 w-6 animate-spin text-gray-400" />
+      </div>
+    )
+  }
+
+  if (error || !data) {
+    return (
+      <div className="text-center text-gray-500 py-4 text-sm">
+        {error || 'No chart data available'}
+      </div>
+    )
+  }
+
+  switch (block.chart_type) {
+    case 'match_card':
+      return <MatchPerformanceCards data={data} />
+    case 'radar':
+      return <PlayerRadarChart data={data} />
+    case 'bar':
+      return <PlayerBarChart data={data} />
+    case 'line':
+      return <PlayerLineChart data={data} />
+    case 'stat_table':
+      return <PlayerStatTable data={data} />
+    default:
+      return <div className="text-gray-500">Unknown chart type</div>
+  }
+}
+
+// Locked premium block placeholder
+function LockedBlock({ authorName, authorId, onSubscribe }) {
+  return (
+    <Card className="border-dashed border-2 border-amber-200 bg-amber-50/50">
+      <CardContent className="py-8 text-center">
+        <Lock className="h-8 w-8 text-amber-500 mx-auto mb-3" />
+        <p className="text-gray-700 font-medium mb-2">
+          Premium Content
+        </p>
+        <p className="text-sm text-gray-500 mb-4">
+          Subscribe to {authorName || 'this writer'} to unlock this section
+        </p>
+        {onSubscribe && (
+          <Button 
+            onClick={onSubscribe}
+            className="bg-amber-600 hover:bg-amber-700 text-white"
+          >
+            Subscribe to Unlock
+          </Button>
+        )}
+      </CardContent>
+    </Card>
+  )
+}
+
+// Main BlockRenderer component
+export function BlockRenderer({ 
+  blocks, 
+  isSubscribed = false, 
+  playerId,
+  weekRange,
+  authorName,
+  authorId,
+  onSubscribe,
+  className 
+}) {
+  if (!blocks || blocks.length === 0) {
+    return null
+  }
+
+  return (
+    <div className={cn('space-y-4', className)}>
+      {blocks.map((block, index) => {
+        // Check if block is premium and user is not subscribed
+        const blockLocked = block.is_premium && !isSubscribed
+
+        if (blockLocked) {
+          return (
+            <LockedBlock 
+              key={block.id || index}
+              authorName={authorName}
+              authorId={authorId}
+              onSubscribe={onSubscribe}
+            />
+          )
+        }
+
+        switch (block.type) {
+          case 'text':
+            return (
+              <div 
+                key={block.id || index}
+                className="prose prose-gray max-w-none
+                  prose-headings:text-gray-900 prose-headings:font-bold
+                  prose-p:text-gray-700 prose-p:leading-relaxed
+                  prose-strong:text-gray-900
+                  prose-a:text-violet-600 prose-a:no-underline hover:prose-a:underline"
+                dangerouslySetInnerHTML={{ __html: block.content }}
+              />
+            )
+
+          case 'chart':
+            return (
+              <Card key={block.id || index} className="overflow-hidden">
+                <CardContent className="p-4">
+                  <ChartBlock 
+                    block={block} 
+                    playerId={playerId}
+                    weekRange={weekRange}
+                  />
+                </CardContent>
+              </Card>
+            )
+
+          case 'divider':
+            return (
+              <hr 
+                key={block.id || index} 
+                className="border-t-2 border-gray-200 my-6" 
+              />
+            )
+
+          default:
+            return null
+        }
+      })}
+    </div>
+  )
+}
+
+export default BlockRenderer
+

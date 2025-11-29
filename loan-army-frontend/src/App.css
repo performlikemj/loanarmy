@@ -118,3 +118,17 @@
     @apply bg-background text-foreground;
   }
 }
+
+/* Hide Buy Me a Coffee buttons inside newsletter content */
+.newsletter-content [aria-label="Support Go On Loan"],
+.newsletter-content a[href*="buymeacoffee"] {
+  display: none !important;
+}
+
+/* Ensure nav links are not affected by prose typography styles */
+nav a {
+  text-decoration: none !important;
+}
+nav a:hover {
+  text-decoration: none !important;
+}

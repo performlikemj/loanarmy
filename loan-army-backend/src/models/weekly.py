@@ -170,7 +170,8 @@ class FixturePlayerStats(db.Model):
                 'missed': self.penalty_missed,
                 'saved': self.penalty_saved
             },
-            'offsides': self.offsides
+            'offsides': self.offsides,
+            'raw_json': self.raw_json
         }
 
 

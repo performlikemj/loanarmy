@@ -4,7 +4,15 @@ import sys
 sys.path.insert(0, os.path.dirname(os.path.dirname(__file__)))
 from flask import Flask, send_from_directory, jsonify
 from src.models.league import db, League, Team, LoanedPlayer, Newsletter, UserSubscription
-from src.routes.api import api_bp
+import src.models.weekly  # Ensure weekly models are registered with SQLAlchemy
+from src.routes.api import api_bp, require_api_key
+from src.routes.journalist import journalist_bp
+from src.routes.stripe_journalist import stripe_journalist_bp
+from src.routes.stripe_subscriber import stripe_subscriber_bp
+from src.routes.stripe_webhooks import stripe_webhooks_bp
+from src.routes.admin_revenue import admin_revenue_bp
+from src.routes.newsletter_usage import newsletter_usage_bp
+from src.routes.newsletter_deadline import newsletter_deadline_bp
 import logging
 from sqlalchemy.engine.url import make_url, URL
 from flask_migrate import Migrate
@@ -69,6 +77,13 @@ for name in ("mcp", "agents.mcp", "mcp.shared.session", "mcp.client"):
     logging.getLogger(name).setLevel(logging.WARNING)
 
 app.register_blueprint(api_bp, url_prefix='/api')
+app.register_blueprint(journalist_bp, url_prefix='/api')
+app.register_blueprint(stripe_journalist_bp, url_prefix='/api')
+app.register_blueprint(stripe_subscriber_bp, url_prefix='/api')
+app.register_blueprint(stripe_webhooks_bp, url_prefix='/api')
+app.register_blueprint(admin_revenue_bp, url_prefix='/api')
+app.register_blueprint(newsletter_usage_bp, url_prefix='/api')
+app.register_blueprint(newsletter_deadline_bp, url_prefix='/api')
 
 csp = {
     'default-src': ["'self'"],
@@ -159,14 +174,13 @@ def handle_http_exception(exc: HTTPException):
     response.content_type = 'application/json'
     return response
 
-# Add debug endpoint
+# Debug endpoint - requires admin authentication
 @app.route('/api/debug/database', methods=['GET'])
+@require_api_key
 def debug_database():
-    """Debug endpoint to check database state."""
+    """Debug endpoint to check database state. Requires admin authentication."""
     try:
         stats = {
-            'database_path': db_uri,
-            'database_exists': os.path.exists(db_uri),
             'tables': {
                 'leagues': League.query.count(),
                 'teams': Team.query.count(),
@@ -179,7 +193,8 @@ def debug_database():
         }
         return jsonify(stats)
     except Exception as e:
-        return jsonify({'error': str(e), 'traceback': str(e.__traceback__)}), 500
+        logger.error(f"Debug database check failed: {e}")
+        return jsonify({'error': 'Database check failed'}), 500
 
 @app.route('/', defaults={'path': ''})
 @app.route('/<path:path>')
@@ -198,6 +213,25 @@ def serve(path):
             return "index.html not found", 404
 
 migrate = Migrate(app, db)
+
+
+# CLI Commands for maintenance tasks
+@app.cli.command("backfill-tokens")
+def backfill_unsubscribe_tokens():
+    """Backfill unsubscribe_token for all subscriptions that don't have one."""
+    import uuid
+    subs_without_token = UserSubscription.query.filter(
+        UserSubscription.unsubscribe_token.is_(None)
+    ).all()
+    
+    count = 0
+    for sub in subs_without_token:
+        sub.unsubscribe_token = str(uuid.uuid4())
+        count += 1
+    
+    db.session.commit()
+    print(f"✅ Backfilled {count} subscription(s) with unsubscribe tokens")
+
 
 if __name__ == "__main__":
     # Only run when you execute `python src/main.py`,

@@ -1,5 +1,6 @@
 from flask import Blueprint, request, jsonify, make_response, render_template, Response, current_app, g
-from src.models.league import db, League, Team, LoanedPlayer, Newsletter, UserSubscription, EmailToken, LoanFlag, AdminSetting, NewsletterComment, UserAccount, SupplementalLoan, NewsletterPlayerYoutubeLink, Player, _as_utc, _dedupe_loans
+from src.models.league import db, League, Team, LoanedPlayer, Newsletter, UserSubscription, EmailToken, LoanFlag, AdminSetting, NewsletterComment, UserAccount, SupplementalLoan, NewsletterPlayerYoutubeLink, NewsletterCommentary, Player, JournalistTeamAssignment, CommentaryApplause, TeamTrackingRequest, StripeSubscription, NewsletterDigestQueue, JournalistSubscription, _as_utc, _dedupe_loans
+from src.models.sponsor import Sponsor
 from src.api_football_client import APIFootballClient
 from src.admin.sandbox_tasks import (
     SandboxContext,
@@ -28,11 +29,13 @@ from datetime import timedelta
 from typing import Any
 from itsdangerous import URLSafeTimedSerializer, BadSignature, SignatureExpired
 import secrets
+import base64
 import string
 import requests
 from src.extensions import limiter
-from src.utils.sanitize import sanitize_comment_body, sanitize_plain_text
+from src.utils.sanitize import sanitize_comment_body, sanitize_plain_text, sanitize_commentary_html
 from src.agents.errors import NoActiveLoaneesError
+from src.utils.newsletter_slug import compose_newsletter_public_slug
 
 logger = logging.getLogger(__name__)
 
@@ -84,7 +87,6 @@ def require_api_key(f):
     def decorated_function(*args, **kwargs):
         if request.method == 'OPTIONS':
             return make_response('', 204)
-        print(f"[DEBUG require_api_key] method={request.method} path={request.path}", flush=True)
         client_ip = get_client_ip()
         auth_header = request.headers.get('Authorization') or ''
         api_key_header = request.headers.get('X-API-Key') or request.headers.get('X-Admin-Key') or ''
@@ -182,12 +184,14 @@ def require_api_key(f):
     
     return decorated_function
 
-# CORS support
+# CORS support - only add headers not already set by Flask-CORS
+# Do NOT override Access-Control-Allow-Origin (Flask-CORS in main.py handles this based on CORS_ALLOW_ORIGINS)
 @api_bp.after_request
 def after_request(response):
-    response.headers.add('Access-Control-Allow-Origin', '*')
-    response.headers.add('Access-Control-Allow-Headers', 'Content-Type,Authorization,X-API-Key,X-Admin-Key')
-    response.headers.add('Access-Control-Allow-Methods', 'GET,PUT,POST,DELETE,OPTIONS')
+    if 'Access-Control-Allow-Headers' not in response.headers:
+        response.headers.add('Access-Control-Allow-Headers', 'Content-Type,Authorization,X-API-Key,X-Admin-Key')
+    if 'Access-Control-Allow-Methods' not in response.headers:
+        response.headers.add('Access-Control-Allow-Methods', 'GET,PUT,POST,DELETE,OPTIONS')
     return response
 
 
@@ -285,10 +289,86 @@ def admin_sandbox_run(task_id: str):
 
     return jsonify(result)
 
+
+@api_bp.route('/admin/users', methods=['GET'])
+@require_api_key
+def admin_get_users():
+    """Get all users with their subscriptions and assignments."""
+    try:
+        users = UserAccount.query.order_by(UserAccount.created_at.desc()).all()
+        result = []
+        for user in users:
+            # Get subscriptions (teams they follow)
+            # Note: UserSubscription links by email, not user_id
+            subscriptions = UserSubscription.query.filter_by(email=user.email, active=True).all()
+            following = []
+            for sub in subscriptions:
+                if sub.team:
+                    following.append({
+                        'team_id': sub.team.team_id,
+                        'name': sub.team.name
+                    })
+            
+            # Get assignments (teams they report on)
+            assignments = JournalistTeamAssignment.query.filter_by(user_id=user.id).all()
+            reporting = []
+            for assign in assignments:
+                if assign.team:
+                    reporting.append({
+                        'team_id': assign.team.team_id,
+                        'name': assign.team.name
+                    })
+            
+            user_data = user.to_dict()
+            user_data['following'] = following
+            user_data['reporting'] = reporting
+            result.append(user_data)
+            
+        return jsonify(result)
+    except Exception as e:
+        return jsonify(_safe_error_payload(e, 'Failed to fetch users')), 500
+
+
+@api_bp.route('/admin/users/<int:user_id>/role', methods=['POST'])
+@require_api_key
+def admin_toggle_user_role(user_id):
+    """Toggle user role (specifically journalist status)."""
+    try:
+        data = request.get_json() or {}
+        is_journalist = data.get('is_journalist')
+        
+        if is_journalist is None:
+            return jsonify({'error': 'is_journalist boolean is required'}), 400
+            
+        user = UserAccount.query.get(user_id)
+        if not user:
+            return jsonify({'error': 'User not found'}), 404
+            
+        user.is_journalist = bool(is_journalist)
+        # If becoming a journalist, ensure they can author commentary
+        if user.is_journalist:
+            user.can_author_commentary = True
+            
+        db.session.commit()
+        
+        return jsonify({
+            'message': f"User role updated. Journalist: {user.is_journalist}",
+            'user': user.to_dict()
+        })
+    except Exception as e:
+        db.session.rollback()
+        return jsonify(_safe_error_payload(e, 'Failed to update user role')), 500
+
 # --- Lightweight user token auth (for comments/login) ---
 def _user_serializer() -> URLSafeTimedSerializer:
-    secret = current_app.config.get('SECRET_KEY') or os.getenv('SECRET_KEY') or 'change-me'
-    return URLSafeTimedSerializer(secret_key=secret, salt='user-auth')
+    secret = current_app.config.get('SECRET_KEY') or os.getenv('SECRET_KEY')
+    is_prod = os.getenv("FLASK_ENV", "").lower() in ("prod", "production", "stage", "staging")
+    
+    # Fail fast in production if SECRET_KEY is missing or default
+    if is_prod and (not secret or secret == 'change-me'):
+        raise RuntimeError("SECRET_KEY must be properly configured in production")
+    
+    return URLSafeTimedSerializer(secret_key=secret or 'change-me', salt='user-auth')
 
 # def _user_rate_limit_key() is defined near the top of this file to ensure it exists before decorator usage
 def _base_display_name_from_email(email: str) -> str:
@@ -595,6 +675,42 @@ def _send_subscription_verification_email(email: str, team_names: list[str], tok
     }
     return _send_email_via_webhook(email=email, subject=subject, text=text, html=html, meta=meta)
 
+
+def _send_waitlist_welcome_email(email: str, team_names: list[str]) -> dict:
+    """Send a welcome email for teams that don't have active newsletters yet."""
+    subject = "Thanks for your interest in Go On Loan newsletters"
+    
+    team_lines_html = ''.join(f'<li>{name}</li>' for name in team_names)
+    team_lines_text = '\n'.join(f" • {name}" for name in team_names)
+    
+    html = f"""
+    <p>Thanks for subscribing to Go On Loan newsletters!</p>
+    <p>You've subscribed to the following team(s):</p>
+    <ul>{team_lines_html}</ul>
+    <p><strong>Important:</strong> We're not currently generating newsletters for {'this team' if len(team_names) == 1 else 'these teams'} yet. 
+    Newsletter generation is resource-intensive, and we only activate it once a team has sufficient subscriber interest.</p>
+    <p>We'll notify you via email once we start creating newsletters for your selected team(s). 
+    In the meantime, thank you for your patience and support!</p>
+    <p>If you have any questions, feel free to reach out.</p>
+    """
+    
+    text = (
+        "Thanks for subscribing to Go On Loan newsletters!\n\n"
+        "You've subscribed to:\n"
+        f"{team_lines_text}\n\n"
+        f"Important: We're not currently generating newsletters for {'this team' if len(team_names) == 1 else 'these teams'} yet. "
+        "Newsletter generation is resource-intensive, and we only activate it once a team has sufficient subscriber interest.\n\n"
+        "We'll notify you via email once we start creating newsletters for your selected team(s). "
+        "In the meantime, thank you for your patience and support!"
+    )
+    
+    meta = {
+        'kind': 'waitlist_welcome',
+        'team_count': len(team_names),
+    }
+    return _send_email_via_webhook(email=email, subject=subject, text=text, html=html, meta=meta)
+
+
 @api_bp.route('/health', methods=['GET'])
 def health_check():
     """Health check endpoint."""
@@ -681,9 +797,163 @@ def auth_me():
             'user_id': user.id if user else None,
             'display_name': user.display_name if user else None,
             'display_name_confirmed': bool(user.display_name_confirmed) if user else False,
+            'is_journalist': bool(user.is_journalist) if user else False,
         })
     except Exception as e:
         return jsonify(_safe_error_payload(e, 'An unexpected error occurred. Please try again later.')), 500
+
+
+@api_bp.route('/user/email-preferences', methods=['GET', 'PATCH'])
+@require_user_auth
+def user_email_preferences():
+    """Get or update user's email delivery preference."""
+    try:
+        email = getattr(g, 'user_email', None)
+        if not email:
+            return jsonify({'error': 'auth context missing email'}), 401
+        
+        user = UserAccount.query.filter_by(email=email).first()
+        if not user:
+            user = _ensure_user_account(email)
+        
+        if request.method == 'PATCH':
+            payload = request.get_json() or {}
+            pref = (payload.get('email_delivery_preference') or '').strip().lower()
+            if pref not in ('individual', 'digest'):
+                return jsonify({'error': 'email_delivery_preference must be "individual" or "digest"'}), 400
+            user.email_delivery_preference = pref
+            user.updated_at = datetime.now(timezone.utc)
+            db.session.commit()
+        
+        return jsonify({
+            'email_delivery_preference': user.email_delivery_preference or 'individual',
+            'user_id': user.id,
+        })
+    except Exception as e:
+        try:
+            db.session.rollback()
+        except Exception:
+            pass
+        return jsonify(_safe_error_payload(e, 'An unexpected error occurred. Please try again later.')), 500
+
+
+@api_bp.route('/user/all-subscriptions', methods=['GET'])
+@require_user_auth
+def user_all_subscriptions():
+    """Get all user's subscriptions (both free team subs and paid journalist subs)."""
+    try:
+        email = getattr(g, 'user_email', None)
+        if not email:
+            return jsonify({'error': 'auth context missing email'}), 401
+        
+        user = UserAccount.query.filter_by(email=email).first()
+        
+        # Get free team subscriptions (by email)
+        team_subs = UserSubscription.query.filter_by(email=email, active=True).all()
+        free_subscriptions = []
+        for sub in team_subs:
+            team = sub.team
+            free_subscriptions.append({
+                'id': sub.id,
+                'type': 'free',
+                'team_id': sub.team_id,
+                'team_name': team.name if team else None,
+                'team_logo': team.logo if team else None,
+                'created_at': sub.created_at.isoformat() if sub.created_at else None,
+                'last_email_sent': sub.last_email_sent.isoformat() if sub.last_email_sent else None,
+            })
+        
+        # Get PAID journalist subscriptions (Stripe only)
+        paid_subscriptions = []
+        
+        if user:
+            stripe_subs = StripeSubscription.query.filter_by(
+                subscriber_user_id=user.id
+            ).filter(StripeSubscription.status.in_(['active', 'trialing', 'past_due', 'canceled'])).all()
+            
+            for sub in stripe_subs:
+                # Skip canceled subscriptions that have already ended
+                if sub.status == 'canceled' and sub.current_period_end:
+                    if sub.current_period_end < datetime.now(timezone.utc):
+                        continue
+                        
+                journalist = sub.journalist
+                
+                # Get journalist's assigned teams for context
+                assigned_teams = []
+                if journalist:
+                    for assignment in journalist.assigned_teams:
+                        if assignment.team:
+                            assigned_teams.append({
+                                'id': assignment.team.id,
+                                'name': assignment.team.name,
+                                'logo': assignment.team.logo,
+                            })
+                
+                paid_subscriptions.append({
+                    'id': sub.id,
+                    'type': 'paid',
+                    'journalist_id': sub.journalist_user_id,
+                    'journalist_name': journalist.display_name if journalist else None,
+                    'journalist_email': journalist.email if journalist else None,
+                    'journalist_profile_image': journalist.profile_image_url if journalist else None,
+                    'assigned_teams': assigned_teams,
+                    'status': sub.status,
+                    'current_period_end': sub.current_period_end.isoformat() if sub.current_period_end else None,
+                    'cancel_at_period_end': sub.cancel_at_period_end,
+                    'created_at': sub.created_at.isoformat() if sub.created_at else None,
+                })
+        
+        # Get FREE journalist follows (JournalistSubscription)
+        journalist_follows = []
+        if user:
+            follows = JournalistSubscription.query.filter_by(
+                subscriber_user_id=user.id,
+                is_active=True
+            ).all()
+            
+            for follow in follows:
+                journalist = UserAccount.query.get(follow.journalist_user_id)
+                
+                # Get journalist's assigned teams for context
+                assigned_teams = []
+                if journalist:
+                    for assignment in getattr(journalist, 'assigned_teams', []) or []:
+                        if assignment.team:
+                            assigned_teams.append({
+                                'id': assignment.team.id,
+                                'name': assignment.team.name,
+                                'logo': assignment.team.logo,
+                            })
+                
+                journalist_follows.append({
+                    'id': follow.id,
+                    'journalist_id': follow.journalist_user_id,
+                    'journalist_name': journalist.display_name if journalist else None,
+                    'journalist_email': journalist.email if journalist else None,
+                    'journalist_profile_image': journalist.profile_image_url if journalist else None,
+                    'assigned_teams': assigned_teams,
+                    'created_at': follow.created_at.isoformat() if follow.created_at else None,
+                })
+        
+        # Calculate estimated emails per week
+        # Assume each team/journalist sends ~1 newsletter per week
+        individual_count = len(free_subscriptions) + len(journalist_follows)
+        
+        return jsonify({
+            'free_subscriptions': free_subscriptions,
+            'paid_subscriptions': paid_subscriptions,
+            'journalist_follows': journalist_follows,
+            'total_count': individual_count,
+            'estimated_emails_per_week': {
+                'individual': individual_count,
+                'digest': 1 if individual_count > 0 else 0,
+            },
+            'email_delivery_preference': (user.email_delivery_preference if user else 'individual') or 'individual',
+        })
+    except Exception as e:
+        return jsonify(_safe_error_payload(e, 'An unexpected error occurred. Please try again later.')), 500
+
 
 def _user_rate_limit_key() -> str | None:
     return getattr(g, 'user_email', None) or (request.remote_addr or 'anon')
@@ -793,8 +1063,9 @@ def verify_login_code():
             pass
         return jsonify(_safe_error_payload(e, 'Unable to verify login code right now. Please try again later.')), 500
 @api_bp.route('/auth/status', methods=['GET'])
+@require_api_key
 def auth_status():
-    """Get API authentication status and instructions."""
+    """Get API authentication status and instructions. Requires admin authentication."""
     api_key_configured = bool(os.getenv('ADMIN_API_KEY'))
     ip_whitelist_configured = bool(ALLOWED_ADMIN_IPS)
     client_ip = get_client_ip()
@@ -949,6 +1220,19 @@ def get_leagues():
     except Exception as e:
         return jsonify(_safe_error_payload(e, 'An unexpected error occurred. Please try again later.')), 500
 
+# Gameweek endpoints
+@api_bp.route('/gameweeks', methods=['GET'])
+def get_gameweeks():
+    """Get available gameweeks for the season."""
+    try:
+        season = request.args.get('season', type=int)
+        from src.utils.gameweeks import get_season_gameweeks
+        weeks = get_season_gameweeks(season_start_year=season)
+        return jsonify(weeks)
+    except Exception as e:
+        logger.error(f"Error getting gameweeks: {e}")
+        return jsonify(_safe_error_payload(e, 'An unexpected error occurred. Please try again later.')), 500
+
 # Team endpoints
 @api_bp.route('/teams', methods=['GET'])
 def get_teams():
@@ -990,6 +1274,18 @@ def get_teams():
         teams = query.all()
         active_teams_count = len(teams)
         logger.info(f"✅ Filtered teams found: {active_teams_count}")
+        
+        # Deduplicate teams by team_id, keeping the latest season
+        # This is necessary because we store teams per season
+        deduped_teams = {}
+        for team in teams:
+            existing = deduped_teams.get(team.team_id)
+            if not existing or team.season > existing.season:
+                deduped_teams[team.team_id] = team
+        
+        teams = list(deduped_teams.values())
+        # Sort by name for consistent display
+        teams.sort(key=lambda x: x.name)
         
         if active_teams_count == 0:
             logger.warning("⚠️ No teams found matching the filters")
@@ -1093,6 +1389,9 @@ def get_team(team_id):
 def get_team_loans(team_id):
     """Get loans for a specific team."""
     try:
+        # Import helper functions for player photos and team logos
+        from src.agents.weekly_agent import _player_photo_for, _team_logo_for_team  # type: ignore
+        
         team = Team.query.get_or_404(team_id)
         active_only = request.args.get('active_only', 'true').lower() in ('1', 'true', 'yes', 'on', 'y')
         dedupe = request.args.get('dedupe', 'true').lower() in ('1', 'true', 'yes', 'on', 'y')
@@ -1109,7 +1408,117 @@ def get_team_loans(team_id):
         if dedupe:
             loans = _dedupe_loans(loans)
 
-        result = [loan.to_dict() for loan in loans]
+        # Optionally enrich with season context stats (like newsletter does)
+        include_season_context = request.args.get('include_season_context', 'false').lower() in ('1', 'true', 'yes', 'on', 'y')
+        
+        result = []
+        for loan in loans:
+            loan_dict = loan.to_dict()
+            
+            # Add player photo and position from Player table
+            if loan_dict.get('player_id'):
+                try:
+                    loan_dict['player_photo'] = _player_photo_for(loan_dict['player_id'])
+                except Exception:
+                    loan_dict['player_photo'] = None
+                
+                # Get player position from Player table
+                try:
+                    player = Player.query.filter_by(player_id=loan_dict['player_id']).first()
+                    if player:
+                        loan_dict['position'] = player.position  # e.g., 'G', 'D', 'M', 'F'
+                    else:
+                        loan_dict['position'] = None
+                except Exception:
+                    loan_dict['position'] = None
+            else:
+                loan_dict['player_photo'] = None
+                loan_dict['position'] = None
+            
+            # Add loan team logo if loan_team_api_id is available
+            if loan_dict.get('loan_team_api_id'):
+                try:
+                    loan_dict['loan_team_logo'] = _team_logo_for_team(loan_dict['loan_team_api_id'])
+                except Exception:
+                    loan_dict['loan_team_logo'] = None
+            else:
+                loan_dict['loan_team_logo'] = None
+            
+            # Optionally enrich with cumulative season stats (like newsletter generation)
+            if include_season_context and loan_dict.get('player_id') and loan_dict.get('loan_team_api_id'):
+                try:
+                    from src.api_football_client import APIFootballClient
+                    api_client = APIFootballClient()
+                    
+                    # Determine season from window_key or use current season
+                    season_year = season_val
+                    if not season_year and loan.window_key:
+                        # Extract season from window_key (e.g., "2024-25::FULL" -> 2024)
+                        try:
+                            season_str = loan.window_key.split('-')[0]
+                            season_year = int(season_str)
+                        except (ValueError, IndexError):
+                            # Fallback to current season
+                            from datetime import datetime
+                            now = datetime.now()
+                            season_year = now.year if now.month >= 8 else now.year - 1
+                    
+                    if not season_year:
+                        from datetime import datetime
+                        now = datetime.now()
+                        season_year = now.year if now.month >= 8 else now.year - 1
+                    
+                    # Get season context
+                    season_context = api_client.get_player_season_context(
+                        player_id=loan_dict['player_id'],
+                        loan_team_id=loan_dict['loan_team_api_id'],
+                        season=season_year,
+                        up_to_date=date.today(),
+                        db_session=db.session
+                    )
+                    
+                    # Use cumulative season stats if available and more complete
+                    season_stats = season_context.get('season_stats', {})
+                    if season_stats:
+                        # Prefer season context stats for appearances (games_played)
+                        if season_stats.get('games_played', 0) > 0:
+                            loan_dict['appearances'] = season_stats.get('games_played', loan_dict.get('appearances', 0))
+                        # Prefer season context stats for goals/assists if they're higher (more complete)
+                        if season_stats.get('goals', 0) > (loan_dict.get('goals') or 0):
+                            loan_dict['goals'] = season_stats.get('goals', loan_dict.get('goals', 0))
+                        if season_stats.get('assists', 0) > (loan_dict.get('assists') or 0):
+                            loan_dict['assists'] = season_stats.get('assists', loan_dict.get('assists', 0))
+                        if season_stats.get('minutes', 0) > (loan_dict.get('minutes_played') or 0):
+                            loan_dict['minutes_played'] = season_stats.get('minutes', loan_dict.get('minutes_played', 0))
+                        
+                        # Include position-specific stats for the Browse page display
+                        # Defender/Midfielder stats
+                        if season_stats.get('tackles_total') is not None:
+                            loan_dict['tackles'] = season_stats.get('tackles_total')
+                        if season_stats.get('interceptions') is not None:
+                            loan_dict['interceptions'] = season_stats.get('interceptions')
+                        if season_stats.get('duels_won') is not None:
+                            loan_dict['duels_won'] = season_stats.get('duels_won')
+                        if season_stats.get('duels_total') is not None:
+                            loan_dict['duels_total'] = season_stats.get('duels_total')
+                        if season_stats.get('passes_key') is not None:
+                            loan_dict['key_passes'] = season_stats.get('passes_key')
+                        
+                        # Goalkeeper stats
+                        if season_stats.get('saves') is not None:
+                            loan_dict['saves'] = season_stats.get('saves')
+                        if season_stats.get('goals_conceded') is not None:
+                            loan_dict['goals_conceded'] = season_stats.get('goals_conceded')
+                        
+                        # Clean sheets (calculate from games where goals_conceded is 0)
+                        if season_stats.get('clean_sheets') is not None:
+                            loan_dict['clean_sheets'] = season_stats.get('clean_sheets')
+                except Exception as e:
+                    # If season context fails, use stored stats (fallback)
+                    logger.debug(f"Failed to enrich loan {loan.id} with season context: {e}")
+                    pass
+            
+            result.append(loan_dict)
 
         include_supp = request.args.get('include_supplemental', 'false').lower() in ('1', 'true', 'yes', 'on')
         if include_supp:
@@ -1140,7 +1549,26 @@ def get_team_loans(team_id):
                         'updated_at': s.updated_at.isoformat() if s.updated_at else None,
                         'season_year': s.season_year,
                         'id': f"supp-{s.id}",
+                        'player_id': s.api_player_id,
                     }
+                    # Add player photo for supplemental loans if available
+                    if item.get('player_id'):
+                        try:
+                            item['player_photo'] = _player_photo_for(item['player_id'])
+                        except Exception:
+                            item['player_photo'] = None
+                    else:
+                        item['player_photo'] = None
+                    
+                    # Add loan team logo for supplemental loans if available
+                    if item.get('loan_team_api_id'):
+                        try:
+                            item['loan_team_logo'] = _team_logo_for_team(item['loan_team_api_id'])
+                        except Exception:
+                            item['loan_team_logo'] = None
+                    else:
+                        item['loan_team_logo'] = None
+                    
                     result.append(item)
                 except Exception:
                     continue
@@ -1940,6 +2368,10 @@ def update_my_subscriptions():
             pass
         return jsonify(_safe_error_payload(e, 'An unexpected error occurred. Please try again later.')), 500
 
+        return jsonify(payload)
+    except Exception as e:
+        return jsonify(_safe_error_payload(e, 'An unexpected error occurred. Please try again later.')), 500
+
 @api_bp.route('/newsletters/<int:newsletter_id>', methods=['GET'])
 def get_newsletter(newsletter_id):
     """Get specific newsletter."""
@@ -1947,6 +2379,52 @@ def get_newsletter(newsletter_id):
         newsletter = Newsletter.query.get_or_404(newsletter_id)
         payload = newsletter.to_dict()
         
+        # Collect all commentaries
+        all_commentaries = [c.to_dict() for c in _collect_commentaries_for_newsletter(newsletter)]
+        
+        # Check for journalist filter
+        journalist_id_param = request.args.get('journalist_id')
+        if journalist_id_param:
+            try:
+                journalist_id = int(journalist_id_param)
+                # Filter commentaries
+                filtered_commentaries = [c for c in all_commentaries if c.get('author_id') == journalist_id]
+                
+                # Check subscription status
+                is_subscribed = False
+                email = _get_authorized_email()
+                if email:
+                    user = UserAccount.query.filter_by(email=email).first()
+                    if user:
+                        sub = JournalistSubscription.query.filter_by(
+                            subscriber_user_id=user.id,
+                            journalist_user_id=journalist_id,
+                            is_active=True
+                        ).first()
+                        if sub:
+                            is_subscribed = True
+                
+                # Apply masking
+                for c in filtered_commentaries:
+                    if c.get('is_premium') and not is_subscribed:
+                        # Mask content
+                        raw_content = c.get('content') or ''
+                        # Simple strip tags for preview
+                        clean_text = re.sub('<[^<]+?>', '', raw_content)
+                        preview = clean_text[:200] + '...' if len(clean_text) > 200 else clean_text
+                        c['content'] = preview
+                        c['is_locked'] = True
+                    else:
+                        c['is_locked'] = False
+                
+                payload['commentaries'] = filtered_commentaries
+                
+            except ValueError:
+                # Invalid journalist_id, ignore filter
+                payload['commentaries'] = all_commentaries
+        else:
+            payload['commentaries'] = all_commentaries
+
         logger.info(f"📰 [get_newsletter] Serving newsletter ID: {newsletter_id}")
         
         # Extract embedded rendered variants if present
@@ -2007,6 +2485,822 @@ def get_newsletter(newsletter_id):
     except Exception as e:
         return jsonify(_safe_error_payload(e, 'An unexpected error occurred. Please try again later.')), 500
 
+@api_bp.route('/newsletters/<int:newsletter_id>/refresh-fixtures', methods=['POST'])
+def refresh_newsletter_fixtures(newsletter_id: int):
+    """
+    Check upcoming fixtures in a newsletter and update with results if games have been played.
+    This makes newsletters 'living documents' that show actual match outcomes.
+    """
+    try:
+        newsletter = Newsletter.query.get_or_404(newsletter_id)
+        
+        # Parse structured content
+        raw_content = newsletter.structured_content or newsletter.content or '{}'
+        try:
+            content = json.loads(raw_content)
+        except json.JSONDecodeError:
+            return jsonify({'error': 'Invalid newsletter content'}), 400
+        
+        sections = content.get('sections', [])
+        if not sections:
+            return jsonify({'updated': False, 'message': 'No sections found'})
+        
+        # Initialize API client for fixture lookups
+        from src.api_football_client import APIFootballClient
+        api_client = APIFootballClient()
+        
+        now = datetime.now(timezone.utc)
+        fixtures_updated = 0
+        fixtures_checked = 0
+        
+        # Iterate through all player sections and their upcoming fixtures
+        for section in sections:
+            items = section.get('items', [])
+            for item in items:
+                # Get loan team info from the player item (for fallback lookups)
+                item_loan_team_id = item.get('loan_team_id') or item.get('loan_team_api_id')
+                
+                upcoming_fixtures = item.get('upcoming_fixtures', [])
+                for fixture in upcoming_fixtures:
+                    # Skip if already has result
+                    if fixture.get('result'):
+                        continue
+                    
+                    # Check if fixture date is in the past
+                    fixture_date_str = fixture.get('date')
+                    if not fixture_date_str:
+                        continue
+                    
+                    try:
+                        fixture_date = datetime.fromisoformat(fixture_date_str.replace('Z', '+00:00'))
+                    except (ValueError, TypeError):
+                        continue
+                    
+                    # Only check fixtures that should have been played (add 3 hour buffer for match duration)
+                    if fixture_date + timedelta(hours=3) > now:
+                        continue
+                    
+                    fixtures_checked += 1
+                    
+                    # Get fixture_id - either from fixture data or look it up
+                    fixture_id = fixture.get('fixture_id')
+                    loan_team_id = fixture.get('loan_team_id') or item_loan_team_id
+                    
+                    result_data = None
+                    
+                    if fixture_id:
+                        # Direct lookup by fixture ID
+                        result_data = api_client.get_fixture_result(fixture_id)
+                    elif loan_team_id:
+                        # Fallback: Look up by team + date (for older newsletters without fixture_id)
+                        try:
+                            fixture_date_only = fixture_date.date()
+                            date_str = fixture_date_only.strftime('%Y-%m-%d')
+                            season = api_client.current_season_start_year
+                            
+                            # Fetch fixtures for this team on this date
+                            team_fixtures = api_client.get_fixtures_for_team(
+                                loan_team_id, season, date_str, date_str
+                            )
+                            
+                            # Find matching fixture by opponent
+                            opponent_id = fixture.get('opponent_id')
+                            opponent_name = fixture.get('opponent', '').lower()
+                            
+                            for fx in team_fixtures:
+                                fx_info = fx.get('fixture', {})
+                                teams = fx.get('teams', {})
+                                home = teams.get('home', {}) or {}
+                                away = teams.get('away', {}) or {}
+                                
+                                # Check if this fixture matches by opponent
+                                is_home = loan_team_id == home.get('id')
+                                opp_team = away if is_home else home
+                                
+                                match_by_id = opponent_id and opp_team.get('id') == opponent_id
+                                match_by_name = opponent_name and opponent_name in (opp_team.get('name', '')).lower()
+                                
+                                if match_by_id or match_by_name:
+                                    # Found it - extract result data
+                                    goals = fx.get('goals', {})
+                                    result_data = {
+                                        'fixture_id': fx_info.get('id'),
+                                        'status': fx_info.get('status', {}).get('short', ''),
+                                        'home_team_id': home.get('id'),
+                                        'away_team_id': away.get('id'),
+                                        'home_score': goals.get('home'),
+                                        'away_score': goals.get('away'),
+                                    }
+                                    # Store fixture_id for future lookups
+                                    fixture['fixture_id'] = fx_info.get('id')
+                                    fixture['loan_team_id'] = loan_team_id
+                                    break
+                        except Exception as e:
+                            logger.warning(f"Fallback fixture lookup failed: {e}")
+                            continue
+                    
+                    if not result_data:
+                        continue
+                    
+                    status = result_data.get('status', '')
+                    # Only update if match is finished (FT, AET, PEN)
+                    if status not in ('FT', 'AET', 'PEN'):
+                        continue
+                    
+                    home_score = result_data.get('home_score')
+                    away_score = result_data.get('away_score')
+                    
+                    if home_score is None or away_score is None:
+                        continue
+                    
+                    # Determine W/L/D based on loan team
+                    home_team_id = result_data.get('home_team_id')
+                    is_home = loan_team_id == home_team_id
+                    
+                    if is_home:
+                        team_score = home_score
+                        opponent_score = away_score
+                    else:
+                        team_score = away_score
+                        opponent_score = home_score
+                    
+                    if team_score > opponent_score:
+                        match_result = 'W'
+                    elif team_score < opponent_score:
+                        match_result = 'L'
+                    else:
+                        match_result = 'D'
+                    
+                    # Update the fixture with result data
+                    fixture['status'] = 'completed'
+                    fixture['home_score'] = home_score
+                    fixture['away_score'] = away_score
+                    fixture['result'] = match_result
+                    fixture['team_score'] = team_score
+                    fixture['opponent_score'] = opponent_score
+                    
+                    fixtures_updated += 1
+        
+        # Save updated content if any fixtures were updated
+        if fixtures_updated > 0:
+            content_json = json.dumps(content, ensure_ascii=False)
+            newsletter.structured_content = content_json
+            newsletter.content = content_json
+            db.session.commit()
+            logger.info(f"Updated {fixtures_updated} fixture results for newsletter {newsletter_id}")
+        
+        # Return updated newsletter content
+        return jsonify({
+            'updated': fixtures_updated > 0,
+            'fixtures_checked': fixtures_checked,
+            'fixtures_updated': fixtures_updated,
+            'enriched_content': content
+        })
+        
+    except Exception as e:
+        logger.error(f"Error refreshing fixtures for newsletter {newsletter_id}: {e}")
+        import traceback
+        traceback.print_exc()
+        return jsonify(_safe_error_payload(e, 'Failed to refresh fixture results')), 500
+
+@api_bp.route('/players/<int:player_id>/stats', methods=['GET'])
+def get_public_player_stats(player_id: int):
+    """
+    Get historical stats for a player (public endpoint).
+    Fetches directly from API-Football if local data is incomplete.
+    Only returns CLUB games (not international).
+    """
+    try:
+        from src.models.weekly import FixturePlayerStats, Fixture
+        from src.models.league import LoanedPlayer
+        from src.api_football_client import APIFootballClient
+        
+        # Get current season
+        current_year = datetime.now().year
+        current_month = datetime.now().month
+        season = current_year if current_month >= 8 else current_year - 1
+        season_prefix = f"{season}-{str(season + 1)[-2:]}"  # e.g., "2025-26"
+        
+        # Find ALL loan teams for this player this season (handles mid-season transfers)
+        all_loans = LoanedPlayer.query.filter(
+            LoanedPlayer.player_id == player_id,
+            LoanedPlayer.window_key.like(f"{season_prefix}%")
+        ).order_by(LoanedPlayer.updated_at.desc()).all()
+        
+        # If no season-specific loans, try getting any loan
+        if not all_loans:
+            all_loans = [LoanedPlayer.query.filter_by(player_id=player_id).order_by(LoanedPlayer.updated_at.desc()).first()]
+            all_loans = [l for l in all_loans if l]  # Remove None
+        
+        # Build a map of team_api_id -> team info for all loan teams
+        loan_teams_info = {}  # {api_team_id: {name, logo, window_type}}
+        for loan in all_loans:
+            if loan and loan.loan_team_id:
+                loan_team = Team.query.get(loan.loan_team_id)
+                if loan_team:
+                    window_type = 'Summer'
+                    if loan.window_key and '::' in loan.window_key:
+                        window_part = loan.window_key.split('::')[1]
+                        if window_part.upper() == 'JANUARY':
+                            window_type = 'January'
+                    loan_teams_info[loan_team.team_id] = {
+                        'name': loan_team.name,
+                        'logo': loan_team.logo,
+                        'window_type': window_type,
+                        'is_active': loan.is_active,
+                    }
+        
+        loan_team_api_ids = list(loan_teams_info.keys())
+        
+        # Query local stats for ALL loan teams
+        stats_query = db.session.query(
+            FixturePlayerStats, Fixture
+        ).join(
+            Fixture, FixturePlayerStats.fixture_id == Fixture.id
+        ).filter(
+            FixturePlayerStats.player_api_id == player_id
+        )
+        
+        # Filter to only loan team games
+        if loan_team_api_ids:
+            stats_query = stats_query.filter(
+                FixturePlayerStats.team_api_id.in_(loan_team_api_ids)
+            )
+        
+        stats_query = stats_query.order_by(Fixture.date_utc.asc()).all()
+        
+        # Sync missing games from each loan team
+        for loan_team_api_id in loan_team_api_ids:
+            try:
+                local_count = sum(1 for s, f in stats_query if s.team_api_id == loan_team_api_id)
+                api_client = APIFootballClient()
+                api_totals = api_client._fetch_player_team_season_totals_api(
+                    player_id=player_id,
+                    team_id=loan_team_api_id,
+                    season=season,
+                )
+                api_appearances = api_totals.get('games_played', 0)
+                
+                if api_appearances > local_count:
+                    logger.info(f"Player {player_id} at team {loan_team_api_id}: API={api_appearances}, local={local_count}. Syncing...")
+                    _sync_player_club_fixtures(player_id, loan_team_api_id, season)
+            except Exception as e:
+                logger.warning(f"Failed to sync for player {player_id} at team {loan_team_api_id}: {e}")
+        
+        # Re-query after potential sync
+        stats_query = db.session.query(
+            FixturePlayerStats, Fixture
+        ).join(
+            Fixture, FixturePlayerStats.fixture_id == Fixture.id
+        ).filter(
+            FixturePlayerStats.player_api_id == player_id
+        )
+        if loan_team_api_ids:
+            stats_query = stats_query.filter(
+                FixturePlayerStats.team_api_id.in_(loan_team_api_ids)
+            )
+        stats_query = stats_query.order_by(Fixture.date_utc.asc()).all()
+
+        result = []
+        for stats, fixture in stats_query:
+            # Get opponent name
+            opponent_name = "Unknown"
+            is_home = (stats.team_api_id == fixture.home_team_api_id)
+            opponent_api_id = fixture.away_team_api_id if is_home else fixture.home_team_api_id
+            
+            opponent = Team.query.filter_by(team_id=opponent_api_id).first()
+            if opponent:
+                opponent_name = opponent.name
+            
+            # Get loan team info for this stat
+            team_info = loan_teams_info.get(stats.team_api_id, {})
+            
+            # Fallback: lookup team directly from Team table if not in loan_teams_info
+            if not team_info:
+                direct_team = Team.query.filter_by(team_id=stats.team_api_id).first()
+                if direct_team:
+                    team_info = {
+                        'name': direct_team.name,
+                        'logo': direct_team.logo,
+                        'window_type': 'Summer',
+                    }
+            
+            stats_dict = stats.to_dict()
+            stats_dict['fixture_date'] = fixture.date_utc.isoformat() if fixture.date_utc else None
+            stats_dict['opponent'] = opponent_name
+            stats_dict['is_home'] = is_home
+            stats_dict['competition'] = fixture.competition_name
+            stats_dict['loan_team_name'] = team_info.get('name', 'Unknown')
+            stats_dict['loan_team_logo'] = team_info.get('logo')
+            stats_dict['loan_window'] = team_info.get('window_type', 'Summer')
+            
+            result.append(stats_dict)
+
+        return jsonify(result)
+
+    except Exception as e:
+        logger.error(f"Error fetching player stats for player_id={player_id}: {e}")
+        import traceback
+        traceback.print_exc()
+        return jsonify(_safe_error_payload(e, 'Failed to fetch player stats')), 500
+
+
+def _sync_player_club_fixtures(player_id: int, loan_team_api_id: int, season: int) -> int:
+    """
+    Sync all fixtures for a player at their loan club from API-Football.
+    Returns number of fixtures synced.
+    """
+    from src.api_football_client import APIFootballClient
+    from src.models.weekly import Fixture, FixturePlayerStats
+    
+    api_client = APIFootballClient()
+    
+    # Fetch all fixtures for the loan team this season
+    season_start = f"{season}-08-01"
+    today = datetime.now().strftime('%Y-%m-%d')
+    
+    fixtures = api_client.get_fixtures_for_team(
+        loan_team_api_id, 
+        season, 
+        season_start, 
+        today
+    )
+    
+    logger.info(f"Found {len(fixtures)} fixtures for team {loan_team_api_id} in season {season}")
+    
+    synced = 0
+    for fx in fixtures:
+        fixture_info = fx.get('fixture', {})
+        fixture_id_api = fixture_info.get('id')
+        fixture_status = fixture_info.get('status', {}).get('short', '')
+        
+        # Only process finished games
+        if fixture_status not in ('FT', 'AET', 'PEN'):
+            continue
+        
+        # Get or create fixture record
+        existing_fixture = Fixture.query.filter_by(fixture_id_api=fixture_id_api).first()
+        
+        if not existing_fixture:
+            teams = fx.get('teams', {})
+            goals = fx.get('goals', {})
+            league = fx.get('league', {})
+            
+            existing_fixture = Fixture(
+                fixture_id_api=fixture_id_api,
+                date_utc=datetime.fromisoformat(fixture_info.get('date', '').replace('Z', '+00:00')) if fixture_info.get('date') else None,
+                season=season,
+                competition_name=league.get('name'),
+                home_team_api_id=teams.get('home', {}).get('id'),
+                away_team_api_id=teams.get('away', {}).get('id'),
+                home_goals=goals.get('home'),
+                away_goals=goals.get('away'),
+            )
+            db.session.add(existing_fixture)
+            db.session.flush()
+        
+        # Check if we already have player stats for this fixture
+        existing_stats = FixturePlayerStats.query.filter_by(
+            fixture_id=existing_fixture.id,
+            player_api_id=player_id
+        ).first()
+        
+        if existing_stats:
+            continue
+        
+        # Fetch player stats for this fixture from API
+        try:
+            player_stats = api_client.get_player_stats_for_fixture(player_id, season, fixture_id_api)
+            
+            if player_stats and player_stats.get('statistics'):
+                # statistics is a LIST, get first element
+                stat_list = player_stats['statistics']
+                if not stat_list:
+                    continue
+                st = stat_list[0] if isinstance(stat_list, list) else stat_list
+                
+                # Extract stats from the nested structure
+                games = st.get('games', {}) or {}
+                goals_obj = st.get('goals', {}) or {}
+                cards = st.get('cards', {}) or {}
+                shots = st.get('shots', {}) or {}
+                passes = st.get('passes', {}) or {}
+                tackles = st.get('tackles', {}) or {}
+                duels = st.get('duels', {}) or {}
+                dribbles = st.get('dribbles', {}) or {}
+                
+                minutes = games.get('minutes', 0) or 0
+                
+                # Only add if player actually played
+                if minutes and minutes > 0:
+                    fps = FixturePlayerStats(
+                        fixture_id=existing_fixture.id,
+                        player_api_id=player_id,
+                        team_api_id=loan_team_api_id,
+                        minutes=minutes,
+                        position=games.get('position'),
+                        rating=games.get('rating'),
+                        goals=goals_obj.get('total', 0) or 0,
+                        assists=goals_obj.get('assists', 0) or 0,
+                        yellows=cards.get('yellow', 0) or 0,
+                        reds=cards.get('red', 0) or 0,
+                        shots_total=shots.get('total'),
+                        shots_on=shots.get('on'),
+                        passes_total=passes.get('total'),
+                        passes_key=passes.get('key'),
+                        tackles_total=tackles.get('total'),
+                        duels_won=duels.get('won'),
+                        duels_total=duels.get('total'),
+                        dribbles_success=dribbles.get('success'),
+                        saves=st.get('saves'),
+                    )
+                    db.session.add(fps)
+                    synced += 1
+                    logger.debug(f"Added stats for fixture {fixture_id_api}: {minutes}' played")
+        except Exception as e:
+            logger.warning(f"Failed to get player stats for fixture {fixture_id_api}: {e}")
+            continue
+    
+    if synced > 0:
+        db.session.commit()
+        logger.info(f"Synced {synced} fixtures for player {player_id} at team {loan_team_api_id}")
+    
+    return synced
+
+@api_bp.route('/players/<int:player_id>/profile', methods=['GET'])
+def get_public_player_profile(player_id: int):
+    """
+    Get player profile info including name, team, position, photo.
+    Used for the public player profile pages.
+    """
+    try:
+        from src.models.league import LoanedPlayer, SupplementalLoan, Player
+        
+        result = {
+            'player_id': player_id,
+            'name': None,
+            'photo': None,
+            'position': None,
+            'loan_team_name': None,
+            'loan_team_id': None,
+            'loan_team_logo': None,
+            'parent_team_name': None,
+            'parent_team_id': None,
+            'parent_team_logo': None,
+            'nationality': None,
+            'age': None,
+        }
+        
+        # Get player base info from Player table (has photo)
+        player = Player.query.filter_by(player_id=player_id).first()
+        if player:
+            result['name'] = player.name
+            result['photo'] = player.photo_url
+            result['position'] = player.position
+            result['nationality'] = player.nationality
+            result['age'] = player.age
+        
+        # Get loan info from LoanedPlayer (most recent active loan)
+        loaned = LoanedPlayer.query.filter_by(player_id=player_id, is_active=True).order_by(LoanedPlayer.updated_at.desc()).first()
+        if not loaned:
+            # Try any loan record for this player
+            loaned = LoanedPlayer.query.filter_by(player_id=player_id).order_by(LoanedPlayer.updated_at.desc()).first()
+        
+        if loaned:
+            if not result['name']:
+                result['name'] = loaned.player_name
+            result['loan_team_name'] = loaned.loan_team_name
+            result['parent_team_name'] = loaned.primary_team_name
+            
+            # Get team logos from Team table
+            if loaned.loan_team_id:
+                loan_team = Team.query.get(loaned.loan_team_id)
+                if loan_team:
+                    result['loan_team_logo'] = loan_team.logo
+                    result['loan_team_id'] = loan_team.team_id
+            
+            if loaned.primary_team_id:
+                parent_team = Team.query.get(loaned.primary_team_id)
+                if parent_team:
+                    result['parent_team_logo'] = parent_team.logo
+                    result['parent_team_id'] = parent_team.team_id
+        
+        # If still no name, try supplemental loans
+        if not result['name']:
+            supplemental = SupplementalLoan.query.filter_by(api_player_id=player_id).first()
+            if supplemental:
+                result['name'] = supplemental.player_name
+                result['loan_team_name'] = supplemental.loan_team_name
+                result['parent_team_name'] = supplemental.parent_team_name
+                if supplemental.loan_team:
+                    result['loan_team_logo'] = supplemental.loan_team.logo
+                if supplemental.parent_team:
+                    result['parent_team_logo'] = supplemental.parent_team.logo
+        
+        # If still no name, try to get from fixture stats position
+        if not result['name']:
+            from src.models.weekly import FixturePlayerStats
+            stats = FixturePlayerStats.query.filter_by(player_api_id=player_id).first()
+            if stats:
+                result['position'] = stats.position
+        
+        # Final fallback for name
+        if not result['name']:
+            result['name'] = f"Player #{player_id}"
+        
+        # Get ALL loans for this season (for mid-season transfers)
+        current_year = datetime.now().year
+        current_month = datetime.now().month
+        season_year = current_year if current_month >= 8 else current_year - 1
+        season_prefix = f"{season_year}-{str(season_year + 1)[-2:]}"  # e.g., "2025-26"
+        
+        all_season_loans = LoanedPlayer.query.filter(
+            LoanedPlayer.player_id == player_id,
+            LoanedPlayer.window_key.like(f"{season_prefix}%")
+        ).order_by(LoanedPlayer.updated_at.desc()).all()
+        
+        # Deduplicate by (loan_team_id, window_key) - keep only the first (most recent) entry
+        seen_loan_keys = set()
+        loan_history = []
+        for loan in all_season_loans:
+            # Create unique key for deduplication
+            dedup_key = (loan.loan_team_id, loan.window_key)
+            if dedup_key in seen_loan_keys:
+                continue
+            seen_loan_keys.add(dedup_key)
+            
+            loan_team = Team.query.get(loan.loan_team_id) if loan.loan_team_id else None
+            parent_team = Team.query.get(loan.primary_team_id) if loan.primary_team_id else None
+            
+            # Determine window type from window_key (e.g., "2025-26::FULL" or "2025-26::JANUARY")
+            window_type = 'Summer'
+            if loan.window_key and '::' in loan.window_key:
+                window_part = loan.window_key.split('::')[1]
+                if window_part.upper() == 'JANUARY':
+                    window_type = 'January'
+                elif window_part.upper() == 'FULL':
+                    window_type = 'Summer'
+                else:
+                    window_type = window_part.title()
+            
+            loan_history.append({
+                'loan_team_name': loan.loan_team_name,
+                'loan_team_id': loan_team.team_id if loan_team else None,
+                'loan_team_logo': loan_team.logo if loan_team else None,
+                'parent_team_name': loan.primary_team_name,
+                'parent_team_id': parent_team.team_id if parent_team else None,
+                'parent_team_logo': parent_team.logo if parent_team else None,
+                'window_type': window_type,
+                'window_key': loan.window_key,
+                'is_active': loan.is_active,
+            })
+        
+        result['loan_history'] = loan_history
+        result['has_multiple_loans'] = len(loan_history) > 1
+        
+        return jsonify(result)
+
+    except Exception as e:
+        logger.error(f"Error fetching player profile for player_id={player_id}: {e}")
+        import traceback
+        traceback.print_exc()
+        return jsonify(_safe_error_payload(e, 'Failed to fetch player profile')), 500
+
+@api_bp.route('/players/<int:player_id>/season-stats', methods=['GET'])
+def get_public_player_season_stats(player_id: int):
+    """
+    Get aggregated season stats for a player at their LOAN CLUB only.
+    Does NOT include international games or games at other clubs.
+    """
+    try:
+        from src.models.weekly import FixturePlayerStats, Fixture
+        from src.models.league import LoanedPlayer
+        from src.api_football_client import APIFootballClient
+        from sqlalchemy import func
+        
+        # Get current season
+        current_year = datetime.now().year
+        current_month = datetime.now().month
+        season_start_year = current_year if current_month >= 8 else current_year - 1
+        season_start = datetime(season_start_year, 8, 1)
+        
+        season_prefix = f"{season_start_year}-{str(season_start_year + 1)[-2:]}"  # e.g., "2025-26"
+        
+        result = {
+            'player_id': player_id,
+            'season': f"{season_start_year}/{season_start_year + 1}",
+            'appearances': 0,
+            'minutes': 0,
+            'goals': 0,
+            'assists': 0,
+            'yellows': 0,
+            'reds': 0,
+            'avg_rating': None,
+            'source': 'none',
+            'loan_clubs_only': True,  # Stats are only from loan clubs (not international)
+            'clubs': [],  # Per-club breakdown
+        }
+        
+        # Find ALL loan teams for this player this season
+        all_loans = LoanedPlayer.query.filter(
+            LoanedPlayer.player_id == player_id,
+            LoanedPlayer.window_key.like(f"{season_prefix}%")
+        ).order_by(LoanedPlayer.updated_at.desc()).all()
+        
+        if not all_loans:
+            # Fallback to any loan
+            loaned = LoanedPlayer.query.filter_by(player_id=player_id).order_by(LoanedPlayer.updated_at.desc()).first()
+            all_loans = [loaned] if loaned else []
+        
+        if not all_loans:
+            return jsonify(result)  # Can't get stats without loan teams
+        
+        # Build list of loan teams with their API IDs
+        loan_teams_info = []
+        loan_team_api_ids = []
+        for loan in all_loans:
+            if loan and loan.loan_team_id:
+                loan_team = Team.query.get(loan.loan_team_id)
+                if loan_team and loan_team.team_id not in loan_team_api_ids:
+                    window_type = 'Summer'
+                    if loan.window_key and '::' in loan.window_key:
+                        window_part = loan.window_key.split('::')[1]
+                        if window_part.upper() == 'JANUARY':
+                            window_type = 'January'
+                    loan_teams_info.append({
+                        'api_id': loan_team.team_id,
+                        'name': loan_team.name,
+                        'logo': loan_team.logo,
+                        'window_type': window_type,
+                        'is_active': loan.is_active,
+                    })
+                    loan_team_api_ids.append(loan_team.team_id)
+        
+        result['loan_team'] = loan_teams_info[0]['name'] if loan_teams_info else None
+        result['has_multiple_clubs'] = len(loan_teams_info) > 1
+        
+        # Aggregate stats from API-Football for ALL loan clubs
+        total_appearances = 0
+        total_minutes = 0
+        total_goals = 0
+        total_assists = 0
+        clubs_breakdown = []
+        
+        for team_info in loan_teams_info:
+            try:
+                api_client = APIFootballClient()
+                api_totals = api_client._fetch_player_team_season_totals_api(
+                    player_id=player_id,
+                    team_id=team_info['api_id'],
+                    season=season_start_year,
+                )
+                
+                if api_totals and api_totals.get('games_played', 0) > 0:
+                    club_stats = {
+                        'team_name': team_info['name'],
+                        'team_logo': team_info['logo'],
+                        'window_type': team_info['window_type'],
+                        'is_current': team_info['is_active'],
+                        'appearances': api_totals.get('games_played', 0),
+                        'minutes': api_totals.get('minutes', 0),
+                        'goals': api_totals.get('goals', 0),
+                        'assists': api_totals.get('assists', 0),
+                    }
+                    clubs_breakdown.append(club_stats)
+                    total_appearances += club_stats['appearances']
+                    total_minutes += club_stats['minutes']
+                    total_goals += club_stats['goals']
+                    total_assists += club_stats['assists']
+                    result['source'] = 'api-football'
+            except Exception as api_err:
+                logger.warning(f"Failed to get API-Football stats for player {player_id} at {team_info['name']}: {api_err}")
+        
+        result['appearances'] = total_appearances
+        result['minutes'] = total_minutes
+        result['goals'] = total_goals
+        result['assists'] = total_assists
+        result['clubs'] = clubs_breakdown
+        
+        # Get detailed stats from local DB (aggregate across ALL loan clubs)
+        stats_query = db.session.query(
+            func.count(FixturePlayerStats.id).label('appearances'),
+            func.sum(FixturePlayerStats.minutes).label('total_minutes'),
+            func.sum(FixturePlayerStats.goals).label('total_goals'),
+            func.sum(FixturePlayerStats.assists).label('total_assists'),
+            func.sum(FixturePlayerStats.yellows).label('total_yellows'),
+            func.sum(FixturePlayerStats.reds).label('total_reds'),
+            func.avg(FixturePlayerStats.rating).label('avg_rating'),
+            func.sum(FixturePlayerStats.shots_total).label('total_shots'),
+            func.sum(FixturePlayerStats.shots_on).label('shots_on_target'),
+            func.sum(FixturePlayerStats.passes_key).label('total_key_passes'),
+            func.sum(FixturePlayerStats.tackles_total).label('total_tackles'),
+            func.sum(FixturePlayerStats.saves).label('total_saves'),
+        ).join(
+            Fixture, FixturePlayerStats.fixture_id == Fixture.id
+        ).filter(
+            FixturePlayerStats.player_api_id == player_id,
+            FixturePlayerStats.team_api_id.in_(loan_team_api_ids),  # ALL loan clubs
+            Fixture.date_utc >= season_start
+        ).first()
+        
+        if stats_query and stats_query.appearances:
+            result['yellows'] = int(stats_query.total_yellows or 0)
+            result['reds'] = int(stats_query.total_reds or 0)
+            result['avg_rating'] = round(float(stats_query.avg_rating or 0), 2) if stats_query.avg_rating else None
+            result['shots'] = int(stats_query.total_shots or 0)
+            result['shots_on_target'] = int(stats_query.shots_on_target or 0)
+            result['key_passes'] = int(stats_query.total_key_passes or 0)
+            result['tackles'] = int(stats_query.total_tackles or 0)
+            result['saves'] = int(stats_query.total_saves or 0)
+            result['local_appearances'] = stats_query.appearances or 0
+            
+            # If API-Football didn't work, use local DB
+            if result['source'] == 'none':
+                result['appearances'] = stats_query.appearances or 0
+                result['minutes'] = int(stats_query.total_minutes or 0)
+                result['goals'] = int(stats_query.total_goals or 0)
+                result['assists'] = int(stats_query.total_assists or 0)
+                result['source'] = 'local-db'
+        
+        return jsonify(result)
+
+    except Exception as e:
+        logger.error(f"Error fetching season stats for player_id={player_id}: {e}")
+        import traceback
+        traceback.print_exc()
+        return jsonify(_safe_error_payload(e, 'Failed to fetch season stats')), 500
+
+
+@api_bp.route('/players/<int:player_id>/commentaries', methods=['GET'])
+def get_player_commentaries(player_id: int):
+    """
+    Get all commentaries/writeups that mention this player.
+    Returns journalist writeups with author info.
+    """
+    try:
+        # Find all commentaries that reference this player
+        commentaries = NewsletterCommentary.query.filter(
+            NewsletterCommentary.player_id == player_id,
+            NewsletterCommentary.is_active == True
+        ).order_by(NewsletterCommentary.created_at.desc()).all()
+        
+        result = []
+        for c in commentaries:
+            author = c.author
+            newsletter = c.newsletter
+            
+            commentary_data = {
+                'id': c.id,
+                'content': c.content,
+                'title': c.title,
+                'commentary_type': c.commentary_type,
+                'is_premium': c.is_premium,
+                'created_at': c.created_at.isoformat() if c.created_at else None,
+                'updated_at': c.updated_at.isoformat() if c.updated_at else None,
+                'author': {
+                    'id': author.id if author else None,
+                    'display_name': author.display_name if author else None,
+                    'profile_image_url': author.profile_image_url if author else None,
+                    'is_journalist': author.is_journalist if author else False,
+                } if author else None,
+                'newsletter': {
+                    'id': newsletter.id if newsletter else None,
+                    'title': newsletter.title if newsletter else None,
+                    'week_start_date': newsletter.week_start_date.isoformat() if newsletter and newsletter.week_start_date else None,
+                    'week_end_date': newsletter.week_end_date.isoformat() if newsletter and newsletter.week_end_date else None,
+                    'team_name': newsletter.team.name if newsletter and newsletter.team else None,
+                } if newsletter else None,
+            }
+            result.append(commentary_data)
+        
+        # Also get unique authors who have written about this player
+        unique_authors = {}
+        for c in commentaries:
+            if c.author and c.author.id not in unique_authors:
+                unique_authors[c.author.id] = {
+                    'id': c.author.id,
+                    'display_name': c.author.display_name,
+                    'profile_image_url': c.author.profile_image_url,
+                    'is_journalist': c.author.is_journalist,
+                    'commentary_count': 0,
+                }
+            if c.author:
+                unique_authors[c.author.id]['commentary_count'] += 1
+        
+        return jsonify({
+            'player_id': player_id,
+            'commentaries': result,
+            'total_count': len(result),
+            'authors': list(unique_authors.values()),
+        })
+        
+    except Exception as e:
+        logger.error(f"Error fetching commentaries for player_id={player_id}: {e}")
+        import traceback
+        traceback.print_exc()
+        return jsonify(_safe_error_payload(e, 'Failed to fetch player commentaries')), 500
+
+
 @api_bp.route('/newsletters/<int:newsletter_id>/comments', methods=['GET'])
 def list_newsletter_comments(newsletter_id: int):
     try:
@@ -2064,26 +3358,39 @@ def create_newsletter_comment(newsletter_id: int):
 def generate_newsletter():
     """Generate a newsletter for a specific team and date."""
     try:
+        logger.info("=" * 80)
+        logger.info("📰 NEWSLETTER GENERATION REQUEST STARTED")
+        
         data = request.get_json()
         team_id = data.get('team_id')
         target_date = data.get('target_date')  # Format: YYYY-MM-DD
         newsletter_type = data.get('type', 'weekly')
+        force_refresh = data.get('force_refresh', False)
+        
+        logger.info(f"📝 Request data: team_id={team_id}, target_date={target_date}, type={newsletter_type}, force_refresh={force_refresh}")
         
         if not team_id:
+            logger.warning("❌ Missing team_id in request")
             return jsonify({'error': 'team_id is required'}), 400
         
+        logger.info(f"🔍 Fetching team with ID: {team_id}")
         team = Team.query.get_or_404(team_id)
+        logger.info(f"✅ Found team: {team.name} (ID: {team.id})")
         
         # Parse target date
         if target_date:
             try:
                 target_date = datetime.strptime(target_date, '%Y-%m-%d').date()
-            except ValueError:
+                logger.info(f"📅 Parsed target date: {target_date}")
+            except ValueError as ve:
+                logger.error(f"❌ Invalid date format: {target_date}, error: {ve}")
                 return jsonify({'error': 'Invalid date format. Use YYYY-MM-DD'}), 400
         else:
             target_date = date.today()
+            logger.info(f"📅 Using today's date: {target_date}")
         
         # Check if newsletter already exists for this team and date
+        logger.info(f"🔍 Checking for existing newsletter: team_id={team_id}, type={newsletter_type}, date={target_date}")
         existing = Newsletter.query.filter_by(
             team_id=team_id,
             newsletter_type=newsletter_type,
@@ -2091,6 +3398,7 @@ def generate_newsletter():
         ).first()
         
         if existing:
+            logger.info(f"ℹ️  Newsletter already exists with ID: {existing.id}")
             return jsonify({
                 'message': 'Newsletter already exists for this date',
                 'newsletter': existing.to_dict()
@@ -2100,27 +3408,54 @@ def generate_newsletter():
         # compiles full player + loan team weekly context before writing,
         # then persist the newsletter with the same semantics as before.
         if newsletter_type == 'weekly':
-            from src.agents.weekly_newsletter_agent import (
-                compose_team_weekly_newsletter,
-                persist_newsletter,
-            )
+            logger.info("🤖 Starting weekly newsletter composition...")
+            try:
+                from src.agents.weekly_newsletter_agent import (
+                    compose_team_weekly_newsletter,
+                    persist_newsletter,
+                )
+                logger.info("✅ Successfully imported newsletter agent functions")
+            except ImportError as ie:
+                logger.error(f"❌ IMPORT ERROR: Failed to import newsletter agent: {ie}")
+                logger.exception("Full import traceback:")
+                raise
 
-            composed = compose_team_weekly_newsletter(team_id, target_date)
-            # Persist using shared helper (sets generated_date/published_date)
-            row = persist_newsletter(
-                team_db_id=team_id,
-                content_json_str=composed['content_json'],
-                week_start=composed['week_start'],
-                week_end=composed['week_end'],
-                issue_date=target_date,
-                newsletter_type='weekly',
-            )
+            try:
+                logger.info(f"🚀 Calling compose_team_weekly_newsletter(team_id={team_id}, target_date={target_date}, force_refresh={force_refresh})")
+                composed = compose_team_weekly_newsletter(team_id, target_date, force_refresh=force_refresh)
+                logger.info("✅ Newsletter composed successfully")
+                logger.info(f"📊 Composed data keys: {list(composed.keys())}")
+            except Exception as compose_error:
+                logger.error(f"❌ COMPOSITION ERROR: {type(compose_error).__name__}: {compose_error}")
+                logger.exception("Full composition traceback:")
+                raise
+            
+            try:
+                logger.info("💾 Persisting newsletter to database...")
+                # Persist using shared helper (sets generated_date/published_date)
+                row = persist_newsletter(
+                    team_db_id=team_id,
+                    content_json_str=composed['content_json'],
+                    week_start=composed['week_start'],
+                    week_end=composed['week_end'],
+                    issue_date=target_date,
+                    newsletter_type='weekly',
+                )
+                logger.info(f"✅ Newsletter persisted with ID: {row.id}")
+            except Exception as persist_error:
+                logger.error(f"❌ PERSISTENCE ERROR: {type(persist_error).__name__}: {persist_error}")
+                logger.exception("Full persistence traceback:")
+                raise
+            
+            logger.info("🎉 Newsletter generation completed successfully!")
+            logger.info("=" * 80)
             return jsonify({
                 'message': 'Newsletter generated successfully',
                 'newsletter': row.to_dict()
             })
         
         # Fallback for other types (currently unsupported):
+        logger.warning(f"❌ Unsupported newsletter type: {newsletter_type}")
         return jsonify({'error': f'Unsupported newsletter type: {newsletter_type}'}), 400
         
     except Exception as e:
@@ -2129,7 +3464,10 @@ def generate_newsletter():
             db.session.rollback()
         except Exception:
             pass
-        logger.error(f"Error generating newsletter: {e}")
+        logger.error("=" * 80)
+        logger.error(f"💥 FATAL ERROR in generate_newsletter: {type(e).__name__}: {e}")
+        logger.exception("Full error traceback:")
+        logger.error("=" * 80)
         return jsonify(_safe_error_payload(e, 'An unexpected error occurred. Please try again later.')), 500
 
 def generate_newsletter_content(*args, **kwargs):  # pragma: no cover - legacy shim
@@ -2160,6 +3498,7 @@ def _activate_subscriptions(email: str, team_ids: list[int], preferred_frequency
     created_ids: list[int] = []
     updated_ids: list[int] = []
     skipped: list[dict[str, Any]] = []
+    teams_without_newsletters: list[dict[str, Any]] = []
 
     unique_ids: list[int] = []
     seen_ids: set[int] = set()
@@ -2177,6 +3516,13 @@ def _activate_subscriptions(email: str, team_ids: list[int], preferred_frequency
         if not team:
             skipped.append({'team_id': tid, 'reason': 'team not found'})
             continue
+
+        # Track teams without active newsletters
+        if not team.newsletters_active:
+            teams_without_newsletters.append({
+                'team_id': team.id,
+                'team_name': team.name
+            })
 
         existing = UserSubscription.query.filter_by(email=email, team_id=team.id).first()
         if existing:
@@ -2210,6 +3556,14 @@ def _activate_subscriptions(email: str, team_ids: list[int], preferred_frequency
     result_ids = created_ids + updated_ids
     subs = UserSubscription.query.filter(UserSubscription.id.in_(result_ids)).all() if result_ids else []
 
+    # Send waitlist email if there are teams without newsletters
+    if teams_without_newsletters:
+        try:
+            team_names = [t['team_name'] for t in teams_without_newsletters]
+            _send_waitlist_welcome_email(email, team_names)
+        except Exception as e:
+            logger.warning('Failed to send waitlist email to %s: %s', email, e)
+
     return {
         'message': 'Subscriptions updated',
         'created_count': len(created_ids),
@@ -2218,6 +3572,7 @@ def _activate_subscriptions(email: str, team_ids: list[int], preferred_frequency
         'created_ids': created_ids,
         'updated_ids': updated_ids,
         'subscriptions': [s.to_dict() for s in subs],
+        'teams_without_newsletters': teams_without_newsletters,
     }
 
 
@@ -2245,6 +3600,7 @@ def _process_subscriptions(email: str, team_ids_raw: list[Any], preferred_freque
 
     valid_ids: list[int] = []
     team_names: list[str] = []
+    teams_without_newsletters: list[dict[str, Any]] = []
     seen_ids: set[int] = set()
     for tid in parsed_ids:
         if tid in seen_ids:
@@ -2256,6 +3612,13 @@ def _process_subscriptions(email: str, team_ids_raw: list[Any], preferred_freque
             continue
         valid_ids.append(tid)
         team_names.append(team.name or f'Team #{tid}')
+        
+        # Track teams without active newsletters
+        if not team.newsletters_active:
+            teams_without_newsletters.append({
+                'team_id': team.id,
+                'team_name': team.name
+            })
 
     if not valid_ids:
         return {'error': 'No valid team ids provided', 'skipped': skipped}, 400
@@ -2277,6 +3640,7 @@ def _process_subscriptions(email: str, team_ids_raw: list[Any], preferred_freque
                 'team_count': len(valid_ids),
                 'expires_at': token_row.expires_at.isoformat() if token_row.expires_at else None,
                 'skipped': skipped,
+                'teams_without_newsletters': teams_without_newsletters,
             }, 202)
         except Exception as exc:
             try:
@@ -2568,6 +3932,78 @@ def token_unsubscribe(token: str):
         }
 
     return render_template('unsubscribe_confirmation.html', **ctx), code
+
+
+@api_bp.route('/subscriptions/one-click-unsubscribe/<token>', methods=['POST'])
+def one_click_unsubscribe(token: str):
+    """RFC 8058 One-Click Unsubscribe endpoint for email clients.
+    
+    This endpoint is designed for email providers (Gmail, Yahoo, etc.) that 
+    implement one-click unsubscribe via the List-Unsubscribe-Post header.
+    
+    The email client sends a POST request with body: List-Unsubscribe=One-Click
+    
+    Returns 200 on success (required by RFC 8058).
+    """
+    try:
+        # RFC 8058 specifies the body should be "List-Unsubscribe=One-Click"
+        # but we accept any POST to this endpoint as valid
+        body = request.get_data(as_text=True) or ''
+        content_type = request.content_type or ''
+        
+        logger.info(
+            'One-click unsubscribe request: token=%s content_type=%s body_preview=%s',
+            token[:8] + '...' if len(token) > 8 else token,
+            content_type,
+            body[:100] if body else '(empty)'
+        )
+        
+        sub, status, code = _unsubscribe_subscription_by_token(token)
+        
+        if status == 'missing_token':
+            # Return 200 anyway per RFC 8058 best practices
+            # (some clients don't handle non-200 well)
+            logger.warning('One-click unsubscribe: missing token')
+            return '', 200
+        
+        if status == 'not_found':
+            logger.warning('One-click unsubscribe: token not found - %s', token[:8] + '...')
+            return '', 200
+        
+        if status in ('unsubscribed', 'already_unsubscribed'):
+            logger.info('One-click unsubscribe successful for token %s', token[:8] + '...')
+            return '', 200
+        
+        return '', 200
+        
+    except Exception as e:
+        logger.exception('One-click unsubscribe failed for token')
+        # Still return 200 to avoid retry loops from email clients
+        return '', 200
+
+
+def _build_unsubscribe_headers(unsubscribe_url: str, one_click_url: str) -> dict:
+    """Build RFC 8058 compliant List-Unsubscribe headers.
+    
+    Args:
+        unsubscribe_url: URL for the regular unsubscribe page (GET)
+        one_click_url: URL for the one-click POST endpoint
+        
+    Returns:
+        dict: Headers to include in the email
+    """
+    if not unsubscribe_url:
+        return {}
+    
+    return {
+        # List-Unsubscribe can include both mailto: and https: URLs
+        # We provide the HTTPS URL for the unsubscribe page
+        'List-Unsubscribe': f'<{unsubscribe_url}>',
+        # List-Unsubscribe-Post enables one-click unsubscribe
+        # The value tells the email client what to POST
+        'List-Unsubscribe-Post': 'List-Unsubscribe=One-Click',
+    }
+
 
 @api_bp.route('/verify/request', methods=['POST'])
 def request_verification_token():
@@ -3173,15 +4609,12 @@ def _load_newsletter_json(n: Newsletter) -> dict | None:
             try:
                 youtube_links = NewsletterPlayerYoutubeLink.query.filter_by(newsletter_id=n.id).all()
                 if youtube_links:
-                    # Create lookup dictionaries for quick access
+                    # Create lookup dictionary by player_id
                     links_by_player_id = {}
-                    links_by_supplemental_id = {}
                     
                     for link in youtube_links:
                         if link.player_id:
                             links_by_player_id[link.player_id] = link.youtube_link
-                        if link.supplemental_loan_id:
-                            links_by_supplemental_id[link.supplemental_loan_id] = link.youtube_link
                     
                     # Inject links into player items
                     sections = data.get('sections', [])
@@ -3206,25 +4639,6 @@ def _load_newsletter_json(n: Newsletter) -> dict | None:
                                                     'title': 'YouTube Highlights'
                                                 }
                                                 # Check if not already present
-                                                if not any(
-                                                    (isinstance(l, dict) and l.get('url') == youtube_url) or 
-                                                    (isinstance(l, str) and l == youtube_url)
-                                                    for l in existing_links
-                                                ):
-                                                    existing_links.insert(0, youtube_link_obj)
-                                                item['links'] = existing_links
-                                            
-                                            # Check for supplemental loan
-                                            supplemental_loan_id = item.get('supplemental_loan_id')
-                                            if supplemental_loan_id and supplemental_loan_id in links_by_supplemental_id:
-                                                youtube_url = links_by_supplemental_id[supplemental_loan_id]
-                                                existing_links = item.get('links', [])
-                                                if not isinstance(existing_links, list):
-                                                    existing_links = []
-                                                youtube_link_obj = {
-                                                    'url': youtube_url,
-                                                    'title': 'YouTube Highlights'
-                                                }
                                                 if not any(
                                                     (isinstance(l, dict) and l.get('url') == youtube_url) or 
                                                     (isinstance(l, str) and l == youtube_url)
@@ -3284,13 +4698,32 @@ def _plain_text_from_news(data: dict, meta: Newsletter) -> str:
             )
             lines.append(f"• {pname} ({loan_team}) – {wsum}")
             lines.append(f"  {stat_str}")
+            # Add graph URLs for markdown (Reddit)
+            if it.get("rating_graph_url"):
+                graph_url = _absolute_url(it["rating_graph_url"])
+                lines.append(f"  📊 [Rating Graph]({graph_url})")
+            if it.get("minutes_graph_url"):
+                graph_url = _absolute_url(it["minutes_graph_url"])
+                lines.append(f"  📊 [Minutes Graph]({graph_url})")
             notes = it.get("match_notes") or []
             for n in notes:
                 lines.append(f"  - {n}")
     return "\n".join(lines).strip() + "\n"
-
-
 def _newsletter_issue_slug(n: Newsletter) -> str:
+    slug_value = getattr(n, 'public_slug', None)
+    if slug_value:
+        return slug_value
+    slug_value = compose_newsletter_public_slug(
+        team_name=n.team.name if n.team else None,
+        newsletter_type=n.newsletter_type,
+        week_start=n.week_start_date,
+        week_end=n.week_end_date,
+        issue_date=n.issue_date,
+        identifier=n.id,
+    )
+    if slug_value:
+        n.public_slug = slug_value
+        return slug_value
     if n.week_end_date:
         return n.week_end_date.isoformat()
     if n.issue_date:
@@ -3533,13 +4966,119 @@ def _compute_newsletter_social_meta(n: Newsletter, context: dict[str, Any]) -> d
     }
 
 # --- Newsletter delivery helpers ---
+def _embed_image(path):
+    if not path: return ''
+    if path.startswith('/static/'):
+        try:
+            clean_path = path.replace('/static/', '', 1)
+            real_path = os.path.join(current_app.static_folder, clean_path)
+            if os.path.exists(real_path):
+                with open(real_path, "rb") as f:
+                    encoded = base64.b64encode(f.read()).decode('utf-8')
+                    return f"data:image/png;base64,{encoded}"
+        except Exception as e:
+            logging.error(f"Failed to embed image {path}: {e}")
+    return path
+
+def _collect_commentaries_for_newsletter(n: Newsletter) -> list[NewsletterCommentary]:
+    """Return all active commentaries associated with a newsletter, including
+    week-scoped entries whose newsletter_id may be null. Deduplicates by id."""
+    seen: dict[int, NewsletterCommentary] = {}
+
+    def _add(c: NewsletterCommentary | None):
+        if not c or not getattr(c, 'is_active', False):
+            return
+        if c.id not in seen:
+            seen[c.id] = c
+
+    # Directly linked commentaries (relationship + explicit query for safety)
+    for c in getattr(n, 'commentaries', []) or []:
+        _add(c)
+    if n.id:
+        for c in NewsletterCommentary.query.filter_by(newsletter_id=n.id, is_active=True).all():
+            _add(c)
+
+    # Week-scoped commentaries by API team id (cross-season compatibility)
+    api_team_id = None
+    team_db_id = n.team_id
+    if team_db_id:
+        api_team_id = db.session.query(Team.team_id).filter(Team.id == team_db_id).scalar()
+
+    if n.week_start_date and n.week_end_date:
+        # Primary: join on API team id
+        if api_team_id:
+            rows = (
+                NewsletterCommentary.query.join(Team)
+                .filter(
+                    Team.team_id == api_team_id,
+                    NewsletterCommentary.week_start_date == n.week_start_date,
+                    NewsletterCommentary.week_end_date == n.week_end_date,
+                    NewsletterCommentary.is_active.is_(True)
+                )
+                .order_by(NewsletterCommentary.position.asc(), NewsletterCommentary.created_at.asc())
+                .all()
+            )
+            for c in rows:
+                _add(c)
+
+        # Fallback: match by DB team_id when join data is missing (older rows)
+        if team_db_id:
+            rows = (
+                NewsletterCommentary.query
+                .filter(
+                    NewsletterCommentary.team_id == team_db_id,
+                    NewsletterCommentary.week_start_date == n.week_start_date,
+                    NewsletterCommentary.week_end_date == n.week_end_date,
+                    NewsletterCommentary.is_active.is_(True)
+                )
+                .order_by(NewsletterCommentary.position.asc(), NewsletterCommentary.created_at.asc())
+                .all()
+            )
+            for c in rows:
+                _add(c)
+
+    # Stable ordering for presentation
+    type_order = {'intro': 0, 'player': 1, 'summary': 2}
+    commentaries = list(seen.values())
+    commentaries.sort(key=lambda c: (
+        type_order.get(getattr(c, 'commentary_type', ''), 99),
+        getattr(c, 'position', 0) or 0,
+        getattr(c, 'created_at', datetime.min) or datetime.min,
+    ))
+    return commentaries
+
+
 def _newsletter_render_context(n: Newsletter) -> dict[str, Any]:
     data = _load_newsletter_json(n) or {}
     team_logo = data.get('team_logo')
     if not team_logo and n.team and getattr(n.team, 'logo', None):
         team_logo = n.team.logo
 
+    # Generate web URL for newsletter
+    canonical_slug = _newsletter_issue_slug(n)
+    web_url = _absolute_url(f'/newsletters/{canonical_slug}')
+
+    commentaries = _collect_commentaries_for_newsletter(n)
+    intro_commentary = []
+    summary_commentary = []
+    player_commentary_map = {}
+
+    for c in commentaries:
+        if c.commentary_type == 'intro':
+            intro_commentary.append(c.to_dict())
+        elif c.commentary_type == 'summary':
+            summary_commentary.append(c.to_dict())
+        elif c.commentary_type == 'player' and c.player_id:
+            player_commentary_map.setdefault(c.player_id, []).append(c.to_dict())
+
+    # Buy Me a Coffee button URL - use official CDN image
+    bmc_button_url = 'https://cdn.buymeacoffee.com/buttons/v2/default-yellow.png'
+    
+    # Public base URL for player links in emails
+    public_base_url = os.getenv('PUBLIC_BASE_URL', '').rstrip('/')
+
     context: dict[str, Any] = {
+        'embed_image': _embed_image,
         'meta': n,
         'team_name': n.team.name if n.team else '',
         'title': data.get('title') or n.title,
@@ -3550,6 +5089,13 @@ def _newsletter_render_context(n: Newsletter) -> dict[str, Any]:
         'by_numbers': data.get('by_numbers') or {},
         'fan_pulse': data.get('fan_pulse') or [],
         'team_logo': team_logo,
+        'web_url': web_url,
+        'public_slug': canonical_slug,
+        'public_base_url': public_base_url,
+        'intro_commentary': intro_commentary,
+        'summary_commentary': summary_commentary,
+        'player_commentary_map': player_commentary_map,
+        'bmc_button_url': bmc_button_url,
     }
     context['social_meta'] = _compute_newsletter_social_meta(n, context)
     return context
@@ -3683,20 +5229,60 @@ def _deliver_newsletter_via_webhook(
     }
 
     delivered_count = 0
+    digest_queued_count = 0
     failures: list[dict[str, Any]] = []
     last_status_code: int | None = None
     last_response_text = ''
 
+    # Import digest queue function
+    from src.services.newsletter_deadline_service import queue_newsletter_for_digest
+
     for email in recipients:
         normalized_email = _normalize_email(email)
         subscription = sub_lookup.get(normalized_email)
+        
+        # Check if user prefers digest delivery
+        user_account = UserAccount.query.filter_by(email=normalized_email).first()
+        user_prefers_digest = (
+            user_account 
+            and getattr(user_account, 'email_delivery_preference', 'individual') == 'digest'
+        )
+        
+        # If user prefers digest, queue instead of sending immediately
+        if user_prefers_digest and user_account:
+            try:
+                queued = queue_newsletter_for_digest(user_account.id, n.id)
+                if queued:
+                    digest_queued_count += 1
+                    logger.info(f"Queued newsletter {n.id} for digest delivery to {email}")
+                else:
+                    logger.debug(f"Newsletter {n.id} already queued for {email}")
+                continue  # Skip sending individual email
+            except Exception as queue_err:
+                logger.warning(f"Failed to queue for digest, falling back to individual: {queue_err}")
+                # Fall through to send individual email
+        
         unsubscribe_url = None
+        one_click_url = None
+        email_headers = {}
+        
         if subscription and subscription.unsubscribe_token:
-            token_path = f"/subscriptions/unsubscribe/{subscription.unsubscribe_token}"
+            token = subscription.unsubscribe_token
+            # Regular unsubscribe page (for link in email body)
+            token_path = f"/subscriptions/unsubscribe/{token}"
             if unsubscribe_base:
                 unsubscribe_url = f"{unsubscribe_base.rstrip('/')}{token_path}"
             else:
                 unsubscribe_url = token_path
+            
+            # One-click unsubscribe endpoint (for RFC 8058 / List-Unsubscribe-Post header)
+            one_click_path = f"/api/subscriptions/one-click-unsubscribe/{token}"
+            if unsubscribe_base:
+                one_click_url = f"{unsubscribe_base.rstrip('/')}{one_click_path}"
+            
+            # Build RFC 8058 compliant headers for email providers
+            if one_click_url:
+                email_headers = _build_unsubscribe_headers(unsubscribe_url, one_click_url)
 
         html = render_template(
             'newsletter_email.html',
@@ -3712,6 +5298,7 @@ def _deliver_newsletter_via_webhook(
         meta_payload = meta_base.copy()
         meta_payload.update({
             'unsubscribe_url': unsubscribe_url,
+            'one_click_unsubscribe_url': one_click_url,
             'subscription_id': subscription.id if subscription else None,
             'manage_url': manage_url,
         })
@@ -3725,6 +5312,7 @@ def _deliver_newsletter_via_webhook(
             'email': email,
             'html': html,
             'text': text,
+            'headers': email_headers,  # RFC 8058 List-Unsubscribe headers
             'meta': meta_payload,
         }
 
@@ -3758,18 +5346,94 @@ def _deliver_newsletter_via_webhook(
                 'http_status': last_status_code,
             })
 
-    status = 'ok' if delivered_count == total_recipients else ('partial' if delivered_count else 'error')
+    # Calculate status including digest queued
+    total_processed = delivered_count + digest_queued_count
+    status = 'ok' if total_processed == total_recipients else ('partial' if total_processed else 'error')
     result: dict[str, Any] = {
         'status': status,
         'http_status': last_status_code,
         'recipient_count': total_recipients,
         'delivered_count': delivered_count,
+        'digest_queued_count': digest_queued_count,
         'webhook_url': webhook_url,
         'response_text': last_response_text,
     }
     if failures:
         result['failures'] = failures
     return result
+
+@api_bp.route('/newsletters/<int:newsletter_id>/preview', methods=['POST'])
+@require_api_key
+def preview_newsletter_custom(newsletter_id: int):
+    try:
+        newsletter = Newsletter.query.get_or_404(newsletter_id)
+        
+        # Ensure we reload fresh content if structured_content is available
+        data = _load_newsletter_json(newsletter) or {}
+        
+        # Determine active commentaries based on request
+        payload = request.get_json() or {}
+        journalist_ids = payload.get('journalist_ids')
+        render_mode = payload.get('render_mode', 'web')  # 'web' or 'email'
+        use_snippets = payload.get('use_snippets', False)
+        
+        # Fetch commentaries using week-based query with API Team ID (cross-season compatible)
+        commentaries = []
+        if newsletter.team_id and newsletter.week_start_date and newsletter.week_end_date:
+            # Get the API Team ID for cross-season compatibility
+            api_team_id = db.session.query(Team.team_id).filter(Team.id == newsletter.team_id).scalar()
+            
+            if api_team_id:
+                # Query commentaries by API Team ID and week dates
+                query = NewsletterCommentary.query.join(Team).filter(
+                    Team.team_id == api_team_id,
+                    NewsletterCommentary.week_start_date == newsletter.week_start_date,
+                    NewsletterCommentary.week_end_date == newsletter.week_end_date,
+                    NewsletterCommentary.is_active == True
+                )
+                
+                # Apply journalist filtering if specified
+                if journalist_ids is not None:
+                    if not isinstance(journalist_ids, list):
+                        journalist_ids = []
+                    if len(journalist_ids) > 0:
+                        query = query.filter(NewsletterCommentary.author_id.in_(journalist_ids))
+                    else:
+                        # Empty list means show no commentaries (unsubscribed simulation)
+                        commentaries = []
+                        query = None
+                
+                if query is not None:
+                    commentaries = query.all()
+                    print(f"[PREVIEW DEBUG] Found {len(commentaries)} commentaries for team API ID {api_team_id}, week {newsletter.week_start_date} to {newsletter.week_end_date}")
+                    for c in commentaries:
+                        print(f"  - Commentary ID {c.id}: type={c.commentary_type}, player_id={c.player_id}, author={c.author_name}")
+        
+        print(f"[PREVIEW DEBUG] Final commentary count after filtering: {len(commentaries)}, journalist_ids filter: {journalist_ids}")
+        
+        # Render
+        from src.agents.weekly_agent import _render_variants_custom
+        
+        variants = _render_variants_custom(
+            news=data,
+            team_name=newsletter.team.name if newsletter.team else None,
+            commentaries=commentaries,
+            use_snippets=use_snippets,
+            render_mode=render_mode
+        )
+        
+        return jsonify({
+            'html': variants.get(f'{render_mode}_html', ''),
+            'meta': {
+                'journalist_count': len(commentaries),
+                'mode': render_mode,
+                'snippets': use_snippets
+            }
+        })
+
+    except Exception as e:
+        logger.exception('Preview rendering failed')
+        return jsonify(_safe_error_payload(e, 'Preview generation failed')), 500
 
 @api_bp.route('/newsletters/<int:newsletter_id>/render.<fmt>', methods=['GET'])
 @require_api_key
@@ -4559,6 +6223,20 @@ def admin_seed_top5_loans():
                 # Record candidate triplet for potential pruning
                 candidate_triplets.add((int(player_id), int(parent_team.id), int(loan_team.id)))
 
+                # Deactivate ALL old active loans for this player before creating new one
+                # This ensures a player only has ONE active loan at a time
+                if not dry_run:
+                    old_loans = LoanedPlayer.query.filter(
+                        LoanedPlayer.player_id == int(player_id),
+                        LoanedPlayer.is_active.is_(True),
+                    ).all()
+                    for old_loan in old_loans:
+                        # Don't deactivate if it's the exact same loan we're about to create/reactivate
+                        if old_loan.loan_team_id == loan_team.id and old_loan.window_key == window_key:
+                            continue
+                        old_loan.is_active = False
+                        old_loan.updated_at = datetime.now(timezone.utc)
+
                 # Duplicate handling: prefer reactivation over new row
                 any_row = LoanedPlayer.query.filter_by(
                     player_id=int(player_id),
@@ -4602,6 +6280,25 @@ def admin_seed_top5_loans():
                 details.append({'player_id': player_id, 'status': f'error: {ex}'})
 
         if not dry_run:
+            # Mark all parent teams that now have loans as tracked
+            if created > 0:
+                tracked_team_ids = set()
+                for detail in details:
+                    if detail.get('status') in ('created', 'reactivated'):
+                        pid = detail.get('player_id')
+                        d = direct.get(pid) or {}
+                        mt = multi_team.get(pid) or []
+                        primary_api_id = d.get('primary_team_id') or (mt[1] if len(mt) > 1 else None)
+                        if primary_api_id:
+                            tracked_team_ids.add(primary_api_id)
+                
+                for api_id in tracked_team_ids:
+                    try:
+                        team = Team.query.filter_by(team_id=api_id, season=season).first()
+                        if team:
+                            team.is_tracked = True
+                    except Exception:
+                        pass
             db.session.commit()
 
         # Optional pruning of stale seeded loans for this season
@@ -4798,17 +6495,19 @@ def admin_seed_team_loans():
                 if overwrite and not dry_run:
                     # Deactivate any existing active loans for this player at this parent in this season
                     season_start = season
-                    # window_key season match by prefix
+                    # Deactivate ALL old active loans for this player (regardless of parent team)
+                    # This ensures a player only has ONE active loan at a time
                     existing_rows = LoanedPlayer.query.filter(
                         LoanedPlayer.player_id == int(player_id),
-                        LoanedPlayer.primary_team_id == parent_team.id,
                         LoanedPlayer.is_active.is_(True),
                     ).all()
                     for row in existing_rows:
                         try:
-                            # Deactivate only same-season rows if window_key matches season
-                            if row.window_key and str(row.window_key).startswith(str(season_start)):
-                                row.is_active = False
+                            # Don't deactivate if it's the exact same loan we're about to create/reactivate
+                            if row.loan_team_id == loan_team.id and row.window_key == window_key:
+                                continue
+                            row.is_active = False
+                            row.updated_at = datetime.now(timezone.utc)
                         except Exception:
                             continue
 
@@ -4855,6 +6554,9 @@ def admin_seed_team_loans():
                 details.append({'player_id': player_id, 'status': f'error: {ex}'})
 
         if not dry_run:
+            # Mark parent team as tracked since we're adding loans
+            if created > 0 and parent_row:
+                parent_row.is_tracked = True
             db.session.commit()
 
         try:
@@ -4885,6 +6587,119 @@ def admin_seed_team_loans():
         db.session.rollback()
         return jsonify(_safe_error_payload(e, 'An unexpected error occurred. Please try again later.')), 500
 
+
+@api_bp.route('/admin/resync-goalkeeper-saves', methods=['POST'])
+@require_api_key
+def admin_resync_goalkeeper_saves():
+    """
+    Re-sync goalkeeper saves data from API-Football.
+    Finds goalkeeper fixtures missing saves data and fetches from API.
+    
+    Request body (optional):
+    {
+        "dry_run": true,      // Preview mode (default: false)
+        "player_id": 284361,  // Filter to specific player (optional)
+        "limit": 50           // Max fixtures to process (default: 50)
+    }
+    """
+    import time
+    from src.models.weekly import FixturePlayerStats, Fixture
+    from src.api_football_client import APIFootballClient
+    
+    try:
+        data = request.get_json(force=True) if request.data else {}
+        dry_run = data.get('dry_run', False)
+        player_id_filter = data.get('player_id')
+        limit = min(data.get('limit', 50), 200)  # Cap at 200 to avoid timeout
+        
+        logger.info(f"Admin resync-goalkeeper-saves: dry_run={dry_run}, player_id={player_id_filter}, limit={limit}")
+        
+        # Find goalkeeper stats with missing saves data
+        query = db.session.query(
+            FixturePlayerStats, Fixture
+        ).join(
+            Fixture, FixturePlayerStats.fixture_id == Fixture.id
+        ).filter(
+            FixturePlayerStats.position == 'G',
+            FixturePlayerStats.saves.is_(None),
+            FixturePlayerStats.minutes > 0
+        )
+        
+        if player_id_filter:
+            query = query.filter(FixturePlayerStats.player_api_id == player_id_filter)
+        
+        results = query.order_by(Fixture.date_utc.desc()).limit(limit).all()
+        
+        if not results:
+            return jsonify({
+                'message': 'No goalkeeper fixtures found with missing saves data',
+                'dry_run': dry_run,
+                'processed': 0,
+            })
+        
+        api_client = APIFootballClient()
+        
+        updated = 0
+        skipped = 0
+        errors = 0
+        details = []
+        
+        for stats, fixture in results:
+            fixture_id_api = fixture.fixture_id_api
+            player_api_id = stats.player_api_id
+            season = fixture.season or datetime.now().year
+            
+            try:
+                player_stats = api_client.get_player_stats_for_fixture(player_api_id, season, fixture_id_api)
+                
+                if player_stats and player_stats.get('statistics'):
+                    stat_list = player_stats['statistics']
+                    if stat_list:
+                        st = stat_list[0] if isinstance(stat_list, list) else stat_list
+                        saves = st.get('saves')
+                        
+                        if saves is not None:
+                            if not dry_run:
+                                stats.saves = saves
+                                db.session.commit()
+                            
+                            details.append({
+                                'player_id': player_api_id,
+                                'fixture_id': fixture_id_api,
+                                'saves': saves,
+                                'status': 'updated' if not dry_run else 'would_update'
+                            })
+                            updated += 1
+                        else:
+                            skipped += 1
+                    else:
+                        skipped += 1
+                else:
+                    skipped += 1
+                
+                # Rate limiting - brief pause between API calls
+                time.sleep(0.2)
+                
+            except Exception as e:
+                logger.warning(f"Error resyncing saves for player {player_api_id} fixture {fixture_id_api}: {e}")
+                errors += 1
+        
+        return jsonify({
+            'message': 'Goalkeeper saves resync complete',
+            'dry_run': dry_run,
+            'found': len(results),
+            'updated': updated,
+            'skipped': skipped,
+            'errors': errors,
+            'details': details[:50],  # Limit response size
+        })
+        
+    except Exception as e:
+        logger.exception('admin_resync_goalkeeper_saves failed')
+        db.session.rollback()
+        return jsonify(_safe_error_payload(e, 'Failed to resync goalkeeper saves')), 500
+
+
 # --- Admin: Missing names helpers ---
 def _is_placeholder_name(name: str | None) -> bool:
     if not name:
@@ -4894,6 +6709,48 @@ def _is_placeholder_name(name: str | None) -> bool:
         return True
     low = s.lower()
     return low.startswith('player ') or low.startswith('unknown')
+
+
+def _is_placeholder_team_name(name: str | None) -> bool:
+    if not name:
+        return True
+    s = str(name).strip()
+    if not s:
+        return True
+    return s.lower().startswith('team ')
+
+
+def _update_team_name_if_missing(team_row, *, season: int, dry_run: bool = False) -> dict:
+    """Update a Team row's name when it is a placeholder.
+
+    Returns a dict with status and optional new_name/error for logging/testing.
+    """
+    if not team_row:
+        return {'status': 'no_team_row'}
+
+    current_name = getattr(team_row, 'name', None)
+    api_team_id = getattr(team_row, 'team_id', None)
+
+    if not _is_placeholder_team_name(current_name):
+        return {'status': 'ok_existing', 'name': current_name}
+
+    if not api_team_id:
+        return {'status': 'missing_api_id'}
+
+    try:
+        info = api_client.get_team_by_id(int(api_team_id), season)
+        new_name = (info.get('team') or {}).get('name') if isinstance(info, dict) else None
+    except Exception as exc:  # pragma: no cover - network failures
+        return {'status': 'error', 'error': str(exc)}
+
+    if not new_name or _is_placeholder_team_name(new_name):
+        return {'status': 'no_name_found'}
+
+    if dry_run:
+        return {'status': 'would_update', 'new_name': new_name}
+
+    team_row.name = new_name
+    return {'status': 'updated', 'new_name': new_name}
 
 @api_bp.route('/admin/loans/missing-names', methods=['GET'])
 @require_api_key
@@ -5000,6 +6857,8 @@ def admin_backfill_player_names():
 
         updated, skipped = 0, 0
         details = []
+        team_updates = 0
+        team_details = []
 
         # Make sure API client season aligns for lookups
         try:
@@ -5023,6 +6882,37 @@ def admin_backfill_player_names():
                     r.player_name = name
                     updated += 1
                     details.append({'loan_id': r.id, 'player_id': r.player_id, 'new_name': name, 'status': 'updated'})
+
+                # Backfill team names (parent and loan) when missing
+                primary_team = Team.query.get(r.primary_team_id) if r.primary_team_id else None
+                if primary_team:
+                    primary_result = _update_team_name_if_missing(primary_team, season=season, dry_run=dry_run)
+                    if primary_result.get('status') in {'updated', 'would_update'}:
+                        team_updates += 1
+                        team_details.append({
+                            'team_id': getattr(primary_team, 'team_id', None),
+                            'db_id': getattr(primary_team, 'id', None),
+                            'role': 'primary',
+                            **{k: v for k, v in primary_result.items() if k != 'status'},
+                            'status': primary_result['status'],
+                        })
+                        if not dry_run and primary_result.get('new_name') and _is_placeholder_team_name(r.primary_team_name):
+                            r.primary_team_name = primary_result['new_name']
+
+                loan_team = Team.query.get(r.loan_team_id) if r.loan_team_id else None
+                if loan_team:
+                    loan_result = _update_team_name_if_missing(loan_team, season=season, dry_run=dry_run)
+                    if loan_result.get('status') in {'updated', 'would_update'}:
+                        team_updates += 1
+                        team_details.append({
+                            'team_id': getattr(loan_team, 'team_id', None),
+                            'db_id': getattr(loan_team, 'id', None),
+                            'role': 'loan',
+                            **{k: v for k, v in loan_result.items() if k != 'status'},
+                            'status': loan_result['status'],
+                        })
+                        if not dry_run and loan_result.get('new_name') and _is_placeholder_team_name(r.loan_team_name):
+                            r.loan_team_name = loan_result['new_name']
             except Exception as ex:
                 skipped += 1
                 details.append({'loan_id': r.id, 'player_id': r.player_id, 'status': f'error: {ex}'})
@@ -5038,6 +6928,7 @@ def admin_backfill_player_names():
                 'updated': updated,
                 'skipped': skipped,
                 'dry_run': dry_run,
+                'team_updates': team_updates,
             })
         except Exception:
             pass
@@ -5048,6 +6939,8 @@ def admin_backfill_player_names():
             'skipped': skipped,
             'dry_run': dry_run,
             'processed': len(rows),
+            'team_updates': team_updates,
+            'team_details': team_details[:200],
             'details': details[:200]
         })
     except Exception as e:
@@ -5242,6 +7135,164 @@ def admin_backfill_team_leagues_all():
         db.session.rollback()
         return jsonify(_safe_error_payload(e, 'An unexpected error occurred. Please try again later.')), 500
 
+@api_bp.route('/admin/players/<int:player_id>/sync-fixtures', methods=['POST'])
+@require_api_key
+def admin_sync_player_fixtures(player_id: int):
+    """
+    Sync/backfill all fixtures for a player from API-Football.
+    Fetches the player's fixtures for their loan team in the current season
+    and stores any missing fixture stats in the database.
+    """
+    try:
+        from src.api_football_client import APIFootballClient
+        from src.models.weekly import Fixture, FixturePlayerStats
+        from src.models.league import LoanedPlayer
+        
+        data = request.get_json() or {}
+        dry_run = data.get('dry_run', False)
+        
+        # Get current season
+        current_year = datetime.now().year
+        current_month = datetime.now().month
+        season = data.get('season', current_year if current_month >= 8 else current_year - 1)
+        
+        # Find the player's MOST RECENT loan team (order by updated_at to get current loan)
+        loaned = LoanedPlayer.query.filter_by(player_id=player_id, is_active=True).order_by(LoanedPlayer.updated_at.desc()).first()
+        if not loaned:
+            loaned = LoanedPlayer.query.filter_by(player_id=player_id).order_by(LoanedPlayer.updated_at.desc()).first()
+        
+        if not loaned or not loaned.loan_team_id:
+            return jsonify({'error': 'No loan record found for this player'}), 404
+        
+        loan_team = Team.query.get(loaned.loan_team_id)
+        if not loan_team:
+            return jsonify({'error': 'Loan team not found'}), 404
+        
+        loan_team_api_id = loan_team.team_id
+        
+        api_client = APIFootballClient()
+        
+        # Fetch all fixtures for this team in the season
+        season_start = f"{season}-08-01"
+        season_end = f"{season + 1}-06-30"
+        
+        logger.info(f"Syncing fixtures for player {player_id} ({loaned.player_name}) at team {loan_team_api_id} ({loan_team.name})")
+        
+        fixtures = api_client.get_fixtures_for_team(
+            loan_team_api_id, 
+            season, 
+            season_start, 
+            season_end
+        )
+        
+        synced = 0
+        skipped = 0
+        errors = []
+        
+        for fx in fixtures:
+            fixture_info = fx.get('fixture', {})
+            fixture_id_api = fixture_info.get('id')
+            fixture_status = fixture_info.get('status', {}).get('short', '')
+            
+            # Only process finished games
+            if fixture_status not in ('FT', 'AET', 'PEN'):
+                skipped += 1
+                continue
+            
+            # Check if we already have this fixture
+            existing_fixture = Fixture.query.filter_by(fixture_id_api=fixture_id_api).first()
+            
+            if not existing_fixture:
+                # Create the fixture
+                if not dry_run:
+                    teams = fx.get('teams', {})
+                    goals = fx.get('goals', {})
+                    league = fx.get('league', {})
+                    
+                    existing_fixture = Fixture(
+                        fixture_id_api=fixture_id_api,
+                        date_utc=datetime.fromisoformat(fixture_info.get('date', '').replace('Z', '+00:00')) if fixture_info.get('date') else None,
+                        season=season,
+                        competition_name=league.get('name'),
+                        home_team_api_id=teams.get('home', {}).get('id'),
+                        away_team_api_id=teams.get('away', {}).get('id'),
+                        home_goals=goals.get('home'),
+                        away_goals=goals.get('away'),
+                    )
+                    db.session.add(existing_fixture)
+                    db.session.flush()
+            
+            # Check if we have player stats for this fixture
+            if existing_fixture:
+                existing_stats = FixturePlayerStats.query.filter_by(
+                    fixture_id=existing_fixture.id,
+                    player_api_id=player_id
+                ).first()
+                
+                if existing_stats:
+                    skipped += 1
+                    continue
+            
+            # Fetch player stats for this fixture
+            try:
+                player_stats = api_client.get_player_stats_for_fixture(player_id, season, fixture_id_api)
+                
+                if player_stats and player_stats.get('statistics'):
+                    stats = player_stats['statistics']
+                    
+                    if not dry_run and existing_fixture:
+                        fps = FixturePlayerStats(
+                            fixture_id=existing_fixture.id,
+                            player_api_id=player_id,
+                            team_api_id=loan_team_api_id,
+                            minutes=stats.get('minutes', 0),
+                            position=stats.get('position'),
+                            rating=stats.get('rating'),
+                            goals=stats.get('goals', 0),
+                            assists=stats.get('assists', 0),
+                            yellows=stats.get('yellows', 0),
+                            reds=stats.get('reds', 0),
+                            shots_total=stats.get('shots_total'),
+                            shots_on=stats.get('shots_on'),
+                            passes_total=stats.get('passes_total'),
+                            passes_key=stats.get('passes_key'),
+                            tackles_total=stats.get('tackles_total'),
+                            duels_won=stats.get('duels_won'),
+                            duels_total=stats.get('duels_total'),
+                            dribbles_success=stats.get('dribbles_success'),
+                            saves=stats.get('saves'),
+                        )
+                        db.session.add(fps)
+                    
+                    synced += 1
+                else:
+                    skipped += 1
+                    
+            except Exception as e:
+                errors.append(f"Fixture {fixture_id_api}: {str(e)}")
+        
+        if not dry_run:
+            db.session.commit()
+        
+        return jsonify({
+            'player_id': player_id,
+            'player_name': loaned.player_name,
+            'loan_team': loan_team.name,
+            'season': season,
+            'dry_run': dry_run,
+            'fixtures_found': len(fixtures),
+            'synced': synced,
+            'skipped': skipped,
+            'errors': errors[:10],  # Limit error list
+        })
+        
+    except Exception as e:
+        logger.error(f"Error syncing fixtures for player {player_id}: {e}")
+        import traceback
+        traceback.print_exc()
+        db.session.rollback()
+        return jsonify(_safe_error_payload(e, 'Failed to sync player fixtures')), 500
+
 # --- Admin: Flags management (list/update) ---
 @api_bp.route('/admin/flags', methods=['GET'])
 @require_api_key
@@ -5289,6 +7340,412 @@ def admin_update_flag(flag_id: int):
         logger.exception('admin_update_flag failed')
         db.session.rollback()
         return jsonify(_safe_error_payload(e, 'An unexpected error occurred. Please try again later.')), 500
+
+
+# --- Admin: Team Data Management ---
+
+@api_bp.route('/admin/teams/<int:team_id>/data', methods=['DELETE'])
+@require_api_key
+def admin_delete_team_data(team_id: int):
+    """
+    Delete all tracking data for a team while keeping the team record.
+    
+    This removes:
+    - All LoanedPlayer records where this team is the primary (parent) team
+    - All newsletters for this team
+    - All weekly loan reports for this team
+    - All user subscriptions for this team
+    - All journalist assignments for this team
+    - All newsletter commentaries for this team
+    - Related fixture player stats
+    
+    The team record itself is preserved but marked as is_tracked=False.
+    
+    Query params:
+    - dry_run: If 'true', only return what would be deleted without actually deleting
+    """
+    try:
+        from src.models.weekly import WeeklyLoanReport, WeeklyLoanAppearance, FixturePlayerStats, Fixture
+        
+        team = Team.query.get_or_404(team_id)
+        dry_run = request.args.get('dry_run', 'false').lower() in ('true', '1', 'yes')
+        
+        # Collect all data to delete
+        summary = {
+            'team_id': team.id,
+            'team_name': team.name,
+            'team_api_id': team.team_id,
+            'dry_run': dry_run,
+            'deleted': {}
+        }
+        
+        # 1. Get loans where this team is the primary team
+        loans = LoanedPlayer.query.filter_by(primary_team_id=team_id).all()
+        loan_ids = [l.id for l in loans]
+        player_api_ids = [l.player_id for l in loans]
+        summary['deleted']['loaned_players'] = len(loans)
+        
+        # 2. Get newsletters for this team
+        newsletters = Newsletter.query.filter_by(team_id=team_id).all()
+        newsletter_ids = [n.id for n in newsletters]
+        summary['deleted']['newsletters'] = len(newsletters)
+        
+        # 3. Get weekly loan reports for this team
+        weekly_reports = WeeklyLoanReport.query.filter_by(parent_team_id=team_id).all()
+        report_ids = [r.id for r in weekly_reports]
+        summary['deleted']['weekly_reports'] = len(weekly_reports)
+        
+        # 4. Get weekly loan appearances for these reports
+        appearances_count = 0
+        if report_ids:
+            appearances_count = WeeklyLoanAppearance.query.filter(
+                WeeklyLoanAppearance.weekly_report_id.in_(report_ids)
+            ).count()
+        summary['deleted']['weekly_appearances'] = appearances_count
+        
+        # 5. Get user subscriptions for this team
+        subscriptions = UserSubscription.query.filter_by(team_id=team_id).all()
+        summary['deleted']['subscriptions'] = len(subscriptions)
+        
+        # 6. Get journalist assignments for this team
+        assignments = JournalistTeamAssignment.query.filter_by(team_id=team_id).all()
+        summary['deleted']['journalist_assignments'] = len(assignments)
+        
+        # 7. Get newsletter commentaries for this team
+        commentaries = NewsletterCommentary.query.filter_by(team_id=team_id).all()
+        # Also get commentaries attached to newsletters
+        if newsletter_ids:
+            newsletter_commentaries = NewsletterCommentary.query.filter(
+                NewsletterCommentary.newsletter_id.in_(newsletter_ids)
+            ).all()
+            commentaries = list(set(commentaries + newsletter_commentaries))
+        summary['deleted']['commentaries'] = len(commentaries)
+        
+        # 8. Get newsletter comments for these newsletters
+        comments_count = 0
+        if newsletter_ids:
+            comments_count = NewsletterComment.query.filter(
+                NewsletterComment.newsletter_id.in_(newsletter_ids)
+            ).count()
+        summary['deleted']['newsletter_comments'] = comments_count
+        
+        # 9. Get YouTube links for these newsletters
+        youtube_links_count = 0
+        if newsletter_ids:
+            youtube_links_count = NewsletterPlayerYoutubeLink.query.filter(
+                NewsletterPlayerYoutubeLink.newsletter_id.in_(newsletter_ids)
+            ).count()
+        summary['deleted']['youtube_links'] = youtube_links_count
+        
+        # 10. Get fixture player stats for loan players (optional, expensive)
+        fixture_stats_count = 0
+        if player_api_ids:
+            fixture_stats_count = FixturePlayerStats.query.filter(
+                FixturePlayerStats.player_api_id.in_(player_api_ids)
+            ).count()
+        summary['deleted']['fixture_player_stats'] = fixture_stats_count
+        
+        if dry_run:
+            summary['message'] = 'Dry run complete. No data was deleted.'
+            return jsonify(summary)
+        
+        # Actually delete the data in correct order (respecting foreign keys)
+        
+        # Delete fixture player stats
+        if player_api_ids:
+            FixturePlayerStats.query.filter(
+                FixturePlayerStats.player_api_id.in_(player_api_ids)
+            ).delete(synchronize_session=False)
+        
+        # Delete YouTube links
+        if newsletter_ids:
+            NewsletterPlayerYoutubeLink.query.filter(
+                NewsletterPlayerYoutubeLink.newsletter_id.in_(newsletter_ids)
+            ).delete(synchronize_session=False)
+        
+        # Delete newsletter comments
+        if newsletter_ids:
+            NewsletterComment.query.filter(
+                NewsletterComment.newsletter_id.in_(newsletter_ids)
+            ).delete(synchronize_session=False)
+        
+        # Delete commentaries
+        for commentary in commentaries:
+            db.session.delete(commentary)
+        
+        # Delete journalist assignments
+        for assignment in assignments:
+            db.session.delete(assignment)
+        
+        # Delete user subscriptions
+        for sub in subscriptions:
+            db.session.delete(sub)
+        
+        # Delete weekly appearances first (foreign key to reports)
+        if report_ids:
+            WeeklyLoanAppearance.query.filter(
+                WeeklyLoanAppearance.weekly_report_id.in_(report_ids)
+            ).delete(synchronize_session=False)
+        
+        # Delete weekly reports
+        for report in weekly_reports:
+            db.session.delete(report)
+        
+        # Delete newsletters
+        for newsletter in newsletters:
+            db.session.delete(newsletter)
+        
+        # Delete loaned players
+        for loan in loans:
+            db.session.delete(loan)
+        
+        # Mark team as not tracked
+        team.is_tracked = False
+        team.newsletters_active = False
+        
+        db.session.commit()
+        
+        summary['message'] = f'Successfully deleted all tracking data for {team.name}'
+        return jsonify(summary)
+        
+    except Exception as e:
+        logger.exception('admin_delete_team_data failed')
+        db.session.rollback()
+        return jsonify(_safe_error_payload(e, 'Failed to delete team data')), 500
+
+
+@api_bp.route('/admin/teams/<int:team_id>/tracking', methods=['POST'])
+@require_api_key
+def admin_update_team_tracking(team_id: int):
+    """
+    Update tracking status for a team.
+    
+    Body: { "is_tracked": true/false }
+    """
+    try:
+        team = Team.query.get_or_404(team_id)
+        data = request.get_json() or {}
+        
+        if 'is_tracked' in data:
+            team.is_tracked = bool(data['is_tracked'])
+        
+        db.session.commit()
+        return jsonify({
+            'message': 'updated',
+            'team_id': team.id,
+            'team_name': team.name,
+            'is_tracked': team.is_tracked
+        })
+    except Exception as e:
+        logger.exception('admin_update_team_tracking failed')
+        db.session.rollback()
+        return jsonify(_safe_error_payload(e, 'Failed to update team tracking')), 500
+
+
+@api_bp.route('/admin/teams/bulk-tracking', methods=['POST'])
+@require_api_key
+def admin_bulk_update_team_tracking():
+    """
+    Bulk update tracking status for multiple teams.
+    
+    Body: { 
+        "team_ids": [1, 2, 3], 
+        "is_tracked": true/false,
+        "exclude_team_ids": [4, 5]  # Optional: teams to exclude from update
+    }
+    
+    Or to update all teams except some:
+    { 
+        "all": true,
+        "is_tracked": false,
+        "exclude_team_ids": [4]  # Keep team 4 tracked
+    }
+    """
+    try:
+        data = request.get_json() or {}
+        is_tracked = bool(data.get('is_tracked', False))
+        exclude_ids = data.get('exclude_team_ids', [])
+        
+        if data.get('all'):
+            # Update all teams except excluded ones
+            query = Team.query
+            if exclude_ids:
+                query = query.filter(~Team.id.in_(exclude_ids))
+            teams = query.all()
+        else:
+            team_ids = data.get('team_ids', [])
+            if not team_ids:
+                return jsonify({'error': 'team_ids or all=true required'}), 400
+            teams = Team.query.filter(Team.id.in_(team_ids)).all()
+        
+        updated_count = 0
+        for team in teams:
+            if team.id not in exclude_ids:
+                team.is_tracked = is_tracked
+                updated_count += 1
+        
+        db.session.commit()
+        return jsonify({
+            'message': f'Updated {updated_count} teams',
+            'is_tracked': is_tracked,
+            'updated_count': updated_count
+        })
+    except Exception as e:
+        logger.exception('admin_bulk_update_team_tracking failed')
+        db.session.rollback()
+        return jsonify(_safe_error_payload(e, 'Failed to bulk update team tracking')), 500
+
+
+# --- Admin: Team Tracking Requests ---
+
+@api_bp.route('/admin/tracking-requests', methods=['GET'])
+@require_api_key
+def admin_list_tracking_requests():
+    """List all team tracking requests with optional status filter."""
+    try:
+        status = (request.args.get('status') or 'all').strip().lower()
+        q = TeamTrackingRequest.query
+        if status in ('pending', 'approved', 'rejected'):
+            q = q.filter(TeamTrackingRequest.status == status)
+        rows = q.order_by(TeamTrackingRequest.created_at.desc()).all()
+        return jsonify([r.to_dict() for r in rows])
+    except Exception as e:
+        logger.exception('admin_list_tracking_requests failed')
+        return jsonify(_safe_error_payload(e, 'Failed to list tracking requests')), 500
+
+
+@api_bp.route('/admin/tracking-requests/<int:request_id>', methods=['POST'])
+@require_api_key
+def admin_update_tracking_request(request_id: int):
+    """
+    Update a tracking request status (approve/reject).
+    
+    Body: { "status": "approved"|"rejected", "note": "optional admin note" }
+    
+    If approved, the team's is_tracked flag will be set to true.
+    """
+    try:
+        req = TeamTrackingRequest.query.get_or_404(request_id)
+        data = request.get_json() or {}
+        status = (data.get('status') or '').strip().lower()
+        note = (data.get('note') or '').strip()
+        
+        if status not in ('approved', 'rejected', 'pending'):
+            return jsonify({'error': 'status must be approved, rejected, or pending'}), 400
+        
+        req.status = status
+        if note:
+            req.admin_note = note
+        
+        if status in ('approved', 'rejected'):
+            req.resolved_at = datetime.now(timezone.utc)
+        else:
+            req.resolved_at = None
+        
+        # If approved, mark the team as tracked
+        if status == 'approved' and req.team_id:
+            team = Team.query.get(req.team_id)
+            if team:
+                team.is_tracked = True
+        
+        db.session.commit()
+        return jsonify({
+            'message': 'updated',
+            'request': req.to_dict()
+        })
+    except Exception as e:
+        logger.exception('admin_update_tracking_request failed')
+        db.session.rollback()
+        return jsonify(_safe_error_payload(e, 'Failed to update tracking request')), 500
+
+
+# --- Public: Team Tracking Requests ---
+
+@api_bp.route('/teams/<int:team_id>/request-tracking', methods=['POST'])
+def submit_tracking_request(team_id: int):
+    """
+    Submit a request to track a team.
+    
+    Body: { "email": "optional@email.com", "reason": "Why you want this team tracked" }
+    
+    Rate limited to prevent abuse.
+    """
+    try:
+        team = Team.query.get_or_404(team_id)
+        
+        # Check if team is already tracked
+        if team.is_tracked:
+            return jsonify({'error': 'This team is already being tracked'}), 400
+        
+        # Check for recent pending request for same team (prevent duplicates)
+        recent_cutoff = datetime.now(timezone.utc) - timedelta(hours=24)
+        existing = TeamTrackingRequest.query.filter(
+            TeamTrackingRequest.team_id == team_id,
+            TeamTrackingRequest.status == 'pending',
+            TeamTrackingRequest.created_at > recent_cutoff
+        ).first()
+        
+        if existing:
+            return jsonify({
+                'message': 'A tracking request for this team is already pending',
+                'existing_request_id': existing.id
+            }), 200
+        
+        data = request.get_json() or {}
+        email = (data.get('email') or '').strip()
+        reason = (data.get('reason') or '').strip()
+        
+        # Create the request
+        tracking_request = TeamTrackingRequest(
+            team_id=team.id,
+            team_api_id=team.team_id,
+            team_name=team.name,
+            email=email[:255] if email else None,
+            reason=reason[:1000] if reason else None,
+            ip_address=get_client_ip()[:64] if get_client_ip() else None,
+            user_agent=(request.headers.get('User-Agent') or '')[:512],
+            status='pending'
+        )
+        
+        db.session.add(tracking_request)
+        db.session.commit()
+        
+        return jsonify({
+            'message': f'Tracking request submitted for {team.name}',
+            'request_id': tracking_request.id
+        }), 201
+        
+    except Exception as e:
+        logger.exception('submit_tracking_request failed')
+        db.session.rollback()
+        return jsonify(_safe_error_payload(e, 'Failed to submit tracking request')), 500
+
+
+@api_bp.route('/teams/<int:team_id>/tracking-status', methods=['GET'])
+def get_team_tracking_status(team_id: int):
+    """
+    Get tracking status for a team, including any pending requests.
+    """
+    try:
+        team = Team.query.get_or_404(team_id)
+        
+        pending_request = TeamTrackingRequest.query.filter(
+            TeamTrackingRequest.team_id == team_id,
+            TeamTrackingRequest.status == 'pending'
+        ).first()
+        
+        return jsonify({
+            'team_id': team.id,
+            'team_name': team.name,
+            'is_tracked': team.is_tracked,
+            'has_pending_request': pending_request is not None,
+            'pending_request_id': pending_request.id if pending_request else None,
+            'loan_count': LoanedPlayer.query.filter_by(primary_team_id=team_id, is_active=True).count()
+        })
+    except Exception as e:
+        logger.exception('get_team_tracking_status failed')
+        return jsonify(_safe_error_payload(e, 'Failed to get tracking status')), 500
+
 
 # --- Admin: Newsletters management (list/view/update) ---
 
@@ -5846,6 +8303,89 @@ def admin_bulk_delete_newsletters():
         db.session.rollback()
         return jsonify(_safe_error_payload(e, 'Failed to delete newsletters. Please try again later.')), 500
 
+
+@api_bp.route('/admin/newsletters/send-digests', methods=['POST'])
+@require_api_key
+def admin_send_digest_emails():
+    """Trigger sending of weekly digest emails to users who prefer digest delivery.
+    
+    Body options:
+      - week_key: Optional week key to process (e.g., '2025-W48'). Defaults to current week.
+    """
+    try:
+        from src.services.newsletter_deadline_service import send_digest_emails, get_current_week_key
+        
+        data = request.get_json() or {}
+        week_key = data.get('week_key') or get_current_week_key()
+        
+        result = send_digest_emails(week_key)
+        
+        logger.info(
+            'Admin triggered digest send user=%s week=%s result=%s',
+            getattr(g, 'user_email', None),
+            week_key,
+            result,
+        )
+        
+        return jsonify({
+            'week_key': week_key,
+            **result
+        })
+    except Exception as e:
+        logger.exception('admin_send_digest_emails failed')
+        return jsonify(_safe_error_payload(e, 'Failed to send digest emails. Please try again later.')), 500
+
+
+@api_bp.route('/admin/newsletters/digest-queue', methods=['GET'])
+@require_api_key
+def admin_get_digest_queue():
+    """Get the current digest queue status."""
+    try:
+        from src.services.newsletter_deadline_service import get_current_week_key
+        
+        week_key = request.args.get('week_key') or get_current_week_key()
+        
+        # Get queue stats
+        from sqlalchemy import func
+        
+        queue_stats = db.session.query(
+            NewsletterDigestQueue.sent,
+            func.count(NewsletterDigestQueue.id).label('count'),
+            func.count(func.distinct(NewsletterDigestQueue.user_id)).label('unique_users')
+        ).filter(
+            NewsletterDigestQueue.week_key == week_key
+        ).group_by(NewsletterDigestQueue.sent).all()
+        
+        pending_count = 0
+        pending_users = 0
+        sent_count = 0
+        sent_users = 0
+        
+        for row in queue_stats:
+            if row.sent:
+                sent_count = row.count
+                sent_users = row.unique_users
+            else:
+                pending_count = row.count
+                pending_users = row.unique_users
+        
+        return jsonify({
+            'week_key': week_key,
+            'pending': {
+                'items': pending_count,
+                'users': pending_users
+            },
+            'sent': {
+                'items': sent_count,
+                'users': sent_users
+            },
+            'total': pending_count + sent_count
+        })
+    except Exception as e:
+        logger.exception('admin_get_digest_queue failed')
+        return jsonify(_safe_error_payload(e, 'Failed to get digest queue. Please try again later.')), 500
+
+
 # Newsletter YouTube Links endpoints
 @api_bp.route('/admin/newsletters/<int:newsletter_id>/youtube-links', methods=['GET'])
 @require_api_key
@@ -5868,7 +8408,6 @@ def admin_create_newsletter_youtube_link(newsletter_id: int):
         data = request.get_json() or {}
         
         player_id = data.get('player_id')
-        supplemental_loan_id = data.get('supplemental_loan_id')
         player_name = (data.get('player_name') or '').strip()
         youtube_link = (data.get('youtube_link') or '').strip()
         
@@ -5876,27 +8415,21 @@ def admin_create_newsletter_youtube_link(newsletter_id: int):
             return jsonify({'error': 'player_name is required'}), 400
         if not youtube_link:
             return jsonify({'error': 'youtube_link is required'}), 400
+        if not player_id:
+            return jsonify({'error': 'player_id is required'}), 400
         
         # Check for duplicate entries
-        existing = None
-        if player_id:
-            existing = NewsletterPlayerYoutubeLink.query.filter_by(
-                newsletter_id=newsletter_id,
-                player_id=player_id
-            ).first()
-        elif supplemental_loan_id:
-            existing = NewsletterPlayerYoutubeLink.query.filter_by(
-                newsletter_id=newsletter_id,
-                supplemental_loan_id=supplemental_loan_id
-            ).first()
+        existing = NewsletterPlayerYoutubeLink.query.filter_by(
+            newsletter_id=newsletter_id,
+            player_id=player_id
+        ).first()
         
         if existing:
             return jsonify({'error': 'YouTube link already exists for this player in this newsletter'}), 409
         
         link = NewsletterPlayerYoutubeLink(
             newsletter_id=newsletter_id,
-            player_id=player_id if player_id else None,
-            supplemental_loan_id=supplemental_loan_id if supplemental_loan_id else None,
+            player_id=player_id,
             player_name=player_name,
             youtube_link=youtube_link
         )
@@ -5931,9 +8464,6 @@ def admin_update_newsletter_youtube_link(newsletter_id: int, link_id: int):
         if 'player_id' in data:
             link.player_id = data.get('player_id')
         
-        if 'supplemental_loan_id' in data:
-            link.supplemental_loan_id = data.get('supplemental_loan_id')
-        
         link.updated_at = datetime.now(timezone.utc)
         db.session.commit()
         
@@ -5957,6 +8487,337 @@ def admin_delete_newsletter_youtube_link(newsletter_id: int, link_id: int):
         logger.exception('admin_delete_newsletter_youtube_link failed')
         db.session.rollback()
         return jsonify(_safe_error_payload(e, 'An unexpected error occurred. Please try again later.')), 500
+
+
+@api_bp.route('/newsletters/pending-games/<int:team_id>', methods=['GET'])
+@require_api_key
+def admin_check_pending_games(team_id: int):
+    """Check if any active loanees for a team have unplayed games WITHIN the target week."""
+    try:
+        # Get target date (default to today)
+        target_date_str = request.args.get('target_date')
+        if target_date_str:
+            target_date = datetime.strptime(target_date_str, '%Y-%m-%d').date()
+        else:
+            target_date = datetime.now().date()
+
+        # Calculate week range (Monday to Sunday) for the newsletter
+        week_start = target_date - timedelta(days=target_date.weekday())
+        week_end = week_start + timedelta(days=6)
+        
+        logger.info(f"Checking pending games for team {team_id}, week {week_start} to {week_end}")
+
+        # 1. Find the parent team
+        parent_team = Team.query.get(team_id)
+        if not parent_team:
+            return jsonify({'error': 'Team not found'}), 404
+            
+        # 2. Find active loans for this team
+        active_loans = parent_team.unique_active_loans()
+        
+        if not active_loans:
+            return jsonify({'pending': False, 'games': [], 'message': 'No active loans found'})
+            
+        # 3. Group players by loan team API ID
+        loan_team_map = {} # api_id -> list of LoanedPlayer objects
+        for loan in active_loans:
+            if loan.borrowing_team and loan.borrowing_team.team_id:
+                api_id = loan.borrowing_team.team_id
+                if api_id not in loan_team_map:
+                    loan_team_map[api_id] = []
+                loan_team_map[api_id].append(loan)
+        
+        if not loan_team_map:
+            return jsonify({'pending': False, 'games': [], 'message': 'No loan teams with API IDs found'})
+
+        # 4. Check fixtures for each loan team WITHIN the target week
+        detailed_pending_games = []
+        
+        for loan_api_id, players in loan_team_map.items():
+            # Fetch ALL fixtures for this loan team in the ENTIRE week
+            season = api_client.current_season_start_year
+            fixtures = api_client.get_fixtures_for_team(
+                loan_api_id, 
+                season, 
+                week_start.strftime('%Y-%m-%d'),  # Check the entire week
+                week_end.strftime('%Y-%m-%d')
+            )
+            
+            for f in fixtures:
+                fixture_date_str = (f.get('fixture') or {}).get('date')
+                status = (f.get('fixture') or {}).get('status', {}).get('short')
+                
+                # Parse the fixture date to check if it's within the week
+                try:
+                    if fixture_date_str:
+                        fixture_date = datetime.fromisoformat(fixture_date_str.replace('Z', '+00:00')).date()
+                    else:
+                        continue
+                except:
+                    continue
+                
+                # Only include games WITHIN the target week that haven't been played
+                # NS = Not Started, TBD = Time To Be Defined
+                if week_start <= fixture_date <= week_end and status in ['NS', 'TBD']:
+                    opponent = (f.get('teams') or {}).get('away', {}).get('name') \
+                                if (f.get('teams') or {}).get('home', {}).get('id') == loan_api_id \
+                                else (f.get('teams') or {}).get('home', {}).get('name')
+                    league = (f.get('league') or {}).get('name')
+                    
+                    # Add an entry for EACH player at this club
+                    for player in players:
+                        detailed_pending_games.append({
+                            'player_name': player.player_name,
+                            'loan_team': player.loan_team_name,
+                            'opponent': opponent,
+                            'date': fixture_date_str,
+                            'league': league,
+                            'status': status,
+                            'fixture_id': (f.get('fixture') or {}).get('id')
+                        })
+                        logger.info(f"Found pending game for {player.player_name} on {fixture_date}: {opponent}")
+
+        # Sort by date
+        detailed_pending_games.sort(key=lambda x: x['date'])
+        
+        logger.info(f"Total pending games found: {len(detailed_pending_games)}")
+        
+        return jsonify({
+            'pending': len(detailed_pending_games) > 0,
+            'games': detailed_pending_games
+        })
+
+    except Exception as e:
+        logger.exception(f"admin_check_pending_games failed for team {team_id}")
+        return jsonify(_safe_error_payload(e, 'An unexpected error occurred.')), 500
+
+
+# --------------------------------------------------------------------------------
+# Newsletter Commentary Endpoints
+# --------------------------------------------------------------------------------
+
+def require_commentary_author(f):
+    """Decorator to require can_author_commentary permission."""
+    @wraps(f)
+    def decorated_function(*args, **kwargs):
+        # First check basic API key authentication
+        # The user email should be in g.admin_email after require_api_key
+        if not hasattr(g, 'admin_email') or not g.admin_email:
+            return jsonify({'error': 'Authentication required'}), 401
+        
+        # Check if user has commentary authorship permission
+        user = UserAccount.query.filter_by(email=g.admin_email).first()
+        if not user or not user.can_author_commentary:
+            return jsonify({'error': 'You do not have permission to author commentary'}), 403
+        
+        # Store user in g for the handler to use
+        g.commentary_author = user
+        return f(*args, **kwargs)
+    
+    return decorated_function
+
+
+@api_bp.route('/admin/newsletters/<int:newsletter_id>/commentary', methods=['GET'])
+@require_api_key
+def admin_list_newsletter_commentary(newsletter_id: int):
+    """List all commentary for a newsletter."""
+    try:
+        newsletter = Newsletter.query.get_or_404(newsletter_id)
+        commentaries = NewsletterCommentary.query.filter_by(
+            newsletter_id=newsletter_id,
+            is_active=True
+        ).order_by(
+            NewsletterCommentary.commentary_type,
+            NewsletterCommentary.position
+        ).all()
+        
+        return jsonify({
+            'newsletter_id': newsletter_id,
+            'commentaries': [c.to_dict() for c in commentaries]
+        })
+    except Exception as e:
+        logger.exception('admin_list_newsletter_commentary failed')
+        return jsonify(_safe_error_payload(e, 'Failed to list commentary')), 500
+
+
+@api_bp.route('/admin/newsletters/<int:newsletter_id>/commentary', methods=['POST'])
+@require_api_key
+@require_commentary_author
+def admin_create_newsletter_commentary(newsletter_id: int):
+    """Create new commentary for a newsletter."""
+    try:
+        newsletter = Newsletter.query.get_or_404(newsletter_id)
+        data = request.get_json()
+        
+        if not data:
+            return jsonify({'error': 'Request body is required'}), 400
+        
+        commentary_type = data.get('commentary_type')
+        content = data.get('content')
+        player_id = data.get('player_id')
+        position = data.get('position', 0)
+        
+        # Validation
+        if not commentary_type:
+            return jsonify({'error': 'commentary_type is required'}), 400
+        if not content:
+            return jsonify({'error': 'content is required'}), 400
+        if commentary_type not in ['player', 'intro', 'summary']:
+            return jsonify({'error': 'commentary_type must be player, intro, or summary'}), 400
+        if commentary_type == 'player' and not player_id:
+            return jsonify({'error': 'player_id is required for player commentary'}), 400
+        
+        # Get author from g (set by require_commentary_author)
+        author = g.commentary_author
+        
+        # Create commentary using the factory method (which sanitizes)
+        try:
+            commentary = NewsletterCommentary.sanitize_and_create(
+                newsletter_id=newsletter_id,
+                author_id=author.id,
+                author_name=author.display_name,
+                commentary_type=commentary_type,
+                content=content,
+                player_id=player_id,
+                position=position
+            )
+        except ValueError as ve:
+            return jsonify({'error': str(ve)}), 400
+        
+        db.session.add(commentary)
+        db.session.commit()
+        
+        return jsonify(commentary.to_dict()), 201
+        
+    except Exception as e:
+        logger.exception('admin_create_newsletter_commentary failed')
+        db.session.rollback()
+        return jsonify(_safe_error_payload(e, 'Failed to create commentary')), 500
+
+
+@api_bp.route('/admin/commentary/<int:commentary_id>', methods=['PUT'])
+@require_api_key
+@require_commentary_author
+def admin_update_commentary(commentary_id: int):
+    """Update existing commentary."""
+    try:
+        commentary = NewsletterCommentary.query.get_or_404(commentary_id)
+        author = g.commentary_author
+        
+        # Check ownership (only author or admin can edit)
+        admin_emails = _admin_email_list()
+        is_admin = g.admin_email in admin_emails
+        if commentary.author_id != author.id and not is_admin:
+            return jsonify({'error': 'You can only edit your own commentary'}), 403
+        
+        data = request.get_json()
+        if not data:
+            return jsonify({'error': 'Request body is required'}), 400
+        
+        # Update fields if provided
+        if 'content' in data:
+            try:
+                commentary.content = sanitize_commentary_html(data['content'])
+            except ValueError as ve:
+                return jsonify({'error': str(ve)}), 400
+        
+        if 'position' in data:
+            commentary.position = int(data['position'])
+        
+        if 'is_active' in data:
+            commentary.is_active = bool(data['is_active'])
+        
+        commentary.updated_at = datetime.now(timezone.utc)
+        db.session.commit()
+        
+        return jsonify(commentary.to_dict())
+        
+    except Exception as e:
+        logger.exception('admin_update_commentary failed')
+        db.session.rollback()
+        return jsonify(_safe_error_payload(e, 'Failed to update commentary')), 500
+
+
+@api_bp.route('/admin/commentary/<int:commentary_id>', methods=['DELETE'])
+@require_api_key
+@require_commentary_author
+def admin_delete_commentary(commentary_id: int):
+    """Delete commentary."""
+    try:
+        commentary = NewsletterCommentary.query.get_or_404(commentary_id)
+        author = g.commentary_author
+        
+        # Check ownership (only author or admin can delete)
+        admin_emails = _admin_email_list()
+        is_admin = g.admin_email in admin_emails
+        if commentary.author_id != author.id and not is_admin:
+            return jsonify({'error': 'You can only delete your own commentary'}), 403
+        
+        db.session.delete(commentary)
+        db.session.commit()
+        
+        return jsonify({'message': 'deleted'})
+        
+    except Exception as e:
+        logger.exception('admin_delete_commentary failed')
+        db.session.rollback()
+        return jsonify(_safe_error_payload(e, 'Failed to delete commentary')), 500
+
+
+@api_bp.route('/admin/authors', methods=['GET'])
+@require_api_key
+def admin_list_authors():
+    """List all users with commentary authorship permission."""
+    try:
+        authors = UserAccount.query.filter_by(can_author_commentary=True).all()
+        
+        # Include commentary count for each author
+        result = []
+        for author in authors:
+            author_dict = author.to_dict()
+            commentary_count = NewsletterCommentary.query.filter_by(author_id=author.id).count()
+            author_dict['commentary_count'] = commentary_count
+            result.append(author_dict)
+        
+        return jsonify({'authors': result})
+        
+    except Exception as e:
+        logger.exception('admin_list_authors failed')
+        return jsonify(_safe_error_payload(e, 'Failed to list authors')), 500
+
+
+@api_bp.route('/admin/users/<int:user_id>/author-permission', methods=['PUT'])
+@require_api_key
+def admin_update_author_permission(user_id: int):
+    """Grant or revoke commentary authorship permission. Admin only."""
+    try:
+        # Check if requester is admin
+        admin_emails = _admin_email_list()
+        if not hasattr(g, 'admin_email') or g.admin_email not in admin_emails:
+            return jsonify({'error': 'Only admins can manage author permissions'}), 403
+        
+        user = UserAccount.query.get_or_404(user_id)
+        data = request.get_json()
+        
+        if not data or 'can_author_commentary' not in data:
+            return jsonify({'error': 'can_author_commentary field is required'}), 400
+        
+        user.can_author_commentary = bool(data['can_author_commentary'])
+        user.updated_at = datetime.now(timezone.utc)
+        db.session.commit()
+        
+        return jsonify({
+            'user_id': user.id,
+            'email': user.email,
+            'display_name': user.display_name,
+            'can_author_commentary': user.can_author_commentary
+        })
+        
+    except Exception as e:
+        logger.exception('admin_update_author_permission failed')
+        db.session.rollback()
+        return jsonify(_safe_error_payload(e, 'Failed to update author permission')), 500
+
 
 # Unified Player Management endpoints
 @api_bp.route('/admin/players', methods=['GET'])
@@ -6006,6 +8867,11 @@ def admin_list_players():
         player_map = {}
         for loan in all_loans:
             if loan.player_id not in player_map:
+                # Extract season from window_key (e.g., "2024-25::summer" -> "2024-25")
+                loan_season = None
+                if loan.window_key:
+                    loan_season = loan.window_key.split('::')[0] if '::' in loan.window_key else loan.window_key
+                
                 player_map[loan.player_id] = {
                     'player_id': loan.player_id,
                     'player_name': loan.player_name,
@@ -6015,7 +8881,9 @@ def admin_list_players():
                     'loan_team_id': loan.loan_team_id,
                     'is_active': loan.is_active,
                     'loan_count': 0,
-                    'loan_id': loan.id  # ID of the first/primary loan record for team editing
+                    'loan_id': loan.id,  # ID of the first/primary loan record for team editing
+                    'window_key': loan.window_key,  # Full window key (e.g., "2024-25::summer")
+                    'loan_season': loan_season  # Human-readable season (e.g., "2024-25")
                 }
             player_map[loan.player_id]['loan_count'] += 1
         
@@ -6059,6 +8927,8 @@ def admin_list_players():
                 'loan_team_id': player_info['loan_team_id'],
                 'is_active': player_info['is_active'],
                 'loan_count': player_info['loan_count'],
+                'window_key': player_info.get('window_key'),
+                'loan_season': player_info.get('loan_season'),
                 'loan_id': player_info['loan_id'],  # Primary loan record ID for team updates
                 'sofascore_id': sofascore_id,
                 'has_sofascore_id': bool(sofascore_id),
@@ -6469,7 +9339,6 @@ def admin_delete_player(player_id):
             player_id = int(player_id)
         except ValueError:
             return jsonify({'error': 'Invalid player ID'}), 400
-        print(f"[DEBUG admin_delete_player] invoked with player_id={player_id}", flush=True)
         # Check for loaned player records
         loaned_records = LoanedPlayer.query.filter_by(player_id=player_id).all()
         loaned_count = len(loaned_records)
@@ -6537,7 +9406,10 @@ def admin_runs_history_clear():
 @api_bp.route('/admin/supplemental-loans', methods=['GET'])
 @require_api_key
 def admin_list_supplemental_loans():
-    """List supplemental loans with optional filters."""
+    """DEPRECATED: List supplemental loans with optional filters.
+    
+    Use LoanedPlayer with can_fetch_stats=False instead.
+    """
     try:
         parent_team_api_id = request.args.get('parent_team_api_id', type=int)
         parent_team_db_id = request.args.get('parent_team_db_id', type=int)
@@ -6571,7 +9443,10 @@ def admin_list_supplemental_loans():
 @api_bp.route('/admin/supplemental-loans', methods=['POST'])
 @require_api_key
 def admin_create_supplemental_loan():
-    """Create a new supplemental loan entry."""
+    """DEPRECATED: Create a new supplemental loan entry.
+    
+    Use POST /admin/players instead to create manual players as LoanedPlayer records.
+    """
     try:
         data = request.get_json() or {}
         
@@ -6636,7 +9511,10 @@ def admin_create_supplemental_loan():
 @api_bp.route('/admin/supplemental-loans/<int:loan_id>', methods=['PUT'])
 @require_api_key
 def admin_update_supplemental_loan(loan_id: int):
-    """Update an existing supplemental loan entry."""
+    """DEPRECATED: Update an existing supplemental loan entry.
+    
+    Use PUT /admin/loans/{id} to update LoanedPlayer records instead.
+    """
     try:
         loan = SupplementalLoan.query.get_or_404(loan_id)
         data = request.get_json() or {}
@@ -6683,7 +9561,10 @@ def admin_update_supplemental_loan(loan_id: int):
 @api_bp.route('/admin/supplemental-loans/<int:loan_id>', methods=['DELETE'])
 @require_api_key
 def admin_delete_supplemental_loan(loan_id: int):
-    """Delete a supplemental loan entry."""
+    """DEPRECATED: Delete a supplemental loan entry.
+    
+    Use DELETE /admin/loans/{id} to delete LoanedPlayer records instead.
+    """
     try:
         loan = SupplementalLoan.query.get_or_404(loan_id)
         db.session.delete(loan)
@@ -6693,3 +9574,416 @@ def admin_delete_supplemental_loan(loan_id: int):
         logger.exception('admin_delete_supplemental_loan failed')
         db.session.rollback()
         return jsonify(_safe_error_payload(e, 'An unexpected error occurred. Please try again later.')), 500
+
+
+# --- Admin: Subscriber Analytics ---
+@api_bp.route('/admin/subscriber-stats', methods=['GET'])
+@require_api_key
+def admin_subscriber_stats():
+    """Get subscriber statistics aggregated by team."""
+    request_id = request.headers.get('X-Debug-Request-ID') or uuid4().hex[:12]
+    started_at = time.monotonic()
+    try:
+        search = request.args.get('search', '').strip()
+        min_subs = request.args.get('min_subscribers', type=int)
+        sort_order = request.args.get('sort', 'desc').lower()
+        logger.info(
+            'admin_subscriber_stats request request_id=%s search=%s min_subs=%s sort=%s',
+            request_id,
+            search or '',
+            min_subs,
+            sort_order,
+        )
+        
+        # Query for teams with their subscriber counts
+        from sqlalchemy import func
+        
+        # Subquery to get the latest season for each team_id
+        latest_season_subq = db.session.query(
+            Team.team_id,
+            func.max(Team.season).label('latest_season')
+        ).group_by(Team.team_id).subquery()
+        
+        # Subquery to aggregate subscriptions by team_id (API team ID) across all seasons
+        # This ensures we count all subscriptions for a team regardless of which season's team record they're linked to
+        subscription_agg_subq = db.session.query(
+            Team.team_id,
+            func.count(UserSubscription.id).label('subscriber_count'),
+            func.count(db.case((UserSubscription.active == True, 1))).label('active_subscriber_count')
+        ).join(
+            UserSubscription, Team.id == UserSubscription.team_id
+        ).group_by(Team.team_id).subquery()
+        
+        # Subquery to get latest newsletter date by team_id
+        newsletter_agg_subq = db.session.query(
+            Team.team_id,
+            func.max(Newsletter.published_date).label('latest_newsletter_date')
+        ).join(
+            Newsletter, Team.id == Newsletter.team_id
+        ).group_by(Team.team_id).subquery()
+        
+        # Main query: get latest season team records and join with aggregated subscription data
+        query = db.session.query(
+            Team,
+            func.coalesce(subscription_agg_subq.c.subscriber_count, 0).label('subscriber_count'),
+            func.coalesce(subscription_agg_subq.c.active_subscriber_count, 0).label('active_subscriber_count'),
+            newsletter_agg_subq.c.latest_newsletter_date.label('latest_newsletter_date')
+        ).join(
+            latest_season_subq,
+            db.and_(
+                Team.team_id == latest_season_subq.c.team_id,
+                Team.season == latest_season_subq.c.latest_season
+            )
+        ).outerjoin(
+            subscription_agg_subq, Team.team_id == subscription_agg_subq.c.team_id
+        ).outerjoin(
+            newsletter_agg_subq, Team.team_id == newsletter_agg_subq.c.team_id
+        )
+        
+        # Apply search filter
+        if search:
+            query = query.filter(Team.name.ilike(f'%{search}%'))
+        
+        # Execute query
+        results = query.all()
+        
+        # Filter by minimum subscribers if specified
+        if min_subs is not None:
+            results = [r for r in results if r.subscriber_count >= min_subs]
+        
+        # Sort by subscriber count
+        if sort_order == 'asc':
+            results.sort(key=lambda r: r.subscriber_count)
+        else:
+            results.sort(key=lambda r: r.subscriber_count, reverse=True)
+        
+        # Format response
+        teams_data = []
+        for team, sub_count, active_sub_count, latest_date in results:
+            teams_data.append({
+                'id': team.id,
+                'team_id': team.team_id,
+                'name': team.name,
+                'logo': team.logo,
+                'season': team.season,
+                'subscriber_count': sub_count,
+                'active_subscriber_count': active_sub_count,
+                'newsletters_active': team.newsletters_active,
+                'latest_newsletter_date': latest_date.isoformat() if latest_date else None
+            })
+        
+        # Calculate total unique subscribers
+        total_subscribers = db.session.query(
+            func.count(func.distinct(UserSubscription.email))
+        ).filter(UserSubscription.active == True).scalar() or 0
+
+        duration_ms = (time.monotonic() - started_at) * 1000
+        logger.info(
+            'admin_subscriber_stats success request_id=%s team_count=%d total_subscribers=%d duration_ms=%.1f',
+            request_id,
+            len(teams_data),
+            total_subscribers,
+            duration_ms,
+        )
+        
+        payload = {
+            'teams': teams_data,
+            'total_subscribers': total_subscribers,
+            'request_id': request_id,
+        }
+        response = jsonify(payload)
+        response.headers['X-Request-ID'] = request_id
+        return response
+    except Exception as e:
+        duration_ms = (time.monotonic() - started_at) * 1000
+        logger.exception('admin_subscriber_stats failed request_id=%s duration_ms=%.1f', request_id, duration_ms)
+        payload = _safe_error_payload(e, 'An unexpected error occurred. Please try again later.')
+        payload['request_id'] = request_id
+        response = jsonify(payload)
+        response.headers['X-Request-ID'] = request_id
+        return response, 500
+
+
+@api_bp.route('/admin/teams/<int:team_id>/newsletter-status', methods=['PATCH'])
+@require_api_key
+def admin_toggle_newsletter_status(team_id: int):
+    """Toggle the newsletters_active status for a team."""
+    try:
+        team = Team.query.get_or_404(team_id)
+        data = request.get_json() or {}
+        
+        if 'newsletters_active' in data:
+            team.newsletters_active = bool(data['newsletters_active'])
+            team.updated_at = datetime.now(timezone.utc)
+            db.session.commit()
+            
+            return jsonify({
+                'message': 'Newsletter status updated',
+                'team': team.to_dict()
+            })
+        else:
+            return jsonify({'error': 'newsletters_active field required'}), 400
+    except Exception as e:
+        logger.exception('admin_toggle_newsletter_status failed')
+        db.session.rollback()
+        return jsonify(_safe_error_payload(e, 'An unexpected error occurred. Please try again later.')), 500
+
+@api_bp.route('/commentaries/<int:commentary_id>/applaud', methods=['POST'])
+@limiter.limit("10 per minute")
+def applaud_commentary(commentary_id):
+    """Applaud a commentary (Like)."""
+    try:
+        commentary = NewsletterCommentary.query.get(commentary_id)
+        if not commentary:
+            return jsonify({'error': 'Commentary not found'}), 404
+            
+        # Optional: Track user if logged in
+        user_id = None
+        auth = request.headers.get('Authorization', '')
+        if auth.startswith('Bearer '):
+            try:
+                token = auth.split(' ', 1)[1]
+                s = _user_serializer()
+                data = s.loads(token, max_age=60 * 60 * 24 * 30)
+                email = data.get('email')
+                user = UserAccount.query.filter_by(email=email).first()
+                if user:
+                    user_id = user.id
+            except Exception:
+                pass # Ignore auth errors for applause, treat as anonymous
+        
+        # Simple session tracking to prevent spamming from same session?
+        # For now, we'll just rely on rate limiting and allow multiple claps (Medium style)
+        # But we'll log the session_id if available or generate one
+        session_id = request.headers.get('X-Session-ID')
+        
+        applause = CommentaryApplause(
+            commentary_id=commentary.id,
+            user_id=user_id,
+            session_id=session_id
+        )
+        db.session.add(applause)
+        db.session.commit()
+        
+        # Get updated count
+        count = commentary.applause.count()
+        
+        return jsonify({
+            'message': 'Applauded',
+            'applause_count': count
+        })
+    except Exception as e:
+        db.session.rollback()
+        return jsonify(_safe_error_payload(e, 'Failed to applaud')), 500
+
+
+@api_bp.route('/admin/subscriptions/backfill-tokens', methods=['POST'])
+@require_api_key
+def admin_backfill_unsubscribe_tokens():
+    """Backfill unsubscribe_token for all subscriptions that don't have one."""
+    try:
+        subs_without_token = UserSubscription.query.filter(
+            UserSubscription.unsubscribe_token.is_(None)
+        ).all()
+        
+        count = 0
+        for sub in subs_without_token:
+            sub.unsubscribe_token = str(uuid.uuid4())
+            count += 1
+        
+        db.session.commit()
+        
+        return jsonify({
+            'message': f'Backfilled {count} subscription(s) with unsubscribe tokens',
+            'updated_count': count,
+        })
+    except Exception as e:
+        db.session.rollback()
+        logger.exception('Failed to backfill unsubscribe tokens')
+        return jsonify(_safe_error_payload(e, 'Failed to backfill tokens')), 500
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Sponsor Endpoints
+# ─────────────────────────────────────────────────────────────────────────────
+
+@api_bp.route('/sponsors', methods=['GET'])
+def get_sponsors():
+    """Public endpoint to get active sponsors for display."""
+    try:
+        sponsors = Sponsor.query.filter_by(is_active=True).order_by(Sponsor.display_order.asc()).all()
+        return jsonify({
+            'sponsors': [s.to_public_dict() for s in sponsors]
+        })
+    except Exception as e:
+        logger.exception('Failed to fetch sponsors')
+        return jsonify(_safe_error_payload(e, 'Failed to fetch sponsors')), 500
+
+
+@api_bp.route('/sponsors/<int:sponsor_id>/click', methods=['POST'])
+def track_sponsor_click(sponsor_id):
+    """Track a click on a sponsor link (basic analytics)."""
+    try:
+        sponsor = Sponsor.query.get(sponsor_id)
+        if not sponsor:
+            return jsonify({'error': 'Sponsor not found'}), 404
+        
+        sponsor.click_count = (sponsor.click_count or 0) + 1
+        db.session.commit()
+        
+        return jsonify({'message': 'Click tracked'})
+    except Exception as e:
+        db.session.rollback()
+        logger.exception('Failed to track sponsor click')
+        return jsonify(_safe_error_payload(e, 'Failed to track click')), 500
+
+
+@api_bp.route('/admin/sponsors', methods=['GET'])
+@require_api_key
+def admin_get_sponsors():
+    """Admin endpoint to get all sponsors with full details."""
+    try:
+        sponsors = Sponsor.query.order_by(Sponsor.display_order.asc()).all()
+        return jsonify({
+            'sponsors': [s.to_dict() for s in sponsors]
+        })
+    except Exception as e:
+        logger.exception('Failed to fetch sponsors')
+        return jsonify(_safe_error_payload(e, 'Failed to fetch sponsors')), 500
+
+
+@api_bp.route('/admin/sponsors', methods=['POST'])
+@require_api_key
+def admin_create_sponsor():
+    """Create a new sponsor."""
+    try:
+        data = request.get_json() or {}
+        
+        name = (data.get('name') or '').strip()
+        image_url = (data.get('image_url') or '').strip()
+        link_url = (data.get('link_url') or '').strip()
+        
+        if not name:
+            return jsonify({'error': 'Name is required'}), 400
+        if not image_url:
+            return jsonify({'error': 'Image URL is required'}), 400
+        if not link_url:
+            return jsonify({'error': 'Link URL is required'}), 400
+        
+        # Get the next display order (put new sponsors at the end)
+        max_order = db.session.query(db.func.max(Sponsor.display_order)).scalar() or 0
+        
+        sponsor = Sponsor(
+            name=name,
+            image_url=image_url,
+            link_url=link_url,
+            description=(data.get('description') or '').strip() or None,
+            is_active=data.get('is_active', True),
+            display_order=max_order + 1,
+        )
+        
+        db.session.add(sponsor)
+        db.session.commit()
+        
+        return jsonify({
+            'message': 'Sponsor created',
+            'sponsor': sponsor.to_dict()
+        }), 201
+    except Exception as e:
+        db.session.rollback()
+        logger.exception('Failed to create sponsor')
+        return jsonify(_safe_error_payload(e, 'Failed to create sponsor')), 500
+
+
+@api_bp.route('/admin/sponsors/<int:sponsor_id>', methods=['PUT'])
+@require_api_key
+def admin_update_sponsor(sponsor_id):
+    """Update an existing sponsor."""
+    try:
+        sponsor = Sponsor.query.get(sponsor_id)
+        if not sponsor:
+            return jsonify({'error': 'Sponsor not found'}), 404
+        
+        data = request.get_json() or {}
+        
+        if 'name' in data:
+            name = (data['name'] or '').strip()
+            if not name:
+                return jsonify({'error': 'Name cannot be empty'}), 400
+            sponsor.name = name
+        
+        if 'image_url' in data:
+            image_url = (data['image_url'] or '').strip()
+            if not image_url:
+                return jsonify({'error': 'Image URL cannot be empty'}), 400
+            sponsor.image_url = image_url
+        
+        if 'link_url' in data:
+            link_url = (data['link_url'] or '').strip()
+            if not link_url:
+                return jsonify({'error': 'Link URL cannot be empty'}), 400
+            sponsor.link_url = link_url
+        
+        if 'description' in data:
+            sponsor.description = (data['description'] or '').strip() or None
+        
+        if 'is_active' in data:
+            sponsor.is_active = bool(data['is_active'])
+        
+        if 'display_order' in data:
+            sponsor.display_order = int(data['display_order'])
+        
+        db.session.commit()
+        
+        return jsonify({
+            'message': 'Sponsor updated',
+            'sponsor': sponsor.to_dict()
+        })
+    except Exception as e:
+        db.session.rollback()
+        logger.exception('Failed to update sponsor')
+        return jsonify(_safe_error_payload(e, 'Failed to update sponsor')), 500
+
+
+@api_bp.route('/admin/sponsors/<int:sponsor_id>', methods=['DELETE'])
+@require_api_key
+def admin_delete_sponsor(sponsor_id):
+    """Delete a sponsor."""
+    try:
+        sponsor = Sponsor.query.get(sponsor_id)
+        if not sponsor:
+            return jsonify({'error': 'Sponsor not found'}), 404
+        
+        db.session.delete(sponsor)
+        db.session.commit()
+        
+        return jsonify({'message': 'Sponsor deleted'})
+    except Exception as e:
+        db.session.rollback()
+        logger.exception('Failed to delete sponsor')
+        return jsonify(_safe_error_payload(e, 'Failed to delete sponsor')), 500
+
+
+@api_bp.route('/admin/sponsors/reorder', methods=['POST'])
+@require_api_key
+def admin_reorder_sponsors():
+    """Reorder sponsors by providing an array of sponsor IDs in the desired order."""
+    try:
+        data = request.get_json() or {}
+        sponsor_ids = data.get('sponsor_ids', [])
+        
+        if not sponsor_ids or not isinstance(sponsor_ids, list):
+            return jsonify({'error': 'sponsor_ids array is required'}), 400
+        
+        for index, sponsor_id in enumerate(sponsor_ids):
+            sponsor = Sponsor.query.get(sponsor_id)
+            if sponsor:
+                sponsor.display_order = index
+        
+        db.session.commit()
+        
+        return jsonify({'message': 'Sponsors reordered'})
+    except Exception as e:
+        db.session.rollback()
+        logger.exception('Failed to reorder sponsors')
+        return jsonify(_safe_error_payload(e, 'Failed to reorder sponsors')), 500

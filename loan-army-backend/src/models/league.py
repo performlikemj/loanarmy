@@ -115,6 +115,8 @@ class Team(db.Model):
     venue_city = db.Column(db.String(50))
     venue_capacity = db.Column(db.Integer)
     is_active = db.Column(db.Boolean, default=True)
+    newsletters_active = db.Column(db.Boolean, default=False)
+    is_tracked = db.Column(db.Boolean, default=False)  # Whether we're actively tracking this team's loans
     league_id = db.Column(db.Integer, db.ForeignKey('leagues.id'), nullable=True)
     created_at = db.Column(db.DateTime, default=datetime.now(timezone.utc))
     updated_at = db.Column(db.DateTime, default=datetime.now(timezone.utc), onupdate=datetime.now(timezone.utc))
@@ -155,6 +157,8 @@ class Team(db.Model):
             'venue_city': self.venue_city,
             'venue_capacity': self.venue_capacity,
             'is_active': self.is_active,
+            'newsletters_active': self.newsletters_active,
+            'is_tracked': self.is_tracked,
             'season': self.season,
             'league_name': self.league.name if self.league else None,
             'current_loaned_out_count': len(current_loans),
@@ -231,6 +235,17 @@ class LoanedPlayer(db.Model):
 
 
 class SupplementalLoan(db.Model):
+    """DEPRECATED: Use LoanedPlayer with can_fetch_stats=False instead.
+    
+    This table has been deprecated in favor of unified manual player handling.
+    Manual/untrackable players are now identified by:
+    - player_id < 0 (negative IDs)
+    - can_fetch_stats = False in LoanedPlayer
+    - data_source = 'manual' in LoanedPlayer
+    
+    Historical records remain for reference only. All new manual players should
+    be created via LoanedPlayer table using the Players & Loans Manager.
+    """
     __tablename__ = 'supplemental_loans'
 
     id = db.Column(db.Integer, primary_key=True)
@@ -354,6 +369,7 @@ class Newsletter(db.Model):
     title = db.Column(db.String(200), nullable=False)
     content = db.Column(db.Text, nullable=False)
     structured_content = db.Column(db.Text)  # JSON string
+    public_slug = db.Column(db.String(200), unique=True, index=True, nullable=False)
     week_start_date = db.Column(db.Date)
     week_end_date = db.Column(db.Date)
     issue_date = db.Column(db.Date)  # The target date for this newsletter issue
@@ -375,6 +391,7 @@ class Newsletter(db.Model):
             'title': self.title,
             'content': self.content,
             'structured_content': self.structured_content,
+            'public_slug': self.public_slug,
             'week_start_date': self.week_start_date.isoformat() if self.week_start_date else None,
             'week_end_date': self.week_end_date.isoformat() if self.week_end_date else None,
             'issue_date': self.issue_date.isoformat() if self.issue_date else None,
@@ -385,7 +402,8 @@ class Newsletter(db.Model):
             'subscriber_count': self.subscriber_count,
             'generated_date': self.generated_date.isoformat() if self.generated_date else None,
             'created_at': self.created_at.isoformat() if self.created_at else None,
-            'updated_at': self.updated_at.isoformat() if self.updated_at else None
+            'updated_at': self.updated_at.isoformat() if self.updated_at else None,
+            'commentaries': [c.to_dict() for c in self.commentaries] if self.commentaries else []
         }
 
 class UserSubscription(db.Model):
@@ -468,6 +486,46 @@ class LoanFlag(db.Model):
     resolved_at = db.Column(db.DateTime)
 
 
+class TeamTrackingRequest(db.Model):
+    """User requests to track a team's loan players.
+    
+    When users see a team isn't being tracked, they can submit a request
+    which admin can approve or reject.
+    """
+    __tablename__ = 'team_tracking_requests'
+
+    id = db.Column(db.Integer, primary_key=True)
+    team_id = db.Column(db.Integer, db.ForeignKey('teams.id'), nullable=False)
+    team_api_id = db.Column(db.Integer, nullable=False)
+    team_name = db.Column(db.String(100), nullable=False)
+    email = db.Column(db.String(255))
+    reason = db.Column(db.Text)
+    ip_address = db.Column(db.String(64))
+    user_agent = db.Column(db.String(512))
+    status = db.Column(db.String(20), default='pending')  # pending|approved|rejected
+    admin_note = db.Column(db.Text)
+    created_at = db.Column(db.DateTime, default=datetime.now(timezone.utc))
+    resolved_at = db.Column(db.DateTime)
+
+    team = db.relationship('Team', backref='tracking_requests', lazy=True)
+
+    def to_dict(self):
+        return {
+            'id': self.id,
+            'team_id': self.team_id,
+            'team_api_id': self.team_api_id,
+            'team_name': self.team_name,
+            'team_logo': self.team.logo if self.team else None,
+            'team_league': self.team.league.name if self.team and self.team.league else None,
+            'email': self.email,
+            'reason': self.reason,
+            'status': self.status,
+            'admin_note': self.admin_note,
+            'created_at': self.created_at.isoformat() if self.created_at else None,
+            'resolved_at': self.resolved_at.isoformat() if self.resolved_at else None,
+        }
+
+
 class AdminSetting(db.Model):
     __tablename__ = 'admin_settings'
 
@@ -492,12 +550,30 @@ class UserAccount(db.Model):
     display_name = db.Column(db.String(80), nullable=False)
     display_name_lower = db.Column(db.String(80), unique=True, nullable=False)
     display_name_confirmed = db.Column(db.Boolean, default=False)
+    can_author_commentary = db.Column(db.Boolean, default=False, nullable=False)
     created_at = db.Column(db.DateTime, default=datetime.now(timezone.utc))
     updated_at = db.Column(db.DateTime, default=datetime.now(timezone.utc), onupdate=datetime.now(timezone.utc))
     last_login_at = db.Column(db.DateTime)
     last_display_name_change_at = db.Column(db.DateTime)
 
+    # Journalist fields
+    is_journalist = db.Column(db.Boolean, default=False, nullable=False)
+    bio = db.Column(db.Text)
+    profile_image_url = db.Column(db.Text)
+
+    # Email preferences
+    email_delivery_preference = db.Column(db.String(20), default='individual', nullable=False)  # 'individual' | 'digest'
+
     comments = db.relationship('NewsletterComment', back_populates='user', lazy=True)
+    commentaries = db.relationship('NewsletterCommentary', back_populates='author', lazy=True)
+    
+    # Relationships for subscriptions
+    journalist_subscriptions = db.relationship('JournalistSubscription', 
+                                             foreign_keys='JournalistSubscription.journalist_user_id',
+                                             backref='journalist', lazy=True)
+    subscribed_to = db.relationship('JournalistSubscription',
+                                  foreign_keys='JournalistSubscription.subscriber_user_id',
+                                  backref='subscriber', lazy=True)
 
     def to_dict(self):
         return {
@@ -505,10 +581,15 @@ class UserAccount(db.Model):
             'email': sanitize_plain_text(self.email) if self.email else None,
             'display_name': sanitize_plain_text(self.display_name) if self.display_name else None,
             'display_name_confirmed': bool(self.display_name_confirmed),
+            'can_author_commentary': bool(self.can_author_commentary),
             'created_at': self.created_at.isoformat() if self.created_at else None,
             'updated_at': self.updated_at.isoformat() if self.updated_at else None,
             'last_login_at': self.last_login_at.isoformat() if self.last_login_at else None,
             'last_display_name_change_at': self.last_display_name_change_at.isoformat() if self.last_display_name_change_at else None,
+            'is_journalist': self.is_journalist,
+            'bio': sanitize_plain_text(self.bio) if self.bio else None,
+            'profile_image_url': self.profile_image_url,
+            'email_delivery_preference': self.email_delivery_preference or 'individual',
         }
 
 
@@ -559,28 +640,382 @@ class NewsletterComment(db.Model):
 
 
 class NewsletterPlayerYoutubeLink(db.Model):
+    """YouTube highlights links for players in newsletters.
+    
+    Uses player_id for both tracked (positive IDs) and manual (negative IDs) players.
+    Manual players are identified by:
+    - player_id < 0 (negative IDs from migration or Players & Loans Manager)
+    - Corresponding LoanedPlayer.can_fetch_stats = False
+    """
     __tablename__ = 'newsletter_player_youtube_links'
 
     id = db.Column(db.Integer, primary_key=True)
     newsletter_id = db.Column(db.Integer, db.ForeignKey('newsletters.id', ondelete='CASCADE'), nullable=False)
-    player_id = db.Column(db.Integer, nullable=True)  # API-Football player ID for tracked players
-    supplemental_loan_id = db.Column(db.Integer, db.ForeignKey('supplemental_loans.id', ondelete='CASCADE'), nullable=True)
-    player_name = db.Column(db.String(120), nullable=False)
+    player_id = db.Column(db.Integer, nullable=False)  # Player ID: positive for tracked, negative for manual players
+    player_name = db.Column(db.String(120), nullable=False)  # For display/reference
     youtube_link = db.Column(db.String(500), nullable=False)
     created_at = db.Column(db.DateTime, default=datetime.now(timezone.utc))
     updated_at = db.Column(db.DateTime, default=datetime.now(timezone.utc), onupdate=datetime.now(timezone.utc))
 
     newsletter = db.relationship('Newsletter', backref='youtube_links', lazy=True)
-    supplemental_loan = db.relationship('SupplementalLoan', lazy=True)
 
     def to_dict(self):
         return {
             'id': self.id,
             'newsletter_id': self.newsletter_id,
             'player_id': self.player_id,
-            'supplemental_loan_id': self.supplemental_loan_id,
             'player_name': self.player_name,
             'youtube_link': self.youtube_link,
             'created_at': self.created_at.isoformat() if self.created_at else None,
             'updated_at': self.updated_at.isoformat() if self.updated_at else None,
+        }
+
+
+class NewsletterCommentary(db.Model):
+    """Commentary added by authorized authors to newsletters.
+    
+    Supports three types of commentary:
+    - 'player': Commentary attached to a specific player's performance
+    - 'intro': Opening commentary for the newsletter
+    - 'summary': Closing commentary/wrap-up for the newsletter
+    
+    All content is sanitized on save to prevent XSS attacks.
+    """
+    __tablename__ = 'newsletter_commentary'
+    
+    id = db.Column(db.Integer, primary_key=True)
+    newsletter_id = db.Column(db.Integer, db.ForeignKey('newsletters.id', ondelete='CASCADE'), nullable=True)  # Now nullable
+    team_id = db.Column(db.Integer, db.ForeignKey('teams.id'), nullable=True)  # For week-based creation
+    player_id = db.Column(db.Integer, nullable=True)  # Nullable for intro/summary commentary
+    commentary_type = db.Column(db.String(20), nullable=False)  # 'player', 'intro', 'summary'
+    content = db.Column(db.Text, nullable=False)  # Sanitized HTML content
+    author_id = db.Column(db.Integer, db.ForeignKey('user_accounts.id', ondelete='CASCADE'), nullable=False)
+    author_name = db.Column(db.String(120), nullable=False)  # Cached display name
+    position = db.Column(db.Integer, default=0, nullable=False)  # For ordering multiple commentaries
+    is_active = db.Column(db.Boolean, default=True, nullable=False)
+    
+    # New fields for journalist articles
+    title = db.Column(db.String(200))
+    is_premium = db.Column(db.Boolean, default=True, nullable=False)
+    
+    # Structured blocks for modular content builder (stores array of block objects)
+    # Each block has: id, type (text|chart|divider), content, is_premium, position, chart_config
+    structured_blocks = db.Column(db.JSON, nullable=True)
+    
+    # Week-based association fields (for pre-newsletter creation)
+    week_start_date = db.Column(db.Date, nullable=True)
+    week_end_date = db.Column(db.Date, nullable=True)
+    
+    created_at = db.Column(db.DateTime, default=datetime.now(timezone.utc))
+    updated_at = db.Column(db.DateTime, default=datetime.now(timezone.utc), onupdate=datetime.now(timezone.utc))
+    
+    # Relationships
+    newsletter = db.relationship('Newsletter', backref='commentaries', lazy=True)
+    author = db.relationship('UserAccount', back_populates='commentaries', lazy=True)
+    team = db.relationship('Team', lazy=True)
+    applause = db.relationship('CommentaryApplause', backref='commentary', lazy='dynamic', cascade='all, delete-orphan')
+    
+    def to_dict(self):
+        from src.utils.sanitize import sanitize_commentary_html, sanitize_plain_text
+        
+        # Re-sanitize on read as additional safety layer
+        safe_content = sanitize_commentary_html(self.content) if self.content else ''
+        
+        # Get author profile image if author relationship exists
+        author_profile_image = None
+        if self.author:
+            author_profile_image = self.author.profile_image_url
+        
+        return {
+            'id': self.id,
+            'newsletter_id': self.newsletter_id,
+            'team_id': self.team_id,
+            'team_name': self.team.name if self.team else (self.newsletter.team.name if self.newsletter and self.newsletter.team else None),
+            'player_id': self.player_id,
+            'commentary_type': self.commentary_type,
+            'content': safe_content,
+            'structured_blocks': self.structured_blocks,
+            'author_id': self.author_id,
+            'author_name': sanitize_plain_text(self.author_name) if self.author_name else None,
+            'author_profile_image': author_profile_image,
+            'position': self.position,
+            'is_active': self.is_active,
+            'title': sanitize_plain_text(self.title) if self.title else None,
+            'is_premium': self.is_premium,
+            'week_start_date': self.week_start_date.isoformat() if self.week_start_date else None,
+            'week_end_date': self.week_end_date.isoformat() if self.week_end_date else None,
+            'created_at': self.created_at.isoformat() if self.created_at else None,
+            'updated_at': self.updated_at.isoformat() if self.updated_at else None,
+            'applause_count': self.applause.count(),
+        }
+    
+    def validate_commentary_type(self):
+        """Validate that commentary_type is one of the allowed values."""
+        allowed_types = ['player', 'intro', 'summary']
+        if self.commentary_type not in allowed_types:
+            raise ValueError(f'commentary_type must be one of {allowed_types}, got: {self.commentary_type}')
+    
+    def validate_player_commentary(self):
+        """Validate that player_id is present if commentary_type is 'player'."""
+        if self.commentary_type == 'player' and not self.player_id:
+            raise ValueError("Player ID is required for player commentary")
+
+
+class CommentaryApplause(db.Model):
+    """Tracks applause/likes for newsletter commentaries."""
+    __tablename__ = 'commentary_applause'
+
+    id = db.Column(db.Integer, primary_key=True)
+    commentary_id = db.Column(db.Integer, db.ForeignKey('newsletter_commentary.id', ondelete='CASCADE'), nullable=False)
+    user_id = db.Column(db.Integer, db.ForeignKey('user_accounts.id'), nullable=True)
+    session_id = db.Column(db.String(100), nullable=True)  # For anonymous tracking
+    created_at = db.Column(db.DateTime, default=datetime.now(timezone.utc))
+
+    def to_dict(self):
+        return {
+            'id': self.id,
+            'commentary_id': self.commentary_id,
+            'user_id': self.user_id,
+            'created_at': self.created_at.isoformat() if self.created_at else None
+        }
+    
+    @staticmethod
+    def sanitize_and_create(newsletter_id, author_id, author_name, commentary_type, content, player_id=None, position=0):
+        """Factory method that sanitizes content before creating a commentary."""
+        from src.utils.sanitize import sanitize_commentary_html
+        
+        # Sanitize content
+        sanitized_content = sanitize_commentary_html(content)
+        
+        # Create instance
+        commentary = NewsletterCommentary(
+            newsletter_id=newsletter_id,
+            author_id=author_id,
+            author_name=author_name,
+            commentary_type=commentary_type,
+            content=sanitized_content,
+            player_id=player_id,
+            position=position,
+        )
+        
+        # Validate
+        commentary.validate_commentary_type()
+        commentary.validate_player_commentary()
+        
+        return commentary
+
+
+class JournalistSubscription(db.Model):
+    __tablename__ = 'journalist_subscriptions'
+
+    id = db.Column(db.Integer, primary_key=True)
+    subscriber_user_id = db.Column(db.Integer, db.ForeignKey('user_accounts.id'), nullable=False)
+    journalist_user_id = db.Column(db.Integer, db.ForeignKey('user_accounts.id'), nullable=False)
+    is_active = db.Column(db.Boolean, default=True, nullable=False)
+    created_at = db.Column(db.DateTime, default=datetime.now(timezone.utc))
+    updated_at = db.Column(db.DateTime, default=datetime.now(timezone.utc), onupdate=datetime.now(timezone.utc))
+
+    __table_args__ = (
+        db.UniqueConstraint('subscriber_user_id', 'journalist_user_id', name='uq_journalist_subscription'),
+    )
+
+    def to_dict(self):
+        return {
+            'id': self.id,
+            'subscriber_user_id': self.subscriber_user_id,
+            'journalist_user_id': self.journalist_user_id,
+            'is_active': self.is_active,
+            'created_at': self.created_at.isoformat() if self.created_at else None,
+            'updated_at': self.updated_at.isoformat() if self.updated_at else None,
+        }
+
+
+class JournalistTeamAssignment(db.Model):
+    __tablename__ = 'journalist_team_assignments'
+
+    id = db.Column(db.Integer, primary_key=True)
+    user_id = db.Column(db.Integer, db.ForeignKey('user_accounts.id'), nullable=False)
+    team_id = db.Column(db.Integer, db.ForeignKey('teams.id'), nullable=False)
+    assigned_at = db.Column(db.DateTime, default=datetime.now(timezone.utc))
+    assigned_by = db.Column(db.Integer, db.ForeignKey('user_accounts.id'), nullable=True)
+
+    # Relationships
+    journalist = db.relationship('UserAccount', foreign_keys=[user_id], backref=db.backref('assigned_teams', lazy=True))
+    team = db.relationship('Team', backref=db.backref('assigned_journalists', lazy=True))
+    assigner = db.relationship('UserAccount', foreign_keys=[assigned_by])
+
+    __table_args__ = (
+        db.UniqueConstraint('user_id', 'team_id', name='uq_journalist_team_assignment'),
+    )
+
+    def to_dict(self):
+        return {
+            'id': self.id,
+            'user_id': self.user_id,
+            'team_id': self.team_id,
+            'team_name': self.team.name if self.team else None,
+            'assigned_at': self.assigned_at.isoformat() if self.assigned_at else None,
+            'assigned_by': self.assigned_by
+        }
+
+
+class StripeConnectedAccount(db.Model):
+    """Stores journalist Stripe Connect account info"""
+    __tablename__ = 'stripe_connected_accounts'
+
+    id = db.Column(db.Integer, primary_key=True)
+    journalist_user_id = db.Column(db.Integer, db.ForeignKey('user_accounts.id'), nullable=False, unique=True)
+    stripe_account_id = db.Column(db.String(255), unique=True, nullable=False)
+    onboarding_complete = db.Column(db.Boolean, default=False, nullable=False)
+    payouts_enabled = db.Column(db.Boolean, default=False, nullable=False)
+    charges_enabled = db.Column(db.Boolean, default=False, nullable=False)
+    details_submitted = db.Column(db.Boolean, default=False, nullable=False)
+    created_at = db.Column(db.DateTime, default=datetime.now(timezone.utc))
+    updated_at = db.Column(db.DateTime, default=datetime.now(timezone.utc), onupdate=datetime.now(timezone.utc))
+
+    # Relationship
+    journalist = db.relationship('UserAccount', foreign_keys=[journalist_user_id], backref=db.backref('stripe_account', uselist=False))
+
+    def to_dict(self):
+        return {
+            'id': self.id,
+            'journalist_user_id': self.journalist_user_id,
+            'stripe_account_id': self.stripe_account_id,
+            'onboarding_complete': self.onboarding_complete,
+            'payouts_enabled': self.payouts_enabled,
+            'charges_enabled': self.charges_enabled,
+            'details_submitted': self.details_submitted,
+            'created_at': self.created_at.isoformat() if self.created_at else None,
+            'updated_at': self.updated_at.isoformat() if self.updated_at else None
+        }
+
+
+class StripeSubscriptionPlan(db.Model):
+    """Journalist-defined subscription pricing"""
+    __tablename__ = 'stripe_subscription_plans'
+
+    id = db.Column(db.Integer, primary_key=True)
+    journalist_user_id = db.Column(db.Integer, db.ForeignKey('user_accounts.id'), nullable=False)
+    stripe_product_id = db.Column(db.String(255), nullable=False)
+    stripe_price_id = db.Column(db.String(255), nullable=False, unique=True)
+    price_amount = db.Column(db.Integer, nullable=False)  # in cents
+    currency = db.Column(db.String(3), default='usd', nullable=False)
+    is_active = db.Column(db.Boolean, default=True, nullable=False)
+    created_at = db.Column(db.DateTime, default=datetime.now(timezone.utc))
+    updated_at = db.Column(db.DateTime, default=datetime.now(timezone.utc), onupdate=datetime.now(timezone.utc))
+
+    # Relationship
+    journalist = db.relationship('UserAccount', foreign_keys=[journalist_user_id], backref=db.backref('subscription_plans', lazy=True))
+
+    def to_dict(self):
+        return {
+            'id': self.id,
+            'journalist_user_id': self.journalist_user_id,
+            'stripe_product_id': self.stripe_product_id,
+            'stripe_price_id': self.stripe_price_id,
+            'price_amount': self.price_amount,
+            'price_display': f"${self.price_amount / 100:.2f}",
+            'currency': self.currency,
+            'is_active': self.is_active,
+            'created_at': self.created_at.isoformat() if self.created_at else None,
+            'updated_at': self.updated_at.isoformat() if self.updated_at else None
+        }
+
+
+class StripeSubscription(db.Model):
+    """Tracks active Stripe subscriptions"""
+    __tablename__ = 'stripe_subscriptions'
+
+    id = db.Column(db.Integer, primary_key=True)
+    subscriber_user_id = db.Column(db.Integer, db.ForeignKey('user_accounts.id'), nullable=False)
+    journalist_user_id = db.Column(db.Integer, db.ForeignKey('user_accounts.id'), nullable=False)
+    stripe_subscription_id = db.Column(db.String(255), unique=True, nullable=False)
+    stripe_customer_id = db.Column(db.String(255), nullable=False)
+    status = db.Column(db.String(50), nullable=False)  # active, canceled, past_due, etc.
+    current_period_start = db.Column(db.DateTime)
+    current_period_end = db.Column(db.DateTime)
+    cancel_at_period_end = db.Column(db.Boolean, default=False)
+    created_at = db.Column(db.DateTime, default=datetime.now(timezone.utc))
+    updated_at = db.Column(db.DateTime, default=datetime.now(timezone.utc), onupdate=datetime.now(timezone.utc))
+
+    __table_args__ = (
+        db.UniqueConstraint('subscriber_user_id', 'journalist_user_id', name='uq_stripe_subscription'),
+    )
+
+    # Relationships
+    subscriber = db.relationship('UserAccount', foreign_keys=[subscriber_user_id], backref=db.backref('stripe_subscriptions', lazy=True))
+    journalist = db.relationship('UserAccount', foreign_keys=[journalist_user_id], backref=db.backref('stripe_subscribers', lazy=True))
+
+    def to_dict(self):
+        return {
+            'id': self.id,
+            'subscriber_user_id': self.subscriber_user_id,
+            'journalist_user_id': self.journalist_user_id,
+            'stripe_subscription_id': self.stripe_subscription_id,
+            'stripe_customer_id': self.stripe_customer_id,
+            'status': self.status,
+            'current_period_start': self.current_period_start.isoformat() if self.current_period_start else None,
+            'current_period_end': self.current_period_end.isoformat() if self.current_period_end else None,
+            'cancel_at_period_end': self.cancel_at_period_end,
+            'created_at': self.created_at.isoformat() if self.created_at else None,
+            'updated_at': self.updated_at.isoformat() if self.updated_at else None
+        }
+
+
+class StripePlatformRevenue(db.Model):
+    """Tracks platform fees for admin dashboard"""
+    __tablename__ = 'stripe_platform_revenue'
+
+    id = db.Column(db.Integer, primary_key=True)
+    period_start = db.Column(db.Date, nullable=False)
+    period_end = db.Column(db.Date, nullable=False)
+    total_revenue_cents = db.Column(db.Integer, default=0, nullable=False)  # Total subscriptions processed
+    platform_fee_cents = db.Column(db.Integer, default=0, nullable=False)  # 10% collected
+    subscription_count = db.Column(db.Integer, default=0, nullable=False)
+    created_at = db.Column(db.DateTime, default=datetime.now(timezone.utc))
+
+    def to_dict(self):
+        return {
+            'id': self.id,
+            'period_start': self.period_start.isoformat() if self.period_start else None,
+            'period_end': self.period_end.isoformat() if self.period_end else None,
+            'total_revenue_cents': self.total_revenue_cents,
+            'total_revenue_display': f"${self.total_revenue_cents / 100:.2f}",
+            'platform_fee_cents': self.platform_fee_cents,
+            'platform_fee_display': f"${self.platform_fee_cents / 100:.2f}",
+            'subscription_count': self.subscription_count,
+            'created_at': self.created_at.isoformat() if self.created_at else None
+        }
+
+
+class NewsletterDigestQueue(db.Model):
+    """Queue for newsletters to be sent as part of a weekly digest email"""
+    __tablename__ = 'newsletter_digest_queue'
+
+    id = db.Column(db.Integer, primary_key=True)
+    user_id = db.Column(db.Integer, db.ForeignKey('user_accounts.id'), nullable=False)
+    newsletter_id = db.Column(db.Integer, db.ForeignKey('newsletters.id'), nullable=False)
+    week_key = db.Column(db.String(20), nullable=False)  # e.g., '2025-W48' for grouping
+    queued_at = db.Column(db.DateTime, default=datetime.now(timezone.utc), nullable=False)
+    sent = db.Column(db.Boolean, default=False, nullable=False)
+    sent_at = db.Column(db.DateTime, nullable=True)
+
+    __table_args__ = (
+        db.UniqueConstraint('user_id', 'newsletter_id', name='uq_digest_queue_user_newsletter'),
+        db.Index('ix_digest_queue_week_sent', 'week_key', 'sent'),
+    )
+
+    # Relationships
+    user = db.relationship('UserAccount', backref=db.backref('digest_queue', lazy=True))
+    newsletter = db.relationship('Newsletter', backref=db.backref('digest_queue_entries', lazy=True))
+
+    def to_dict(self):
+        return {
+            'id': self.id,
+            'user_id': self.user_id,
+            'newsletter_id': self.newsletter_id,
+            'week_key': self.week_key,
+            'queued_at': self.queued_at.isoformat() if self.queued_at else None,
+            'sent': self.sent,
+            'sent_at': self.sent_at.isoformat() if self.sent_at else None,
         }

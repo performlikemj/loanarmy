@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-# Loan Army - ACA deployment script (local use)
+# Go On Loan - ACA deployment script (local use)
 # - Builds backend and frontend images and pushes to ACR
 # - Grants AcrPull to app identities and updates Container Apps
 # - Sets/updates ingress ports and prints FQDNs
