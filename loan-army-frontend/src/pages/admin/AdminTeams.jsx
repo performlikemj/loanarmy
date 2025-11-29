@@ -9,6 +9,7 @@ import { Avatar, AvatarFallback, AvatarImage } from '@/components/ui/avatar'
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from '@/components/ui/dialog'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
+import { Label } from '@/components/ui/label'
 import { 
   Loader2, 
   Trash2, 
@@ -22,7 +23,11 @@ import {
   CheckSquare,
   Square,
   Shield,
-  ArrowLeftRight
+  ArrowLeftRight,
+  Pencil,
+  Save,
+  X,
+  Wand2
 } from 'lucide-react'
 import { APIService } from '@/lib/api'
 
@@ -46,6 +51,18 @@ export function AdminTeams() {
   const [bulkDeletePreviews, setBulkDeletePreviews] = useState([])
   const [deleteLoading, setDeleteLoading] = useState(false)
   const [previewLoading, setPreviewLoading] = useState(false)
+
+  // Placeholder team names state
+  const [placeholderTeams, setPlaceholderTeams] = useState([])
+  const [placeholderLoading, setPlaceholderLoading] = useState(false)
+  const [placeholderSeason, setPlaceholderSeason] = useState(new Date().getFullYear().toString())
+  const [editingTeamId, setEditingTeamId] = useState(null)
+  const [editingName, setEditingName] = useState('')
+  const [savingName, setSavingName] = useState(false)
+  const [bulkFixing, setBulkFixing] = useState(false)
+  const [bulkFixDryRun, setBulkFixDryRun] = useState(true)
+  const [propagating, setPropagating] = useState(false)
+  const [propagateDryRun, setPropagateDryRun] = useState(true)
 
   const loadTeams = useCallback(async () => {
     try {
@@ -273,6 +290,123 @@ export function AdminTeams() {
     }
   }
 
+  // Placeholder team names functions
+  const loadPlaceholderTeams = useCallback(async () => {
+    try {
+      setPlaceholderLoading(true)
+      const params = {}
+      if (placeholderSeason) params.season = placeholderSeason
+      const data = await APIService.adminListPlaceholderTeamNames(params)
+      setPlaceholderTeams(Array.isArray(data) ? data : [])
+    } catch (error) {
+      console.error('Failed to load placeholder teams:', error)
+      setMessage({ type: 'error', text: 'Failed to load placeholder team names' })
+    } finally {
+      setPlaceholderLoading(false)
+    }
+  }, [placeholderSeason])
+
+  const startEditingName = (team) => {
+    setEditingTeamId(team.id)
+    setEditingName(team.name)
+  }
+
+  const cancelEditingName = () => {
+    setEditingTeamId(null)
+    setEditingName('')
+  }
+
+  const saveTeamName = async (teamId) => {
+    if (!editingName.trim()) {
+      setMessage({ type: 'error', text: 'Name cannot be empty' })
+      return
+    }
+    
+    try {
+      setSavingName(true)
+      await APIService.adminUpdateTeamName(teamId, editingName.trim())
+      setMessage({ type: 'success', text: 'Team name updated successfully' })
+      setEditingTeamId(null)
+      setEditingName('')
+      loadPlaceholderTeams()
+      loadTeams() // Also refresh main teams list
+    } catch (error) {
+      console.error('Failed to update team name:', error)
+      setMessage({ type: 'error', text: `Failed to update team name: ${error.message}` })
+    } finally {
+      setSavingName(false)
+    }
+  }
+
+  const bulkFixPlaceholderNames = async () => {
+    if (!placeholderSeason) {
+      setMessage({ type: 'error', text: 'Please enter a season year' })
+      return
+    }
+
+    try {
+      setBulkFixing(true)
+      const result = await APIService.adminBulkFixTeamNames({
+        season: parseInt(placeholderSeason),
+        dry_run: bulkFixDryRun
+      })
+      
+      const updatedCount = result.updated_count || 0
+      const skippedCount = result.skipped_count || 0
+      
+      if (bulkFixDryRun) {
+        setMessage({
+          type: 'success',
+          text: `Dry run: would update ${updatedCount} team(s), skipped ${skippedCount}`
+        })
+      } else {
+        setMessage({
+          type: 'success',
+          text: `Updated ${updatedCount} team name(s), skipped ${skippedCount}`
+        })
+        loadPlaceholderTeams()
+        loadTeams()
+      }
+    } catch (error) {
+      console.error('Failed to bulk fix team names:', error)
+      setMessage({ type: 'error', text: `Failed to bulk fix names: ${error.message}` })
+    } finally {
+      setBulkFixing(false)
+    }
+  }
+
+  const propagateTeamNames = async () => {
+    try {
+      setPropagating(true)
+      const result = await APIService.adminPropagateTeamNames({
+        dry_run: propagateDryRun,
+        fix_loans: true,
+        fix_newsletters: true
+      })
+      
+      const loansUpdated = result.loans_updated || 0
+      const newslettersUpdated = result.newsletters_updated || 0
+      const detailsCount = result.details?.length || 0
+      
+      if (propagateDryRun) {
+        setMessage({
+          type: 'success',
+          text: `Dry run: would update ${detailsCount} record(s) (loans + newsletters)`
+        })
+      } else {
+        setMessage({
+          type: 'success',
+          text: `Propagated names to ${loansUpdated} loan record(s) and ${newslettersUpdated} newsletter(s)`
+        })
+      }
+    } catch (error) {
+      console.error('Failed to propagate team names:', error)
+      setMessage({ type: 'error', text: `Failed to propagate names: ${error.message}` })
+    } finally {
+      setPropagating(false)
+    }
+  }
+
   // Calculate totals for bulk preview
   const bulkTotals = useMemo(() => {
     const totals = {
@@ -326,6 +460,10 @@ export function AdminTeams() {
                 {trackingRequests.filter(r => r.status === 'pending').length}
               </Badge>
             )}
+          </TabsTrigger>
+          <TabsTrigger value="fix-names" onClick={() => { if (placeholderTeams.length === 0) loadPlaceholderTeams() }}>
+            <Pencil className="h-4 w-4 mr-2" />
+            Fix Team Names
           </TabsTrigger>
         </TabsList>
 
@@ -632,6 +770,202 @@ export function AdminTeams() {
                       )}
                     </div>
                   ))}
+                </div>
+              )}
+            </CardContent>
+          </Card>
+        </TabsContent>
+
+        <TabsContent value="fix-names" className="space-y-4">
+          <Card>
+            <CardHeader>
+              <div className="flex items-center justify-between">
+                <div>
+                  <CardTitle className="flex items-center gap-2">
+                    <Pencil className="h-5 w-5" />
+                    Fix Placeholder Team Names
+                  </CardTitle>
+                  <CardDescription>
+                    Correct teams showing as "Team 12345" with their real names
+                  </CardDescription>
+                </div>
+              </div>
+            </CardHeader>
+            <CardContent className="space-y-4">
+              {/* Controls */}
+              <div className="flex flex-wrap items-end gap-4 p-4 bg-muted/50 rounded-lg">
+                <div className="space-y-1">
+                  <Label htmlFor="placeholder-season">Season Year</Label>
+                  <Input
+                    id="placeholder-season"
+                    type="number"
+                    value={placeholderSeason}
+                    onChange={(e) => setPlaceholderSeason(e.target.value)}
+                    className="w-28"
+                    placeholder="2024"
+                  />
+                </div>
+                <Button onClick={loadPlaceholderTeams} disabled={placeholderLoading}>
+                  {placeholderLoading && <Loader2 className="h-4 w-4 mr-2 animate-spin" />}
+                  <Search className="h-4 w-4 mr-2" />
+                  Find Placeholder Names
+                </Button>
+                <div className="flex items-center gap-2 ml-auto">
+                  <label className="flex items-center gap-2 text-sm">
+                    <input
+                      type="checkbox"
+                      checked={bulkFixDryRun}
+                      onChange={(e) => setBulkFixDryRun(e.target.checked)}
+                      className="h-4 w-4"
+                    />
+                    <span>Dry run</span>
+                  </label>
+                  <Button 
+                    onClick={bulkFixPlaceholderNames} 
+                    disabled={bulkFixing || !placeholderSeason}
+                    variant="secondary"
+                  >
+                    {bulkFixing && <Loader2 className="h-4 w-4 mr-2 animate-spin" />}
+                    <Wand2 className="h-4 w-4 mr-2" />
+                    Auto-Fix from API
+                  </Button>
+                </div>
+              </div>
+
+              {/* Propagate to Old Data */}
+              <div className="p-4 bg-blue-50 border border-blue-200 rounded-lg">
+                <div className="flex flex-wrap items-center justify-between gap-4">
+                  <div>
+                    <h4 className="font-medium text-blue-900">Propagate Names to Old Data</h4>
+                    <p className="text-sm text-blue-700 mt-1">
+                      After fixing team names above, use this to update old newsletters and loan records.
+                    </p>
+                  </div>
+                  <div className="flex items-center gap-2">
+                    <label className="flex items-center gap-2 text-sm">
+                      <input
+                        type="checkbox"
+                        checked={propagateDryRun}
+                        onChange={(e) => setPropagateDryRun(e.target.checked)}
+                        className="h-4 w-4"
+                      />
+                      <span>Dry run</span>
+                    </label>
+                    <Button 
+                      onClick={propagateTeamNames} 
+                      disabled={propagating}
+                    >
+                      {propagating && <Loader2 className="h-4 w-4 mr-2 animate-spin" />}
+                      <RefreshCw className="h-4 w-4 mr-2" />
+                      {propagateDryRun ? 'Preview Propagation' : 'Propagate to Old Data'}
+                    </Button>
+                  </div>
+                </div>
+              </div>
+
+              {/* Results */}
+              {placeholderLoading ? (
+                <div className="flex items-center justify-center py-8">
+                  <Loader2 className="h-6 w-6 animate-spin" />
+                </div>
+              ) : placeholderTeams.length === 0 ? (
+                <div className="text-center py-8 text-muted-foreground">
+                  <CheckCircle className="h-12 w-12 mx-auto mb-3 text-green-500" />
+                  <p className="font-medium">No placeholder team names found!</p>
+                  <p className="text-sm mt-1">All teams have proper names. Click "Find Placeholder Names" to search.</p>
+                </div>
+              ) : (
+                <div className="border rounded-lg overflow-hidden">
+                  <div className="flex items-center justify-between bg-muted px-4 py-2">
+                    <span className="text-sm font-medium">
+                      Found {placeholderTeams.length} team(s) with placeholder names
+                    </span>
+                    <Badge variant="secondary">Season {placeholderSeason}</Badge>
+                  </div>
+                  <div className="max-h-[500px] overflow-auto">
+                    <table className="w-full text-sm">
+                      <thead className="bg-muted/60 sticky top-0">
+                        <tr className="text-left">
+                          <th className="px-4 py-2 w-16">ID</th>
+                          <th className="px-4 py-2">Current Name</th>
+                          <th className="px-4 py-2">API ID</th>
+                          <th className="px-4 py-2">Season</th>
+                          <th className="px-4 py-2">Country</th>
+                          <th className="px-4 py-2 w-40">Actions</th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {placeholderTeams.map((team) => (
+                          <tr key={team.id} className="border-t hover:bg-muted/30">
+                            <td className="px-4 py-2 text-muted-foreground">{team.id}</td>
+                            <td className="px-4 py-2">
+                              {editingTeamId === team.id ? (
+                                <Input
+                                  value={editingName}
+                                  onChange={(e) => setEditingName(e.target.value)}
+                                  className="h-8"
+                                  autoFocus
+                                  onKeyDown={(e) => {
+                                    if (e.key === 'Enter') saveTeamName(team.id)
+                                    if (e.key === 'Escape') cancelEditingName()
+                                  }}
+                                />
+                              ) : (
+                                <div className="flex items-center gap-2">
+                                  {team.logo && (
+                                    <Avatar className="h-6 w-6">
+                                      <AvatarImage src={team.logo} alt={team.name} />
+                                      <AvatarFallback className="text-xs">?</AvatarFallback>
+                                    </Avatar>
+                                  )}
+                                  <span className="text-amber-600 font-medium">{team.name}</span>
+                                </div>
+                              )}
+                            </td>
+                            <td className="px-4 py-2 text-muted-foreground font-mono text-xs">
+                              {team.team_id}
+                            </td>
+                            <td className="px-4 py-2">{team.season}</td>
+                            <td className="px-4 py-2">{team.country}</td>
+                            <td className="px-4 py-2">
+                              {editingTeamId === team.id ? (
+                                <div className="flex gap-1">
+                                  <Button
+                                    size="sm"
+                                    onClick={() => saveTeamName(team.id)}
+                                    disabled={savingName}
+                                  >
+                                    {savingName ? (
+                                      <Loader2 className="h-4 w-4 animate-spin" />
+                                    ) : (
+                                      <Save className="h-4 w-4" />
+                                    )}
+                                  </Button>
+                                  <Button
+                                    size="sm"
+                                    variant="ghost"
+                                    onClick={cancelEditingName}
+                                    disabled={savingName}
+                                  >
+                                    <X className="h-4 w-4" />
+                                  </Button>
+                                </div>
+                              ) : (
+                                <Button
+                                  size="sm"
+                                  variant="outline"
+                                  onClick={() => startEditingName(team)}
+                                >
+                                  <Pencil className="h-4 w-4 mr-1" />
+                                  Edit
+                                </Button>
+                              )}
+                            </td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  </div>
                 </div>
               )}
             </CardContent>

@@ -6,6 +6,13 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
 import { Badge } from '@/components/ui/badge'
 import { ScrollArea } from '@/components/ui/scroll-area'
 import {
+    Drawer,
+    DrawerContent,
+    DrawerHeader,
+    DrawerTitle,
+    DrawerDescription,
+} from '@/components/ui/drawer'
+import {
     LineChart,
     Line,
     BarChart,
@@ -17,7 +24,7 @@ import {
     ResponsiveContainer,
     ReferenceLine,
 } from 'recharts'
-import { Loader2, ArrowLeft, User, TrendingUp, Calendar, Target, PenTool, ChevronRight } from 'lucide-react'
+import { Loader2, ArrowLeft, User, TrendingUp, Calendar, Target, PenTool, ChevronRight, Users } from 'lucide-react'
 import { APIService } from '@/lib/api'
 import { format } from 'date-fns'
 import { Avatar, AvatarFallback, AvatarImage } from '@/components/ui/avatar'
@@ -79,6 +86,11 @@ export function PlayerPage() {
     const [error, setError] = useState(null)
     const [position, setPosition] = useState(DEFAULT_POSITION)
     const [selectedMetrics, setSelectedMetrics] = useState([])
+    
+    // Team players drawer state
+    const [drawerOpen, setDrawerOpen] = useState(false)
+    const [teamPlayers, setTeamPlayers] = useState([])
+    const [loadingTeamPlayers, setLoadingTeamPlayers] = useState(false)
 
     useEffect(() => {
         if (playerId) {
@@ -138,6 +150,30 @@ export function PlayerPage() {
             }
             return [...prev, metricKey]
         })
+    }
+
+    // Handle parent club click to show other loanees
+    const handleParentClubClick = async () => {
+        // Use primary_team_db_id (database ID) for API calls
+        if (!profile?.primary_team_db_id) return
+        
+        setDrawerOpen(true)
+        setLoadingTeamPlayers(true)
+        
+        try {
+            const loans = await APIService.getTeamLoans(profile.primary_team_db_id, {
+                active_only: 'true',
+                dedupe: 'true'
+            })
+            // Filter out current player
+            const otherPlayers = loans.filter(loan => loan.player_id !== parseInt(playerId))
+            setTeamPlayers(otherPlayers)
+        } catch (err) {
+            console.error('Failed to load team players:', err)
+            setTeamPlayers([])
+        } finally {
+            setLoadingTeamPlayers(false)
+        }
     }
 
     // Format data for charts
@@ -284,12 +320,16 @@ export function PlayerPage() {
                                 {/* Club Info */}
                                 <div className="flex flex-wrap items-center gap-3 mt-2 text-sm">
                                     {profile?.parent_team_name && (
-                                        <div className="flex items-center gap-1.5 text-gray-600">
+                                        <button
+                                            onClick={handleParentClubClick}
+                                            className="flex items-center gap-1.5 text-gray-600 hover:text-blue-600 transition-colors cursor-pointer group"
+                                        >
                                             {profile.parent_team_logo && (
                                                 <img src={profile.parent_team_logo} alt="" className="w-5 h-5 rounded-full object-cover" />
                                             )}
-                                            <span className="font-medium">{profile.parent_team_name}</span>
-                                        </div>
+                                            <span className="font-medium group-hover:underline">{profile.parent_team_name}</span>
+                                            <Users className="w-3.5 h-3.5 opacity-0 group-hover:opacity-100 transition-opacity text-blue-500" />
+                                        </button>
                                     )}
                                     {/* Show loan history if multiple clubs */}
                                     {profile?.loan_history && profile.loan_history.length > 0 && (
@@ -740,6 +780,79 @@ export function PlayerPage() {
                     </div>
                 )}
             </div>
+
+            {/* Team Players Drawer */}
+            <Drawer open={drawerOpen} onOpenChange={setDrawerOpen}>
+                <DrawerContent>
+                    <DrawerHeader className="border-b">
+                        <div className="flex items-center gap-3">
+                            {profile?.parent_team_logo && (
+                                <img 
+                                    src={profile.parent_team_logo} 
+                                    alt="" 
+                                    className="w-10 h-10 rounded-full object-cover border-2 border-gray-200" 
+                                />
+                            )}
+                            <div>
+                                <DrawerTitle>{profile?.parent_team_name} Loanees</DrawerTitle>
+                                <DrawerDescription>
+                                    {teamPlayers.length} player{teamPlayers.length !== 1 ? 's' : ''} currently out on loan
+                                </DrawerDescription>
+                            </div>
+                        </div>
+                    </DrawerHeader>
+                    
+                    <div className="p-4 max-h-[60vh] overflow-y-auto">
+                        {loadingTeamPlayers ? (
+                            <div className="flex items-center justify-center py-8">
+                                <Loader2 className="h-6 w-6 animate-spin text-blue-500" />
+                            </div>
+                        ) : teamPlayers.length === 0 ? (
+                            <p className="text-center text-gray-500 py-8">No other players on loan</p>
+                        ) : (
+                            <div className="space-y-2">
+                                {teamPlayers.map((player) => (
+                                    <Link
+                                        key={player.player_id}
+                                        to={`/players/${player.player_id}`}
+                                        onClick={() => setDrawerOpen(false)}
+                                        className="flex items-center gap-3 p-3 rounded-lg hover:bg-gray-50 active:bg-gray-100 transition-colors group"
+                                    >
+                                        {player.player_photo ? (
+                                            <img 
+                                                src={player.player_photo} 
+                                                alt={player.player_name}
+                                                className="w-12 h-12 rounded-full object-cover border-2 border-gray-200"
+                                            />
+                                        ) : (
+                                            <div className="w-12 h-12 rounded-full bg-gradient-to-br from-blue-500 to-blue-600 flex items-center justify-center flex-shrink-0">
+                                                <User className="h-6 w-6 text-white" />
+                                            </div>
+                                        )}
+                                        <div className="flex-1 min-w-0">
+                                            <div className="font-medium text-gray-900 group-hover:text-blue-600 transition-colors">
+                                                {player.player_name}
+                                            </div>
+                                            <div className="flex items-center gap-2 text-sm text-gray-500">
+                                                {player.loan_team_logo && (
+                                                    <img src={player.loan_team_logo} alt="" className="w-4 h-4 rounded-full" />
+                                                )}
+                                                <span className="truncate">{player.loan_team_name}</span>
+                                            </div>
+                                            {(player.appearances > 0 || player.goals > 0 || player.assists > 0) && (
+                                                <div className="text-xs text-gray-400 mt-0.5">
+                                                    {player.appearances || 0} apps · {player.goals || 0}G · {player.assists || 0}A
+                                                </div>
+                                            )}
+                                        </div>
+                                        <ChevronRight className="h-5 w-5 text-gray-300 group-hover:text-blue-500 transition-colors flex-shrink-0" />
+                                    </Link>
+                                ))}
+                            </div>
+                        )}
+                    </div>
+                </DrawerContent>
+            </Drawer>
         </div>
     )
 }

@@ -980,6 +980,40 @@ export class APIService {
         }, { admin: true })
     }
 
+    static async adminUpdateTeamName(teamId, name) {
+        return this.request(`/admin/teams/${teamId}/name`, {
+            method: 'PUT',
+            body: JSON.stringify({ name })
+        }, { admin: true })
+    }
+
+    static async adminListPlaceholderTeamNames(params = {}) {
+        const query = new URLSearchParams(params).toString()
+        return this.request(`/admin/teams/placeholder-names${query ? '?' + query : ''}`, {}, { admin: true })
+    }
+
+    static async adminBulkFixTeamNames(payload) {
+        return this.request('/admin/teams/bulk-fix-names', {
+            method: 'POST',
+            body: JSON.stringify(payload)
+        }, { admin: true })
+    }
+
+    static async adminPropagateTeamNames(payload) {
+        return this.request('/admin/teams/propagate-names', {
+            method: 'POST',
+            body: JSON.stringify(payload)
+        }, { admin: true })
+    }
+
+    static async adminCheckNewsletterReadiness(targetDate, teamIds = []) {
+        const params = new URLSearchParams()
+        if (targetDate) params.append('target_date', targetDate)
+        if (teamIds.length) params.append('team_ids', teamIds.join(','))
+        const query = params.toString()
+        return this.request(`/newsletters/readiness${query ? '?' + query : ''}`, {}, { admin: true })
+    }
+
     // Sponsor API methods
     static async getSponsors() {
         return this.request('/sponsors')

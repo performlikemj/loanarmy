@@ -2984,6 +2984,7 @@ def get_public_player_profile(player_id: int):
                 if parent_team:
                     result['parent_team_logo'] = parent_team.logo
                     result['parent_team_id'] = parent_team.team_id
+                    result['primary_team_db_id'] = loaned.primary_team_id  # DB ID for API calls
         
         # If still no name, try supplemental loans
         if not result['name']:
@@ -7542,6 +7543,290 @@ def admin_update_team_tracking(team_id: int):
         return jsonify(_safe_error_payload(e, 'Failed to update team tracking')), 500
 
 
+@api_bp.route('/admin/teams/<int:team_id>/name', methods=['PUT'])
+@require_api_key
+def admin_update_team_name(team_id: int):
+    """
+    Update the name for a team. Useful for correcting placeholder names like "Team 12345".
+    
+    Body: { "name": "Correct Team Name" }
+    """
+    try:
+        team = Team.query.get_or_404(team_id)
+        data = request.get_json() or {}
+        
+        new_name = (data.get('name') or '').strip()
+        if not new_name:
+            return jsonify({'error': 'name is required'}), 400
+        
+        old_name = team.name
+        team.name = new_name
+        team.updated_at = datetime.now(timezone.utc)
+        
+        db.session.commit()
+        return jsonify({
+            'message': 'updated',
+            'team_id': team.id,
+            'api_team_id': team.team_id,
+            'old_name': old_name,
+            'new_name': team.name,
+        })
+    except Exception as e:
+        logger.exception('admin_update_team_name failed')
+        db.session.rollback()
+        return jsonify(_safe_error_payload(e, 'Failed to update team name')), 500
+
+
+@api_bp.route('/admin/teams/placeholder-names', methods=['GET'])
+@require_api_key
+def admin_list_placeholder_team_names():
+    """
+    List teams with placeholder names like "Team 12345".
+    
+    Query params:
+      - season: Filter by season year
+      - limit: Max results (default 100)
+    """
+    try:
+        season = request.args.get('season')
+        limit = request.args.get('limit', 100, type=int)
+        
+        query = Team.query.filter(
+            db.func.lower(Team.name).like('team %')
+        )
+        
+        if season:
+            query = query.filter(Team.season == int(season))
+        
+        teams = query.order_by(Team.name.asc()).limit(limit).all()
+        
+        return jsonify([{
+            'id': t.id,
+            'team_id': t.team_id,
+            'name': t.name,
+            'season': t.season,
+            'country': t.country,
+            'logo': t.logo,
+            'league_name': t.league.name if t.league else None,
+        } for t in teams])
+    except Exception as e:
+        logger.exception('admin_list_placeholder_team_names failed')
+        return jsonify(_safe_error_payload(e, 'Failed to list placeholder team names')), 500
+
+
+@api_bp.route('/admin/teams/bulk-fix-names', methods=['POST'])
+@require_api_key
+def admin_bulk_fix_team_names():
+    """
+    Attempt to fix placeholder team names by fetching from API-Football.
+    
+    Body: {
+        "team_ids": [1, 2, 3],  # Optional: specific teams to fix
+        "season": 2024,  # Required: season for API lookup
+        "dry_run": false  # Preview changes without saving
+    }
+    """
+    try:
+        data = request.get_json() or {}
+        team_ids = data.get('team_ids', [])
+        season = data.get('season')
+        dry_run = bool(data.get('dry_run', False))
+        
+        if not season:
+            return jsonify({'error': 'season is required'}), 400
+        
+        # Find teams to fix
+        if team_ids:
+            teams = Team.query.filter(
+                Team.id.in_(team_ids),
+                db.func.lower(Team.name).like('team %')
+            ).all()
+        else:
+            teams = Team.query.filter(
+                db.func.lower(Team.name).like('team %'),
+                Team.season == int(season)
+            ).limit(50).all()
+        
+        updated = []
+        skipped = []
+        
+        for team in teams:
+            result = _update_team_name_if_missing(team, season=int(season), dry_run=dry_run)
+            if result.get('status') in ('updated', 'would_update'):
+                updated.append({
+                    'id': team.id,
+                    'api_team_id': team.team_id,
+                    'old_name': team.name if dry_run else result.get('old_name', team.name),
+                    'new_name': result.get('new_name'),
+                })
+            else:
+                skipped.append({
+                    'id': team.id,
+                    'api_team_id': team.team_id,
+                    'name': team.name,
+                    'status': result.get('status'),
+                })
+        
+        if not dry_run:
+            db.session.commit()
+        
+        return jsonify({
+            'dry_run': dry_run,
+            'updated': updated,
+            'skipped': skipped,
+            'updated_count': len(updated),
+            'skipped_count': len(skipped),
+        })
+    except Exception as e:
+        logger.exception('admin_bulk_fix_team_names failed')
+        db.session.rollback()
+        return jsonify(_safe_error_payload(e, 'Failed to bulk fix team names')), 500
+
+
+@api_bp.route('/admin/teams/propagate-names', methods=['POST'])
+@require_api_key
+def admin_propagate_team_names():
+    """
+    Propagate corrected team names from the Teams table to:
+    1. LoanedPlayer records (primary_team_name, loan_team_name)
+    2. Newsletter structured_content JSON
+    
+    Body: {
+        "team_ids": [1, 2, 3],  # Optional: specific teams to propagate (DB IDs)
+        "dry_run": false,  # Preview changes without saving
+        "fix_loans": true,  # Update LoanedPlayer records
+        "fix_newsletters": true  # Update Newsletter structured_content
+    }
+    """
+    try:
+        import json as json_module
+        
+        data = request.get_json() or {}
+        team_ids = data.get('team_ids', [])
+        dry_run = bool(data.get('dry_run', False))
+        fix_loans = bool(data.get('fix_loans', True))
+        fix_newsletters = bool(data.get('fix_newsletters', True))
+        
+        results = {
+            'dry_run': dry_run,
+            'loans_updated': 0,
+            'newsletters_updated': 0,
+            'details': []
+        }
+        
+        # Get teams to process
+        if team_ids:
+            teams = Team.query.filter(Team.id.in_(team_ids)).all()
+        else:
+            # Only process teams that had placeholder names (now fixed)
+            # We can't tell which ones were fixed, so process all
+            teams = Team.query.all()
+        
+        # Build team_id -> name mapping
+        team_name_map = {}
+        for t in teams:
+            team_name_map[t.id] = t.name
+        
+        if fix_loans:
+            # Update LoanedPlayer.primary_team_name
+            for team in teams:
+                count = LoanedPlayer.query.filter(
+                    LoanedPlayer.primary_team_id == team.id,
+                    LoanedPlayer.primary_team_name != team.name
+                ).count()
+                
+                if count > 0:
+                    results['details'].append({
+                        'type': 'loan_primary',
+                        'team_id': team.id,
+                        'team_name': team.name,
+                        'records': count
+                    })
+                    
+                    if not dry_run:
+                        LoanedPlayer.query.filter(
+                            LoanedPlayer.primary_team_id == team.id
+                        ).update({'primary_team_name': team.name}, synchronize_session=False)
+                        results['loans_updated'] += count
+            
+            # Update LoanedPlayer.loan_team_name
+            for team in teams:
+                count = LoanedPlayer.query.filter(
+                    LoanedPlayer.loan_team_id == team.id,
+                    LoanedPlayer.loan_team_name != team.name
+                ).count()
+                
+                if count > 0:
+                    results['details'].append({
+                        'type': 'loan_borrowing',
+                        'team_id': team.id,
+                        'team_name': team.name,
+                        'records': count
+                    })
+                    
+                    if not dry_run:
+                        LoanedPlayer.query.filter(
+                            LoanedPlayer.loan_team_id == team.id
+                        ).update({'loan_team_name': team.name}, synchronize_session=False)
+                        results['loans_updated'] += count
+        
+        if fix_newsletters:
+            # Update Newsletter structured_content
+            newsletters = Newsletter.query.filter(
+                Newsletter.structured_content.isnot(None)
+            ).all()
+            
+            for nl in newsletters:
+                try:
+                    content = json_module.loads(nl.structured_content) if nl.structured_content else None
+                    if not content:
+                        continue
+                    
+                    modified = False
+                    
+                    # Fix team_name at top level
+                    if content.get('team_id') and content['team_id'] in team_name_map:
+                        new_name = team_name_map[content['team_id']]
+                        if content.get('team_name') != new_name:
+                            content['team_name'] = new_name
+                            modified = True
+                    
+                    # Fix player loan_team and loan_team_name in player items
+                    for item in content.get('player_items', []):
+                        loan_team_id = item.get('loan_team_id')
+                        if loan_team_id and loan_team_id in team_name_map:
+                            new_name = team_name_map[loan_team_id]
+                            if item.get('loan_team') != new_name:
+                                item['loan_team'] = new_name
+                                modified = True
+                            if item.get('loan_team_name') != new_name:
+                                item['loan_team_name'] = new_name
+                                modified = True
+                    
+                    if modified:
+                        results['details'].append({
+                            'type': 'newsletter',
+                            'newsletter_id': nl.id,
+                            'team_id': nl.team_id
+                        })
+                        
+                        if not dry_run:
+                            nl.structured_content = json_module.dumps(content)
+                            results['newsletters_updated'] += 1
+                            
+                except Exception as e:
+                    logger.warning(f"Failed to update newsletter {nl.id}: {e}")
+        
+        if not dry_run:
+            db.session.commit()
+        
+        return jsonify(results)
+    except Exception as e:
+        logger.exception('admin_propagate_team_names failed')
+        db.session.rollback()
+        return jsonify(_safe_error_payload(e, 'Failed to propagate team names')), 500
+
+
 @api_bp.route('/admin/teams/bulk-tracking', methods=['POST'])
 @require_api_key
 def admin_bulk_update_team_tracking():
@@ -8589,6 +8874,175 @@ def admin_check_pending_games(team_id: int):
 
     except Exception as e:
         logger.exception(f"admin_check_pending_games failed for team {team_id}")
+        return jsonify(_safe_error_payload(e, 'An unexpected error occurred.')), 500
+
+
+@api_bp.route('/newsletters/readiness', methods=['GET'])
+@require_api_key
+def admin_check_newsletter_readiness():
+    """
+    Check newsletter generation readiness for all tracked teams.
+    Returns a summary showing which teams have all games completed vs pending games.
+    
+    Query params:
+      - target_date: YYYY-MM-DD (defaults to today)
+      - team_ids: comma-separated list of team DB IDs to check (optional, defaults to all tracked teams)
+    
+    Returns:
+    {
+        "target_date": "2024-11-25",
+        "week_start": "2024-11-25",
+        "week_end": "2024-12-01",
+        "ready": true/false,  # All teams ready?
+        "teams": [
+            {
+                "team_id": 1,
+                "team_name": "Manchester United",
+                "ready": true,
+                "pending_count": 0,
+                "total_loans": 5
+            },
+            ...
+        ],
+        "summary": {
+            "total_teams": 10,
+            "ready_count": 8,
+            "pending_count": 2
+        }
+    }
+    """
+    try:
+        # Get target date
+        target_date_str = request.args.get('target_date')
+        if target_date_str:
+            target_date = datetime.strptime(target_date_str, '%Y-%m-%d').date()
+        else:
+            target_date = datetime.now().date()
+
+        # Calculate week range (Monday to Sunday)
+        week_start = target_date - timedelta(days=target_date.weekday())
+        week_end = week_start + timedelta(days=6)
+        
+        # Get teams to check
+        team_ids_param = request.args.get('team_ids', '')
+        if team_ids_param:
+            team_ids = [int(tid.strip()) for tid in team_ids_param.split(',') if tid.strip()]
+            teams = Team.query.filter(Team.id.in_(team_ids)).all()
+        else:
+            # Get all tracked teams
+            teams = Team.query.filter(Team.is_tracked == True).all()
+        
+        if not teams:
+            return jsonify({
+                'target_date': target_date.isoformat(),
+                'week_start': week_start.isoformat(),
+                'week_end': week_end.isoformat(),
+                'ready': True,
+                'teams': [],
+                'summary': {
+                    'total_teams': 0,
+                    'ready_count': 0,
+                    'pending_count': 0
+                }
+            })
+        
+        results = []
+        season = api_client.current_season_start_year
+        
+        for team in teams:
+            # Get active loans for this team
+            active_loans = team.unique_active_loans()
+            
+            if not active_loans:
+                results.append({
+                    'team_id': team.id,
+                    'team_name': team.name,
+                    'ready': True,
+                    'pending_count': 0,
+                    'total_loans': 0,
+                    'pending_games': []
+                })
+                continue
+            
+            # Group players by loan team API ID
+            loan_team_map = {}
+            for loan in active_loans:
+                if loan.borrowing_team and loan.borrowing_team.team_id:
+                    api_id = loan.borrowing_team.team_id
+                    if api_id not in loan_team_map:
+                        loan_team_map[api_id] = []
+                    loan_team_map[api_id].append(loan)
+            
+            pending_games = []
+            
+            # Check fixtures for each loan team within the week
+            for loan_api_id, players in loan_team_map.items():
+                try:
+                    fixtures = api_client.get_fixtures_for_team(
+                        loan_api_id, 
+                        season, 
+                        week_start.strftime('%Y-%m-%d'),
+                        week_end.strftime('%Y-%m-%d')
+                    )
+                    
+                    for f in fixtures:
+                        fixture_date_str = (f.get('fixture') or {}).get('date')
+                        status = (f.get('fixture') or {}).get('status', {}).get('short')
+                        
+                        try:
+                            if fixture_date_str:
+                                fixture_date = datetime.fromisoformat(fixture_date_str.replace('Z', '+00:00')).date()
+                            else:
+                                continue
+                        except:
+                            continue
+                        
+                        # Only include games within the week that haven't been played
+                        if week_start <= fixture_date <= week_end and status in ['NS', 'TBD']:
+                            opponent = (f.get('teams') or {}).get('away', {}).get('name') \
+                                        if (f.get('teams') or {}).get('home', {}).get('id') == loan_api_id \
+                                        else (f.get('teams') or {}).get('home', {}).get('name')
+                            
+                            for player in players:
+                                pending_games.append({
+                                    'player_name': player.player_name,
+                                    'loan_team': player.loan_team_name,
+                                    'opponent': opponent,
+                                    'date': fixture_date_str,
+                                })
+                except Exception as e:
+                    logger.warning(f"Failed to check fixtures for loan team {loan_api_id}: {e}")
+            
+            results.append({
+                'team_id': team.id,
+                'team_name': team.name,
+                'ready': len(pending_games) == 0,
+                'pending_count': len(pending_games),
+                'total_loans': len(active_loans),
+                'pending_games': pending_games[:5]  # Only first 5 for brevity
+            })
+        
+        # Sort: not-ready teams first
+        results.sort(key=lambda x: (x['ready'], x['team_name']))
+        
+        ready_count = sum(1 for r in results if r['ready'])
+        pending_count = len(results) - ready_count
+        
+        return jsonify({
+            'target_date': target_date.isoformat(),
+            'week_start': week_start.isoformat(),
+            'week_end': week_end.isoformat(),
+            'ready': pending_count == 0,
+            'teams': results,
+            'summary': {
+                'total_teams': len(results),
+                'ready_count': ready_count,
+                'pending_count': pending_count
+            }
+        })
+
+    except Exception as e:
+        logger.exception("admin_check_newsletter_readiness failed")
         return jsonify(_safe_error_payload(e, 'An unexpected error occurred.')), 500
 
 

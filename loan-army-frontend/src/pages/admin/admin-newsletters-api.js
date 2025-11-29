@@ -1,6 +1,7 @@
 export const NEWSLETTER_GENERATE_ENDPOINT = '/newsletters/generate'
 export const NEWSLETTER_GENERATE_ALL_ENDPOINT = '/newsletters/generate-weekly-all'
 export const LOANS_SEED_TEAM_ENDPOINT = '/admin/loans/seed-team'
+export const LOANS_SEED_TOP5_ENDPOINT = '/admin/loans/seed-top5'
 
 export function buildGenerateTeamRequest({ teamId, targetDate, forceRefresh }) {
   if (!teamId) throw new Error('teamId is required')
@@ -49,6 +50,29 @@ export function buildSeedTeamRequest({ teamId, season, dryRun = false, overwrite
 
   return {
     endpoint: LOANS_SEED_TEAM_ENDPOINT,
+    options: {
+      method: 'POST',
+      body: JSON.stringify(body),
+    },
+    admin: true,
+  }
+}
+
+export function buildSeedTop5Request({ season, dryRun = false, overwrite = false, leagueIds, windowKey } = {}) {
+  const numericSeason = season != null ? Number(season) : NaN
+  if (!Number.isFinite(numericSeason)) throw new Error('season is required')
+
+  const body = {
+    season: numericSeason,
+    dry_run: !!dryRun,
+    overwrite: !!overwrite,
+  }
+
+  if (Array.isArray(leagueIds) && leagueIds.length) body.league_ids = leagueIds
+  if (windowKey != null && `${windowKey}`.trim() !== '') body.window_key = `${windowKey}`.trim()
+
+  return {
+    endpoint: LOANS_SEED_TOP5_ENDPOINT,
     options: {
       method: 'POST',
       body: JSON.stringify(body),

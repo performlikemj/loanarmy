@@ -27,7 +27,7 @@ import TeamMultiSelect from '@/components/ui/TeamMultiSelect.jsx'
 import TeamSelect from '@/components/ui/TeamSelect.jsx'
 import { NewsletterPreviewDialog } from '@/components/admin/NewsletterPreviewDialog'
 import { NEWSLETTER_ACTION_GRID_CLASS } from './admin-newsletters-layout.js'
-import { buildGenerateTeamRequest, buildGenerateAllRequest, buildSeedTeamRequest } from './admin-newsletters-api.js'
+import { buildGenerateTeamRequest, buildGenerateAllRequest, buildSeedTeamRequest, buildSeedTop5Request } from './admin-newsletters-api.js'
 import {
     seedSelectedButtonLabel,
     seedTop5ButtonLabel,
@@ -106,6 +106,11 @@ export function AdminNewsletters() {
     const [generationPreference, setGenerationPreference] = useState('always_ask')
     const [pendingGamesDialogOpen, setPendingGamesDialogOpen] = useState(false)
     const [pendingGamesData, setPendingGamesData] = useState([]) // Array of { teamName, games: [] }
+
+    // Newsletter readiness state
+    const [readinessData, setReadinessData] = useState(null)
+    const [readinessLoading, setReadinessLoading] = useState(false)
+    const [readinessDialogOpen, setReadinessDialogOpen] = useState(false)
 
     // Load config for preference
     useEffect(() => {
@@ -421,6 +426,26 @@ export function AdminNewsletters() {
         }
     }
 
+    // Check newsletter readiness for all tracked teams
+    const checkReadiness = async () => {
+        if (!generateDate) {
+            setMessage({ type: 'error', text: 'Please select a target date first' })
+            return
+        }
+
+        try {
+            setReadinessLoading(true)
+            const data = await APIService.adminCheckNewsletterReadiness(generateDate)
+            setReadinessData(data)
+            setReadinessDialogOpen(true)
+        } catch (error) {
+            console.error('Failed to check readiness:', error)
+            setMessage({ type: 'error', text: `Failed to check readiness: ${error.message}` })
+        } finally {
+            setReadinessLoading(false)
+        }
+    }
+
     const generateForSelectedTeams = async () => {
         if (selectedTeams.length === 0) {
             setMessage({ type: 'error', text: 'Please select at least one team' })
@@ -497,13 +522,8 @@ export function AdminNewsletters() {
     const seedTop5 = async () => {
         try {
             setSeedingTop5(true)
-            const result = await APIService.request('/admin/loans/seed-top5', {
-                method: 'POST',
-                body: JSON.stringify({
-                    year: parseInt(seedYear),
-                    dry_run: seedTop5DryRun
-                })
-            }, { admin: true })
+            const req = buildSeedTop5Request({ season: seedYear, dryRun: seedTop5DryRun })
+            const result = await APIService.request(req.endpoint, req.options, { admin: req.admin })
 
             setMessage({
                 type: 'success',
@@ -688,6 +708,31 @@ export function AdminNewsletters() {
                                 Force Refresh Data (clear cache)
                             </Label>
                         </div>
+                        
+                        {/* Readiness Check Button */}
+                        <Button 
+                            onClick={checkReadiness} 
+                            variant="outline" 
+                            className="w-full"
+                            disabled={readinessLoading || !generateDate}
+                        >
+                            {readinessLoading ? (
+                                <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                            ) : readinessData?.ready ? (
+                                <CheckCircle2 className="mr-2 h-4 w-4 text-green-600" />
+                            ) : readinessData ? (
+                                <AlertCircle className="mr-2 h-4 w-4 text-amber-500" />
+                            ) : (
+                                <Calendar className="mr-2 h-4 w-4" />
+                            )}
+                            {readinessData?.ready 
+                                ? 'All Games Complete - Ready to Generate!' 
+                                : readinessData 
+                                    ? `${readinessData.summary?.pending_count || 0} team(s) have pending games`
+                                    : 'Check Newsletter Readiness'
+                            }
+                        </Button>
+                        
                         <div className="flex gap-2">
                             <Button onClick={generateForSelectedTeams} className="flex-1" disabled={generating || generatingAll}>
                                 {generating && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
@@ -1349,6 +1394,129 @@ export function AdminNewsletters() {
                         <Button onClick={() => executeGeneration(selectedTeams)}>
                             Generate Anyway
                         </Button>
+                    </DialogFooter>
+                </DialogContent>
+            </Dialog>
+
+            {/* Newsletter Readiness Dialog */}
+            <Dialog open={readinessDialogOpen} onOpenChange={setReadinessDialogOpen}>
+                <DialogContent className="max-w-3xl max-h-[85vh] overflow-y-auto">
+                    <DialogHeader>
+                        <DialogTitle className={`flex items-center gap-2 ${readinessData?.ready ? 'text-green-600' : 'text-amber-600'}`}>
+                            {readinessData?.ready ? (
+                                <CheckCircle2 className="h-5 w-5" />
+                            ) : (
+                                <AlertCircle className="h-5 w-5" />
+                            )}
+                            {readinessData?.ready ? 'All Games Complete!' : 'Some Games Pending'}
+                        </DialogTitle>
+                        <DialogDescription>
+                            Week: {readinessData?.week_start} to {readinessData?.week_end}
+                        </DialogDescription>
+                    </DialogHeader>
+
+                    {readinessData && (
+                        <div className="space-y-4 my-4">
+                            {/* Summary */}
+                            <div className={`p-4 rounded-lg ${readinessData.ready ? 'bg-green-50 border border-green-200' : 'bg-amber-50 border border-amber-200'}`}>
+                                <div className="flex items-center justify-between">
+                                    <span className="font-medium">
+                                        {readinessData.ready ? (
+                                            '✅ Ready to generate newsletters!'
+                                        ) : (
+                                            `⚠️ ${readinessData.summary?.pending_count} of ${readinessData.summary?.total_teams} team(s) have pending games`
+                                        )}
+                                    </span>
+                                    <div className="flex gap-2">
+                                        <Badge variant="outline" className="bg-green-100">
+                                            {readinessData.summary?.ready_count} ready
+                                        </Badge>
+                                        {readinessData.summary?.pending_count > 0 && (
+                                            <Badge variant="outline" className="bg-amber-100">
+                                                {readinessData.summary?.pending_count} pending
+                                            </Badge>
+                                        )}
+                                    </div>
+                                </div>
+                            </div>
+
+                            {/* Team Details */}
+                            <div className="border rounded-lg overflow-hidden">
+                                <div className="max-h-[400px] overflow-auto">
+                                    <table className="w-full text-sm">
+                                        <thead className="bg-muted sticky top-0">
+                                            <tr className="text-left">
+                                                <th className="px-3 py-2 w-10">Status</th>
+                                                <th className="px-3 py-2">Team</th>
+                                                <th className="px-3 py-2 w-24 text-center">Active Loans</th>
+                                                <th className="px-3 py-2 w-24 text-center">Pending</th>
+                                                <th className="px-3 py-2">Details</th>
+                                            </tr>
+                                        </thead>
+                                        <tbody>
+                                            {readinessData.teams?.map((team, idx) => (
+                                                <tr key={idx} className={`border-t ${team.ready ? '' : 'bg-amber-50'}`}>
+                                                    <td className="px-3 py-2 text-center">
+                                                        {team.ready ? (
+                                                            <CheckCircle2 className="h-5 w-5 text-green-600 mx-auto" />
+                                                        ) : (
+                                                            <AlertCircle className="h-5 w-5 text-amber-500 mx-auto" />
+                                                        )}
+                                                    </td>
+                                                    <td className="px-3 py-2 font-medium">{team.team_name}</td>
+                                                    <td className="px-3 py-2 text-center text-muted-foreground">{team.total_loans}</td>
+                                                    <td className="px-3 py-2 text-center">
+                                                        {team.pending_count > 0 ? (
+                                                            <Badge variant="outline" className="bg-amber-100">{team.pending_count}</Badge>
+                                                        ) : (
+                                                            <span className="text-muted-foreground">—</span>
+                                                        )}
+                                                    </td>
+                                                    <td className="px-3 py-2">
+                                                        {team.pending_games?.length > 0 ? (
+                                                            <div className="text-xs text-muted-foreground">
+                                                                {team.pending_games.slice(0, 2).map((g, i) => (
+                                                                    <div key={i}>
+                                                                        {g.player_name} vs {g.opponent} ({new Date(g.date).toLocaleDateString()})
+                                                                    </div>
+                                                                ))}
+                                                                {team.pending_games.length > 2 && (
+                                                                    <div className="text-muted-foreground italic">
+                                                                        +{team.pending_games.length - 2} more...
+                                                                    </div>
+                                                                )}
+                                                            </div>
+                                                        ) : (
+                                                            <span className="text-green-600 text-xs">All complete</span>
+                                                        )}
+                                                    </td>
+                                                </tr>
+                                            ))}
+                                        </tbody>
+                                    </table>
+                                </div>
+                            </div>
+                        </div>
+                    )}
+
+                    <DialogFooter>
+                        <Button variant="outline" onClick={() => setReadinessDialogOpen(false)}>
+                            Close
+                        </Button>
+                        {readinessData?.ready && (
+                            <Button onClick={() => {
+                                setReadinessDialogOpen(false)
+                                // Auto-select all ready teams for generation
+                                const readyTeamIds = readinessData.teams
+                                    ?.filter(t => t.ready)
+                                    .map(t => t.team_id)
+                                if (readyTeamIds?.length) {
+                                    setSelectedTeams(readyTeamIds.map(String))
+                                }
+                            }}>
+                                Select All Ready Teams
+                            </Button>
+                        )}
                     </DialogFooter>
                 </DialogContent>
             </Dialog>

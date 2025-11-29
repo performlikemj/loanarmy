@@ -8133,7 +8133,40 @@ function TeamsPage() {
                           ) : (teamLoans[team.id] || []).length === 0 ? (
                             <div className="text-sm text-gray-500 text-center py-4">No loans found.</div>
                           ) : (
-                            <div className="text-sm text-gray-600">{teamLoans[team.id]?.length || 0} players on loan</div>
+                            <div className="space-y-2">
+                              {(teamLoans[team.id] || []).map((loan) => (
+                                <Link
+                                  key={loan.id}
+                                  to={`/players/${loan.player_id}`}
+                                  className="flex items-center gap-3 p-2 rounded-lg hover:bg-gray-100 transition-colors group"
+                                  onClick={(e) => e.stopPropagation()}
+                                >
+                                  {loan.player_photo ? (
+                                    <Avatar className="h-8 w-8 ring-2 ring-transparent group-hover:ring-blue-300 transition-all">
+                                      <AvatarImage src={loan.player_photo} alt={loan.player_name} />
+                                      <AvatarFallback className="text-xs bg-blue-100">
+                                        {loan.player_name.split(' ').map(n => n[0]).join('').slice(0, 2).toUpperCase()}
+                                      </AvatarFallback>
+                                    </Avatar>
+                                  ) : (
+                                    <Avatar className="h-8 w-8 bg-blue-100 ring-2 ring-transparent group-hover:ring-blue-300 transition-all">
+                                      <AvatarFallback className="text-xs">
+                                        {loan.player_name.split(' ').map(n => n[0]).join('').slice(0, 2).toUpperCase()}
+                                      </AvatarFallback>
+                                    </Avatar>
+                                  )}
+                                  <div className="flex-1 min-w-0">
+                                    <div className="font-medium text-sm text-gray-900 group-hover:text-blue-600 transition-colors truncate">
+                                      {loan.player_name}
+                                    </div>
+                                    <div className="text-xs text-gray-500 truncate">
+                                      → {loan.loan_team_name}
+                                    </div>
+                                  </div>
+                                  <ChevronRight className="h-4 w-4 text-gray-400 group-hover:text-blue-500 transition-colors" />
+                                </Link>
+                              ))}
+                            </div>
                           )}
                         </div>
                       )}
@@ -8212,27 +8245,36 @@ function TeamsPage() {
                                 (teamLoans[team.id] || []).map((loan) => (
                                   <div key={loan.id} className="border rounded-lg p-2.5 sm:p-3 bg-gray-50/50 hover:bg-gray-50 transition-colors">
                                     <div className="flex items-start gap-2 sm:gap-3">
-                                      {/* Player Photo */}
-                                      <div className="shrink-0">
-                                        {loan.player_photo ? (
-                                          <Avatar className="h-10 w-10 sm:h-12 sm:w-12">
-                                            <AvatarImage src={loan.player_photo} alt={`${loan.player_name} headshot`} />
-                                            <AvatarFallback className="text-xs bg-blue-100">
-                                              {loan.player_name.split(' ').map(n => n[0]).join('').slice(0, 2).toUpperCase()}
-                                            </AvatarFallback>
-                                          </Avatar>
-                                        ) : (
-                                          <Avatar className="h-10 w-10 sm:h-12 sm:w-12 bg-blue-100">
-                                            <AvatarFallback className="text-xs">
-                                              {loan.player_name.split(' ').map(n => n[0]).join('').slice(0, 2).toUpperCase()}
-                                            </AvatarFallback>
-                                          </Avatar>
-                                        )}
-                                      </div>
+                                      {/* Player Photo & Name - Clickable Link */}
+                                      <Link 
+                                        to={`/players/${loan.player_id}`}
+                                        className="flex items-start gap-2 sm:gap-3 flex-1 min-w-0 group"
+                                        onClick={(e) => e.stopPropagation()}
+                                      >
+                                        <div className="shrink-0">
+                                          {loan.player_photo ? (
+                                            <Avatar className="h-10 w-10 sm:h-12 sm:w-12 ring-2 ring-transparent group-hover:ring-blue-300 transition-all">
+                                              <AvatarImage src={loan.player_photo} alt={`${loan.player_name} headshot`} />
+                                              <AvatarFallback className="text-xs bg-blue-100">
+                                                {loan.player_name.split(' ').map(n => n[0]).join('').slice(0, 2).toUpperCase()}
+                                              </AvatarFallback>
+                                            </Avatar>
+                                          ) : (
+                                            <Avatar className="h-10 w-10 sm:h-12 sm:w-12 bg-blue-100 ring-2 ring-transparent group-hover:ring-blue-300 transition-all">
+                                              <AvatarFallback className="text-xs">
+                                                {loan.player_name.split(' ').map(n => n[0]).join('').slice(0, 2).toUpperCase()}
+                                              </AvatarFallback>
+                                            </Avatar>
+                                          )}
+                                        </div>
+                                        <div className="flex-1 min-w-0">
+                                          <div className="font-medium text-sm mb-1 break-words text-gray-900 group-hover:text-blue-600 transition-colors">{loan.player_name}</div>
+                                        </div>
+                                      </Link>
+                                    </div>
 
-                                      {/* Player Info */}
-                                      <div className="flex-1 min-w-0">
-                                        <div className="font-medium text-sm mb-1 break-words">{loan.player_name}</div>
+                                    {/* Player Info */}
+                                    <div className="ml-12 sm:ml-[60px]">
 
                                         {/* Loan Team with Logo */}
                                         <div className="flex flex-wrap items-center gap-1.5 sm:gap-2 mb-2">
@@ -8252,32 +8294,68 @@ function TeamsPage() {
                                           )}
                                         </div>
 
-                                        {/* Stats Badges */}
+                                        {/* Stats Badges - Position-aware */}
                                         <div className="flex flex-wrap items-center gap-1.5 mb-2">
                                           {loan.appearances !== null && loan.appearances !== undefined ? (
                                             <Badge variant="secondary" className="text-xs px-1.5 py-0.5">
                                               {loan.appearances} {loan.appearances === 1 ? 'app' : 'apps'}
                                             </Badge>
                                           ) : null}
-                                          {loan.goals !== null && loan.goals !== undefined ? (
-                                            <Badge
-                                              variant="secondary"
-                                              className={`text-xs px-1.5 py-0.5 ${loan.goals > 0 ? 'bg-green-100 text-green-800' : 'bg-gray-100 text-gray-600'}`}
-                                            >
-                                              {loan.goals} {loan.goals === 1 ? 'goal' : 'goals'}
-                                            </Badge>
-                                          ) : null}
-                                          {loan.assists !== null && loan.assists !== undefined ? (
-                                            <Badge
-                                              variant="secondary"
-                                              className={`text-xs px-1.5 py-0.5 ${loan.assists > 0 ? 'bg-blue-100 text-blue-800' : 'bg-gray-100 text-gray-600'}`}
-                                            >
-                                              {loan.assists} {loan.assists === 1 ? 'assist' : 'assists'}
-                                            </Badge>
-                                          ) : null}
+                                          {/* Goalkeeper stats */}
+                                          {loan.position === 'G' || loan.position === 'Goalkeeper' ? (
+                                            <>
+                                              {loan.saves !== null && loan.saves !== undefined ? (
+                                                <Badge
+                                                  variant="secondary"
+                                                  className={`text-xs px-1.5 py-0.5 ${loan.saves > 0 ? 'bg-purple-100 text-purple-800' : 'bg-gray-100 text-gray-600'}`}
+                                                >
+                                                  {loan.saves} {loan.saves === 1 ? 'save' : 'saves'}
+                                                </Badge>
+                                              ) : null}
+                                              {loan.goals_conceded !== null && loan.goals_conceded !== undefined ? (
+                                                <Badge
+                                                  variant="secondary"
+                                                  className={`text-xs px-1.5 py-0.5 ${loan.goals_conceded === 0 ? 'bg-green-100 text-green-800' : 'bg-gray-100 text-gray-600'}`}
+                                                >
+                                                  {loan.goals_conceded} conceded
+                                                </Badge>
+                                              ) : null}
+                                              {loan.clean_sheets !== null && loan.clean_sheets !== undefined && loan.clean_sheets > 0 ? (
+                                                <Badge
+                                                  variant="secondary"
+                                                  className="text-xs px-1.5 py-0.5 bg-emerald-100 text-emerald-800"
+                                                >
+                                                  {loan.clean_sheets} clean {loan.clean_sheets === 1 ? 'sheet' : 'sheets'}
+                                                </Badge>
+                                              ) : null}
+                                            </>
+                                          ) : (
+                                            /* Outfield player stats */
+                                            <>
+                                              {loan.goals !== null && loan.goals !== undefined ? (
+                                                <Badge
+                                                  variant="secondary"
+                                                  className={`text-xs px-1.5 py-0.5 ${loan.goals > 0 ? 'bg-green-100 text-green-800' : 'bg-gray-100 text-gray-600'}`}
+                                                >
+                                                  {loan.goals} {loan.goals === 1 ? 'goal' : 'goals'}
+                                                </Badge>
+                                              ) : null}
+                                              {loan.assists !== null && loan.assists !== undefined ? (
+                                                <Badge
+                                                  variant="secondary"
+                                                  className={`text-xs px-1.5 py-0.5 ${loan.assists > 0 ? 'bg-blue-100 text-blue-800' : 'bg-gray-100 text-gray-600'}`}
+                                                >
+                                                  {loan.assists} {loan.assists === 1 ? 'assist' : 'assists'}
+                                                </Badge>
+                                              ) : null}
+                                            </>
+                                          )}
+                                          {/* No stats fallback */}
                                           {(loan.appearances === null || loan.appearances === undefined) &&
-                                            (loan.goals === null || loan.goals === undefined) &&
-                                            (loan.assists === null || loan.assists === undefined) && (
+                                            (loan.position === 'G' || loan.position === 'Goalkeeper'
+                                              ? (loan.saves === null || loan.saves === undefined) && (loan.goals_conceded === null || loan.goals_conceded === undefined)
+                                              : (loan.goals === null || loan.goals === undefined) && (loan.assists === null || loan.assists === undefined)
+                                            ) && (
                                               <span className="text-xs text-gray-500">No stats available</span>
                                             )}
                                         </div>
@@ -8353,7 +8431,6 @@ function TeamsPage() {
                                           </div>
                                         )}
                                       </div>
-                                    </div>
                                   </div>
                                 ))
                               )}
