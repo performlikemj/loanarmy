@@ -100,18 +100,23 @@ def main():
                     stat_list = player_stats['statistics']
                     if stat_list:
                         st = stat_list[0] if isinstance(stat_list, list) else stat_list
-                        saves = st.get('saves')
+                        # Goalkeeper saves are in the 'goals' block in API-Football response
+                        goals_block = st.get('goals', {}) or {}
+                        saves = goals_block.get('saves')
+                        goals_conceded = goals_block.get('conceded')
                         
                         if saves is not None:
-                            print(f"  -> Found saves: {saves}")
+                            print(f"  -> Found saves: {saves}, conceded: {goals_conceded}")
                             
                             if not args.dry_run:
                                 stats.saves = saves
+                                if goals_conceded is not None and stats.goals_conceded is None:
+                                    stats.goals_conceded = goals_conceded
                                 db.session.commit()
                             
                             updated += 1
                         else:
-                            print(f"  -> No saves data in API response")
+                            print(f"  -> No saves data in API response (goals block: {goals_block})")
                             skipped += 1
                     else:
                         print(f"  -> Empty statistics in response")

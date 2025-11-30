@@ -431,10 +431,10 @@ export function AdminTeams() {
   }, [bulkDeletePreviews])
 
   return (
-    <div className="space-y-6">
+    <div className="space-y-4 sm:space-y-6 overflow-hidden">
       <div>
-        <h2 className="text-3xl font-bold tracking-tight">Team Management</h2>
-        <p className="text-muted-foreground mt-1">
+        <h2 className="text-2xl sm:text-3xl font-bold tracking-tight">Team Management</h2>
+        <p className="text-sm sm:text-base text-muted-foreground mt-1">
           Manage team tracking status and data
         </p>
       </div>
@@ -447,23 +447,23 @@ export function AdminTeams() {
       )}
 
       <Tabs defaultValue="teams">
-        <TabsList>
-          <TabsTrigger value="teams">
-            <Users className="h-4 w-4 mr-2" />
-            Teams ({trackedTeams.length} tracked)
+        <TabsList className="flex-wrap h-auto gap-1 p-1">
+          <TabsTrigger value="teams" className="text-xs sm:text-sm">
+            <Users className="h-4 w-4 mr-1 sm:mr-2" />
+            <span className="hidden xs:inline">Teams</span> ({trackedTeams.length})
           </TabsTrigger>
-          <TabsTrigger value="requests">
-            <Clock className="h-4 w-4 mr-2" />
-            Tracking Requests
+          <TabsTrigger value="requests" className="text-xs sm:text-sm">
+            <Clock className="h-4 w-4 mr-1 sm:mr-2" />
+            <span className="hidden xs:inline">Tracking</span> Requests
             {trackingRequests.filter(r => r.status === 'pending').length > 0 && (
-              <Badge variant="destructive" className="ml-2">
+              <Badge variant="destructive" className="ml-1 sm:ml-2 text-xs">
                 {trackingRequests.filter(r => r.status === 'pending').length}
               </Badge>
             )}
           </TabsTrigger>
-          <TabsTrigger value="fix-names" onClick={() => { if (placeholderTeams.length === 0) loadPlaceholderTeams() }}>
-            <Pencil className="h-4 w-4 mr-2" />
-            Fix Team Names
+          <TabsTrigger value="fix-names" className="text-xs sm:text-sm" onClick={() => { if (placeholderTeams.length === 0) loadPlaceholderTeams() }}>
+            <Pencil className="h-4 w-4 mr-1 sm:mr-2" />
+            Fix <span className="hidden xs:inline">Team</span> Names
           </TabsTrigger>
         </TabsList>
 
@@ -482,7 +482,7 @@ export function AdminTeams() {
             <CardContent>
               {/* Search and controls */}
               <div className="flex flex-col gap-4 mb-4">
-                <div className="flex items-center gap-4">
+                <div className="flex flex-col sm:flex-row items-stretch sm:items-center gap-2 sm:gap-4">
                   <div className="relative flex-1">
                     <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 h-4 w-4 text-muted-foreground" />
                     <Input
@@ -492,7 +492,7 @@ export function AdminTeams() {
                       className="pl-10"
                     />
                   </div>
-                  <Button variant="outline" onClick={loadTeams}>
+                  <Button variant="outline" onClick={loadTeams} className="shrink-0">
                     <RefreshCw className="h-4 w-4 mr-2" />
                     Refresh
                   </Button>
@@ -501,32 +501,30 @@ export function AdminTeams() {
                 {/* Bulk selection controls */}
                 {trackedTeams.length > 0 && (
                   <div className="flex flex-wrap items-center gap-2 p-3 bg-muted/50 rounded-lg">
-                    <span className="text-sm font-medium mr-2">Selection:</span>
-                    <Button variant="outline" size="sm" onClick={selectAllTracked}>
-                      <CheckSquare className="h-4 w-4 mr-1" />
-                      All
-                    </Button>
-                    <Button variant="outline" size="sm" onClick={selectNone}>
-                      <Square className="h-4 w-4 mr-1" />
-                      None
-                    </Button>
-                    <Button variant="outline" size="sm" onClick={invertSelection}>
-                      <ArrowLeftRight className="h-4 w-4 mr-1" />
-                      Invert
-                    </Button>
-                    
-                    <div className="h-6 w-px bg-border mx-2" />
+                    <span className="text-sm font-medium w-full sm:w-auto">Selection:</span>
+                    <div className="flex flex-wrap items-center gap-2">
+                      <Button variant="outline" size="sm" onClick={selectAllTracked}>
+                        <CheckSquare className="h-4 w-4 mr-1" />
+                        All
+                      </Button>
+                      <Button variant="outline" size="sm" onClick={selectNone}>
+                        <Square className="h-4 w-4 mr-1" />
+                        None
+                      </Button>
+                      <Button variant="outline" size="sm" onClick={invertSelection}>
+                        <ArrowLeftRight className="h-4 w-4 mr-1" />
+                        Invert
+                      </Button>
+                    </div>
                     
                     <span className="text-sm text-muted-foreground">
                       {selectedTeamIds.size} selected
                     </span>
 
                     {selectedTeamIds.size > 0 && (
-                      <>
-                        <div className="h-6 w-px bg-border mx-2" />
-                        
+                      <div className="flex flex-wrap items-center gap-2 w-full sm:w-auto mt-2 sm:mt-0 pt-2 sm:pt-0 border-t sm:border-t-0 sm:border-l sm:pl-2 border-border">
                         <Select value={bulkMode} onValueChange={setBulkMode}>
-                          <SelectTrigger className="w-44 h-8">
+                          <SelectTrigger className="w-full sm:w-44 h-8">
                             <SelectValue />
                           </SelectTrigger>
                           <SelectContent>
@@ -549,14 +547,15 @@ export function AdminTeams() {
                           variant="destructive" 
                           size="sm"
                           onClick={handleBulkDeleteClick}
+                          className="w-full sm:w-auto"
                         >
                           <Trash2 className="h-4 w-4 mr-1" />
                           {bulkMode === 'delete' 
-                            ? `Delete ${teamsToDelete.length} teams` 
+                            ? `Delete ${teamsToDelete.length}` 
                             : `Delete ${teamsToDelete.length}, keep ${teamsToKeep.length}`
                           }
                         </Button>
-                      </>
+                      </div>
                     )}
                   </div>
                 )}
@@ -577,7 +576,7 @@ export function AdminTeams() {
                     return (
                       <div 
                         key={team.id} 
-                        className={`flex items-center justify-between p-3 border rounded-lg transition-colors ${
+                        className={`p-3 border rounded-lg transition-colors ${
                           isSelected 
                             ? willBeDeleted 
                               ? 'bg-red-50 border-red-200' 
@@ -585,47 +584,50 @@ export function AdminTeams() {
                             : 'hover:bg-muted/50'
                         }`}
                       >
-                        <div className="flex items-center gap-3">
+                        <div className="flex items-start gap-3">
                           <Checkbox
                             checked={isSelected}
                             onCheckedChange={() => toggleTeamSelection(team.id)}
+                            className="mt-1"
                           />
-                          <Avatar className="h-10 w-10">
+                          <Avatar className="h-10 w-10 shrink-0">
                             <AvatarImage src={team.logo} alt={team.name} />
                             <AvatarFallback>{team.name.slice(0, 2).toUpperCase()}</AvatarFallback>
                           </Avatar>
-                          <div>
-                            <p className="font-medium">{team.name}</p>
-                            <p className="text-sm text-muted-foreground">
+                          <div className="flex-1 min-w-0">
+                            <div className="flex flex-wrap items-center gap-2">
+                              <p className="font-medium truncate">{team.name}</p>
+                              <Badge variant="default" className="bg-green-600 shrink-0">
+                                <CheckCircle className="h-3 w-3 mr-1" />
+                                Tracked
+                              </Badge>
+                              {isSelected && selectedTeamIds.size > 0 && (
+                                <Badge variant={willBeDeleted ? "destructive" : "default"} className="shrink-0">
+                                  {willBeDeleted ? 'Will be deleted' : 'Will be kept'}
+                                </Badge>
+                              )}
+                            </div>
+                            <p className="text-sm text-muted-foreground truncate">
                               {team.league_name || team.country} • {team.current_loaned_out_count} loans
                             </p>
+                            <div className="flex flex-wrap gap-2 mt-2">
+                              <Button 
+                                variant="outline" 
+                                size="sm"
+                                onClick={() => handleToggleTracking(team)}
+                              >
+                                Stop Tracking
+                              </Button>
+                              <Button 
+                                variant="destructive" 
+                                size="sm"
+                                onClick={() => handleDeleteClick(team)}
+                              >
+                                <Trash2 className="h-4 w-4 mr-1" />
+                                Delete
+                              </Button>
+                            </div>
                           </div>
-                          {isSelected && selectedTeamIds.size > 0 && (
-                            <Badge variant={willBeDeleted ? "destructive" : "default"} className="ml-2">
-                              {willBeDeleted ? 'Will be deleted' : 'Will be kept'}
-                            </Badge>
-                          )}
-                        </div>
-                        <div className="flex items-center gap-2">
-                          <Badge variant="default" className="bg-green-600">
-                            <CheckCircle className="h-3 w-3 mr-1" />
-                            Tracked
-                          </Badge>
-                          <Button 
-                            variant="outline" 
-                            size="sm"
-                            onClick={() => handleToggleTracking(team)}
-                          >
-                            Stop Tracking
-                          </Button>
-                          <Button 
-                            variant="destructive" 
-                            size="sm"
-                            onClick={() => handleDeleteClick(team)}
-                          >
-                            <Trash2 className="h-4 w-4 mr-1" />
-                            Delete
-                          </Button>
                         </div>
                       </div>
                     )
@@ -683,7 +685,7 @@ export function AdminTeams() {
         <TabsContent value="requests" className="space-y-4">
           <Card>
             <CardHeader>
-              <div className="flex items-center justify-between">
+              <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
                 <div>
                   <CardTitle>Tracking Requests</CardTitle>
                   <CardDescription>
@@ -691,7 +693,7 @@ export function AdminTeams() {
                   </CardDescription>
                 </div>
                 <Select value={requestFilter} onValueChange={setRequestFilter}>
-                  <SelectTrigger className="w-40">
+                  <SelectTrigger className="w-full sm:w-40">
                     <SelectValue />
                   </SelectTrigger>
                   <SelectContent>
@@ -713,28 +715,28 @@ export function AdminTeams() {
               ) : (
                 <div className="space-y-3">
                   {trackingRequests.map(req => (
-                    <div key={req.id} className="p-4 border rounded-lg">
-                      <div className="flex items-start justify-between gap-4">
+                    <div key={req.id} className="p-3 sm:p-4 border rounded-lg">
+                      <div className="flex flex-col sm:flex-row sm:items-start justify-between gap-3">
                         <div className="flex items-center gap-3">
                           {req.team_logo && (
-                            <Avatar className="h-12 w-12">
+                            <Avatar className="h-10 w-10 sm:h-12 sm:w-12 shrink-0">
                               <AvatarImage src={req.team_logo} alt={req.team_name} />
                               <AvatarFallback>{req.team_name?.slice(0, 2).toUpperCase()}</AvatarFallback>
                             </Avatar>
                           )}
-                          <div>
-                            <p className="font-medium">{req.team_name}</p>
-                            <p className="text-sm text-muted-foreground">{req.team_league}</p>
+                          <div className="min-w-0">
+                            <p className="font-medium truncate">{req.team_name}</p>
+                            <p className="text-sm text-muted-foreground truncate">{req.team_league}</p>
                             <p className="text-xs text-muted-foreground mt-1">
-                              Requested {new Date(req.created_at).toLocaleDateString()}
-                              {req.email && ` by ${req.email}`}
+                              {new Date(req.created_at).toLocaleDateString()}
+                              {req.email && <span className="hidden sm:inline"> by {req.email}</span>}
                             </p>
                           </div>
                         </div>
                         <Badge variant={
                           req.status === 'pending' ? 'secondary' :
                           req.status === 'approved' ? 'default' : 'destructive'
-                        }>
+                        } className="self-start shrink-0">
                           {req.status === 'pending' && <Clock className="h-3 w-3 mr-1" />}
                           {req.status === 'approved' && <CheckCircle className="h-3 w-3 mr-1" />}
                           {req.status === 'rejected' && <XCircle className="h-3 w-3 mr-1" />}
@@ -750,10 +752,11 @@ export function AdminTeams() {
                         </p>
                       )}
                       {req.status === 'pending' && (
-                        <div className="flex gap-2 mt-3">
+                        <div className="flex flex-wrap gap-2 mt-3">
                           <Button
                             size="sm"
                             onClick={() => handleRequestAction(req.id, 'approved')}
+                            className="flex-1 sm:flex-none"
                           >
                             <CheckCircle className="h-4 w-4 mr-1" />
                             Approve
@@ -762,6 +765,7 @@ export function AdminTeams() {
                             size="sm"
                             variant="outline"
                             onClick={() => handleRequestAction(req.id, 'rejected')}
+                            className="flex-1 sm:flex-none"
                           >
                             <XCircle className="h-4 w-4 mr-1" />
                             Reject
@@ -793,24 +797,24 @@ export function AdminTeams() {
             </CardHeader>
             <CardContent className="space-y-4">
               {/* Controls */}
-              <div className="flex flex-wrap items-end gap-4 p-4 bg-muted/50 rounded-lg">
-                <div className="space-y-1">
+              <div className="flex flex-col sm:flex-row flex-wrap items-start sm:items-end gap-3 sm:gap-4 p-4 bg-muted/50 rounded-lg">
+                <div className="space-y-1 w-full sm:w-auto">
                   <Label htmlFor="placeholder-season">Season Year</Label>
                   <Input
                     id="placeholder-season"
                     type="number"
                     value={placeholderSeason}
                     onChange={(e) => setPlaceholderSeason(e.target.value)}
-                    className="w-28"
+                    className="w-full sm:w-28"
                     placeholder="2024"
                   />
                 </div>
-                <Button onClick={loadPlaceholderTeams} disabled={placeholderLoading}>
+                <Button onClick={loadPlaceholderTeams} disabled={placeholderLoading} className="w-full sm:w-auto">
                   {placeholderLoading && <Loader2 className="h-4 w-4 mr-2 animate-spin" />}
                   <Search className="h-4 w-4 mr-2" />
                   Find Placeholder Names
                 </Button>
-                <div className="flex items-center gap-2 ml-auto">
+                <div className="flex flex-wrap items-center gap-2 w-full sm:w-auto sm:ml-auto">
                   <label className="flex items-center gap-2 text-sm">
                     <input
                       type="checkbox"
@@ -824,24 +828,25 @@ export function AdminTeams() {
                     onClick={bulkFixPlaceholderNames} 
                     disabled={bulkFixing || !placeholderSeason}
                     variant="secondary"
+                    className="flex-1 sm:flex-none"
                   >
                     {bulkFixing && <Loader2 className="h-4 w-4 mr-2 animate-spin" />}
                     <Wand2 className="h-4 w-4 mr-2" />
-                    Auto-Fix from API
+                    Auto-Fix
                   </Button>
                 </div>
               </div>
 
               {/* Propagate to Old Data */}
               <div className="p-4 bg-blue-50 border border-blue-200 rounded-lg">
-                <div className="flex flex-wrap items-center justify-between gap-4">
+                <div className="flex flex-col sm:flex-row flex-wrap items-start sm:items-center justify-between gap-3 sm:gap-4">
                   <div>
                     <h4 className="font-medium text-blue-900">Propagate Names to Old Data</h4>
                     <p className="text-sm text-blue-700 mt-1">
-                      After fixing team names above, use this to update old newsletters and loan records.
+                      Update old newsletters and loan records.
                     </p>
                   </div>
-                  <div className="flex items-center gap-2">
+                  <div className="flex flex-wrap items-center gap-2 w-full sm:w-auto">
                     <label className="flex items-center gap-2 text-sm">
                       <input
                         type="checkbox"
@@ -854,10 +859,11 @@ export function AdminTeams() {
                     <Button 
                       onClick={propagateTeamNames} 
                       disabled={propagating}
+                      className="flex-1 sm:flex-none"
                     >
                       {propagating && <Loader2 className="h-4 w-4 mr-2 animate-spin" />}
                       <RefreshCw className="h-4 w-4 mr-2" />
-                      {propagateDryRun ? 'Preview Propagation' : 'Propagate to Old Data'}
+                      {propagateDryRun ? 'Preview' : 'Propagate'}
                     </Button>
                   </div>
                 </div>
@@ -876,29 +882,29 @@ export function AdminTeams() {
                 </div>
               ) : (
                 <div className="border rounded-lg overflow-hidden">
-                  <div className="flex items-center justify-between bg-muted px-4 py-2">
+                  <div className="flex flex-wrap items-center justify-between gap-2 bg-muted px-4 py-2">
                     <span className="text-sm font-medium">
-                      Found {placeholderTeams.length} team(s) with placeholder names
+                      Found {placeholderTeams.length} team(s)
                     </span>
                     <Badge variant="secondary">Season {placeholderSeason}</Badge>
                   </div>
                   <div className="max-h-[500px] overflow-auto">
-                    <table className="w-full text-sm">
+                    <table className="w-full text-sm min-w-[600px]">
                       <thead className="bg-muted/60 sticky top-0">
                         <tr className="text-left">
-                          <th className="px-4 py-2 w-16">ID</th>
-                          <th className="px-4 py-2">Current Name</th>
-                          <th className="px-4 py-2">API ID</th>
-                          <th className="px-4 py-2">Season</th>
-                          <th className="px-4 py-2">Country</th>
-                          <th className="px-4 py-2 w-40">Actions</th>
+                          <th className="px-3 sm:px-4 py-2 w-12 sm:w-16">ID</th>
+                          <th className="px-3 sm:px-4 py-2">Current Name</th>
+                          <th className="px-3 sm:px-4 py-2">API ID</th>
+                          <th className="px-3 sm:px-4 py-2">Season</th>
+                          <th className="px-3 sm:px-4 py-2">Country</th>
+                          <th className="px-3 sm:px-4 py-2 w-28 sm:w-40">Actions</th>
                         </tr>
                       </thead>
                       <tbody>
                         {placeholderTeams.map((team) => (
                           <tr key={team.id} className="border-t hover:bg-muted/30">
-                            <td className="px-4 py-2 text-muted-foreground">{team.id}</td>
-                            <td className="px-4 py-2">
+                            <td className="px-3 sm:px-4 py-2 text-muted-foreground">{team.id}</td>
+                            <td className="px-3 sm:px-4 py-2">
                               {editingTeamId === team.id ? (
                                 <Input
                                   value={editingName}
@@ -913,21 +919,21 @@ export function AdminTeams() {
                               ) : (
                                 <div className="flex items-center gap-2">
                                   {team.logo && (
-                                    <Avatar className="h-6 w-6">
+                                    <Avatar className="h-6 w-6 shrink-0">
                                       <AvatarImage src={team.logo} alt={team.name} />
                                       <AvatarFallback className="text-xs">?</AvatarFallback>
                                     </Avatar>
                                   )}
-                                  <span className="text-amber-600 font-medium">{team.name}</span>
+                                  <span className="text-amber-600 font-medium truncate max-w-[150px]">{team.name}</span>
                                 </div>
                               )}
                             </td>
-                            <td className="px-4 py-2 text-muted-foreground font-mono text-xs">
+                            <td className="px-3 sm:px-4 py-2 text-muted-foreground font-mono text-xs">
                               {team.team_id}
                             </td>
-                            <td className="px-4 py-2">{team.season}</td>
-                            <td className="px-4 py-2">{team.country}</td>
-                            <td className="px-4 py-2">
+                            <td className="px-3 sm:px-4 py-2">{team.season}</td>
+                            <td className="px-3 sm:px-4 py-2">{team.country}</td>
+                            <td className="px-3 sm:px-4 py-2">
                               {editingTeamId === team.id ? (
                                 <div className="flex gap-1">
                                   <Button
@@ -956,8 +962,8 @@ export function AdminTeams() {
                                   variant="outline"
                                   onClick={() => startEditingName(team)}
                                 >
-                                  <Pencil className="h-4 w-4 mr-1" />
-                                  Edit
+                                  <Pencil className="h-4 w-4 sm:mr-1" />
+                                  <span className="hidden sm:inline">Edit</span>
                                 </Button>
                               )}
                             </td>

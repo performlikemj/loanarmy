@@ -2938,6 +2938,10 @@ def _sync_player_club_fixtures(player_id: int, loan_team_api_id: int, season: in
                 
                 # Only add if player actually played
                 if minutes and minutes > 0:
+                    # Fouls and penalties for more complete stats
+                    fouls = st.get('fouls', {}) or {}
+                    penalty = st.get('penalty', {}) or {}
+                    
                     fps = FixturePlayerStats(
                         fixture_id=existing_fixture.id,
                         player_api_id=player_id,
@@ -2957,7 +2961,13 @@ def _sync_player_club_fixtures(player_id: int, loan_team_api_id: int, season: in
                         duels_won=duels.get('won'),
                         duels_total=duels.get('total'),
                         dribbles_success=dribbles.get('success'),
-                        saves=st.get('saves'),
+                        # Goalkeeper stats - saves and conceded are in goals block
+                        saves=goals_obj.get('saves'),
+                        goals_conceded=goals_obj.get('conceded'),
+                        # Additional stats
+                        fouls_drawn=fouls.get('drawn'),
+                        fouls_committed=fouls.get('committed'),
+                        penalty_saved=penalty.get('saved'),
                     )
                     db.session.add(fps)
                     synced += 1
@@ -6724,17 +6734,24 @@ def admin_resync_goalkeeper_saves():
                     stat_list = player_stats['statistics']
                     if stat_list:
                         st = stat_list[0] if isinstance(stat_list, list) else stat_list
-                        saves = st.get('saves')
+                        # Goalkeeper saves are in the 'goals' block in API-Football response
+                        goals_block = st.get('goals', {}) or {}
+                        saves = goals_block.get('saves')
+                        goals_conceded = goals_block.get('conceded')
                         
                         if saves is not None:
                             if not dry_run:
                                 stats.saves = saves
+                                # Also update goals_conceded if missing
+                                if goals_conceded is not None and stats.goals_conceded is None:
+                                    stats.goals_conceded = goals_conceded
                                 db.session.commit()
                             
                             details.append({
                                 'player_id': player_api_id,
                                 'fixture_id': fixture_id_api,
                                 'saves': saves,
+                                'goals_conceded': goals_conceded,
                                 'status': 'updated' if not dry_run else 'would_update'
                             })
                             updated += 1
@@ -7306,33 +7323,62 @@ def admin_sync_player_fixtures(player_id: int):
                 player_stats = api_client.get_player_stats_for_fixture(player_id, season, fixture_id_api)
                 
                 if player_stats and player_stats.get('statistics'):
-                    stats = player_stats['statistics']
+                    # statistics is a LIST, get first element
+                    stat_list = player_stats['statistics']
+                    if not stat_list:
+                        skipped += 1
+                        continue
+                    st = stat_list[0] if isinstance(stat_list, list) else stat_list
                     
-                    if not dry_run and existing_fixture:
+                    # Extract stats from the nested structure
+                    games = st.get('games', {}) or {}
+                    goals_block = st.get('goals', {}) or {}
+                    cards = st.get('cards', {}) or {}
+                    shots = st.get('shots', {}) or {}
+                    passes = st.get('passes', {}) or {}
+                    tackles = st.get('tackles', {}) or {}
+                    duels = st.get('duels', {}) or {}
+                    dribbles = st.get('dribbles', {}) or {}
+                    fouls = st.get('fouls', {}) or {}
+                    penalty = st.get('penalty', {}) or {}
+                    
+                    minutes = games.get('minutes', 0) or 0
+                    
+                    # Only add if player actually played
+                    if minutes and minutes > 0 and not dry_run and existing_fixture:
                         fps = FixturePlayerStats(
                             fixture_id=existing_fixture.id,
                             player_api_id=player_id,
                             team_api_id=loan_team_api_id,
-                            minutes=stats.get('minutes', 0),
-                            position=stats.get('position'),
-                            rating=stats.get('rating'),
-                            goals=stats.get('goals', 0),
-                            assists=stats.get('assists', 0),
-                            yellows=stats.get('yellows', 0),
-                            reds=stats.get('reds', 0),
-                            shots_total=stats.get('shots_total'),
-                            shots_on=stats.get('shots_on'),
-                            passes_total=stats.get('passes_total'),
-                            passes_key=stats.get('passes_key'),
-                            tackles_total=stats.get('tackles_total'),
-                            duels_won=stats.get('duels_won'),
-                            duels_total=stats.get('duels_total'),
-                            dribbles_success=stats.get('dribbles_success'),
-                            saves=stats.get('saves'),
+                            minutes=minutes,
+                            position=games.get('position'),
+                            rating=games.get('rating'),
+                            goals=goals_block.get('total', 0) or 0,
+                            assists=goals_block.get('assists', 0) or 0,
+                            yellows=cards.get('yellow', 0) or 0,
+                            reds=cards.get('red', 0) or 0,
+                            shots_total=shots.get('total'),
+                            shots_on=shots.get('on'),
+                            passes_total=passes.get('total'),
+                            passes_key=passes.get('key'),
+                            tackles_total=tackles.get('total'),
+                            duels_won=duels.get('won'),
+                            duels_total=duels.get('total'),
+                            dribbles_success=dribbles.get('success'),
+                            # Goalkeeper stats - saves and conceded are in goals block
+                            saves=goals_block.get('saves'),
+                            goals_conceded=goals_block.get('conceded'),
+                            # Additional stats
+                            fouls_drawn=fouls.get('drawn'),
+                            fouls_committed=fouls.get('committed'),
+                            penalty_saved=penalty.get('saved'),
                         )
                         db.session.add(fps)
-                    
-                    synced += 1
+                        synced += 1
+                    elif minutes and minutes > 0:
+                        synced += 1  # Dry run counts this as would-sync
+                    else:
+                        skipped += 1
                 else:
                     skipped += 1
                     

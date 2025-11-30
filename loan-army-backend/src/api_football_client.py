@@ -1024,7 +1024,7 @@ class APIFootballClient:
                     return {
                         "statistics": [{
                             "games": games,      # Pass through full games object
-                            "goals": goals,      # Pass through full goals object
+                            "goals": goals,      # Pass through full goals object (includes saves, conceded for GKs)
                             "cards": cards,      # Pass through full cards object
                             "shots": shots,      # NEW: shots stats
                             "passes": passes,    # NEW: passing stats
@@ -1034,7 +1034,8 @@ class APIFootballClient:
                             "fouls": fouls,      # NEW: fouls drawn/committed
                             "penalty": penalty,  # NEW: penalty stats
                             "offsides": st.get('offsides'),  # NEW: offsides
-                            "saves": st.get('saves'),  # Goalkeeper saves (direct field in API-Football)
+                            # Goalkeeper saves: API-Football stores in goals block
+                            "saves": goals.get('saves'),
                         }],
                         "played": played_flag,
                         "role": role,
