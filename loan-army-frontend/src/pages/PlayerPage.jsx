@@ -662,7 +662,7 @@ export function PlayerPage() {
                                                         <th className="p-3 font-medium text-gray-500">Match</th>
                                                         <th className="p-3 font-medium text-gray-500">Min</th>
                                                         <th className="p-3 font-medium text-gray-500">Rating</th>
-                                                        <th className="p-3 font-medium text-gray-500">{position === 'Goalkeeper' ? 'Saves/GA' : 'G/A'}</th>
+                                                        <th className="p-3 font-medium text-gray-500">{position === 'Goalkeeper' ? 'Performance' : 'G/A'}</th>
                                                         <th className="p-3 font-medium text-gray-500">Key Stats</th>
                                                     </tr>
                                                 </thead>
@@ -702,12 +702,18 @@ export function PlayerPage() {
                                                             </td>
                                                             <td className="p-3">
                                                                 {position === 'Goalkeeper' ? (
-                                                                    <>
-                                                                        {s.saves > 0 && <span className="mr-2">🧤 {s.saves}</span>}
-                                                                        {s.goals_conceded > 0 && <span className="text-orange-600">{s.goals_conceded} GA</span>}
-                                                                        {s.goals_conceded === 0 && <span className="text-green-600">CS</span>}
-                                                                        {!s.saves && s.goals_conceded === undefined && <span className="text-gray-300">-</span>}
-                                                                    </>
+                                                                    <div className="flex flex-col gap-0.5">
+                                                                        {(s.saves > 0 || s.saves === 0) && (
+                                                                            <span className="text-blue-600 text-xs font-medium">{s.saves} {s.saves === 1 ? 'save' : 'saves'}</span>
+                                                                        )}
+                                                                        {s.goals_conceded === 0 && (
+                                                                            <span className="text-green-600 text-xs font-medium">Clean sheet ✓</span>
+                                                                        )}
+                                                                        {s.goals_conceded > 0 && (
+                                                                            <span className="text-orange-600 text-xs">{s.goals_conceded} conceded</span>
+                                                                        )}
+                                                                        {s.saves === undefined && s.goals_conceded === undefined && <span className="text-gray-300">-</span>}
+                                                                    </div>
                                                                 ) : (
                                                                     <>
                                                                         {s.goals > 0 && <span className="mr-2">⚽ {s.goals}</span>}
@@ -717,10 +723,18 @@ export function PlayerPage() {
                                                                 )}
                                                             </td>
                                                             <td className="p-3 text-xs text-gray-500">
-                                                                {s.passes?.key > 0 && <div>{s.passes.key} Key Passes</div>}
-                                                                {s.tackles?.total > 0 && <div>{s.tackles.total} Tackles</div>}
-                                                                {s.dribbles?.success > 0 && <div>{s.dribbles.success} Dribbles</div>}
-                                                                {s.saves > 0 && <div>{s.saves} Saves</div>}
+                                                                {position === 'Goalkeeper' ? (
+                                                                    <>
+                                                                        {s.passes?.total > 0 && <div>{s.passes.total} Passes</div>}
+                                                                        {s.passes?.accuracy && <div>{s.passes.accuracy}% Pass Acc</div>}
+                                                                    </>
+                                                                ) : (
+                                                                    <>
+                                                                        {s.passes?.key > 0 && <div>{s.passes.key} Key Passes</div>}
+                                                                        {s.tackles?.total > 0 && <div>{s.tackles.total} Tackles</div>}
+                                                                        {s.dribbles?.success > 0 && <div>{s.dribbles.success} Dribbles</div>}
+                                                                    </>
+                                                                )}
                                                             </td>
                                                         </tr>
                                                     ))}
@@ -907,7 +921,7 @@ export function PlayerPage() {
                                             {(player.appearances > 0 || player.goals > 0 || player.assists > 0 || player.saves > 0) && (
                                                 <div className="text-xs text-gray-400 mt-0.5">
                                                     {player.appearances || 0} apps · {player.position === 'G' || player.position === 'Goalkeeper' 
-                                                        ? `${player.saves || 0} saves · ${player.goals_conceded || 0} GA`
+                                                        ? `${player.saves || 0} saves · ${player.goals_conceded || 0} conceded`
                                                         : `${player.goals || 0}G · ${player.assists || 0}A`}
                                                 </div>
                                             )}
