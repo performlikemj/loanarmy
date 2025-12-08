@@ -1902,6 +1902,12 @@ class APIFootballClient:
                     logger.warning(f"Failed to store/update fixture/player stats for fixture {fixture_id}, player {player_id}: {e}")
                     # Continue processing even if storage fails
             
+            # Track stats coverage level for this match
+            # 'full' = detailed stats (minutes, rating, shots, passes, etc.)
+            # 'limited' = only basic stats from lineups+events (goals, assists, cards)
+            # 'none' = player not found in this match
+            match_stats_coverage = 'none'
+            
             # Initialize comprehensive player line stats
             player_line = {
                 'minutes': 0,
@@ -1940,6 +1946,7 @@ class APIFootballClient:
                 minutes = player_stats_row.minutes or 0
                 if minutes > 0:
                     played = True
+                    match_stats_coverage = 'full'  # Full stats from database
                     player_line = {
                         'minutes': minutes,
                         'goals': player_stats_row.goals or 0,
@@ -2043,11 +2050,17 @@ class APIFootballClient:
                         # For limited coverage (FA Cup, etc.), assume ~45 mins if in starting XI but no minutes data
                         effective_minutes = minutes if minutes > 0 else (45 if pstats.get('role') == 'startXI' else 1)
                         
-                        # Log when we're using fallback with goals/assists from events (FA Cup, etc.)
-                        if minutes == 0 and (goals_scored > 0 or assists_made > 0):
+                        # Determine coverage level based on available data
+                        # If we have actual minutes from API, we have full stats
+                        # If minutes=0 but player participated, we only have limited stats from events
+                        if minutes > 0:
+                            match_stats_coverage = 'full'
+                        else:
+                            match_stats_coverage = 'limited'
                             logger.info(
-                                f"⚽ LIMITED COVERAGE: player_id={player_id}, fixture_id={fixture_id}, "
-                                f"goals={goals_scored}, assists={assists_made} (from events, no minutes data)"
+                                f"📊 LIMITED STATS: player_id={player_id}, fixture_id={fixture_id}, "
+                                f"competition={fx.get('league', {}).get('name')}, "
+                                f"goals={goals_scored}, assists={assists_made} (from events only)"
                             )
                         
                         player_line.update({
@@ -2229,6 +2242,7 @@ class APIFootballClient:
                 'player': player_line,
                 'role': pstats.get('role') if pstats else None,
                 'match_notes': match_notes,  # Explicit attribution to prevent AI misattribution
+                'stats_coverage': match_stats_coverage,  # 'full', 'limited', or 'none'
             }
 
             if include_team_stats:
@@ -2303,6 +2317,11 @@ class APIFootballClient:
             logger.warning(f"Failed to fetch upcoming fixtures for player_id={player_id}: {e}")
             upcoming_fixtures = []
         
+        # Check if any matches had limited stats coverage
+        limited_matches = [m for m in matches if m.get('stats_coverage') == 'limited']
+        has_limited_stats = len(limited_matches) > 0
+        limited_competitions = list(set(m.get('competition') for m in limited_matches if m.get('competition')))
+        
         return {
             'player_id': player_id,
             'player_api_id': player_id,
@@ -2312,7 +2331,9 @@ class APIFootballClient:
             'range': [start_str, end_str],
             'totals': totals,
             'matches': matches,
-            'upcoming_fixtures': upcoming_fixtures
+            'upcoming_fixtures': upcoming_fixtures,
+            'has_limited_stats': has_limited_stats,  # True if any match lacked detailed stats
+            'limited_competitions': limited_competitions,  # e.g., ['FA Cup', 'EFL Trophy']
         }
 
     # ------------------------------------------------------------------

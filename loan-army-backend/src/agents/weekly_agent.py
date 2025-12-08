@@ -696,6 +696,20 @@ Manual/Untracked Players (can_fetch_stats=False):
 - If any news links/articles were found, ALWAYS include them - they provide valuable context
 - Example: "This player is not currently tracked by our data provider. We've requested they be added to improve future coverage. [Player] remains on loan with [Team]."
 
+Limited Stats Coverage (has_limited_stats=True or stats_coverage='limited' on a match):
+- Some competitions (FA Cup, EFL Trophy, etc.) only provide basic stats (goals, assists, cards) without detailed metrics
+- When a match has stats_coverage='limited', we have goals/assists/cards but NOT: minutes, rating, shots, passes, tackles, dribbles
+- The limited_competitions field lists which competitions had limited data (e.g., ['FA Cup', 'EFL Trophy'])
+- TASTEFUL HANDLING:
+  - DO lead with the key stats we have: "Scored twice in the FA Cup tie against Luton"
+  - DO NOT apologize or over-explain: avoid "unfortunately we don't have detailed stats"
+  - If mixing full and limited matches, prioritize detail on full-coverage matches
+  - For limited matches, focus on the outcome: goals, assists, result, and context from match_notes
+  - Example (good): "E. Ennis netted twice in the FA Cup draw with Luton, then started against Tranmere in the EFL Trophy."
+  - Example (bad): "Detailed statistics are not available for the FA Cup match, but E. Ennis scored 2 goals."
+- At the end of a player's summary, you MAY add a brief note ONLY if most matches were limited:
+  "Note: Cup competitions provide limited match data."
+
 Quality rules (STRICT):
 - ROLE-BASED LANGUAGE (check role field for each match):
   - role='startXI' AND minutes > 60 → "started" (full game or most of it)
@@ -732,7 +746,9 @@ Output JSON ONLY:
     "player_name": "H. Player",
     "week_summary": "IN-DEPTH multi-sentence summary using ALL stats and match_notes",
     "stats": {...},  // Must match source data for this player_id exactly
-    "match_notes": [...]
+    "match_notes": [...],
+    "has_limited_stats": false,  // true if any match lacked detailed stats
+    "limited_competitions": []  // e.g., ["FA Cup"] - competitions with basic stats only
   }]}],
   "by_numbers": {"minutes_leaders":[...], "ga_leaders":[...]},
   "fan_pulse": [{"player":"...","forum":"...","quote":"...","url":"..."}]
