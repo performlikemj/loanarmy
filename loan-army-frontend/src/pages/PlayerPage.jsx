@@ -24,10 +24,12 @@ import {
     ResponsiveContainer,
     ReferenceLine,
 } from 'recharts'
-import { Loader2, ArrowLeft, User, TrendingUp, Calendar, Target, PenTool, ChevronRight, Users } from 'lucide-react'
+import { Loader2, ArrowLeft, User, TrendingUp, Calendar, Target, PenTool, ChevronRight, Users, Info } from 'lucide-react'
 import { APIService } from '@/lib/api'
 import { format } from 'date-fns'
 import { Avatar, AvatarFallback, AvatarImage } from '@/components/ui/avatar'
+import { SponsorSidebar, SponsorStrip } from '@/components/SponsorSidebar'
+import { Tooltip as UITooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip'
 
 const METRIC_CONFIG = {
     'Attacker': {
@@ -88,10 +90,16 @@ export function PlayerPage() {
     const [position, setPosition] = useState(DEFAULT_POSITION)
     const [selectedMetrics, setSelectedMetrics] = useState([])
     
-    // Team players drawer state
+    // Parent club drawer state (players loaned OUT from parent club)
     const [drawerOpen, setDrawerOpen] = useState(false)
     const [teamPlayers, setTeamPlayers] = useState([])
     const [loadingTeamPlayers, setLoadingTeamPlayers] = useState(false)
+    
+    // Loan team drawer state (players loaned TO this team)
+    const [loanTeamDrawerOpen, setLoanTeamDrawerOpen] = useState(false)
+    const [loanTeamPlayers, setLoanTeamPlayers] = useState([])
+    const [loadingLoanTeamPlayers, setLoadingLoanTeamPlayers] = useState(false)
+    const [selectedLoanTeam, setSelectedLoanTeam] = useState(null)
 
     // Smart back navigation - goes to previous page, or home if no history
     const handleBack = () => {
@@ -164,7 +172,7 @@ export function PlayerPage() {
         })
     }
 
-    // Handle parent club click to show other loanees
+    // Handle parent club click to show other loanees (players loaned OUT from parent club)
     const handleParentClubClick = async () => {
         // Use primary_team_db_id (database ID) for API calls
         if (!profile?.primary_team_db_id) return
@@ -175,7 +183,8 @@ export function PlayerPage() {
         try {
             const loans = await APIService.getTeamLoans(profile.primary_team_db_id, {
                 active_only: 'true',
-                dedupe: 'true'
+                dedupe: 'true',
+                direction: 'loaned_from'
             })
             // Filter out current player
             const otherPlayers = loans.filter(loan => loan.player_id !== parseInt(playerId))
@@ -185,6 +194,31 @@ export function PlayerPage() {
             setTeamPlayers([])
         } finally {
             setLoadingTeamPlayers(false)
+        }
+    }
+
+    // Handle loan team click to show other players on loan at that team
+    const handleLoanTeamClick = async (loanTeamDbId, loanTeamName, loanTeamLogo) => {
+        if (!loanTeamDbId) return
+        
+        setSelectedLoanTeam({ name: loanTeamName, logo: loanTeamLogo })
+        setLoanTeamDrawerOpen(true)
+        setLoadingLoanTeamPlayers(true)
+        
+        try {
+            const loans = await APIService.getTeamLoans(loanTeamDbId, {
+                active_only: 'true',
+                dedupe: 'true',
+                direction: 'loaned_to'
+            })
+            // Filter out current player
+            const otherPlayers = loans.filter(loan => loan.player_id !== parseInt(playerId))
+            setLoanTeamPlayers(otherPlayers)
+        } catch (err) {
+            console.error('Failed to load loan team players:', err)
+            setLoanTeamPlayers([])
+        } finally {
+            setLoadingLoanTeamPlayers(false)
         }
     }
 
@@ -354,9 +388,10 @@ export function PlayerPage() {
                                             <span className="text-gray-400">→</span>
                                             <div className="flex flex-wrap items-center gap-2">
                                                 {profile.loan_history.map((loan, idx) => (
-                                                    <div 
+                                                    <button 
                                                         key={idx} 
-                                                        className={`flex items-center gap-1.5 ${loan.is_active ? 'text-blue-600' : 'text-gray-400'}`}
+                                                        onClick={() => loan.loan_team_db_id && handleLoanTeamClick(loan.loan_team_db_id, loan.loan_team_name, loan.loan_team_logo)}
+                                                        className={`flex items-center gap-1.5 group ${loan.is_active ? 'text-blue-600 hover:text-blue-800' : 'text-gray-400 hover:text-gray-600'} transition-colors ${loan.loan_team_db_id ? 'cursor-pointer' : ''}`}
                                                     >
                                                         {loan.loan_team_logo && (
                                                             <img 
@@ -365,9 +400,12 @@ export function PlayerPage() {
                                                                 className={`w-5 h-5 rounded-full object-cover ${!loan.is_active ? 'opacity-50' : ''}`} 
                                                             />
                                                         )}
-                                                        <span className={`font-medium ${!loan.is_active ? 'line-through' : ''}`}>
+                                                        <span className={`font-medium ${!loan.is_active ? 'line-through' : ''} ${loan.loan_team_db_id ? 'group-hover:underline' : ''}`}>
                                                             {loan.loan_team_name}
                                                         </span>
+                                                        {loan.loan_team_db_id && (
+                                                            <Users className="w-3.5 h-3.5 opacity-0 group-hover:opacity-100 transition-opacity text-blue-500" />
+                                                        )}
                                                         <Badge 
                                                             variant="outline" 
                                                             className={`text-xs ${loan.is_active 
@@ -379,7 +417,7 @@ export function PlayerPage() {
                                                         {idx < profile.loan_history.length - 1 && (
                                                             <span className="text-gray-300 ml-1">→</span>
                                                         )}
-                                                    </div>
+                                                    </button>
                                                 ))}
                                             </div>
                                         </>
@@ -388,13 +426,19 @@ export function PlayerPage() {
                                     {(!profile?.loan_history || profile.loan_history.length === 0) && profile?.loan_team_name && (
                                         <>
                                             <span className="text-gray-400">→</span>
-                                            <div className="flex items-center gap-1.5 text-blue-600">
+                                            <button 
+                                                onClick={() => profile.loan_team_db_id && handleLoanTeamClick(profile.loan_team_db_id, profile.loan_team_name, profile.loan_team_logo)}
+                                                className={`flex items-center gap-1.5 text-blue-600 hover:text-blue-800 transition-colors group ${profile.loan_team_db_id ? 'cursor-pointer' : ''}`}
+                                            >
                                                 {profile.loan_team_logo && (
                                                     <img src={profile.loan_team_logo} alt="" className="w-5 h-5 rounded-full object-cover" />
                                                 )}
-                                                <span className="font-medium">{profile.loan_team_name}</span>
+                                                <span className={`font-medium ${profile.loan_team_db_id ? 'group-hover:underline' : ''}`}>{profile.loan_team_name}</span>
+                                                {profile.loan_team_db_id && (
+                                                    <Users className="w-3.5 h-3.5 opacity-0 group-hover:opacity-100 transition-opacity text-blue-500" />
+                                                )}
                                                 <Badge variant="outline" className="text-xs bg-blue-50 text-blue-700 border-blue-200">Loan</Badge>
-                                            </div>
+                                            </button>
                                         </>
                                     )}
                                 </div>
@@ -404,16 +448,93 @@ export function PlayerPage() {
                 </div>
             </div>
 
-            <div className="max-w-6xl mx-auto px-4 py-6">
-                {stats.length === 0 ? (
-                    <Card>
-                        <CardContent className="py-12 text-center">
-                            <Target className="h-12 w-12 mx-auto text-gray-300 mb-4" />
-                            <p className="text-gray-500">No match data available for this player yet.</p>
-                        </CardContent>
-                    </Card>
-                ) : (
-                    <div className="space-y-6">
+            <div className="max-w-[1400px] mx-auto px-4 py-6">
+                <div className="flex flex-col lg:flex-row gap-6">
+                    {/* Main Content */}
+                    <div className="flex-1 min-w-0 max-w-6xl">
+                        {stats.length === 0 && seasonStats?.stats_coverage !== 'limited' ? (
+                            <Card>
+                                <CardContent className="py-12 text-center">
+                                    <Target className="h-12 w-12 mx-auto text-gray-300 mb-4" />
+                                    <p className="text-gray-500">No match data available for this player yet.</p>
+                                </CardContent>
+                            </Card>
+                        ) : stats.length === 0 && seasonStats?.stats_coverage === 'limited' ? (
+                            /* LIMITED COVERAGE VIEW - Show basic stats from lineup/events data */
+                            <div className="space-y-6">
+                                {/* Limited Coverage Notice */}
+                                <Card className="bg-amber-50 border-amber-200">
+                                    <CardContent className="py-4">
+                                        <div className="flex items-start gap-3">
+                                            <Target className="h-5 w-5 text-amber-600 mt-0.5" />
+                                            <div>
+                                                <p className="font-medium text-amber-800">Limited Stats Available</p>
+                                                <p className="text-sm text-amber-700 mt-1">
+                                                    {seasonStats?.limited_stats_note || 'Full match stats are not available for this league. Showing appearances, goals, and assists from lineup and event data.'}
+                                                </p>
+                                            </div>
+                                        </div>
+                                    </CardContent>
+                                </Card>
+                                
+                                {/* Basic Stats Cards */}
+                                <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
+                                    <Card>
+                                        <CardContent className="pt-4 text-center">
+                                            <div className="text-3xl font-bold text-gray-900">{seasonStats?.appearances || 0}</div>
+                                            <div className="text-xs text-gray-500 uppercase tracking-wider mt-1">Appearances</div>
+                                        </CardContent>
+                                    </Card>
+                                    <Card>
+                                        <CardContent className="pt-4 text-center">
+                                            <div className="text-3xl font-bold text-blue-600">{seasonStats?.goals || 0}</div>
+                                            <div className="text-xs text-gray-500 uppercase tracking-wider mt-1">Goals</div>
+                                        </CardContent>
+                                    </Card>
+                                    <Card>
+                                        <CardContent className="pt-4 text-center">
+                                            <div className="text-3xl font-bold text-green-600">{seasonStats?.assists || 0}</div>
+                                            <div className="text-xs text-gray-500 uppercase tracking-wider mt-1">Assists</div>
+                                        </CardContent>
+                                    </Card>
+                                    <Card>
+                                        <CardContent className="pt-4 text-center">
+                                            <div className="text-3xl font-bold text-yellow-600">{seasonStats?.yellows || 0}</div>
+                                            <div className="text-xs text-gray-500 uppercase tracking-wider mt-1">Yellow Cards</div>
+                                        </CardContent>
+                                    </Card>
+                                </div>
+                                
+                                {/* Loan Club Info */}
+                                {seasonStats?.clubs && seasonStats.clubs.length > 0 && (
+                                    <Card>
+                                        <CardHeader className="pb-2">
+                                            <CardTitle className="text-base">Current Loan</CardTitle>
+                                        </CardHeader>
+                                        <CardContent>
+                                            <div className="flex items-center gap-3">
+                                                {seasonStats.clubs[0].team_logo && (
+                                                    <img 
+                                                        src={seasonStats.clubs[0].team_logo} 
+                                                        alt={seasonStats.clubs[0].team_name}
+                                                        className="h-10 w-10 object-contain"
+                                                    />
+                                                )}
+                                                <div>
+                                                    <div className="font-semibold">{seasonStats.clubs[0].team_name}</div>
+                                                    <div className="text-sm text-gray-500">
+                                                        {seasonStats.clubs[0].appearances} appearances
+                                                        {seasonStats.clubs[0].goals > 0 && ` · ${seasonStats.clubs[0].goals} goals`}
+                                                        {seasonStats.clubs[0].assists > 0 && ` · ${seasonStats.clubs[0].assists} assists`}
+                                                    </div>
+                                                </div>
+                                            </div>
+                                        </CardContent>
+                                    </Card>
+                                )}
+                            </div>
+                        ) : (
+                            <div className="space-y-6">
                         {/* Season Summary Cards - Position-aware */}
                         <div className="grid grid-cols-2 md:grid-cols-5 gap-4">
                             <Card>
@@ -853,8 +974,18 @@ export function PlayerPage() {
                                 </CardContent>
                             </Card>
                         )}
+                        </div>
+                    )}
                     </div>
-                )}
+
+                    {/* Sponsor Sidebar - visible on larger screens */}
+                    <SponsorSidebar className="hidden lg:block" />
+                </div>
+
+                {/* Mobile Sponsor Strip - visible on smaller screens */}
+                <div className="lg:hidden pb-6">
+                    <SponsorStrip />
+                </div>
             </div>
 
             {/* Team Players Drawer */}
@@ -917,6 +1048,97 @@ export function PlayerPage() {
                                                     <img src={player.loan_team_logo} alt="" className="w-4 h-4 rounded-full" />
                                                 )}
                                                 <span className="truncate">{player.loan_team_name}</span>
+                                            </div>
+                                            {(player.appearances > 0 || player.goals > 0 || player.assists > 0 || player.saves > 0) && (
+                                                <div className="text-xs text-gray-400 mt-0.5">
+                                                    {player.appearances || 0} apps · {player.position === 'G' || player.position === 'Goalkeeper' 
+                                                        ? `${player.saves || 0} saves · ${player.goals_conceded || 0} conceded`
+                                                        : `${player.goals || 0}G · ${player.assists || 0}A`}
+                                                </div>
+                                            )}
+                                        </div>
+                                        <ChevronRight className="h-5 w-5 text-gray-300 group-hover:text-blue-500 transition-colors flex-shrink-0" />
+                                    </Link>
+                                ))}
+                            </div>
+                        )}
+                    </div>
+                </DrawerContent>
+            </Drawer>
+
+            {/* Loan Team Players Drawer - shows players loaned TO this team */}
+            <Drawer open={loanTeamDrawerOpen} onOpenChange={setLoanTeamDrawerOpen}>
+                <DrawerContent>
+                    <DrawerHeader className="border-b">
+                        <div className="flex items-center gap-3">
+                            {selectedLoanTeam?.logo && (
+                                <img 
+                                    src={selectedLoanTeam.logo} 
+                                    alt="" 
+                                    className="w-10 h-10 rounded-full object-cover border-2 border-gray-200" 
+                                />
+                            )}
+                            <div>
+                                <DrawerTitle>Players on Loan at {selectedLoanTeam?.name}</DrawerTitle>
+                                <DrawerDescription>
+                                    {loadingLoanTeamPlayers 
+                                        ? "Loading players..." 
+                                        : `${loanTeamPlayers.length} tracked loanee${loanTeamPlayers.length !== 1 ? 's' : ''} from top-flight clubs`
+                                    }
+                                </DrawerDescription>
+                            </div>
+                        </div>
+                    </DrawerHeader>
+                    
+                    <div className="p-4 max-h-[60vh] overflow-y-auto">
+                        {loadingLoanTeamPlayers ? (
+                            <div className="flex items-center justify-center py-8">
+                                <Loader2 className="h-6 w-6 animate-spin text-blue-500" />
+                            </div>
+                        ) : loanTeamPlayers.length === 0 ? (
+                            <div className="text-center py-8 px-4">
+                                <div className="flex items-center justify-center gap-2 text-gray-500 mb-2">
+                                    <span>No other tracked loanees at this club</span>
+                                    <UITooltip>
+                                        <TooltipTrigger asChild>
+                                            <Info className="h-4 w-4 text-gray-400 cursor-help" />
+                                        </TooltipTrigger>
+                                        <TooltipContent side="top" className="max-w-xs text-center">
+                                            <p>We track players on loan from top-flight clubs (Premier League, La Liga, Serie A, etc.). Players loaned from lower leagues aren't included.</p>
+                                        </TooltipContent>
+                                    </UITooltip>
+                                </div>
+                                <p className="text-sm text-gray-400">
+                                    There may be additional loanees from leagues we don't monitor.
+                                </p>
+                            </div>
+                        ) : (
+                            <div className="space-y-2">
+                                {loanTeamPlayers.map((player) => (
+                                    <Link
+                                        key={player.player_id}
+                                        to={`/players/${player.player_id}`}
+                                        onClick={() => setLoanTeamDrawerOpen(false)}
+                                        className="flex items-center gap-3 p-3 rounded-lg hover:bg-gray-50 active:bg-gray-100 transition-colors group"
+                                    >
+                                        {player.player_photo ? (
+                                            <img 
+                                                src={player.player_photo} 
+                                                alt={player.player_name}
+                                                className="w-12 h-12 rounded-full object-cover border-2 border-gray-200"
+                                            />
+                                        ) : (
+                                            <div className="w-12 h-12 rounded-full bg-gradient-to-br from-blue-500 to-blue-600 flex items-center justify-center flex-shrink-0">
+                                                <User className="h-6 w-6 text-white" />
+                                            </div>
+                                        )}
+                                        <div className="flex-1 min-w-0">
+                                            <div className="font-medium text-gray-900 group-hover:text-blue-600 transition-colors">
+                                                {player.player_name}
+                                            </div>
+                                            <div className="flex items-center gap-2 text-sm text-gray-500">
+                                                <span className="text-gray-400">from</span>
+                                                <span className="truncate">{player.primary_team_name}</span>
                                             </div>
                                             {(player.appearances > 0 || player.goals > 0 || player.assists > 0 || player.saves > 0) && (
                                                 <div className="text-xs text-gray-400 mt-0.5">

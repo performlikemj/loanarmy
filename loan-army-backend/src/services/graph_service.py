@@ -1,5 +1,5 @@
 import os
-from datetime import datetime
+from datetime import datetime, timezone
 from src.models.league import db
 from src.models.weekly import FixturePlayerStats, Fixture
 import logging
@@ -71,7 +71,7 @@ class GraphService:
             fig.autofmt_xdate()
             
             # Save
-            timestamp = int(datetime.now().timestamp())
+            timestamp = int(datetime.now(timezone.utc).timestamp())
             filename = f"rating_{player_id}_{timestamp}.png"
             filepath = os.path.join(self.static_folder, filename)
             fig.savefig(filepath, bbox_inches='tight', dpi=100)
@@ -130,7 +130,7 @@ class GraphService:
                 plt.xticks(rotation=45, ha='right')
 
             # Save
-            timestamp = int(datetime.now().timestamp())
+            timestamp = int(datetime.now(timezone.utc).timestamp())
             filename = f"minutes_{player_id}_{timestamp}.png"
             filepath = os.path.join(self.static_folder, filename)
             fig.savefig(filepath, bbox_inches='tight', dpi=100)

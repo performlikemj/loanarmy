@@ -616,7 +616,7 @@ Workflow:
 
 DATA STRUCTURE EXPLANATION:
 Each player has:
-- matches[]: array of games with 'match_notes', 'opponent', 'competition', 'date', 'player' (all stats for that game)
+- matches[]: array of games with 'match_notes', 'opponent', 'competition', 'date', 'role', 'player' (all stats for that game)
 - totals: aggregated weekly stats across all matches
 - season_context: cumulative season stats and trends for narrative depth
   - season_stats: total games, goals, assists, minutes, ratings, etc. for the entire season
@@ -624,6 +624,13 @@ Each player has:
   - trends: goals_per_90, assists_per_90, shot_accuracy, goals_last_5, duels_win_rate, etc.
 - The 'player' field in each match contains: minutes, goals, assists, rating, shots_total, shots_on, passes_key, 
   dribbles_success, dribbles_attempts, tackles_total, tackles_interceptions, duels_won, duels_total, saves, etc.
+
+ROLE FIELD (CRITICAL - determines how player entered each match):
+- role='startXI' → Player STARTED the match (was in the starting eleven)
+- role='substitutes' → Player was a SUBSTITUTE (came off the bench OR was unused sub if minutes=0)
+- role=null/None → Player was NOT in the matchday squad (injured, suspended, not selected)
+- Use this to accurately describe: "Started vs Arsenal", "Came off the bench vs City", "Was not in the squad"
+- If role='startXI' but minutes are low (e.g., 15-20), player was likely subbed off early (injury/tactical change)
 
 WRITING COMPREHENSIVE SUMMARIES (CRITICAL):
 Your week_summary for each player MUST be in-depth and use ALL available data:
@@ -690,9 +697,14 @@ Manual/Untracked Players (can_fetch_stats=False):
 - Example: "This player is not currently tracked by our data provider. We've requested they be added to improve future coverage. [Player] remains on loan with [Team]."
 
 Quality rules (STRICT):
-- If minutes==0 and role=='substitutes' → write "unused substitute"
-- If minutes==0 and role is null/None → write "was not in the matchday squad" (player was injured, not selected, etc.)
-- If text says "started", minutes MUST be >0; otherwise rewrite as "did not play"
+- ROLE-BASED LANGUAGE (check role field for each match):
+  - role='startXI' AND minutes > 60 → "started" (full game or most of it)
+  - role='startXI' AND minutes 1-60 → "started but was substituted off" (subbed out early - could be injury/tactical)
+  - role='startXI' AND minutes == 0 → unusual, treat as "named in starting XI but did not feature"
+  - role='substitutes' AND minutes > 0 → "came off the bench", "was introduced as a substitute"
+  - role='substitutes' AND minutes == 0 → "unused substitute"
+  - role is null/None AND minutes == 0 → "was not in the matchday squad" (injured, suspended, not selected)
+- If text says "started", the role field MUST be 'startXI'; otherwise check and correct
 - Highlights must come from the same week's stats
 - ALWAYS reference the specific opponent when mentioning goals/assists/performances
 - Use display_name (e.g., "Charlie Wellens") not full legal/middle names

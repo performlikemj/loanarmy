@@ -239,7 +239,7 @@ def handle_invoice_payment_succeeded(invoice_data):
     platform_fee = calculate_platform_fee(amount_paid)
     
     # Update or create revenue record for this period
-    today = date.today()
+    today = datetime.now(timezone.utc).date()
     period_start = today.replace(day=1)  # First day of month
     
     # Calculate last day of month

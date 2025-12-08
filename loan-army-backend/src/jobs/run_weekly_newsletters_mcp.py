@@ -1,4 +1,4 @@
-from datetime import date
+from datetime import date, datetime, timezone
 from src.models.league import db, Team, LoanedPlayer
 from src.agents.weekly_agent import generate_weekly_newsletter_with_mcp_sync
 from src.agents.errors import NoActiveLoaneesError
@@ -29,5 +29,5 @@ def run_for_date(target: date, max_failures: int = 0):
     return results
 
 if __name__ == "__main__":
-    today = date.today()
+    today = datetime.now(timezone.utc).date()
     run_for_date(today)

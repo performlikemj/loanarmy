@@ -1,4 +1,4 @@
-from datetime import date, timedelta, datetime
+from datetime import date, timedelta, datetime, timezone
 
 def get_monday_range(target: date) -> tuple[date, date]:
     """Returns the Monday start and Sunday end for the week containing target."""
@@ -12,7 +12,7 @@ def get_season_gameweeks(season_start_year: int | None = None) -> list[dict]:
     If season_start_year is None, infers it from today's date.
     Returns a list of dicts with label, start_date, end_date, is_current.
     """
-    today = date.today()
+    today = datetime.now(timezone.utc).date()
     
     if season_start_year is None:
         # If we are in Jan-June, season started prev year.

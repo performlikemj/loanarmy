@@ -246,10 +246,16 @@ def get_journalist_articles(journalist_id):
 def _get_player_week_stats(player_id: int, week_start, week_end) -> list:
     """Get player stats for fixtures within a specific week range."""
     from src.models.weekly import FixturePlayerStats, Fixture
-    
+
     if not player_id or not week_start or not week_end:
         return []
-    
+
+    try:
+        player_id = int(player_id)
+    except Exception:
+        # If the player id cannot be coerced, skip stats to avoid DB errors
+        return []
+
     try:
         # Query fixture stats for this player within the date range
         stats_query = db.session.query(
@@ -348,6 +354,11 @@ def _get_player_week_stats(player_id: int, week_start, week_end) -> list:
         return results
     except Exception as e:
         logger.warning(f"Failed to get player week stats: {e}")
+        # Rollback to handle PostgreSQL aborted transaction state
+        try:
+            db.session.rollback()
+        except Exception:
+            pass
         return []
 
 
@@ -423,6 +434,12 @@ def _get_season_stats(player_id: int, season: int = None) -> list:
     from src.models.weekly import FixturePlayerStats, Fixture
     
     if not player_id:
+        return []
+    
+    try:
+        player_id = int(player_id)
+    except Exception:
+        # If the player id cannot be coerced, skip stats to avoid DB errors
         return []
     
     try:
@@ -523,6 +540,11 @@ def _get_season_stats(player_id: int, season: int = None) -> list:
         return results
     except Exception as e:
         logger.warning(f"Failed to get season stats: {e}")
+        # Rollback to handle PostgreSQL aborted transaction state
+        try:
+            db.session.rollback()
+        except Exception:
+            pass
         return []
 
 
@@ -742,8 +764,9 @@ def get_chart_data():
         
         elif date_range == 'season':
             # Get current season (assume July-June cycle)
-            current_year = datetime.now().year
-            current_month = datetime.now().month
+            now_utc = datetime.now(timezone.utc)
+            current_year = now_utc.year
+            current_month = now_utc.month
             season = current_year if current_month >= 7 else current_year - 1
             fixtures_data = _get_season_stats(player_id, season)
         
@@ -1189,6 +1212,12 @@ def _render_chart_block_to_html(block: dict, player_id: int = None, week_start: 
             # Can't render chart without player data
             return _get_chart_placeholder_html(chart_type, "Player data not available")
         
+        # Ensure player_id is an integer to avoid PostgreSQL type mismatch errors
+        try:
+            effective_player_id = int(effective_player_id)
+        except (ValueError, TypeError):
+            return _get_chart_placeholder_html(chart_type, "Invalid player data")
+        
         # Fetch chart data
         chart_data = _fetch_chart_data_for_rendering(
             player_id=effective_player_id,
@@ -1239,6 +1268,11 @@ def _fetch_chart_data_for_rendering(player_id: int, chart_type: str, stat_keys: 
     This mirrors the logic in the get_chart_data API endpoint but for internal use.
     """
     try:
+        try:
+            player_id = int(player_id)
+        except Exception:
+            return None
+
         from datetime import date, timedelta
         
         # Get fixtures data based on date range
@@ -1257,8 +1291,9 @@ def _fetch_chart_data_for_rendering(player_id: int, chart_type: str, stat_keys: 
             start_date = end_date - timedelta(days=30)
             fixtures_data = _get_player_week_stats(player_id, start_date, end_date)
         elif date_range == 'season':
-            current_year = datetime.now().year
-            current_month = datetime.now().month
+            now_utc = datetime.now(timezone.utc)
+            current_year = now_utc.year
+            current_month = now_utc.month
             season = current_year if current_month >= 7 else current_year - 1
             fixtures_data = _get_season_stats(player_id, season)
         else:
@@ -1360,6 +1395,11 @@ def _fetch_chart_data_for_rendering(player_id: int, chart_type: str, stat_keys: 
         
     except Exception as e:
         logger.exception(f"Failed to fetch chart data for rendering: {e}")
+        # Rollback to handle PostgreSQL aborted transaction state
+        try:
+            db.session.rollback()
+        except Exception:
+            pass
         return None
 
 
@@ -1490,9 +1530,14 @@ def create_update_commentary():
         # Create commentary with or without newsletter
         from src.utils.sanitize import sanitize_commentary_html
         
-        # Clean up empty strings
-        if data.get('player_id') == "":
-            data['player_id'] = None
+        # Normalize player_id to int (or None) once
+        player_id_raw = data.get('player_id')
+        if player_id_raw == "":
+            player_id_raw = None
+        try:
+            player_id_norm = int(player_id_raw) if player_id_raw is not None else None
+        except Exception:
+            player_id_norm = None
         
         # Handle structured_blocks if provided
         structured_blocks = data.get('structured_blocks')
@@ -1505,7 +1550,7 @@ def create_update_commentary():
             # Render blocks with chart images for emails
             sanitized_content = _render_blocks_to_html(
                 structured_blocks,
-                player_id=data.get('player_id'),
+                player_id=player_id_norm,
                 week_start=week_start.isoformat() if week_start else None,
                 week_end=week_end.isoformat() if week_end else None
             )
@@ -1536,7 +1581,7 @@ def create_update_commentary():
             commentary_type=data.get('commentary_type', 'summary'),
             content=sanitized_content,
             structured_blocks=structured_blocks,
-            player_id=data.get('player_id'),
+            player_id=player_id_norm,
             position=data.get('position', 0),
             title=data.get('title'),
             is_premium=is_premium,

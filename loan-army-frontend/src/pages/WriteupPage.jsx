@@ -13,6 +13,7 @@ import { APIService } from '@/lib/api'
 import { cn } from '@/lib/utils'
 import ClapIcon from '@/components/ClapIcon.jsx'
 import { BlockRenderer } from '@/components/BlockRenderer'
+import { formatTextToHtml } from '@/lib/formatText'
 
 // Stat display helper
 function StatItem({ icon: Icon, label, value, highlight = false }) {
@@ -434,7 +435,7 @@ export function WriteupPage() {
               <div className="relative">
                 <div 
                   className="prose prose-gray max-w-none blur-sm select-none line-clamp-4"
-                  dangerouslySetInnerHTML={{ __html: data.content }}
+                  dangerouslySetInnerHTML={{ __html: formatTextToHtml(data.content) }}
                 />
                 <div className="absolute inset-0 flex flex-col items-center justify-center bg-gradient-to-t from-white via-white/95 to-transparent">
                   <Lock className="h-8 w-8 text-gray-400 mb-3" />
@@ -454,10 +455,11 @@ export function WriteupPage() {
               <div 
                 className="prose prose-gray max-w-none
                   prose-headings:text-gray-900 prose-headings:font-bold
-                  prose-p:text-gray-700 prose-p:leading-relaxed
+                  prose-p:text-gray-700 prose-p:leading-relaxed prose-p:my-2
+                  prose-ul:my-2 prose-ul:pl-5 prose-li:my-1
                   prose-strong:text-gray-900
                   prose-a:text-violet-600 prose-a:no-underline hover:prose-a:underline"
-                dangerouslySetInnerHTML={{ __html: data.content }}
+                dangerouslySetInnerHTML={{ __html: formatTextToHtml(data.content) }}
               />
             )}
             

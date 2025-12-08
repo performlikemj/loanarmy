@@ -1,12 +1,14 @@
 import React, { useState } from 'react'
+import { Link } from 'react-router-dom'
 import { Card, CardContent, CardHeader } from '@/components/ui/card.jsx'
 import { Button } from '@/components/ui/button.jsx'
 import { Avatar, AvatarImage, AvatarFallback } from '@/components/ui/avatar.jsx'
 import { Badge } from '@/components/ui/badge.jsx'
-import { Lock, Sparkles } from 'lucide-react'
+import { Lock, Sparkles, ExternalLink } from 'lucide-react'
 import ClapIcon from '@/components/ClapIcon.jsx'
 import { BlockRenderer } from '@/components/BlockRenderer'
 import { cn } from '@/lib/utils'
+import { formatTextToHtml } from '@/lib/formatText'
 
 // Color palette for different journalists
 const JOURNALIST_COLORS = [
@@ -158,7 +160,7 @@ export function CommentaryCard({
           {/* Footer */}
           {!isLocked && (
             <div className={cn(
-              'flex items-center gap-3 border-t border-gray-200/50',
+              'flex items-center justify-between border-t border-gray-200/50',
               isCompact ? 'mt-2 pt-2' : 'mt-3 pt-3'
             )}>
               <button
@@ -177,6 +179,20 @@ export function CommentaryCard({
                 )} />
                 <span>{applauseCount > 0 ? applauseCount : 'Applaud'}</span>
               </button>
+              
+              {commentary.id && (
+                <Link
+                  to={`/writeups/${commentary.id}`}
+                  className={cn(
+                    'flex items-center gap-1 text-xs font-medium transition-colors',
+                    colors.accent,
+                    'hover:underline'
+                  )}
+                >
+                  <span>Full analysis</span>
+                  <ExternalLink className="h-3 w-3" />
+                </Link>
+              )}
             </div>
           )}
         </>
@@ -185,7 +201,7 @@ export function CommentaryCard({
         <div className="relative">
           <div 
             className="text-gray-600 text-sm leading-relaxed blur-[2px] select-none line-clamp-2"
-            dangerouslySetInnerHTML={{ __html: commentary.content }}
+            dangerouslySetInnerHTML={{ __html: formatTextToHtml(commentary.content) }}
           />
           <div className="absolute inset-0 flex flex-col items-center justify-center bg-gradient-to-t from-white/95 via-white/80 to-transparent pt-4">
             <Lock className="h-5 w-5 text-gray-400 mb-2" />
@@ -207,17 +223,18 @@ export function CommentaryCard({
           <div 
             className={cn(
               'prose prose-sm max-w-none text-gray-700',
-              'prose-p:my-1.5 prose-ul:my-1.5 prose-ol:my-1.5',
+              'prose-p:my-2 prose-ul:my-2 prose-ol:my-2 prose-li:my-1',
+              'prose-ul:pl-5 prose-ol:pl-5',
               'prose-headings:text-gray-900 prose-headings:font-semibold',
               'prose-strong:text-gray-900 prose-a:text-violet-600',
               isCompact ? 'text-sm leading-relaxed' : 'text-sm sm:text-base leading-relaxed'
             )}
-            dangerouslySetInnerHTML={{ __html: commentary.content }}
+            dangerouslySetInnerHTML={{ __html: formatTextToHtml(commentary.content) }}
           />
           
           {/* Footer */}
           <div className={cn(
-            'flex items-center gap-3 border-t border-gray-200/50',
+            'flex items-center justify-between border-t border-gray-200/50',
             isCompact ? 'mt-2 pt-2' : 'mt-3 pt-3'
           )}>
             <button
@@ -236,6 +253,20 @@ export function CommentaryCard({
               )} />
               <span>{applauseCount > 0 ? applauseCount : 'Applaud'}</span>
             </button>
+            
+            {commentary.id && (
+              <Link
+                to={`/writeups/${commentary.id}`}
+                className={cn(
+                  'flex items-center gap-1 text-xs font-medium transition-colors',
+                  colors.accent,
+                  'hover:underline'
+                )}
+              >
+                <span>Full analysis</span>
+                <ExternalLink className="h-3 w-3" />
+              </Link>
+            )}
           </div>
         </>
       )}

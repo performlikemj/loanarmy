@@ -924,6 +924,16 @@ PLAYER_SUMMARY_SYSTEM_PROMPT = (
     "- Uses vivid verbs: 'bagged', 'delivered', 'anchored', 'orchestrated', 'struggled'\n"
     "- Contextualizes performances using ONLY the provided stats\n"
     "- Varies sentence rhythm—mix short punchy lines with flowing observations\n\n"
+    "ROLE DATA (CRITICAL for accuracy - determines how player entered the match):\n"
+    "- Each match includes 'role' showing how the player was selected:\n"
+    "  - 'startXI' = Player STARTED the match (was in starting lineup)\n"
+    "  - 'substitutes' = Player was a SUBSTITUTE (came off the bench OR was an unused sub)\n"
+    "  - null/None = Player was NOT in the matchday squad (injured, suspended, not selected)\n"
+    "- If role='startXI' → use 'started', 'was named in the starting XI', 'began the match'\n"
+    "- If role='substitutes' AND minutes > 0 → use 'came off the bench', 'was introduced as a substitute'\n"
+    "- If role='substitutes' AND minutes = 0 → 'was an unused substitute'\n"
+    "- If role is null AND minutes = 0 → 'was not in the matchday squad'\n"
+    "- If a player started but played few minutes (e.g. 15-20), they were likely subbed off early (injury/tactical)\n\n"
     "POSITION DATA (critical for accuracy):\n"
     "- Each match includes 'position' showing what role they played THAT game (G=Goalkeeper, D=Defender, M=Midfielder, F=Forward)\n"
     "- A player registered as midfielder may play forward in some matches—use the per-match position\n"
@@ -957,7 +967,7 @@ def _summarize_player_with_groq(
 ) -> str:
     model = os.getenv("NEWSLETTER_GROQ_MODEL", "openai/gpt-oss-120b")
     client = _get_groq_client()
-    # Build per-match breakdown with positions for accurate role attribution
+    # Build per-match breakdown with positions and roles for accurate attribution
     matches_data = []
     for m in (loanee.get("matches") or [])[:3]:
         if isinstance(m, dict):
@@ -966,6 +976,7 @@ def _summarize_player_with_groq(
                 "opponent": m.get("opponent"),
                 "competition": m.get("competition"),
                 "position": player_match.get("position"),  # G/D/M/F for THIS match
+                "role": m.get("role"),  # 'startXI', 'substitutes', or None (not in squad)
                 "goals": player_match.get("goals", 0),
                 "assists": player_match.get("assists", 0),
                 "minutes": player_match.get("minutes", 0),
@@ -1121,6 +1132,13 @@ def _build_player_report_item(loanee: dict, hits: list[dict[str, Any]], *, week_
                 return True
         return False
     
+    def _player_started_match(match_list: list) -> bool:
+        """Check if player started (was in starting XI) in any match this week."""
+        for m in match_list or []:
+            if isinstance(m, dict) and m.get("role") == "startXI":
+                return True
+        return False
+    
     def _player_was_unused_sub(match_list: list) -> bool:
         """Check if player was on the bench but didn't play in any match."""
         for m in match_list or []:
@@ -1129,6 +1147,7 @@ def _build_player_report_item(loanee: dict, hits: list[dict[str, Any]], *, week_
         return False
     
     was_in_squad = _player_was_in_squad(matches)
+    started_match = _player_started_match(matches)
     was_unused_sub = _player_was_unused_sub(matches)
     
     if not can_track:
@@ -1155,7 +1174,13 @@ def _build_player_report_item(loanee: dict, hits: list[dict[str, Any]], *, week_
             if minutes >= 60:
                 action = f"logged {minutes} minutes for {loan_team}"
             elif minutes > 0:
-                action = f"came off the bench for {loan_team}, playing {minutes} minutes"
+                # Check role to determine if player started or came off the bench
+                if started_match:
+                    # Player started but was subbed off (injury/tactical)
+                    action = f"started for {loan_team} but was substituted off after {minutes} minutes"
+                else:
+                    # Player came on as a substitute
+                    action = f"came off the bench for {loan_team}, playing {minutes} minutes"
             elif minutes == 0 and was_unused_sub:
                 action = f"was an unused substitute for {loan_team}"
             elif minutes == 0 and not was_in_squad:
@@ -1170,7 +1195,11 @@ def _build_player_report_item(loanee: dict, hits: list[dict[str, Any]], *, week_
 
         remaining_phrases = list(stat_phrases)
         if minutes > 0 and assists > 0 and minutes < 60:
-            sentence += f", delivering {assists} {_pluralize(assists, 'assist')} off the bench"
+            # Only say "off the bench" if they actually came on as a sub
+            if started_match:
+                sentence += f", delivering {assists} {_pluralize(assists, 'assist')} before being substituted"
+            else:
+                sentence += f", delivering {assists} {_pluralize(assists, 'assist')} off the bench"
             remaining_phrases = [p for p in remaining_phrases if "assist" not in p.lower()]
             if remaining_phrases:
                 sentence += f" alongside {_combine_phrases(remaining_phrases)}"
@@ -1287,6 +1316,7 @@ def _build_player_report_item(loanee: dict, hits: list[dict[str, Any]], *, week_
                 "score": match.get("score"),
                 "result": match.get("result"),
                 "played": match.get("played"),
+                "role": match.get("role"),  # 'startXI', 'substitutes', or None (not in squad)
                 "position": player_stats_this_match.get("position"),  # Position played THIS match
                 "goals": player_stats_this_match.get("goals", 0),
                 "assists": player_stats_this_match.get("assists", 0),

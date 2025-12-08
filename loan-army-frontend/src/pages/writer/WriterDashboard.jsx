@@ -4,7 +4,17 @@ import { Button } from '@/components/ui/button'
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
 import { Badge } from '@/components/ui/badge'
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table'
-import { Loader2, Plus, FileText, Users, LogOut, TrendingUp, UserPlus } from 'lucide-react'
+import {
+    AlertDialog,
+    AlertDialogAction,
+    AlertDialogCancel,
+    AlertDialogContent,
+    AlertDialogDescription,
+    AlertDialogFooter,
+    AlertDialogHeader,
+    AlertDialogTitle,
+} from '@/components/ui/alert-dialog'
+import { Loader2, Plus, FileText, Users, LogOut, TrendingUp, UserPlus, Trash2 } from 'lucide-react'
 import { LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer } from 'recharts'
 import { APIService } from '@/lib/api'
 import { useAuthUI } from '@/context/AuthContext'
@@ -17,6 +27,8 @@ export function WriterDashboard() {
     const [commentaries, setCommentaries] = useState([])
     const [stats, setStats] = useState(null)
     const [error, setError] = useState('')
+    const [deletingId, setDeletingId] = useState(null)
+    const [showDeleteConfirm, setShowDeleteConfirm] = useState(false)
 
     useEffect(() => {
         const loadData = async () => {
@@ -45,6 +57,25 @@ export function WriterDashboard() {
     const handleLogout = () => {
         logout()
         navigate('/writer/login')
+    }
+
+    const handleDelete = async () => {
+        if (!deletingId) return
+        try {
+            await APIService.deleteWriterCommentary(deletingId)
+            setCommentaries(prev => prev.filter(c => c.id !== deletingId))
+        } catch (err) {
+            console.error('Failed to delete commentary', err)
+            setError('Failed to delete commentary')
+        } finally {
+            setDeletingId(null)
+            setShowDeleteConfirm(false)
+        }
+    }
+
+    const confirmDelete = (id) => {
+        setDeletingId(id)
+        setShowDeleteConfirm(true)
     }
 
     if (loading) {
@@ -240,9 +271,19 @@ export function WriterDashboard() {
                                                     {item.is_premium && <Badge className="bg-amber-100 text-amber-800 hover:bg-amber-200 border-amber-200">Premium</Badge>}
                                                 </div>
                                             </div>
-                                            <Button variant="ghost" size="sm" asChild>
-                                                <Link to={`/writer/writeup-editor?id=${item.id}`}>Edit</Link>
-                                            </Button>
+                                            <div className="flex gap-2">
+                                                <Button variant="ghost" size="sm" asChild>
+                                                    <Link to={`/writer/writeup-editor?id=${item.id}`}>Edit</Link>
+                                                </Button>
+                                                <Button 
+                                                    variant="ghost" 
+                                                    size="sm" 
+                                                    onClick={() => confirmDelete(item.id)}
+                                                    className="text-red-600 hover:text-red-700 hover:bg-red-50"
+                                                >
+                                                    <Trash2 className="h-4 w-4" />
+                                                </Button>
+                                            </div>
                                         </div>
                                     ))}
                                 </div>
@@ -255,6 +296,27 @@ export function WriterDashboard() {
                     </Card>
                 </div>
             </main>
+
+            {/* Delete Confirmation Dialog */}
+            <AlertDialog open={showDeleteConfirm} onOpenChange={setShowDeleteConfirm}>
+                <AlertDialogContent>
+                    <AlertDialogHeader>
+                        <AlertDialogTitle>Delete Writeup</AlertDialogTitle>
+                        <AlertDialogDescription>
+                            Are you sure you want to delete this writeup? This action cannot be undone.
+                        </AlertDialogDescription>
+                    </AlertDialogHeader>
+                    <AlertDialogFooter>
+                        <AlertDialogCancel onClick={() => setDeletingId(null)}>Cancel</AlertDialogCancel>
+                        <AlertDialogAction 
+                            onClick={handleDelete}
+                            className="bg-red-600 hover:bg-red-700"
+                        >
+                            Delete
+                        </AlertDialogAction>
+                    </AlertDialogFooter>
+                </AlertDialogContent>
+            </AlertDialog>
         </div>
     )
 }

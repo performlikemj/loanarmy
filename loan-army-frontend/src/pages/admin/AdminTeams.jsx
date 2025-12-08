@@ -64,6 +64,16 @@ export function AdminTeams() {
   const [propagating, setPropagating] = useState(false)
   const [propagateDryRun, setPropagateDryRun] = useState(true)
 
+  // Sync fixtures state
+  const [syncingTeamId, setSyncingTeamId] = useState(null)
+  const [syncJobId, setSyncJobId] = useState(null)
+  const [syncProgress, setSyncProgress] = useState(null)
+
+  // Purge state
+  const [purgeTeamId, setPurgeTeamId] = useState('')
+  const [purgePreview, setPurgePreview] = useState(null)
+  const [purgeLoading, setPurgeLoading] = useState(false)
+
   const loadTeams = useCallback(async () => {
     try {
       setLoading(true)
@@ -262,6 +272,96 @@ export function AdminTeams() {
       setMessage({ type: 'error', text: 'Failed to delete team data' })
     } finally {
       setDeleteLoading(false)
+    }
+  }
+
+  // Sync fixtures for a single team
+  const handleSyncFixtures = async (team) => {
+    setSyncingTeamId(team.id)
+    setSyncProgress(null)
+    
+    try {
+      const res = await APIService.adminSyncTeamFixtures(team.id, { background: true })
+      
+      if (res.job_id) {
+        setSyncJobId(res.job_id)
+        setMessage({ type: 'info', text: `Syncing fixtures for ${team.name}... This runs in the background.` })
+        
+        // Poll for job status
+        const interval = setInterval(async () => {
+          try {
+            const job = await APIService.request(`/admin/jobs/${res.job_id}`, {}, { admin: true })
+            if (job) {
+              setSyncProgress(job)
+              if (job.status === 'completed' || job.status === 'failed') {
+                clearInterval(interval)
+                setSyncingTeamId(null)
+                setSyncJobId(null)
+                if (job.status === 'completed') {
+                  const results = job.results || {}
+                  setMessage({ 
+                    type: 'success', 
+                    text: `Synced ${results.total_synced || 0} fixtures for ${results.players_processed || 0} players from ${team.name}` 
+                  })
+                  loadTeams()
+                } else {
+                  setMessage({ type: 'error', text: `Sync failed: ${job.error || 'Unknown error'}` })
+                }
+              }
+            }
+          } catch (err) {
+            console.error('Failed to get job status:', err)
+          }
+        }, 2000)
+      } else {
+        // Synchronous response
+        setMessage({ 
+          type: 'success', 
+          text: `Synced ${res.total_synced || 0} fixtures for ${res.players_processed || 0} players` 
+        })
+        setSyncingTeamId(null)
+        loadTeams()
+      }
+    } catch (error) {
+      console.error('Failed to sync fixtures:', error)
+      setMessage({ type: 'error', text: `Failed to sync fixtures: ${error.message || 'Unknown error'}` })
+      setSyncingTeamId(null)
+      setSyncJobId(null)
+    }
+  }
+
+  // Purge loans except selected team
+  const handlePurgePreview = async () => {
+    if (!purgeTeamId) {
+      setMessage({ type: 'error', text: 'Please select a team to keep' })
+      return
+    }
+    setPurgeLoading(true)
+    try {
+      const preview = await APIService.adminPurgeLoansExcept([parseInt(purgeTeamId)], { dryRun: true })
+      setPurgePreview(preview)
+    } catch (error) {
+      console.error('Failed to preview purge:', error)
+      setMessage({ type: 'error', text: 'Failed to preview purge' })
+    } finally {
+      setPurgeLoading(false)
+    }
+  }
+
+  const handlePurgeConfirm = async () => {
+    if (!purgeTeamId || !purgePreview) return
+    
+    setPurgeLoading(true)
+    try {
+      const result = await APIService.adminPurgeLoansExcept([parseInt(purgeTeamId)], { dryRun: false })
+      setMessage({ type: 'success', text: result.message })
+      setPurgePreview(null)
+      loadTeams()
+    } catch (error) {
+      console.error('Failed to purge:', error)
+      setMessage({ type: 'error', text: 'Failed to purge loans' })
+    } finally {
+      setPurgeLoading(false)
     }
   }
 
@@ -465,6 +565,10 @@ export function AdminTeams() {
             <Pencil className="h-4 w-4 mr-1 sm:mr-2" />
             Fix <span className="hidden xs:inline">Team</span> Names
           </TabsTrigger>
+          <TabsTrigger value="purge" className="text-xs sm:text-sm">
+            <Trash2 className="h-4 w-4 mr-1 sm:mr-2" />
+            Purge <span className="hidden xs:inline">Data</span>
+          </TabsTrigger>
         </TabsList>
 
         <TabsContent value="teams" className="space-y-4">
@@ -617,6 +721,24 @@ export function AdminTeams() {
                                 onClick={() => handleToggleTracking(team)}
                               >
                                 Stop Tracking
+                              </Button>
+                              <Button 
+                                variant="outline" 
+                                size="sm"
+                                onClick={() => handleSyncFixtures(team)}
+                                disabled={syncingTeamId === team.id}
+                              >
+                                {syncingTeamId === team.id ? (
+                                  <>
+                                    <Loader2 className="h-4 w-4 mr-1 animate-spin" />
+                                    Syncing...
+                                  </>
+                                ) : (
+                                  <>
+                                    <RefreshCw className="h-4 w-4 mr-1" />
+                                    Sync Fixtures
+                                  </>
+                                )}
                               </Button>
                               <Button 
                                 variant="destructive" 
@@ -971,6 +1093,83 @@ export function AdminTeams() {
                         ))}
                       </tbody>
                     </table>
+                  </div>
+                </div>
+              )}
+            </CardContent>
+          </Card>
+        </TabsContent>
+
+        <TabsContent value="purge" className="space-y-4">
+          <Card>
+            <CardHeader>
+              <CardTitle className="flex items-center gap-2 text-red-600">
+                <Trash2 className="h-5 w-5" />
+                Purge All Data Except One Team
+              </CardTitle>
+              <CardDescription>
+                Delete ALL loaned player data except for one specific team. This is useful for resetting to track only one team.
+              </CardDescription>
+            </CardHeader>
+            <CardContent className="space-y-4">
+              <Alert className="border-red-500">
+                <AlertCircle className="h-4 w-4" />
+                <AlertDescription>
+                  <strong>Warning:</strong> This will permanently delete all loaned players and their fixture stats 
+                  from every team EXCEPT the one you select. This cannot be undone.
+                </AlertDescription>
+              </Alert>
+
+              <div className="flex flex-col sm:flex-row gap-4">
+                <div className="flex-1">
+                  <Label className="mb-2 block">Team to Keep</Label>
+                  <Select value={purgeTeamId} onValueChange={setPurgeTeamId}>
+                    <SelectTrigger>
+                      <SelectValue placeholder="Select a team to keep..." />
+                    </SelectTrigger>
+                    <SelectContent>
+                      {teams.filter(t => t.is_tracked).map(team => (
+                        <SelectItem key={team.id} value={String(team.id)}>
+                          {team.name}
+                        </SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                </div>
+                <Button 
+                  onClick={handlePurgePreview} 
+                  disabled={!purgeTeamId || purgeLoading}
+                  variant="outline"
+                  className="mt-auto"
+                >
+                  {purgeLoading ? <Loader2 className="h-4 w-4 mr-2 animate-spin" /> : null}
+                  Preview
+                </Button>
+              </div>
+
+              {purgePreview && (
+                <div className="mt-4 p-4 border rounded-lg bg-muted/30">
+                  <h4 className="font-medium mb-2">Preview - What will be deleted:</h4>
+                  <ul className="space-y-1 text-sm">
+                    <li><strong>Loans to delete:</strong> {purgePreview.loans_to_delete}</li>
+                    <li><strong>Fixture stats to delete:</strong> {purgePreview.fixture_stats_to_delete}</li>
+                    <li><strong>Teams affected:</strong> {purgePreview.teams_affected?.slice(0, 10).join(', ')}{purgePreview.teams_affected?.length > 10 ? `... and ${purgePreview.teams_affected.length - 10} more` : ''}</li>
+                  </ul>
+                  <div className="mt-4 flex gap-2">
+                    <Button 
+                      variant="destructive" 
+                      onClick={handlePurgeConfirm}
+                      disabled={purgeLoading}
+                    >
+                      {purgeLoading ? <Loader2 className="h-4 w-4 mr-2 animate-spin" /> : <Trash2 className="h-4 w-4 mr-2" />}
+                      Confirm Purge
+                    </Button>
+                    <Button 
+                      variant="outline" 
+                      onClick={() => setPurgePreview(null)}
+                    >
+                      Cancel
+                    </Button>
                   </div>
                 </div>
               )}

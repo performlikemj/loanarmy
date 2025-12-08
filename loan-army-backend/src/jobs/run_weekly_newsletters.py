@@ -1,5 +1,5 @@
 import os
-from datetime import date
+from datetime import date, datetime, timezone
 from src.models.league import db, Team, LoanedPlayer, AdminSetting
 from src.agents.weekly_newsletter_agent import generate_team_weekly_newsletter
 from src.agents.errors import NoActiveLoaneesError
@@ -69,6 +69,6 @@ def run_for_date(target_date: date):
 
 if __name__ == "__main__":
     # Ensure Flask application context is active for DB/session access
-    today = date.today()
+    today = datetime.now(timezone.utc).date()
     with app.app_context():
         run_for_date(today)

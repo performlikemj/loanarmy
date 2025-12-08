@@ -4016,17 +4016,49 @@ function AdminPage({ defaultTab = 'newsletters', includeSandbox = true, forcedTa
                                       }
                                       try {
                                         setTeamRunBusy(true)
-                                        setTeamRunMsg(null)
+                                        setTeamRunMsg({ type: 'info', text: 'Starting seed job in background...' })
                                         const res = await APIService.request('/admin/loans/seed-top5', {
                                           method: 'POST',
-                                          body: JSON.stringify({ season: y, overwrite: true })
+                                          body: JSON.stringify({ season: y, overwrite: true, background: true })
                                         }, { admin: true })
-                                        setTeamRunMsg({ type: 'success', text: `Seeded ${res.created} players (skipped ${res.skipped}) for ${res.season}` })
-                                        await refreshLoans()
-                                        try {
-                                          await refreshRunHistory()
-                                        } catch (error) {
-                                          console.warn('Failed to refresh history after seed', error)
+                                        
+                                        if (res.job_id) {
+                                          // Poll for job completion
+                                          const pollJob = async () => {
+                                            try {
+                                              const status = await APIService.request(`/admin/jobs/${res.job_id}`, {}, { admin: true })
+                                              if (status.status === 'completed') {
+                                                const result = status.results || {}
+                                                setTeamRunMsg({ type: 'success', text: `Seeded ${result.created || 0} players (skipped ${result.skipped || 0}) for ${result.season || y}` })
+                                                setTeamRunBusy(false)
+                                                await refreshLoans()
+                                                try {
+                                                  await refreshRunHistory()
+                                                } catch (error) {
+                                                  console.warn('Failed to refresh history after seed', error)
+                                                }
+                                              } else if (status.status === 'failed') {
+                                                setTeamRunMsg({ type: 'error', text: `Seed failed: ${status.error || 'Unknown error'}` })
+                                                setTeamRunBusy(false)
+                                              } else {
+                                                // Still running - show progress
+                                                const progress = status.progress || 0
+                                                const total = status.total || '?'
+                                                const current = status.current_player || ''
+                                                setTeamRunMsg({ type: 'info', text: `Seeding... ${progress}/${total} ${current ? `(${current})` : ''}` })
+                                                setTimeout(pollJob, 3000)
+                                              }
+                                            } catch (error) {
+                                              console.error('Failed to poll job status:', error)
+                                              setTimeout(pollJob, 5000)
+                                            }
+                                          }
+                                          pollJob()
+                                        } else {
+                                          // Synchronous response (shouldn't happen with background: true)
+                                          setTeamRunMsg({ type: 'success', text: `Seeded ${res.created} players (skipped ${res.skipped}) for ${res.season}` })
+                                          setTeamRunBusy(false)
+                                          await refreshLoans()
                                         }
                                       } catch (error) {
                                         const baseError = error?.body?.error || error.message || 'Unknown error'
@@ -4036,7 +4068,6 @@ function AdminPage({ defaultTab = 'newsletters', includeSandbox = true, forcedTa
                                           type: 'error',
                                           text: `Seed failed: ${baseError}${detailText}`
                                         })
-                                      } finally {
                                         setTeamRunBusy(false)
                                       }
                                     }}
@@ -7421,13 +7452,13 @@ function HomePage() {
           <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6 mb-12">
             <Card>
               <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
-                <CardTitle className="text-sm font-medium">European Teams</CardTitle>
+                <CardTitle className="text-sm font-medium">Clubs with Active Loans</CardTitle>
                 <Users className="h-4 w-4 text-muted-foreground" />
               </CardHeader>
               <CardContent>
-                <div className="text-2xl font-bold">{stats.total_teams}</div>
+                <div className="text-2xl font-bold">{stats.teams_with_loans}</div>
                 <p className="text-xs text-muted-foreground">
-                  From top 5 leagues
+                  Currently tracking loanees
                 </p>
               </CardContent>
             </Card>
@@ -7440,7 +7471,7 @@ function HomePage() {
               <CardContent>
                 <div className="text-2xl font-bold">{stats.total_active_loans}</div>
                 <p className="text-xs text-muted-foreground">
-                  Currently tracked
+                  Players out on loan
                 </p>
               </CardContent>
             </Card>
@@ -7944,31 +7975,33 @@ function TeamsPage() {
   }, {})
 
   return (
-    <div className="max-w-7xl mx-auto py-6 sm:px-6 lg:px-8">
-      <div className="px-4 py-6 sm:px-0">
-        <div className="flex flex-col gap-4 mb-6 sticky top-0 bg-gray-50/80 backdrop-blur supports-[backdrop-filter]:bg-gray-50/60 z-10 p-3 rounded-b">
-          <div className="flex justify-between items-center">
-            <div>
-              <h1 className="text-3xl font-bold text-gray-900 mb-2">European Teams</h1>
-              <Badge variant="secondary" className="bg-green-100 text-green-800 border-green-300">
-                <Calendar className="h-3 w-3 mr-1" />
-                Current Season
-              </Badge>
+    <div className="max-w-[1400px] mx-auto py-6 sm:px-6 lg:px-8">
+      <div className="flex flex-col lg:flex-row gap-6">
+        {/* Main Content */}
+        <div className="flex-1 min-w-0 px-4 py-6 sm:px-0">
+          <div className="flex flex-col gap-4 mb-6 sticky top-0 bg-gray-50/80 backdrop-blur supports-[backdrop-filter]:bg-gray-50/60 z-10 p-3 rounded-b">
+            <div className="flex justify-between items-center">
+              <div>
+                <h1 className="text-3xl font-bold text-gray-900 mb-2">European Teams</h1>
+                <Badge variant="secondary" className="bg-green-100 text-green-800 border-green-300">
+                  <Calendar className="h-3 w-3 mr-1" />
+                  Current Season
+                </Badge>
+              </div>
+              <div className="flex items-center gap-2">
+                <Select value={filter} onValueChange={setFilter}>
+                  <SelectTrigger className="w-40">
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="all">All Teams</SelectItem>
+                    <SelectItem value="with_loans">With Loans</SelectItem>
+                  </SelectContent>
+                </Select>
+              </div>
             </div>
-            <div className="flex items-center gap-2">
-              <Select value={filter} onValueChange={setFilter}>
-                <SelectTrigger className="w-40">
-                  <SelectValue />
-                </SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="all">All Teams</SelectItem>
-                  <SelectItem value="with_loans">With Loans</SelectItem>
-                </SelectContent>
-              </Select>
-            </div>
-          </div>
-          
-          {/* Compact Search Bar */}
+            
+            {/* Compact Search Bar */}
           <div className="relative">
             <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 h-4 w-4 text-gray-400" />
             <Input
@@ -8512,6 +8545,15 @@ function TeamsPage() {
             </DialogFooter>
           </DialogContent>
         </Dialog>
+        </div>
+
+        {/* Sponsor Sidebar - visible on larger screens */}
+        <SponsorSidebar className="hidden lg:block" />
+      </div>
+
+      {/* Mobile Sponsor Strip - visible on smaller screens */}
+      <div className="lg:hidden px-4 pb-6">
+        <SponsorStrip />
       </div>
     </div>
   )
@@ -9111,22 +9153,24 @@ function NewslettersPage() {
 
 
   return (
-    <div className="max-w-4xl mx-auto py-6 px-4 sm:px-6 lg:px-8 overflow-x-hidden">
-      <div className="py-6 sm:px-0 overflow-hidden">
-        <div className="text-center mb-8">
-          <h1 className="text-2xl sm:text-3xl font-bold text-gray-900 mb-4">
-            Published Newsletters
-          </h1>
-          <p className="text-lg text-gray-600">
-            Insights about European team loan activities
-          </p>
-          {latestSeason !== null && (
-            <p className="text-sm text-gray-500">
-              Showing season {latestSeason}–{String(latestSeason + 1).slice(-2)} newsletters
+    <div className="max-w-[1400px] mx-auto py-6 px-4 sm:px-6 lg:px-8">
+      <div className="flex flex-col lg:flex-row gap-6">
+        {/* Main Content */}
+        <div className="flex-1 min-w-0 max-w-4xl py-6 sm:px-0 overflow-hidden">
+          <div className="text-center mb-8">
+            <h1 className="text-2xl sm:text-3xl font-bold text-gray-900 mb-4">
+              Published Newsletters
+            </h1>
+            <p className="text-lg text-gray-600">
+              Insights about European team loan activities
             </p>
-          )}
-        </div>
-        {focusedViewActive && (
+            {latestSeason !== null && (
+              <p className="text-sm text-gray-500">
+                Showing season {latestSeason}–{String(latestSeason + 1).slice(-2)} newsletters
+              </p>
+            )}
+          </div>
+          {focusedViewActive && (
           <div className="mb-4 flex flex-col gap-4">
             <div className="flex justify-start">
               <Button variant="ghost" size="sm" onClick={() => navigate('/newsletters')}>
@@ -9635,7 +9679,7 @@ function NewslettersPage() {
                                                     {it.upcoming_fixtures && Array.isArray(it.upcoming_fixtures) && it.upcoming_fixtures.length > 0 && (
                                                       <div className="mt-4 p-3 bg-blue-50 rounded-lg border border-blue-200">
                                                         <h5 className="text-sm font-semibold text-blue-900 mb-3 flex items-center gap-1">
-                                                          📅 Fixtures
+                                                          📅 Look Ahead: Fixtures
                                                         </h5>
                                                         <div className="space-y-2">
                                                           {it.upcoming_fixtures.map((fixture, fIdx) => {
@@ -10115,7 +10159,16 @@ function NewslettersPage() {
             }
           </div >
         )}
-      </div >
+        </div>
+
+        {/* Sponsor Sidebar - visible on larger screens */}
+        <SponsorSidebar className="hidden lg:block" />
+      </div>
+
+      {/* Mobile Sponsor Strip - visible on smaller screens */}
+      <div className="lg:hidden pb-6">
+        <SponsorStrip />
+      </div>
     </div >
   )
 }
@@ -11042,26 +11095,26 @@ function StatsPage() {
           <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
             <Card>
               <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
-                <CardTitle className="text-sm font-medium">Total Teams</CardTitle>
+                <CardTitle className="text-sm font-medium">Clubs with Active Loans</CardTitle>
                 <Users className="h-4 w-4 text-muted-foreground" />
               </CardHeader>
               <CardContent>
-                <div className="text-2xl font-bold">{stats.total_teams}</div>
+                <div className="text-2xl font-bold">{stats.teams_with_loans}</div>
                 <p className="text-xs text-muted-foreground">
-                  European teams tracked
+                  Currently tracking loanees
                 </p>
               </CardContent>
             </Card>
 
             <Card>
               <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
-                <CardTitle className="text-sm font-medium">Teams with Loans</CardTitle>
+                <CardTitle className="text-sm font-medium">Teams in Database</CardTitle>
                 <TrendingUp className="h-4 w-4 text-muted-foreground" />
               </CardHeader>
               <CardContent>
-                <div className="text-2xl font-bold">{stats.teams_with_loans}</div>
+                <div className="text-2xl font-bold">{stats.total_teams}</div>
                 <p className="text-xs text-muted-foreground">
-                  Have active loans
+                  Unique clubs tracked
                 </p>
               </CardContent>
             </Card>

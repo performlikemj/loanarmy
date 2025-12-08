@@ -966,6 +966,20 @@ export class APIService {
         }, { admin: true })
     }
 
+    static async adminSyncTeamFixtures(teamId, { background = false, dryRun = false } = {}) {
+        return this.request(`/admin/teams/${teamId}/sync-all-fixtures`, {
+            method: 'POST',
+            body: JSON.stringify({ background, dry_run: dryRun })
+        }, { admin: true })
+    }
+
+    static async adminPurgeLoansExcept(keepTeamIds, { dryRun = true } = {}) {
+        return this.request('/admin/loans/purge-except', {
+            method: 'POST',
+            body: JSON.stringify({ keep_team_ids: keepTeamIds, dry_run: dryRun })
+        }, { admin: true })
+    }
+
     static async adminUpdateTeamTracking(teamId, isTracked) {
         return this.request(`/admin/teams/${teamId}/tracking`, {
             method: 'POST',

@@ -190,10 +190,13 @@ class LoanedPlayer(db.Model):
     goals = db.Column(db.Integer, default=0)
     assists = db.Column(db.Integer, default=0)
     minutes_played = db.Column(db.Integer, default=0)
+    saves = db.Column(db.Integer, default=0)  # Goalkeeper saves
     yellows = db.Column(db.Integer, default=0)
     reds = db.Column(db.Integer, default=0)
     data_source = db.Column(db.String(50), nullable=False, default='api-football')
     can_fetch_stats = db.Column(db.Boolean, nullable=False, default=True)
+    # Stats coverage level: 'full' (all stats), 'limited' (appearances/goals from lineups/events), 'none'
+    stats_coverage = db.Column(db.String(20), nullable=False, default='full')
     created_at = db.Column(db.DateTime, default=datetime.now(timezone.utc))
     updated_at = db.Column(db.DateTime, default=datetime.now(timezone.utc), onupdate=datetime.now(timezone.utc))
     
@@ -202,7 +205,83 @@ class LoanedPlayer(db.Model):
         db.UniqueConstraint('player_id', 'primary_team_id', 'loan_team_id', 'window_key', name='uq_loans_player_parent_loan_window'),
     )
 
+    def _compute_stats(self):
+        """
+        Compute stats from fixture_player_stats (source of truth).
+        For limited coverage players (e.g., National League), uses denormalized columns
+        which are populated via the /admin/sync-limited-stats endpoint.
+        """
+        from src.models.weekly import FixturePlayerStats
+        from sqlalchemy import func
+        
+        # Default stats if we can't compute
+        default_stats = {
+            'appearances': 0,
+            'goals': 0,
+            'assists': 0,
+            'minutes_played': 0,
+            'saves': 0,
+            'yellows': 0,
+            'reds': 0,
+            'stats_coverage': getattr(self, 'stats_coverage', 'full'),
+        }
+        
+        # For LIMITED coverage players (e.g., National League), use denormalized columns
+        # These are populated by /admin/sync-limited-stats from lineup/events data
+        if getattr(self, 'stats_coverage', 'full') == 'limited':
+            return {
+                'appearances': self.appearances or 0,
+                'goals': self.goals or 0,
+                'assists': self.assists or 0,
+                'minutes_played': 0,  # Not available for limited coverage
+                'saves': self.saves or 0,
+                'yellows': self.yellows or 0,
+                'reds': self.reds or 0,
+                'stats_coverage': 'limited',
+            }
+        
+        # Can't compute without loan team
+        if not self.loan_team_id:
+            return default_stats
+        
+        # Get loan team's API ID
+        loan_team = Team.query.get(self.loan_team_id)
+        if not loan_team or not loan_team.team_id:
+            return default_stats
+        
+        # Aggregate stats from fixture_player_stats (FULL coverage)
+        stats = db.session.query(
+            func.count().label('appearances'),
+            func.coalesce(func.sum(FixturePlayerStats.goals), 0).label('goals'),
+            func.coalesce(func.sum(FixturePlayerStats.assists), 0).label('assists'),
+            func.coalesce(func.sum(FixturePlayerStats.minutes), 0).label('minutes_played'),
+            func.coalesce(func.sum(FixturePlayerStats.saves), 0).label('saves'),
+            func.coalesce(func.sum(FixturePlayerStats.yellows), 0).label('yellows'),
+            func.coalesce(func.sum(FixturePlayerStats.reds), 0).label('reds'),
+        ).filter(
+            FixturePlayerStats.player_api_id == self.player_id,
+            FixturePlayerStats.team_api_id == loan_team.team_id
+        ).first()
+        
+        if not stats:
+            return default_stats
+        
+        return {
+            'appearances': stats.appearances or 0,
+            'goals': int(stats.goals or 0),
+            'assists': int(stats.assists or 0),
+            'minutes_played': int(stats.minutes_played or 0),
+            'saves': int(stats.saves or 0),
+            'yellows': int(stats.yellows or 0),
+            'reds': int(stats.reds or 0),
+            'stats_coverage': 'full',
+        }
+
     def to_dict(self):
+        # Compute stats from fixture_player_stats (source of truth)
+        # This eliminates sync bugs from stale denormalized columns
+        computed = self._compute_stats()
+        
         return {
             'id': self.id,
             'player_id': self.player_id,
@@ -221,14 +300,17 @@ class LoanedPlayer(db.Model):
             'legacy_loan_team_id': self.legacy_loan_team_id,
             'reviewer_notes': self.reviewer_notes,
             'is_active': self.is_active,
-            'appearances': self.appearances,
-            'goals': self.goals,
-            'assists': self.assists,
-            'minutes_played': self.minutes_played,
-            'yellows': self.yellows,
-            'reds': self.reds,
+            # Use computed stats from fixture_player_stats instead of denormalized columns
+            'appearances': computed['appearances'],
+            'goals': computed['goals'],
+            'assists': computed['assists'],
+            'minutes_played': computed['minutes_played'],
+            'saves': computed['saves'],
+            'yellows': computed['yellows'],
+            'reds': computed['reds'],
             'data_source': self.data_source,
             'can_fetch_stats': self.can_fetch_stats,
+            'stats_coverage': self.stats_coverage,  # 'full', 'limited', or 'none'
             'created_at': self.created_at.isoformat() if self.created_at else None,
             'updated_at': self.updated_at.isoformat() if self.updated_at else None
         }
@@ -716,10 +798,10 @@ class NewsletterCommentary(db.Model):
     applause = db.relationship('CommentaryApplause', backref='commentary', lazy='dynamic', cascade='all, delete-orphan')
     
     def to_dict(self):
-        from src.utils.sanitize import sanitize_commentary_html, sanitize_plain_text
+        from src.utils.sanitize import sanitize_plain_text
         
-        # Re-sanitize on read as additional safety layer
-        safe_content = sanitize_commentary_html(self.content) if self.content else ''
+        # Content is already sanitized on write, no need to re-sanitize on read
+        # (Re-sanitizing caused errors with large content like base64 chart images)
         
         # Get author profile image if author relationship exists
         author_profile_image = None
@@ -733,7 +815,7 @@ class NewsletterCommentary(db.Model):
             'team_name': self.team.name if self.team else (self.newsletter.team.name if self.newsletter and self.newsletter.team else None),
             'player_id': self.player_id,
             'commentary_type': self.commentary_type,
-            'content': safe_content,
+            'content': self.content or '',
             'structured_blocks': self.structured_blocks,
             'author_id': self.author_id,
             'author_name': sanitize_plain_text(self.author_name) if self.author_name else None,
@@ -1018,4 +1100,53 @@ class NewsletterDigestQueue(db.Model):
             'queued_at': self.queued_at.isoformat() if self.queued_at else None,
             'sent': self.sent,
             'sent_at': self.sent_at.isoformat() if self.sent_at else None,
+        }
+
+
+class BackgroundJob(db.Model):
+    """Stores background job state in the database for multi-worker environments.
+    
+    This replaces in-memory job storage to ensure all gunicorn workers can access
+    the same job state. Jobs are persisted and can be queried across workers.
+    """
+    __tablename__ = 'background_jobs'
+
+    id = db.Column(db.String(36), primary_key=True)  # UUID
+    job_type = db.Column(db.String(50), nullable=False)  # seed_top5, fix_miscategorized, etc.
+    status = db.Column(db.String(20), nullable=False, default='running')  # running, completed, failed
+    progress = db.Column(db.Integer, default=0)
+    total = db.Column(db.Integer, default=0)
+    current_player = db.Column(db.String(200))
+    results_json = db.Column(db.Text)  # JSON serialized results
+    error = db.Column(db.Text)
+    started_at = db.Column(db.DateTime, default=datetime.now(timezone.utc))
+    completed_at = db.Column(db.DateTime)
+    created_at = db.Column(db.DateTime, default=datetime.now(timezone.utc))
+    updated_at = db.Column(db.DateTime, default=datetime.now(timezone.utc), onupdate=datetime.now(timezone.utc))
+
+    __table_args__ = (
+        db.Index('ix_background_jobs_status', 'status'),
+        db.Index('ix_background_jobs_created', 'created_at'),
+    )
+
+    def to_dict(self):
+        import json
+        results = None
+        if self.results_json:
+            try:
+                results = json.loads(self.results_json)
+            except (json.JSONDecodeError, TypeError):
+                results = None
+        
+        return {
+            'id': self.id,
+            'type': self.job_type,
+            'status': self.status,
+            'progress': self.progress,
+            'total': self.total,
+            'current_player': self.current_player,
+            'results': results,
+            'error': self.error,
+            'started_at': self.started_at.isoformat() if self.started_at else None,
+            'completed_at': self.completed_at.isoformat() if self.completed_at else None,
         }

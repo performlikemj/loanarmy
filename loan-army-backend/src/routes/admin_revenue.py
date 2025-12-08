@@ -4,7 +4,7 @@ import logging
 from src.models.league import db, StripePlatformRevenue, StripeSubscription
 from src.routes.api import require_api_key
 from src.config.stripe_config import PLATFORM_FEE_PERCENT, calculate_platform_fee
-from datetime import datetime, date, timedelta
+from datetime import datetime, date, timedelta, timezone
 from sqlalchemy import func
 
 admin_revenue_bp = Blueprint('admin_revenue', __name__)
@@ -26,7 +26,7 @@ def get_revenue_summary():
         total_platform_fees = all_time.platform_fees or 0
         
         # Get current month totals
-        today = date.today()
+        today = datetime.now(timezone.utc).date()
         month_start = today.replace(day=1)
         
         month_totals = db.session.query(
@@ -243,7 +243,7 @@ def calculate_revenue():
 def get_current_period_revenue():
     """Get revenue for the current billing period (month)"""
     try:
-        today = date.today()
+        today = datetime.now(timezone.utc).date()
         period_start = today.replace(day=1)
         
         # Calculate last day of month

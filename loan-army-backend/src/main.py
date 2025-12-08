@@ -161,7 +161,26 @@ else:
 
 app.config["SQLALCHEMY_DATABASE_URI"] = db_uri
 app.config['SQLALCHEMY_TRACK_MODIFICATIONS'] = False
+# Connection pool settings for resilience against transaction aborts
+app.config['SQLALCHEMY_ENGINE_OPTIONS'] = {
+    'pool_pre_ping': True,  # Test connections before use, discard stale/aborted ones
+    'pool_recycle': 300,    # Recycle connections every 5 minutes
+}
 db.init_app(app)
+
+@app.teardown_appcontext
+def shutdown_session(exception=None):
+    """Ensure database session is properly cleaned up after each request.
+    
+    This prevents 'transaction is aborted' errors from propagating to subsequent
+    requests when using PostgreSQL with connection pooling.
+    """
+    if exception:
+        try:
+            db.session.rollback()
+        except Exception:
+            pass
+    db.session.remove()
 
 @app.errorhandler(HTTPException)
 def handle_http_exception(exc: HTTPException):

@@ -1,5 +1,5 @@
 from flask import Blueprint, request, jsonify, make_response, render_template, Response, current_app, g
-from src.models.league import db, League, Team, LoanedPlayer, Newsletter, UserSubscription, EmailToken, LoanFlag, AdminSetting, NewsletterComment, UserAccount, SupplementalLoan, NewsletterPlayerYoutubeLink, NewsletterCommentary, Player, JournalistTeamAssignment, CommentaryApplause, TeamTrackingRequest, StripeSubscription, NewsletterDigestQueue, JournalistSubscription, _as_utc, _dedupe_loans
+from src.models.league import db, League, Team, LoanedPlayer, Newsletter, UserSubscription, EmailToken, LoanFlag, AdminSetting, NewsletterComment, UserAccount, SupplementalLoan, NewsletterPlayerYoutubeLink, NewsletterCommentary, Player, JournalistTeamAssignment, CommentaryApplause, TeamTrackingRequest, StripeSubscription, NewsletterDigestQueue, JournalistSubscription, BackgroundJob, _as_utc, _dedupe_loans
 from src.models.sponsor import Sponsor
 from src.api_football_client import APIFootballClient
 from src.admin.sandbox_tasks import (
@@ -36,10 +36,71 @@ from src.extensions import limiter
 from src.utils.sanitize import sanitize_comment_body, sanitize_plain_text, sanitize_commentary_html
 from src.agents.errors import NoActiveLoaneesError
 from src.utils.newsletter_slug import compose_newsletter_public_slug
+import threading
 
 logger = logging.getLogger(__name__)
 
 api_bp = Blueprint('api', __name__)
+
+# Database-backed job store for background tasks (works across gunicorn workers)
+def _create_background_job(job_type: str) -> str:
+    """Create a new background job in the database and return its ID."""
+    job_id = str(uuid4())
+    try:
+        job = BackgroundJob(
+            id=job_id,
+            job_type=job_type,
+            status='running',
+            progress=0,
+            total=0,
+            started_at=datetime.now(timezone.utc)
+        )
+        db.session.add(job)
+        db.session.commit()
+    except Exception as e:
+        logger.error(f'Failed to create background job: {e}')
+        db.session.rollback()
+    return job_id
+
+def _update_job(job_id: str, **kwargs):
+    """Update a background job's status in the database."""
+    try:
+        job = db.session.get(BackgroundJob, job_id)
+        if job:
+            if 'progress' in kwargs:
+                job.progress = kwargs['progress']
+            if 'total' in kwargs:
+                job.total = kwargs['total']
+            if 'current_player' in kwargs:
+                job.current_player = kwargs.get('current_player')
+            if 'status' in kwargs:
+                job.status = kwargs['status']
+            if 'error' in kwargs:
+                job.error = kwargs.get('error')
+            if 'results' in kwargs:
+                results = kwargs.get('results')
+                if results is not None:
+                    job.results_json = json.dumps(results)
+            if 'completed_at' in kwargs:
+                completed = kwargs.get('completed_at')
+                if isinstance(completed, str):
+                    job.completed_at = datetime.fromisoformat(completed.replace('Z', '+00:00'))
+                else:
+                    job.completed_at = completed
+            db.session.commit()
+    except Exception as e:
+        logger.error(f'Failed to update background job {job_id}: {e}')
+        db.session.rollback()
+
+def _get_job(job_id: str) -> dict | None:
+    """Get a background job's status from the database."""
+    try:
+        job = db.session.get(BackgroundJob, job_id)
+        if job:
+            return job.to_dict()
+    except Exception as e:
+        logger.error(f'Failed to get background job {job_id}: {e}')
+    return None
 
 
 class LazyAPIFootballClient:
@@ -1128,7 +1189,7 @@ def generate_weekly_all():
         if target_date_str:
             target_dt = datetime.strptime(target_date_str, "%Y-%m-%d").date()
         else:
-            target_dt = date.today()
+            target_dt = datetime.now(timezone.utc).date()
         from src.jobs.run_weekly_newsletters import run_for_date
         result = run_for_date(target_dt)
         # Append to run history for admin UI visibility
@@ -1387,7 +1448,15 @@ def get_team(team_id):
 
 @api_bp.route('/teams/<int:team_id>/loans', methods=['GET'])
 def get_team_loans(team_id):
-    """Get loans for a specific team."""
+    """Get loans for a specific team.
+    
+    Query params:
+    - direction: 'loaned_from' (default) to show players loaned OUT from this team,
+                 'loaned_to' to show players loaned TO this team
+    - active_only: filter to only active loans (default: true)
+    - dedupe: deduplicate loans by player_id (default: true)
+    - season: filter by season year
+    """
     try:
         # Import helper functions for player photos and team logos
         from src.agents.weekly_agent import _player_photo_for, _team_logo_for_team  # type: ignore
@@ -1396,8 +1465,13 @@ def get_team_loans(team_id):
         active_only = request.args.get('active_only', 'true').lower() in ('1', 'true', 'yes', 'on', 'y')
         dedupe = request.args.get('dedupe', 'true').lower() in ('1', 'true', 'yes', 'on', 'y')
         season_val = request.args.get('season', type=int)
+        direction = request.args.get('direction', 'loaned_from').lower()
 
-        query = LoanedPlayer.query.filter_by(primary_team_id=team.id)
+        # Filter by direction: loaned_from = parent club, loaned_to = loan destination
+        if direction == 'loaned_to':
+            query = LoanedPlayer.query.filter_by(loan_team_id=team.id)
+        else:
+            query = LoanedPlayer.query.filter_by(primary_team_id=team.id)
         if active_only:
             query = query.filter(LoanedPlayer.is_active.is_(True))
         if season_val:
@@ -1448,6 +1522,7 @@ def get_team_loans(team_id):
             if include_season_context and loan_dict.get('player_id') and loan_dict.get('loan_team_api_id'):
                 try:
                     from src.api_football_client import APIFootballClient
+                    from src.models.weekly import FixturePlayerStats
                     api_client = APIFootballClient()
                     
                     # Determine season from window_key or use current season
@@ -1459,21 +1534,51 @@ def get_team_loans(team_id):
                             season_year = int(season_str)
                         except (ValueError, IndexError):
                             # Fallback to current season
-                            from datetime import datetime
-                            now = datetime.now()
+                            now = datetime.now(timezone.utc)
                             season_year = now.year if now.month >= 8 else now.year - 1
                     
                     if not season_year:
-                        from datetime import datetime
-                        now = datetime.now()
+                        now = datetime.now(timezone.utc)
                         season_year = now.year if now.month >= 8 else now.year - 1
                     
-                    # Get season context
-                    season_context = api_client.get_player_season_context(
-                        player_id=loan_dict['player_id'],
+                    # 🔄 VERIFY player ID before fetching stats for Browse Teams
+                    # This ensures we show correct stats even if player was seeded with wrong ID
+                    player_id_to_use = loan_dict['player_id']
+                    verified_id, method = api_client.verify_player_id_via_fixtures(
+                        candidate_player_id=loan_dict['player_id'],
+                        player_name=loan.player_name,
                         loan_team_id=loan_dict['loan_team_api_id'],
                         season=season_year,
-                        up_to_date=date.today(),
+                        max_fixtures=3
+                    )
+                    if verified_id != loan_dict['player_id']:
+                        logger.warning(
+                            f"🔄 Browse Teams ID correction for '{loan.player_name}': "
+                            f"{loan_dict['player_id']} → {verified_id}"
+                        )
+                        player_id_to_use = verified_id
+                        # Update the database record
+                        loan.player_id = verified_id
+                        loan.reviewer_notes = (loan.reviewer_notes or '') + f' | ID auto-corrected in browse: {loan_dict["player_id"]} → {verified_id}'
+                        loan.updated_at = datetime.now(timezone.utc)
+                        db.session.commit()
+                        # Delete ghost stats
+                        ghost_deleted = FixturePlayerStats.query.filter(
+                            FixturePlayerStats.player_api_id == loan_dict['player_id'],
+                            FixturePlayerStats.team_api_id == loan_dict['loan_team_api_id'],
+                            FixturePlayerStats.minutes == 0
+                        ).delete()
+                        if ghost_deleted:
+                            db.session.commit()
+                        # Update loan_dict to reflect new ID
+                        loan_dict['player_id'] = verified_id
+                    
+                    # Get season context with verified ID
+                    season_context = api_client.get_player_season_context(
+                        player_id=player_id_to_use,
+                        loan_team_id=loan_dict['loan_team_api_id'],
+                        season=season_year,
+                        up_to_date=datetime.now(timezone.utc).date(),
                         db_session=db.session
                     )
                     
@@ -1879,7 +1984,7 @@ def terminate_loan(loan_id):
             except ValueError:
                 return jsonify({'error': 'Invalid date format. Use YYYY-MM-DD'}), 400
         else:
-            termination_date = date.today()
+            termination_date = datetime.now(timezone.utc).date()
         
         # Update loan record
         loan.early_termination = True
@@ -2223,7 +2328,7 @@ def get_newsletters():
         days = request.args.get('days')
         if days:
             try:
-                cutoff_date = datetime.utcnow() - timedelta(days=int(days))
+                cutoff_date = datetime.now(timezone.utc) - timedelta(days=int(days))
                 query = query.filter(Newsletter.generated_date >= cutoff_date)
             except ValueError:
                 pass
@@ -2249,7 +2354,7 @@ def get_newsletters():
         # Exclude current week (server-side)
         exclude_current_week = request.args.get('exclude_current_week', 'false').lower() in ('true', '1', 'yes', 'y')
         if exclude_current_week:
-            today = date.today()
+            today = datetime.now(timezone.utc).date()
             # Compute Monday..Sunday of current week
             days_since_monday = today.weekday()
             current_week_start = today - timedelta(days=days_since_monday)
@@ -2726,8 +2831,9 @@ def get_public_player_stats(player_id: int):
         from src.api_football_client import APIFootballClient
         
         # Get current season
-        current_year = datetime.now().year
-        current_month = datetime.now().month
+        now_utc = datetime.now(timezone.utc)
+        current_year = now_utc.year
+        current_month = now_utc.month
         season = current_year if current_month >= 8 else current_year - 1
         season_prefix = f"{season}-{str(season + 1)[-2:]}"  # e.g., "2025-26"
         
@@ -2780,6 +2886,9 @@ def get_public_player_stats(player_id: int):
         stats_query = stats_query.order_by(Fixture.date_utc.asc()).all()
         
         # Sync missing games from each loan team
+        # Get player name from loan records for ID verification during sync
+        player_name_for_sync = all_loans[0].player_name if all_loans else None
+        
         for loan_team_api_id in loan_team_api_ids:
             try:
                 local_count = sum(1 for s, f in stats_query if s.team_api_id == loan_team_api_id)
@@ -2793,7 +2902,7 @@ def get_public_player_stats(player_id: int):
                 
                 if api_appearances > local_count:
                     logger.info(f"Player {player_id} at team {loan_team_api_id}: API={api_appearances}, local={local_count}. Syncing...")
-                    _sync_player_club_fixtures(player_id, loan_team_api_id, season)
+                    _sync_player_club_fixtures(player_id, loan_team_api_id, season, player_name=player_name_for_sync)
             except Exception as e:
                 logger.warning(f"Failed to sync for player {player_id} at team {loan_team_api_id}: {e}")
         
@@ -2850,19 +2959,24 @@ def get_public_player_stats(player_id: int):
         return jsonify(_safe_error_payload(e, 'Failed to fetch player stats')), 500
 
 
-def _sync_player_club_fixtures(player_id: int, loan_team_api_id: int, season: int) -> int:
+def _sync_player_club_fixtures(player_id: int, loan_team_api_id: int, season: int, player_name: str = None) -> int:
     """
     Sync all fixtures for a player at their loan club from API-Football.
     Returns number of fixtures synced.
+    
+    Now includes automatic ID verification - if player_id yields no results but
+    a matching player name is found with a different ID, updates the LoanedPlayer
+    record and syncs with the correct ID.
     """
     from src.api_football_client import APIFootballClient
     from src.models.weekly import Fixture, FixturePlayerStats
+    from src.models.league import LoanedPlayer, Team
     
     api_client = APIFootballClient()
     
     # Fetch all fixtures for the loan team this season
     season_start = f"{season}-08-01"
-    today = datetime.now().strftime('%Y-%m-%d')
+    today = datetime.now(timezone.utc).strftime('%Y-%m-%d')
     
     fixtures = api_client.get_fixtures_for_team(
         loan_team_api_id, 
@@ -2872,6 +2986,50 @@ def _sync_player_club_fixtures(player_id: int, loan_team_api_id: int, season: in
     )
     
     logger.info(f"Found {len(fixtures)} fixtures for team {loan_team_api_id} in season {season}")
+    
+    # 🔄 If we have a player name, verify ID via fixtures BEFORE syncing
+    # This catches ID mismatches early (e.g., seeded before player played)
+    corrected_id = None
+    if player_name and len(fixtures) > 0:
+        verified_id, method = api_client.verify_player_id_via_fixtures(
+            candidate_player_id=player_id,
+            player_name=player_name,
+            loan_team_id=loan_team_api_id,
+            season=season,
+            max_fixtures=3
+        )
+        if verified_id != player_id:
+            logger.warning(
+                f"🔄 ID mismatch detected during stats sync for '{player_name}': "
+                f"stored={player_id}, correct={verified_id}. Auto-correcting..."
+            )
+            # Update the LoanedPlayer record
+            loan_team_db = Team.query.filter_by(team_id=loan_team_api_id).first()
+            if loan_team_db:
+                loan = LoanedPlayer.query.filter(
+                    LoanedPlayer.player_id == player_id,
+                    LoanedPlayer.loan_team_id == loan_team_db.id,
+                    LoanedPlayer.is_active.is_(True)
+                ).first()
+                if loan:
+                    loan.player_id = verified_id
+                    loan.reviewer_notes = (loan.reviewer_notes or '') + f' | ID auto-corrected during sync: {player_id} → {verified_id}'
+                    loan.updated_at = datetime.now(timezone.utc)
+                    db.session.commit()
+                    logger.info(f"✅ Updated LoanedPlayer ID from {player_id} to {verified_id}")
+            
+            # Also delete any ghost stats with the old ID
+            ghost_deleted = FixturePlayerStats.query.filter(
+                FixturePlayerStats.player_api_id == player_id,
+                FixturePlayerStats.team_api_id == loan_team_api_id,
+                FixturePlayerStats.minutes == 0
+            ).delete()
+            if ghost_deleted:
+                db.session.commit()
+                logger.info(f"🗑️ Deleted {ghost_deleted} ghost stat records with old ID {player_id}")
+            
+            corrected_id = verified_id
+            player_id = verified_id  # Use corrected ID for syncing
     
     synced = 0
     for fx in fixtures:
@@ -3022,6 +3180,54 @@ def get_public_player_profile(player_id: int):
             loaned = LoanedPlayer.query.filter_by(player_id=player_id).order_by(LoanedPlayer.updated_at.desc()).first()
         
         if loaned:
+            # 🔄 VERIFY player ID for Player Profile page
+            # This ensures we show correct data and fix the database if ID was wrong
+            if loaned.loan_team_id and loaned.can_fetch_stats:
+                try:
+                    from src.api_football_client import APIFootballClient
+                    from src.models.weekly import FixturePlayerStats
+                    
+                    loan_team = Team.query.get(loaned.loan_team_id)
+                    if loan_team and loan_team.team_id:
+                        # Get current season
+                        now_utc = datetime.now(timezone.utc)
+                        season = now_utc.year if now_utc.month >= 8 else now_utc.year - 1
+                        
+                        api_client = APIFootballClient()
+                        verified_id, method = api_client.verify_player_id_via_fixtures(
+                            candidate_player_id=player_id,
+                            player_name=loaned.player_name,
+                            loan_team_id=loan_team.team_id,
+                            season=season,
+                            max_fixtures=3
+                        )
+                        if verified_id != player_id:
+                            logger.warning(
+                                f"🔄 Player Profile ID correction for '{loaned.player_name}': "
+                                f"{player_id} → {verified_id}"
+                            )
+                            # Update the database record
+                            loaned.player_id = verified_id
+                            loaned.reviewer_notes = (loaned.reviewer_notes or '') + f' | ID auto-corrected in profile: {player_id} → {verified_id}'
+                            loaned.updated_at = datetime.now(timezone.utc)
+                            db.session.commit()
+                            # Delete ghost stats
+                            ghost_deleted = FixturePlayerStats.query.filter(
+                                FixturePlayerStats.player_api_id == player_id,
+                                FixturePlayerStats.team_api_id == loan_team.team_id,
+                                FixturePlayerStats.minutes == 0
+                            ).delete()
+                            if ghost_deleted:
+                                db.session.commit()
+                            # Update result to use corrected ID
+                            result['player_id'] = verified_id
+                            # Also update Player table if exists
+                            if player:
+                                player.player_id = verified_id
+                                db.session.commit()
+                except Exception as verify_err:
+                    logger.debug(f"ID verification failed for profile: {verify_err}")
+            
             if not result['name']:
                 result['name'] = loaned.player_name
             result['loan_team_name'] = loaned.loan_team_name
@@ -3033,6 +3239,7 @@ def get_public_player_profile(player_id: int):
                 if loan_team:
                     result['loan_team_logo'] = loan_team.logo
                     result['loan_team_id'] = loan_team.team_id
+                    result['loan_team_db_id'] = loaned.loan_team_id  # DB ID for API calls
             
             if loaned.primary_team_id:
                 parent_team = Team.query.get(loaned.primary_team_id)
@@ -3065,8 +3272,9 @@ def get_public_player_profile(player_id: int):
             result['name'] = f"Player #{player_id}"
         
         # Get ALL loans for this season (for mid-season transfers)
-        current_year = datetime.now().year
-        current_month = datetime.now().month
+        now_utc = datetime.now(timezone.utc)
+        current_year = now_utc.year
+        current_month = now_utc.month
         season_year = current_year if current_month >= 8 else current_year - 1
         season_prefix = f"{season_year}-{str(season_year + 1)[-2:]}"  # e.g., "2025-26"
         
@@ -3102,6 +3310,7 @@ def get_public_player_profile(player_id: int):
             loan_history.append({
                 'loan_team_name': loan.loan_team_name,
                 'loan_team_id': loan_team.team_id if loan_team else None,
+                'loan_team_db_id': loan.loan_team_id,  # DB ID for API calls
                 'loan_team_logo': loan_team.logo if loan_team else None,
                 'parent_team_name': loan.primary_team_name,
                 'parent_team_id': parent_team.team_id if parent_team else None,
@@ -3135,10 +3344,11 @@ def get_public_player_season_stats(player_id: int):
         from sqlalchemy import func
         
         # Get current season
-        current_year = datetime.now().year
-        current_month = datetime.now().month
+        now_utc = datetime.now(timezone.utc)
+        current_year = now_utc.year
+        current_month = now_utc.month
         season_start_year = current_year if current_month >= 8 else current_year - 1
-        season_start = datetime(season_start_year, 8, 1)
+        season_start = datetime(season_start_year, 8, 1, tzinfo=timezone.utc)
         
         season_prefix = f"{season_start_year}-{str(season_start_year + 1)[-2:]}"  # e.g., "2025-26"
         
@@ -3174,6 +3384,37 @@ def get_public_player_season_stats(player_id: int):
         if not all_loans:
             return jsonify(result)  # Can't get stats without loan teams
         
+        # 📊 CHECK FOR LIMITED COVERAGE (e.g., National League)
+        # If the player has limited stats coverage, use denormalized stats from LoanedPlayer
+        primary_loan = all_loans[0]
+        if getattr(primary_loan, 'stats_coverage', 'full') == 'limited':
+            logger.info(f"Using limited coverage stats for player {player_id} ({primary_loan.player_name})")
+            result['appearances'] = primary_loan.appearances or 0
+            result['minutes'] = 0  # Not available for limited coverage
+            result['goals'] = primary_loan.goals or 0
+            result['assists'] = primary_loan.assists or 0
+            result['yellows'] = primary_loan.yellows or 0
+            result['reds'] = primary_loan.reds or 0
+            result['source'] = 'limited-coverage'
+            result['stats_coverage'] = 'limited'
+            result['limited_stats_note'] = 'Full match stats not available for this league. Showing appearances, goals, and assists from lineup/event data.'
+            
+            # Get loan team info
+            if primary_loan.loan_team_id:
+                loan_team = Team.query.get(primary_loan.loan_team_id)
+                if loan_team:
+                    result['loan_team'] = loan_team.name
+                    result['clubs'] = [{
+                        'team_name': loan_team.name,
+                        'team_logo': loan_team.logo,
+                        'appearances': primary_loan.appearances or 0,
+                        'goals': primary_loan.goals or 0,
+                        'assists': primary_loan.assists or 0,
+                        'is_current': primary_loan.is_active,
+                    }]
+            
+            return jsonify(result)
+        
         # Build list of loan teams with their API IDs
         loan_teams_info = []
         loan_team_api_ids = []
@@ -3198,6 +3439,44 @@ def get_public_player_season_stats(player_id: int):
         result['loan_team'] = loan_teams_info[0]['name'] if loan_teams_info else None
         result['has_multiple_clubs'] = len(loan_teams_info) > 1
         
+        # 🔄 VERIFY player ID before fetching season stats
+        # This ensures we show correct stats even if player was seeded with wrong ID
+        api_client = APIFootballClient()
+        player_id_to_use = player_id
+        player_name_for_verify = all_loans[0].player_name if all_loans else None
+        
+        if player_name_for_verify and loan_teams_info:
+            verified_id, method = api_client.verify_player_id_via_fixtures(
+                candidate_player_id=player_id,
+                player_name=player_name_for_verify,
+                loan_team_id=loan_teams_info[0]['api_id'],
+                season=season_start_year,
+                max_fixtures=3
+            )
+            if verified_id != player_id:
+                logger.warning(
+                    f"🔄 Season-stats ID correction for '{player_name_for_verify}': "
+                    f"{player_id} → {verified_id}"
+                )
+                player_id_to_use = verified_id
+                # Update the database record
+                for loan in all_loans:
+                    if loan.player_id == player_id:
+                        loan.player_id = verified_id
+                        loan.reviewer_notes = (loan.reviewer_notes or '') + f' | ID auto-corrected in season-stats: {player_id} → {verified_id}'
+                        loan.updated_at = datetime.now(timezone.utc)
+                db.session.commit()
+                # Delete ghost stats
+                ghost_deleted = FixturePlayerStats.query.filter(
+                    FixturePlayerStats.player_api_id == player_id,
+                    FixturePlayerStats.team_api_id.in_(loan_team_api_ids),
+                    FixturePlayerStats.minutes == 0
+                ).delete()
+                if ghost_deleted:
+                    db.session.commit()
+                # Update result to reflect new ID
+                result['player_id'] = verified_id
+        
         # Aggregate stats from API-Football for ALL loan clubs
         total_appearances = 0
         total_minutes = 0
@@ -3207,9 +3486,8 @@ def get_public_player_season_stats(player_id: int):
         
         for team_info in loan_teams_info:
             try:
-                api_client = APIFootballClient()
                 api_totals = api_client._fetch_player_team_season_totals_api(
-                    player_id=player_id,
+                    player_id=player_id_to_use,
                     team_id=team_info['api_id'],
                     season=season_start_year,
                 )
@@ -3266,6 +3544,11 @@ def get_public_player_season_stats(player_id: int):
         ).first()
         
         if stats_query and stats_query.appearances:
+            local_appearances = stats_query.appearances or 0
+            local_minutes = int(stats_query.total_minutes or 0)
+            local_goals = int(stats_query.total_goals or 0)
+            local_assists = int(stats_query.total_assists or 0)
+            
             result['yellows'] = int(stats_query.total_yellows or 0)
             result['reds'] = int(stats_query.total_reds or 0)
             result['avg_rating'] = round(float(stats_query.avg_rating or 0), 2) if stats_query.avg_rating else None
@@ -3275,14 +3558,27 @@ def get_public_player_season_stats(player_id: int):
             result['tackles'] = int(stats_query.total_tackles or 0)
             result['saves'] = int(stats_query.total_saves or 0)
             result['goals_conceded'] = int(stats_query.total_goals_conceded or 0)
-            result['local_appearances'] = stats_query.appearances or 0
+            result['local_appearances'] = local_appearances
             
-            # If API-Football didn't work, use local DB
-            if result['source'] == 'none':
-                result['appearances'] = stats_query.appearances or 0
-                result['minutes'] = int(stats_query.total_minutes or 0)
-                result['goals'] = int(stats_query.total_goals or 0)
-                result['assists'] = int(stats_query.total_assists or 0)
+            # PREFER local fixture data when it has MORE appearances than API-Football
+            # This handles cases where API-Football's aggregated endpoint is incomplete
+            # Our fixture data is captured per-game and is more reliable
+            if local_appearances > result.get('appearances', 0):
+                logger.info(
+                    f"Using local fixture data for player {player_id}: "
+                    f"local={local_appearances} apps > API={result.get('appearances', 0)} apps"
+                )
+                result['appearances'] = local_appearances
+                result['minutes'] = local_minutes
+                result['goals'] = local_goals
+                result['assists'] = local_assists
+                result['source'] = 'local-db'
+            elif result['source'] == 'none':
+                # Fallback to local DB if API-Football returned nothing
+                result['appearances'] = local_appearances
+                result['minutes'] = local_minutes
+                result['goals'] = local_goals
+                result['assists'] = local_assists
                 result['source'] = 'local-db'
         
         # Calculate clean sheets for goalkeepers (games with 0 goals conceded and >= 45 mins)
@@ -3464,7 +3760,7 @@ def generate_newsletter():
                 logger.error(f"❌ Invalid date format: {target_date}, error: {ve}")
                 return jsonify({'error': 'Invalid date format. Use YYYY-MM-DD'}), 400
         else:
-            target_date = date.today()
+            target_date = datetime.now(timezone.utc).date()
             logger.info(f"📅 Using today's date: {target_date}")
         
         # Check if newsletter already exists for this team and date
@@ -4181,8 +4477,15 @@ def get_overview_stats():
                 LoanedPlayer.window_key.like(f"{current_season_slug}%")
             ).count()
 
+        # Count unique teams (deduplicated by team_id) to avoid counting same team across seasons
+        unique_team_count = (
+            db.session.query(db.func.count(db.func.distinct(Team.team_id)))
+            .filter(Team.is_active.is_(True))
+            .scalar() or 0
+        )
+
         stats = {
-            'total_teams': Team.query.filter_by(is_active=True).count(),
+            'total_teams': unique_team_count,
             'european_leagues': League.query.filter_by(is_european_top_league=True).count(),
             'total_active_loans': LoanedPlayer.query.filter_by(is_active=True).count(),
             'season_loans': season_loans_count,
@@ -4404,7 +4707,7 @@ def detect_loan_candidates():
                     'is_likely_loan': transfer_analysis.get('is_likely_loan', False),
                     'indicators': transfer_analysis.get('indicators', []),
                     'needs_review': True,
-                    'detected_at': datetime.utcnow().isoformat()
+                    'detected_at': datetime.now(timezone.utc).isoformat()
                 }
 
                 loan_candidates.append(loan_candidate)
@@ -6201,6 +6504,82 @@ def admin_cleanup_duplicate_loans():
         db.session.rollback()
         return jsonify(_safe_error_payload(e, 'An unexpected error occurred. Please try again later.')), 500
 
+@api_bp.route('/admin/loans/purge-except', methods=['POST'])
+@require_api_key
+def admin_purge_loans_except():
+    """
+    Delete ALL loaned players except those from specified primary (parent) teams.
+    Also deletes associated fixture_player_stats.
+    
+    Body:
+    - keep_team_ids: list of team database IDs to KEEP (delete all others)
+    - keep_team_api_ids: list of team API IDs to KEEP (alternative to keep_team_ids)
+    - dry_run: if true, just return counts without deleting
+    
+    Example: { "keep_team_ids": [1], "dry_run": false }
+    """
+    try:
+        from src.models.weekly import FixturePlayerStats
+        
+        data = request.get_json() or {}
+        keep_team_ids = data.get('keep_team_ids', [])
+        keep_team_api_ids = data.get('keep_team_api_ids', [])
+        dry_run = data.get('dry_run', True)
+        
+        # Convert API IDs to database IDs if needed
+        if keep_team_api_ids and not keep_team_ids:
+            teams_to_keep = Team.query.filter(Team.team_id.in_(keep_team_api_ids)).all()
+            keep_team_ids = [t.id for t in teams_to_keep]
+        
+        if not keep_team_ids:
+            return jsonify({'error': 'Must specify keep_team_ids or keep_team_api_ids'}), 400
+        
+        # Get loans to delete (where primary_team_id NOT IN keep_team_ids)
+        loans_to_delete = LoanedPlayer.query.filter(
+            ~LoanedPlayer.primary_team_id.in_(keep_team_ids)
+        ).all()
+        
+        player_api_ids = list(set(l.player_id for l in loans_to_delete))
+        
+        # Get fixture stats to delete
+        fixture_stats_count = 0
+        if player_api_ids:
+            fixture_stats_count = FixturePlayerStats.query.filter(
+                FixturePlayerStats.player_api_id.in_(player_api_ids)
+            ).count()
+        
+        summary = {
+            'dry_run': dry_run,
+            'keep_team_ids': keep_team_ids,
+            'loans_to_delete': len(loans_to_delete),
+            'fixture_stats_to_delete': fixture_stats_count,
+            'teams_affected': list(set(l.primary_team_name for l in loans_to_delete)),
+        }
+        
+        if dry_run:
+            summary['message'] = 'Dry run - no data was deleted'
+            return jsonify(summary)
+        
+        # Actually delete
+        if player_api_ids:
+            FixturePlayerStats.query.filter(
+                FixturePlayerStats.player_api_id.in_(player_api_ids)
+            ).delete(synchronize_session=False)
+        
+        for loan in loans_to_delete:
+            db.session.delete(loan)
+        
+        db.session.commit()
+        
+        summary['message'] = f'Successfully deleted {len(loans_to_delete)} loans and {fixture_stats_count} fixture stats'
+        return jsonify(summary)
+        
+    except Exception as e:
+        logger.exception('admin_purge_loans_except failed')
+        db.session.rollback()
+        return jsonify(_safe_error_payload(e, 'Failed to purge loans')), 500
+
+
 @api_bp.route('/admin/loans/<int:loan_id>/deactivate', methods=['POST'])
 @require_api_key
 def admin_deactivate_loan(loan_id: int):
@@ -6219,30 +6598,71 @@ def admin_deactivate_loan(loan_id: int):
 def admin_seed_top5_loans():
     """Seed LoanedPlayer rows for Top-5 European leagues for a given season.
 
-    Body: { season: int, window_key?: str, league_ids?: [int], dry_run?: bool }
+    Body: { season: int, window_key?: str, league_ids?: [int], dry_run?: bool, background?: bool }
     - season: starting year (e.g., 2025 for 2025-26)
     - window_key default: "{season}-{(season+1)%100:02d}::FULL"
     - league_ids default: [39, 140, 78, 135, 61]
+    - background: if true, run in background and return job ID
     """
+    from flask import copy_current_request_context
+    
+    data = request.get_json() or {}
+    season = int(data.get('season') or 0)
+    if not season:
+        return jsonify({'error': 'season is required'}), 400
+    
+    background = bool(data.get('background', False))
+    
+    if background:
+        # Start background job
+        job_id = _create_background_job('seed_top5')
+        
+        @copy_current_request_context
+        def run_seed_in_background():
+            try:
+                result = _run_seed_top5_logic(data, job_id)
+                _update_job(job_id, status='completed', results=result, completed_at=datetime.now(timezone.utc).isoformat())
+            except Exception as e:
+                logger.exception(f'Background seed job {job_id} failed')
+                _update_job(job_id, status='failed', error=str(e), completed_at=datetime.now(timezone.utc).isoformat())
+        
+        thread = threading.Thread(target=run_seed_in_background)
+        thread.start()
+        
+        return jsonify({
+            'message': 'Seed Top 5 job started in background',
+            'job_id': job_id,
+            'status': 'running',
+            'check_status_url': f'/api/admin/jobs/{job_id}'
+        })
+    
+    # Synchronous mode
     try:
-        data = request.get_json() or {}
+        result = _run_seed_top5_logic(data)
+        return jsonify(result)
+    except Exception as e:
+        logger.exception('admin_seed_top5_loans failed')
+        try:
+            db.session.rollback()
+        except Exception:
+            logger.warning('db.session.rollback failed during admin_seed_top5_loans error handling')
+        return jsonify(_safe_error_payload(e, 'Failed to seed top five leagues. Please try again later.', include_detail=True)), 500
+
+
+def _run_seed_top5_logic(data: dict, job_id: str = None) -> dict:
+    """Core logic for seeding Top 5 leagues. Can be run sync or in background."""
+    try:
         season = int(data.get('season') or 0)
-        if not season:
-            return jsonify({'error': 'season is required'}), 400
         league_ids = data.get('league_ids') or [39, 140, 78, 135, 61]
         dry_run = bool(data.get('dry_run'))
         overwrite = bool(data.get('overwrite'))
 
-        requester = getattr(g, 'user_email', None)
-        client_ip = get_client_ip()
         logger.info(
-            'Admin seed-top5 request season=%s dry_run=%s overwrite=%s leagues=%s user=%s ip=%s',
+            'Admin seed-top5 logic season=%s dry_run=%s overwrite=%s leagues=%s',
             season,
             dry_run,
             overwrite,
             league_ids,
-            requester,
-            client_ip,
         )
 
         # Compute default window_key (e.g., 2025-26::FULL)
@@ -6251,10 +6671,17 @@ def admin_seed_top5_loans():
             end_two = str((season + 1) % 100).zfill(2)
             window_key = f"{season}-{end_two}::FULL"
 
+        # Update job status
+        if job_id:
+            _update_job(job_id, progress=0, current_player='Syncing season data...')
+
         # Ensure season data in local DB
         _sync_season(season=season)
         api_client.set_season_year(season)
         api_client._prime_team_cache(season)
+
+        if job_id:
+            _update_job(job_id, current_player='Fetching loan candidates...')
 
         created = 0
         skipped = 0
@@ -6269,10 +6696,16 @@ def admin_seed_top5_loans():
         player_ids = set(direct.keys()) | set(multi_team.keys())
         candidates_total = len(player_ids)
 
+        if job_id:
+            _update_job(job_id, total=candidates_total, progress=0, current_player=f'Processing {candidates_total} candidates...')
+
         # Track candidate triplets to support overwrite/prune
         candidate_triplets: set[tuple[int,int,int]] = set()
 
-        for player_id in player_ids:
+        for idx, player_id in enumerate(player_ids):
+            # Update progress for background jobs
+            if job_id and idx % 10 == 0:
+                _update_job(job_id, progress=idx)
             try:
                 # Derive teams
                 d = direct.get(player_id) or {}
@@ -6297,6 +6730,24 @@ def admin_seed_top5_loans():
                     skipped += 1
                     details.append({'player_id': player_id, 'status': 'skip_unresolved_team'})
                     continue
+
+                # 🔄 VERIFY player ID via fixtures to avoid ID mismatch issues
+                # API-Football sometimes uses different IDs in squad vs fixture APIs
+                verified_player_id, verification_method = api_client.verify_player_id_via_fixtures(
+                    candidate_player_id=int(player_id),
+                    player_name=player_name,
+                    loan_team_id=int(loan_team_api_id),
+                    season=season,
+                    max_fixtures=3  # Check last 3 fixtures
+                )
+                
+                if verified_player_id != player_id:
+                    logger.info(f"🔄 Using fixture-verified ID {verified_player_id} instead of {player_id} for {player_name}")
+                    player_id = verified_player_id
+                
+                # 📊 Check stats coverage for the loan team's league
+                coverage_info = api_client.check_team_stats_coverage(int(loan_team_api_id), season)
+                stats_coverage = coverage_info.get('coverage_level', 'full')
 
                 # Record candidate triplet for potential pruning
                 candidate_triplets.add((int(player_id), int(parent_team.id), int(loan_team.id)))
@@ -6349,10 +6800,11 @@ def admin_seed_top5_loans():
                         window_key=window_key,
                         reviewer_notes='Seeded via /admin/loans/seed-top5',
                         is_active=True,
+                        stats_coverage=stats_coverage,  # 'full', 'limited', or 'none'
                     )
                     db.session.add(loan)
                     created += 1
-                    details.append({'player_id': player_id, 'status': 'created'})
+                    details.append({'player_id': player_id, 'status': 'created', 'stats_coverage': stats_coverage})
             except Exception as ex:
                 skipped += 1
                 details.append({'player_id': player_id, 'status': f'error: {ex}'})
@@ -6484,14 +6936,14 @@ def admin_seed_top5_loans():
             summary_payload['skipped'],
             summary_payload['pruned'],
         )
-        return jsonify(summary_payload)
+        return summary_payload
     except Exception as e:
-        logger.exception('admin_seed_top5_loans failed')
+        logger.exception('_run_seed_top5_logic failed')
         try:
             db.session.rollback()
         except Exception:
-            logger.warning('db.session.rollback failed during admin_seed_top5_loans error handling')
-        return jsonify(_safe_error_payload(e, 'Failed to seed top five leagues. Please try again later.', include_detail=True)), 500
+            logger.warning('db.session.rollback failed during _run_seed_top5_logic error handling')
+        raise
 
 @api_bp.route('/admin/loans/seed-team', methods=['POST'])
 @require_api_key
@@ -6570,6 +7022,24 @@ def admin_seed_team_loans():
                     details.append({'player_id': player_id, 'status': 'skip_unresolved_team'})
                     continue
 
+                # 🔄 VERIFY player ID via fixtures to avoid ID mismatch issues
+                # API-Football sometimes uses different IDs in squad vs fixture APIs
+                verified_player_id, verification_method = api_client.verify_player_id_via_fixtures(
+                    candidate_player_id=int(player_id),
+                    player_name=player_name,
+                    loan_team_id=int(loan_team_api_id),
+                    season=season,
+                    max_fixtures=3  # Check last 3 fixtures
+                )
+                
+                if verified_player_id != player_id:
+                    logger.info(f"🔄 Using fixture-verified ID {verified_player_id} instead of {player_id} for {player_name}")
+                    player_id = verified_player_id
+                
+                # 📊 Check stats coverage for the loan team's league
+                coverage_info = api_client.check_team_stats_coverage(int(loan_team_api_id), season)
+                stats_coverage = coverage_info.get('coverage_level', 'full')
+
                 if overwrite and not dry_run:
                     # Deactivate any existing active loans for this player at this parent in this season
                     season_start = season
@@ -6623,10 +7093,11 @@ def admin_seed_team_loans():
                         window_key=window_key,
                         reviewer_notes='Seeded via /admin/loans/seed-team',
                         is_active=True,
+                        stats_coverage=stats_coverage,  # 'full', 'limited', or 'none'
                     )
                     db.session.add(loan)
                     created += 1
-                    details.append({'player_id': player_id, 'status': 'created'})
+                    details.append({'player_id': player_id, 'status': 'created', 'stats_coverage': stats_coverage})
             except Exception as ex:
                 skipped += 1
                 details.append({'player_id': player_id, 'status': f'error: {ex}'})
@@ -6725,7 +7196,7 @@ def admin_resync_goalkeeper_saves():
         for stats, fixture in results:
             fixture_id_api = fixture.fixture_id_api
             player_api_id = stats.player_api_id
-            season = fixture.season or datetime.now().year
+            season = fixture.season or datetime.now(timezone.utc).year
             
             try:
                 player_stats = api_client.get_player_stats_for_fixture(player_api_id, season, fixture_id_api)
@@ -6783,6 +7254,1209 @@ def admin_resync_goalkeeper_saves():
         logger.exception('admin_resync_goalkeeper_saves failed')
         db.session.rollback()
         return jsonify(_safe_error_payload(e, 'Failed to resync goalkeeper saves')), 500
+
+
+@api_bp.route('/admin/sync-limited-stats', methods=['POST'])
+@require_api_key
+def admin_sync_limited_stats():
+    """
+    Sync stats for players with limited coverage (e.g., National League).
+    
+    For leagues without full player stats, this fetches appearances/goals/assists
+    from lineup and events data and stores them in the LoanedPlayer record.
+    
+    Request body (optional):
+    {
+        "dry_run": true,       // Preview mode (default: false)
+        "player_id": 298062,   // Filter to specific player (optional)
+        "team_api_id": 1834,   // Filter to specific team (optional)
+        "force": false         // Re-sync even if stats already exist (default: false)
+    }
+    """
+    import time
+    from src.api_football_client import APIFootballClient
+    
+    try:
+        data = request.get_json(force=True) if request.data else {}
+        dry_run = data.get('dry_run', False)
+        player_id_filter = data.get('player_id')
+        team_api_id_filter = data.get('team_api_id')
+        force = data.get('force', False)
+        
+        logger.info(f"Admin sync-limited-stats: dry_run={dry_run}, player_id={player_id_filter}, force={force}")
+        
+        # Debug: Check all unique stats_coverage values
+        all_coverages = db.session.query(LoanedPlayer.stats_coverage).distinct().all()
+        logger.info(f"DEBUG: All stats_coverage values in DB: {[c[0] for c in all_coverages]}")
+        
+        # Debug: Count by coverage
+        limited_count_raw = LoanedPlayer.query.filter(LoanedPlayer.stats_coverage == 'limited').count()
+        logger.info(f"DEBUG: Raw count of stats_coverage='limited': {limited_count_raw}")
+        
+        # Find players with limited stats coverage
+        query = LoanedPlayer.query.filter(
+            LoanedPlayer.stats_coverage == 'limited',
+            LoanedPlayer.is_active.is_(True),
+            LoanedPlayer.player_id > 0,  # Exclude manual entries
+        )
+        
+        if player_id_filter:
+            query = query.filter(LoanedPlayer.player_id == player_id_filter)
+        
+        limited_players = query.all()
+        logger.info(f"DEBUG: Found {len(limited_players)} limited players after all filters")
+        
+        if not limited_players:
+            return jsonify({
+                'message': 'No players with limited stats coverage found',
+                'dry_run': dry_run,
+                'processed': 0,
+            })
+        
+        api_client = APIFootballClient()
+        
+        # Determine season
+        now_utc = datetime.now(timezone.utc)
+        current_year = now_utc.year
+        current_month = now_utc.month
+        season = current_year if current_month >= 8 else current_year - 1
+        
+        updated = 0
+        skipped = 0
+        errors = 0
+        details = []
+        
+        for loan in limited_players:
+            try:
+                # Get loan team API ID
+                loan_team = Team.query.get(loan.loan_team_id)
+                if not loan_team or not loan_team.team_id:
+                    skipped += 1
+                    details.append({
+                        'player_id': loan.player_id,
+                        'player_name': loan.player_name,
+                        'status': 'skipped_no_team'
+                    })
+                    continue
+                
+                team_api_id = loan_team.team_id
+                
+                # Apply team filter if specified
+                if team_api_id_filter and team_api_id != team_api_id_filter:
+                    continue
+                
+                # Skip if already has stats (unless force=true)
+                if not force and loan.appearances and loan.appearances > 0:
+                    skipped += 1
+                    details.append({
+                        'player_id': loan.player_id,
+                        'player_name': loan.player_name,
+                        'status': 'skipped_has_stats',
+                        'appearances': loan.appearances,
+                    })
+                    continue
+                
+                # Fetch limited stats from API
+                limited_stats = api_client.get_player_limited_stats(
+                    player_id=loan.player_id,
+                    player_name=loan.player_name,
+                    team_api_id=team_api_id,
+                    season=season,
+                    max_fixtures=50
+                )
+                
+                if dry_run:
+                    details.append({
+                        'player_id': loan.player_id,
+                        'player_name': loan.player_name,
+                        'status': 'would_update',
+                        'new_stats': {
+                            'appearances': limited_stats['appearances'],
+                            'goals': limited_stats['goals'],
+                            'assists': limited_stats['assists'],
+                            'yellows': limited_stats['yellows'],
+                            'reds': limited_stats['reds'],
+                        }
+                    })
+                else:
+                    # Update the loan record
+                    loan.appearances = limited_stats['appearances']
+                    loan.goals = limited_stats['goals']
+                    loan.assists = limited_stats['assists']
+                    loan.yellows = limited_stats['yellows']
+                    loan.reds = limited_stats['reds']
+                    loan.updated_at = datetime.now(timezone.utc)
+                    db.session.add(loan)
+                    
+                    details.append({
+                        'player_id': loan.player_id,
+                        'player_name': loan.player_name,
+                        'status': 'updated',
+                        'stats': {
+                            'appearances': limited_stats['appearances'],
+                            'goals': limited_stats['goals'],
+                            'assists': limited_stats['assists'],
+                        }
+                    })
+                    updated += 1
+                
+                # Rate limiting
+                time.sleep(0.3)
+                
+            except Exception as e:
+                logger.warning(f"Error syncing limited stats for player {loan.player_id}: {e}")
+                errors += 1
+                details.append({
+                    'player_id': loan.player_id,
+                    'player_name': loan.player_name,
+                    'status': f'error: {str(e)}'
+                })
+        
+        if not dry_run and updated > 0:
+            db.session.commit()
+        
+        return jsonify({
+            'message': 'Limited stats sync complete',
+            'dry_run': dry_run,
+            'found': len(limited_players),
+            'updated': updated,
+            'skipped': skipped,
+            'errors': errors,
+            'details': details,
+        })
+        
+    except Exception as e:
+        logger.exception('admin_sync_limited_stats failed')
+        db.session.rollback()
+        return jsonify(_safe_error_payload(e, 'Failed to sync limited stats')), 500
+
+
+@api_bp.route('/admin/loans/fix-miscategorized', methods=['POST'])
+@require_api_key
+def admin_fix_miscategorized_loans():
+    """
+    Fix miscategorized loans by re-verifying against API-Football transfer data.
+    
+    This fetches the actual transfer history for each player and verifies the loan
+    direction matches what's recorded. If there's a mismatch (e.g., a loan return
+    was misidentified as a new loan), it fixes the record.
+    
+    Body: { 
+        dry_run?: bool (default: true),
+        limit?: int (default: 50, use 0 for all),
+        window_key?: str (filter to specific window, e.g. '2024-25::FULL'),
+        background?: bool (default: false) - run in background and return job ID
+    }
+    """
+    from flask import copy_current_request_context
+    
+    data = request.get_json() or {}
+    background = bool(data.get('background', False))
+    
+    if background:
+        # Start background job
+        job_id = _create_background_job('fix_miscategorized')
+        
+        @copy_current_request_context
+        def run_fix_in_background():
+            try:
+                result = _run_fix_miscategorized_logic(data, job_id)
+                _update_job(job_id, status='completed', results=result, completed_at=datetime.now(timezone.utc).isoformat())
+            except Exception as e:
+                logger.exception(f'Background fix job {job_id} failed')
+                _update_job(job_id, status='failed', error=str(e), completed_at=datetime.now(timezone.utc).isoformat())
+        
+        thread = threading.Thread(target=run_fix_in_background)
+        thread.start()
+        
+        return jsonify({
+            'message': 'Fix miscategorized job started in background',
+            'job_id': job_id,
+            'status': 'running',
+            'check_status_url': f'/api/admin/jobs/{job_id}'
+        })
+    
+    # Synchronous mode
+    try:
+        result = _run_fix_miscategorized_logic(data)
+        return jsonify(result)
+    except Exception as e:
+        logger.exception('admin_fix_miscategorized_loans failed')
+        db.session.rollback()
+        return jsonify(_safe_error_payload(e, 'Failed to verify/fix loans')), 500
+
+
+def _run_fix_miscategorized_logic(data: dict, job_id: str = None) -> dict:
+    """Core logic for fixing miscategorized loans. Can be run sync or in background."""
+    from src.api_football_client import is_new_loan_transfer
+    
+    try:
+        dry_run = bool(data.get('dry_run', True))
+        limit_param = int(data.get('limit', 50))
+        process_all = limit_param == 0
+        limit = 10000 if process_all else min(limit_param, 200)
+        window_filter = data.get('window_key')
+        
+        # Build query for active loans
+        query = LoanedPlayer.query.filter(
+            LoanedPlayer.is_active.is_(True),
+            LoanedPlayer.can_fetch_stats.is_(True),
+            LoanedPlayer.player_id > 0
+        )
+        
+        if window_filter:
+            query = query.filter(LoanedPlayer.window_key == window_filter)
+        
+        if not process_all:
+            query = query.limit(limit)
+        
+        loans_to_check = query.order_by(LoanedPlayer.updated_at.desc()).all()
+        total_to_process = len(loans_to_check)
+        
+        # Update job with total count if running in background
+        if job_id:
+            _update_job(job_id, total=total_to_process, progress=0)
+        
+        fixed = 0
+        verified_correct = 0
+        no_loan_found = 0
+        api_errors = 0
+        details = []
+        
+        for idx, loan in enumerate(loans_to_check):
+            # Update progress for background jobs
+            if job_id and idx % 5 == 0:
+                _update_job(job_id, progress=idx, current_player=loan.player_name)
+            try:
+                player_id = loan.player_id
+                
+                # Get the team API IDs
+                primary_team = Team.query.get(loan.primary_team_id)
+                loan_team = Team.query.get(loan.loan_team_id)
+                
+                if not primary_team or not loan_team:
+                    details.append({
+                        'id': loan.id,
+                        'player_name': loan.player_name,
+                        'status': 'skipped_missing_team',
+                    })
+                    continue
+                
+                primary_api_id = primary_team.team_id
+                loan_api_id = loan_team.team_id
+                
+                # Fetch player's transfer history from API-Football
+                transfers_resp = api_client.get_player_transfers(player_id)
+                if not transfers_resp:
+                    api_errors += 1
+                    details.append({
+                        'id': loan.id,
+                        'player_name': loan.player_name,
+                        'status': 'api_error',
+                    })
+                    continue
+                
+                # Parse window dates for filtering
+                try:
+                    window_start, window_end = api_client._parse_window_key(loan.window_key)
+                except:
+                    window_start, window_end = None, None
+                
+                # Find the actual loan transfer for this player in this window
+                actual_loan_found = False
+                correct_primary_id = None
+                correct_loan_id = None
+                transfer_date = None
+                
+                for transfer_block in transfers_resp:
+                    for t in transfer_block.get('transfers', []):
+                        transfer_type = t.get('type', '')
+                        t_date = t.get('date', '')
+                        
+                        # Only consider NEW loans (not returns)
+                        if not is_new_loan_transfer(transfer_type):
+                            continue
+                        
+                        # Check if transfer is in the window
+                        if window_start and window_end and t_date:
+                            try:
+                                from datetime import datetime as dt
+                                t_dt = dt.strptime(t_date, '%Y-%m-%d').date()
+                                if not (window_start <= t_dt <= window_end):
+                                    continue
+                            except:
+                                pass
+                        
+                        teams_data = t.get('teams', {})
+                        out_team = teams_data.get('out', {})
+                        in_team = teams_data.get('in', {})
+                        
+                        out_id = out_team.get('id')
+                        in_id = in_team.get('id')
+                        
+                        # Check if this transfer involves our recorded teams
+                        if {out_id, in_id} == {primary_api_id, loan_api_id}:
+                            actual_loan_found = True
+                            # In API-Football: out = parent club, in = loan destination
+                            correct_primary_id = out_id
+                            correct_loan_id = in_id
+                            transfer_date = t_date
+                            break
+                    
+                    if actual_loan_found:
+                        break
+                
+                if not actual_loan_found:
+                    no_loan_found += 1
+                    details.append({
+                        'id': loan.id,
+                        'player_name': loan.player_name,
+                        'recorded_parent': loan.primary_team_name,
+                        'recorded_loan': loan.loan_team_name,
+                        'status': 'no_matching_loan_in_api',
+                    })
+                    continue
+                
+                # Check if the direction matches
+                is_correct = (correct_primary_id == primary_api_id and correct_loan_id == loan_api_id)
+                
+                if is_correct:
+                    verified_correct += 1
+                    details.append({
+                        'id': loan.id,
+                        'player_name': loan.player_name,
+                        'parent': loan.primary_team_name,
+                        'loan': loan.loan_team_name,
+                        'status': 'verified_correct',
+                    })
+                else:
+                    # Direction is wrong - need to swap
+                    old_primary = loan.primary_team_name
+                    old_loan = loan.loan_team_name
+                    old_primary_id = loan.primary_team_id
+                    old_loan_id = loan.loan_team_id
+                    
+                    if not dry_run:
+                        loan.primary_team_id = old_loan_id
+                        loan.primary_team_name = old_loan
+                        loan.loan_team_id = old_primary_id
+                        loan.loan_team_name = old_primary
+                        loan.reviewer_notes = (loan.reviewer_notes or '') + f' | FIXED: Teams swapped (verified via API, transfer date: {transfer_date})'
+                        loan.updated_at = datetime.now(timezone.utc)
+                    
+                    fixed += 1
+                    details.append({
+                        'id': loan.id,
+                        'player_name': loan.player_name,
+                        'old_parent': old_primary,
+                        'old_loan': old_loan,
+                        'new_parent': old_loan,
+                        'new_loan': old_primary,
+                        'transfer_date': transfer_date,
+                        'status': 'fixed' if not dry_run else 'would_fix',
+                    })
+                
+                # Rate limiting
+                time.sleep(0.15)
+                
+            except Exception as e:
+                logger.warning(f"Error checking loan {loan.id}: {e}")
+                api_errors += 1
+                details.append({
+                    'id': loan.id,
+                    'player_name': loan.player_name,
+                    'status': 'error',
+                    'error': str(e)
+                })
+        
+        if not dry_run and fixed > 0:
+            db.session.commit()
+        
+        logger.info(f"Fix miscategorized loans: dry_run={dry_run}, checked={len(loans_to_check)}, fixed={fixed}, correct={verified_correct}")
+        
+        return {
+            'message': 'Loan verification complete',
+            'dry_run': dry_run,
+            'checked': len(loans_to_check),
+            'verified_correct': verified_correct,
+            'fixed': fixed,
+            'no_loan_found': no_loan_found,
+            'api_errors': api_errors,
+            'details': details,
+        }
+        
+    except Exception as e:
+        logger.exception('_run_fix_miscategorized_logic failed')
+        db.session.rollback()
+        raise
+
+
+@api_bp.route('/admin/jobs/<job_id>', methods=['GET'])
+@require_api_key
+def get_job_status(job_id: str):
+    """Get the status of a background job."""
+    job = _get_job(job_id)
+    if not job:
+        return jsonify({'error': 'Job not found'}), 404
+    return jsonify(job)
+
+
+@api_bp.route('/admin/loans/sync-denormalized-stats', methods=['POST'])
+@require_api_key
+def admin_sync_denormalized_stats():
+    """
+    Sync aggregated stats from fixture_player_stats to loaned_players.
+    
+    This updates the denormalized appearances, goals, assists columns in loaned_players
+    by aggregating from fixture_player_stats.
+    
+    Body: { dry_run?: bool (default: false) }
+    """
+    from src.models.weekly import FixturePlayerStats
+    from sqlalchemy import func
+    
+    try:
+        data = request.get_json() or {}
+        dry_run = bool(data.get('dry_run', False))
+        
+        # Get all active loans
+        active_loans = LoanedPlayer.query.filter(
+            LoanedPlayer.is_active.is_(True),
+            LoanedPlayer.player_id > 0
+        ).all()
+        
+        updated = 0
+        details = []
+        
+        for loan in active_loans:
+            # Get the loan team's API ID
+            loan_team = Team.query.get(loan.loan_team_id)
+            if not loan_team:
+                continue
+            
+            # Aggregate stats from fixture_player_stats
+            stats = db.session.query(
+                func.count(FixturePlayerStats.id).label('appearances'),
+                func.coalesce(func.sum(FixturePlayerStats.goals), 0).label('goals'),
+                func.coalesce(func.sum(FixturePlayerStats.assists), 0).label('assists'),
+                func.coalesce(func.sum(FixturePlayerStats.minutes), 0).label('minutes'),
+                func.coalesce(func.sum(FixturePlayerStats.saves), 0).label('saves'),
+                func.coalesce(func.sum(FixturePlayerStats.yellows), 0).label('yellows'),
+                func.coalesce(func.sum(FixturePlayerStats.reds), 0).label('reds')
+            ).filter(
+                FixturePlayerStats.player_api_id == loan.player_id,
+                FixturePlayerStats.team_api_id == loan_team.team_id
+            ).first()
+            
+            if stats and stats.appearances > 0:
+                old_apps = loan.appearances
+                old_goals = loan.goals
+                old_assists = loan.assists
+                old_saves = loan.saves or 0
+                
+                if not dry_run:
+                    loan.appearances = stats.appearances
+                    loan.goals = stats.goals
+                    loan.assists = stats.assists
+                    loan.minutes_played = stats.minutes
+                    loan.saves = stats.saves
+                    loan.yellows = stats.yellows
+                    loan.reds = stats.reds
+                    loan.updated_at = datetime.now(timezone.utc)
+                
+                if stats.appearances != old_apps or stats.goals != old_goals or stats.assists != old_assists or stats.saves != old_saves:
+                    updated += 1
+                    details.append({
+                        'player_name': loan.player_name,
+                        'loan_team': loan.loan_team_name,
+                        'old_stats': f'{old_apps} apps, {old_goals} g, {old_assists} a, {old_saves} saves',
+                        'new_stats': f'{stats.appearances} apps, {stats.goals} g, {stats.assists} a, {stats.saves} saves'
+                    })
+        
+        if not dry_run and updated > 0:
+            db.session.commit()
+        
+        logger.info(f"Sync denormalized stats: dry_run={dry_run}, checked={len(active_loans)}, updated={updated}")
+        
+        return jsonify({
+            'message': 'Stats sync complete',
+            'dry_run': dry_run,
+            'checked': len(active_loans),
+            'updated': updated,
+            'details': details[:100]  # Limit to 100 for response size
+        })
+        
+    except Exception as e:
+        logger.exception('admin_sync_denormalized_stats failed')
+        db.session.rollback()
+        return jsonify(_safe_error_payload(e, 'Failed to sync stats')), 500
+
+
+@api_bp.route('/admin/loans/reconcile-ids', methods=['POST'])
+@require_api_key
+def admin_reconcile_player_ids():
+    """
+    Detect and fix player ID mismatches AND sync missing stats.
+    
+    Uses a hybrid approach:
+    1. Check recent fixtures (last 10) first
+    2. If not found, check ALL season fixtures
+    3. If still not found, verify via team squad API
+    
+    For players found:
+    - If ID mismatches -> reconcile the ID
+    - If ID matches -> sync their stats
+    - If not in fixtures but in squad -> verify ID or mark as no appearances
+    - If not in squad -> may have left club
+    
+    Body: { 
+        dry_run?: bool (default: true),
+        limit?: int (default: 50, use 0 for all),
+        background?: bool (default: false) - run in background and return job ID
+    }
+    """
+    from src.models.weekly import FixturePlayerStats, Fixture
+    from flask import copy_current_request_context
+    
+    data = request.get_json() or {}
+    background = bool(data.get('background', False))
+    
+    if background:
+        # Start background job
+        job_id = _create_background_job('reconcile_ids')
+        
+        @copy_current_request_context
+        def run_reconcile_in_background():
+            try:
+                result = _run_reconcile_ids_logic(data, job_id)
+                _update_job(job_id, status='completed', results=result, completed_at=datetime.now(timezone.utc).isoformat())
+            except Exception as e:
+                logger.exception(f'Background reconcile job {job_id} failed')
+                _update_job(job_id, status='failed', error=str(e), completed_at=datetime.now(timezone.utc).isoformat())
+        
+        thread = threading.Thread(target=run_reconcile_in_background)
+        thread.start()
+        
+        return jsonify({
+            'message': 'Reconcile job started in background',
+            'job_id': job_id,
+            'status': 'running',
+            'check_status_url': f'/api/admin/jobs/{job_id}'
+        })
+    
+    # Synchronous mode
+    try:
+        result = _run_reconcile_ids_logic(data)
+        return jsonify(result)
+    except Exception as e:
+        logger.exception('admin_reconcile_player_ids failed')
+        db.session.rollback()
+        return jsonify(_safe_error_payload(e, 'Failed to reconcile player IDs')), 500
+
+
+def _run_reconcile_ids_logic(data: dict, job_id: str = None) -> dict:
+    """Core logic for reconciling player IDs. Can be run sync or in background."""
+    from src.models.weekly import FixturePlayerStats, Fixture
+    
+    def _sync_player_stats_from_fixture(fixture_api_id: int, player_api_id: int, team_api_id: int, player_stats: dict) -> dict | None:
+        """Create or update fixture_player_stats record from API data."""
+        fixture = Fixture.query.filter_by(fixture_id_api=fixture_api_id).first()
+        if not fixture:
+            return None
+        
+        existing = FixturePlayerStats.query.filter_by(
+            fixture_id=fixture.id,
+            player_api_id=player_api_id,
+            team_api_id=team_api_id
+        ).first()
+        
+        if existing:
+            return None  # Already synced
+        
+        stats = player_stats.get('statistics', [{}])[0] if player_stats.get('statistics') else {}
+        games = stats.get('games', {})
+        goals_data = stats.get('goals', {})
+        passes = stats.get('passes', {})
+        shots = stats.get('shots', {})
+        cards = stats.get('cards', {})
+        
+        new_stat = FixturePlayerStats(
+            fixture_id=fixture.id,
+            player_api_id=player_api_id,
+            team_api_id=team_api_id,
+            minutes=games.get('minutes') or 0,
+            position=games.get('position'),
+            number=games.get('number'),
+            rating=float(games.get('rating')) if games.get('rating') else None,
+            captain=games.get('captain', False),
+            substitute=games.get('substitute', False),
+            goals=goals_data.get('total') or 0,
+            assists=goals_data.get('assists') or 0,
+            goals_conceded=goals_data.get('conceded'),
+            saves=goals_data.get('saves'),
+            yellows=cards.get('yellow') or 0,
+            reds=cards.get('red') or 0,
+            shots_total=shots.get('total'),
+            shots_on=shots.get('on'),
+            passes_total=passes.get('total'),
+        )
+        db.session.add(new_stat)
+        return {
+            'fixture_id': fixture_api_id,
+            'minutes': new_stat.minutes,
+            'goals': new_stat.goals,
+            'assists': new_stat.assists
+        }
+    
+    def _name_matches(api_name: str, db_name: str) -> bool:
+        """Check if player names match (handles initials like 'J. Moorhouse' vs 'Jack Moorhouse')."""
+        if not api_name or not db_name:
+            return False
+        
+        api_lower = api_name.lower().strip()
+        db_lower = db_name.lower().strip()
+        
+        # Exact match
+        if api_lower == db_lower:
+            return True
+        
+        # Last name match with first initial
+        db_parts = db_lower.split()
+        api_parts = api_lower.split()
+        
+        if len(db_parts) >= 2 and len(api_parts) >= 2:
+            # Check if last names match
+            if db_parts[-1] in api_lower or api_parts[-1] in db_lower:
+                # Check if first initials match
+                if db_lower[0] == api_lower[0]:
+                    return True
+        
+        return False
+    
+    def _search_fixtures_for_player(fixtures: list, team_id: int, player_name: str, old_player_id: int):
+        """
+        Search fixtures for a player by name.
+        Returns (found_different_id, found_same_id, player_fixtures_data)
+        """
+        found_player_id = None
+        found_same_id = False
+        player_fixtures_data = []
+        
+        for fixture in fixtures:
+            fixture_id = fixture.get('fixture', {}).get('id')
+            if not fixture_id:
+                continue
+            
+            # Get player stats for this fixture
+            fixture_players = api_client._make_request('fixtures/players', {
+                'fixture': fixture_id
+            }).get('response', [])
+            
+            for team_data in fixture_players:
+                if team_data.get('team', {}).get('id') != team_id:
+                    continue
+                
+                for player_data in team_data.get('players', []):
+                    player_info = player_data.get('player', {})
+                    api_player_name = player_info.get('name', '')
+                    api_player_id = player_info.get('id')
+                    
+                    if _name_matches(api_player_name, player_name):
+                        if api_player_id != old_player_id:
+                            # ID mismatch found
+                            found_player_id = api_player_id
+                        else:
+                            # Same ID - collect for stats sync
+                            found_same_id = True
+                            player_fixtures_data.append({
+                                'fixture_id': fixture_id,
+                                'player_data': player_data
+                            })
+                        break
+                
+                if found_player_id:
+                    break
+            
+            if found_player_id:
+                break
+            
+            # Rate limiting
+            time.sleep(0.12)
+        
+        return found_player_id, found_same_id, player_fixtures_data
+    
+    try:
+        dry_run = bool(data.get('dry_run', True))
+        limit_param = int(data.get('limit', 50))
+        # limit=0 means process ALL players
+        process_all = limit_param == 0
+        limit = 10000 if process_all else min(limit_param, 100)
+        
+        # Find active loans with 0 fixture stats OR only "ghost" stats (0 total minutes)
+        # Ghost stats occur when API-Football uses different player IDs in squad vs fixture data
+        loans_with_no_stats = []
+        query = LoanedPlayer.query.filter(
+            LoanedPlayer.is_active.is_(True),
+            LoanedPlayer.can_fetch_stats.is_(True),
+            LoanedPlayer.player_id > 0
+        )
+        if not process_all:
+            query = query.limit(limit * 2)
+        active_loans = query.all()
+        
+        for loan in active_loans:
+            loan_team = Team.query.get(loan.loan_team_id)
+            if not loan_team:
+                continue
+            
+            # Check both count and total minutes to catch "ghost" stats
+            # Ghost stats: stat_count > 0 but total_minutes == 0 (wrong player ID in API-Football)
+            stats_result = db.session.query(
+                db.func.count(FixturePlayerStats.id).label('stat_count'),
+                db.func.coalesce(db.func.sum(FixturePlayerStats.minutes), 0).label('total_minutes')
+            ).filter(
+                FixturePlayerStats.player_api_id == loan.player_id,
+                FixturePlayerStats.team_api_id == loan_team.team_id
+            ).first()
+            
+            stat_count = stats_result.stat_count if stats_result else 0
+            total_minutes = stats_result.total_minutes if stats_result else 0
+            
+            # Include if no stats OR has ghost stats (stats exist but 0 total minutes)
+            needs_reconcile = stat_count == 0 or (stat_count > 0 and total_minutes == 0)
+            
+            if needs_reconcile:
+                loans_with_no_stats.append({
+                    'loan': loan,
+                    'loan_team': loan_team,
+                    'player_id': loan.player_id,
+                    'player_name': loan.player_name,
+                    'has_ghost_stats': stat_count > 0 and total_minutes == 0
+                })
+            
+            if len(loans_with_no_stats) >= limit:
+                break
+        
+        id_reconciled = 0
+        id_reconciled_via_squad = 0
+        stats_synced = 0
+        verified_no_appearances = 0
+        loan_destination_changed = 0
+        player_left_club_count = 0
+        duplicate_detected = 0
+        not_in_squad = 0
+        details = []
+        total_to_process = len(loans_with_no_stats)
+        
+        # Update job with total count if running in background
+        if job_id:
+            _update_job(job_id, total=total_to_process, progress=0)
+        
+        for idx, item in enumerate(loans_with_no_stats):
+            loan = item['loan']
+            loan_team = item['loan_team']
+            player_name = item['player_name']
+            old_player_id = item['player_id']
+            
+            # Update progress for background jobs
+            if job_id and idx % 5 == 0:  # Update every 5 players
+                _update_job(job_id, progress=idx, current_player=player_name)
+            
+            try:
+                # STEP 1: Check recent fixtures (last 10)
+                recent_fixtures = api_client._make_request('fixtures', {
+                    'team': loan_team.team_id,
+                    'season': 2025,
+                    'last': 10
+                }).get('response', [])
+                
+                found_player_id, found_same_id, player_fixtures_data = _search_fixtures_for_player(
+                    recent_fixtures, loan_team.team_id, player_name, old_player_id
+                )
+                
+                # STEP 2: If not found in recent, check ALL season fixtures
+                if not found_player_id and not found_same_id:
+                    logger.debug(f"Player {player_name} not in recent fixtures, checking full season...")
+                    
+                    all_fixtures = api_client._make_request('fixtures', {
+                        'team': loan_team.team_id,
+                        'season': 2025,
+                        'status': 'FT'  # Only finished matches
+                    }).get('response', [])
+                    
+                    # Filter out fixtures we already checked
+                    recent_ids = {f.get('fixture', {}).get('id') for f in recent_fixtures}
+                    remaining_fixtures = [f for f in all_fixtures if f.get('fixture', {}).get('id') not in recent_ids]
+                    
+                    if remaining_fixtures:
+                        found_player_id, found_same_id, player_fixtures_data = _search_fixtures_for_player(
+                            remaining_fixtures, loan_team.team_id, player_name, old_player_id
+                        )
+                
+                # Process results
+                has_ghost_stats = item.get('has_ghost_stats', False)
+                
+                if found_player_id:
+                    # Case 1: ID mismatch found in fixtures - reconcile
+                    # Also delete ghost stats (0-minute records with wrong player ID)
+                    ghost_stats_deleted = 0
+                    if has_ghost_stats and not dry_run:
+                        ghost_stats_deleted = FixturePlayerStats.query.filter(
+                            FixturePlayerStats.player_api_id == old_player_id,
+                            FixturePlayerStats.team_api_id == loan_team.team_id,
+                            FixturePlayerStats.minutes == 0
+                        ).delete()
+                        logger.info(f"Deleted {ghost_stats_deleted} ghost stat records for player {player_name} (old ID {old_player_id})")
+                    
+                    detail = {
+                        'loan_id': loan.id,
+                        'player_name': player_name,
+                        'loan_team': loan.loan_team_name,
+                        'old_player_id': old_player_id,
+                        'new_player_id': found_player_id,
+                        'action': 'id_reconcile',
+                        'had_ghost_stats': has_ghost_stats,
+                        'ghost_stats_deleted': ghost_stats_deleted if not dry_run else ('would_delete' if has_ghost_stats else 0),
+                        'status': 'would_reconcile' if dry_run else 'reconciled'
+                    }
+                    
+                    if not dry_run:
+                        loan.player_id = found_player_id
+                        loan.reviewer_notes = (loan.reviewer_notes or '') + f' | ID reconciled: {old_player_id} → {found_player_id}'
+                        if has_ghost_stats:
+                            loan.reviewer_notes += f' (deleted {ghost_stats_deleted} ghost stats)'
+                        loan.updated_at = datetime.now(timezone.utc)
+                    
+                    id_reconciled += 1
+                    details.append(detail)
+                    
+                elif found_same_id and player_fixtures_data:
+                    # Case 2: ID correct, sync stats from fixtures
+                    synced_fixtures = []
+                    
+                    if not dry_run:
+                        for fx_data in player_fixtures_data:
+                            result = _sync_player_stats_from_fixture(
+                                fx_data['fixture_id'],
+                                old_player_id,
+                                loan_team.team_id,
+                                fx_data['player_data']
+                            )
+                            if result:
+                                synced_fixtures.append(result)
+                    
+                    detail = {
+                        'loan_id': loan.id,
+                        'player_name': player_name,
+                        'loan_team': loan.loan_team_name,
+                        'player_id': old_player_id,
+                        'action': 'stats_sync',
+                        'fixtures_found': len(player_fixtures_data),
+                        'fixtures_synced': len(synced_fixtures) if not dry_run else len(player_fixtures_data),
+                        'status': 'would_sync' if dry_run else 'synced'
+                    }
+                    
+                    stats_synced += 1
+                    details.append(detail)
+                    
+                else:
+                    # STEP 3: Not found in ANY fixtures - check team squad
+                    logger.debug(f"Player {player_name} not in any fixtures, checking squad...")
+                    
+                    squad_response = api_client._make_request('players/squads', {
+                        'team': loan_team.team_id
+                    }).get('response', [])
+                    
+                    squad_players = squad_response[0].get('players', []) if squad_response else []
+                    
+                    squad_match = None
+                    for squad_player in squad_players:
+                        squad_name = squad_player.get('name', '')
+                        squad_id = squad_player.get('id')
+                        
+                        if _name_matches(squad_name, player_name):
+                            squad_match = {
+                                'id': squad_id,
+                                'name': squad_name,
+                                'position': squad_player.get('position'),
+                                'number': squad_player.get('number')
+                            }
+                            break
+                    
+                    if squad_match:
+                        if squad_match['id'] != old_player_id:
+                            # Case 3a: ID mismatch found via squad
+                            # Also delete ghost stats if present
+                            ghost_stats_deleted = 0
+                            if has_ghost_stats and not dry_run:
+                                ghost_stats_deleted = FixturePlayerStats.query.filter(
+                                    FixturePlayerStats.player_api_id == old_player_id,
+                                    FixturePlayerStats.team_api_id == loan_team.team_id,
+                                    FixturePlayerStats.minutes == 0
+                                ).delete()
+                                logger.info(f"Deleted {ghost_stats_deleted} ghost stat records for player {player_name} via squad (old ID {old_player_id})")
+                            
+                            detail = {
+                                'loan_id': loan.id,
+                                'player_name': player_name,
+                                'loan_team': loan.loan_team_name,
+                                'old_player_id': old_player_id,
+                                'new_player_id': squad_match['id'],
+                                'action': 'id_reconcile_via_squad',
+                                'had_ghost_stats': has_ghost_stats,
+                                'ghost_stats_deleted': ghost_stats_deleted if not dry_run else ('would_delete' if has_ghost_stats else 0),
+                                'status': 'would_reconcile' if dry_run else 'reconciled'
+                            }
+                            
+                            if not dry_run:
+                                loan.player_id = squad_match['id']
+                                loan.reviewer_notes = (loan.reviewer_notes or '') + f' | ID reconciled via squad: {old_player_id} → {squad_match["id"]}'
+                                if has_ghost_stats:
+                                    loan.reviewer_notes += f' (deleted {ghost_stats_deleted} ghost stats)'
+                                loan.updated_at = datetime.now(timezone.utc)
+                            
+                            id_reconciled_via_squad += 1
+                            details.append(detail)
+                        else:
+                            # Case 3b: ID correct, player in squad but no appearances
+                            detail = {
+                                'loan_id': loan.id,
+                                'player_name': player_name,
+                                'loan_team': loan.loan_team_name,
+                                'player_id': old_player_id,
+                                'action': 'verified_no_appearances',
+                                'squad_position': squad_match.get('position'),
+                                'squad_number': squad_match.get('number'),
+                                'status': 'verified'
+                            }
+                            
+                            verified_no_appearances += 1
+                            details.append(detail)
+                    else:
+                        # Case 4: Not found in squad - check for consecutive loan (moved to different team)
+                        logger.debug(f"Player {player_name} not in squad, checking for consecutive loan...")
+                        
+                        # Get player's transfer history to check for newer loan
+                        transfers = api_client.get_player_transfers(old_player_id)
+                        
+                        newer_loan = None
+                        player_left_club = None
+                        # Use created_at as approximate loan start date
+                        current_loan_date = loan.created_at.date() if loan.created_at else None
+                        primary_team = Team.query.get(loan.primary_team_id)
+                        primary_team_api_id = primary_team.team_id if primary_team else None
+                        
+                        # Check for free agent / released / permanent transfer out
+                        for transfer in transfers:
+                            for t in transfer.get('transfers', []):
+                                transfer_type = t.get('type', '').lower()
+                                transfer_date_str = t.get('date', '')
+                                teams_out = t.get('teams', {}).get('out', {})
+                                teams_in = t.get('teams', {}).get('in', {})
+                                
+                                # Check if player left the parent club permanently
+                                if teams_out.get('id') == primary_team_api_id:
+                                    if transfer_type in ['free agent', 'free', 'n/a', ''] or teams_in.get('id') is None:
+                                        try:
+                                            transfer_date = date.fromisoformat(transfer_date_str) if transfer_date_str else None
+                                        except:
+                                            transfer_date = None
+                                        
+                                        if not current_loan_date or not transfer_date or transfer_date > current_loan_date:
+                                            player_left_club = {
+                                                'transfer_type': transfer_type or 'released',
+                                                'transfer_date': transfer_date_str,
+                                                'destination': teams_in.get('name') or 'Free agent'
+                                            }
+                                            break
+                            if player_left_club:
+                                break
+                        
+                        # Collect all loan transfers to find the most recent one to a different team
+                        loan_transfers = []
+                        if not player_left_club:
+                            for transfer in transfers:
+                                for t in transfer.get('transfers', []):
+                                    transfer_type = t.get('type', '').lower()
+                                    transfer_date_str = t.get('date', '')
+                                    
+                                    # Only look for loan transfers (not loan returns)
+                                    if transfer_type != 'loan':
+                                        continue
+                                    
+                                    teams_out = t.get('teams', {}).get('out', {})
+                                    teams_in = t.get('teams', {}).get('in', {})
+                                    
+                                    # Must be from parent club or current loan team
+                                    if teams_out.get('id') not in [primary_team_api_id, loan_team.team_id]:
+                                        continue
+                                    
+                                    # Must be to a DIFFERENT team than current loan team
+                                    if teams_in.get('id') == loan_team.team_id:
+                                        continue
+                                    
+                                    try:
+                                        transfer_date = date.fromisoformat(transfer_date_str) if transfer_date_str else None
+                                    except:
+                                        transfer_date = None
+                                    
+                                    loan_transfers.append({
+                                        'new_team_id': teams_in.get('id'),
+                                        'new_team_name': teams_in.get('name'),
+                                        'transfer_date': transfer_date,
+                                        'transfer_date_str': transfer_date_str,
+                                        'old_team_name': loan.loan_team_name
+                                    })
+                        
+                        # Find the most recent loan transfer (if any)
+                        if loan_transfers:
+                            # Sort by date (most recent first), handling None dates
+                            loan_transfers.sort(key=lambda x: x['transfer_date'] or date.min, reverse=True)
+                            newest = loan_transfers[0]
+                            
+                            # Only use it if it's after our recorded loan date (or if we can't compare)
+                            if not current_loan_date or not newest['transfer_date'] or newest['transfer_date'] > current_loan_date:
+                                newer_loan = {
+                                    'new_team_id': newest['new_team_id'],
+                                    'new_team_name': newest['new_team_name'],
+                                    'transfer_date': newest['transfer_date_str'],
+                                    'old_team_name': newest['old_team_name']
+                                }
+                        
+                        if player_left_club:
+                            # Player was released/transferred permanently - deactivate loan
+                            detail = {
+                                'loan_id': loan.id,
+                                'player_name': player_name,
+                                'loan_team': loan.loan_team_name,
+                                'player_id': old_player_id,
+                                'transfer_type': player_left_club['transfer_type'],
+                                'transfer_date': player_left_club['transfer_date'],
+                                'destination': player_left_club['destination'],
+                                'action': 'player_left_club',
+                                'status': 'would_deactivate' if dry_run else 'deactivated'
+                            }
+                            
+                            if not dry_run:
+                                loan.is_active = False
+                                loan.reviewer_notes = (loan.reviewer_notes or '') + f' | Left club: {player_left_club["transfer_type"]} on {player_left_club["transfer_date"]}'
+                                loan.updated_at = datetime.now(timezone.utc)
+                            
+                            player_left_club_count += 1
+                            details.append(detail)
+                            
+                        elif newer_loan:
+                            # Found a consecutive loan - update to new destination
+                            new_team = Team.query.filter_by(team_id=newer_loan['new_team_id']).first()
+                            
+                            detail = {
+                                'loan_id': loan.id,
+                                'player_name': player_name,
+                                'old_loan_team': newer_loan['old_team_name'],
+                                'new_loan_team': newer_loan['new_team_name'],
+                                'new_team_id': newer_loan['new_team_id'],
+                                'transfer_date': newer_loan['transfer_date'],
+                                'player_id': old_player_id,
+                                'action': 'loan_destination_changed',
+                                'status': 'would_update' if dry_run else 'updated'
+                            }
+                            
+                            if not dry_run and new_team:
+                                # Update loan to new destination
+                                loan.loan_team_id = new_team.id
+                                loan.loan_team_name = newer_loan['new_team_name']
+                                loan.reviewer_notes = (loan.reviewer_notes or '') + f' | Consecutive loan: {newer_loan["old_team_name"]} → {newer_loan["new_team_name"]} on {newer_loan["transfer_date"]}'
+                                loan.updated_at = datetime.now(timezone.utc)
+                            
+                            loan_destination_changed += 1
+                            details.append(detail)
+                        else:
+                            # Check if there's a duplicate record with same player name at a different team
+                            # Match by last name AND same parent club (by name, since IDs may differ)
+                            last_name = player_name.split()[-1].lower()
+                            duplicate_record = LoanedPlayer.query.filter(
+                                LoanedPlayer.id != loan.id,
+                                LoanedPlayer.is_active.is_(True),
+                                db.or_(
+                                    LoanedPlayer.primary_team_id == loan.primary_team_id,
+                                    LoanedPlayer.primary_team_name == loan.primary_team_name
+                                ),
+                                db.func.lower(LoanedPlayer.player_name).like(f'%{last_name}%')
+                            ).first()
+                            
+                            if duplicate_record and duplicate_record.loan_team_id != loan.loan_team_id:
+                                # Found a duplicate - this is likely the same player with different ID
+                                detail = {
+                                    'loan_id': loan.id,
+                                    'player_name': player_name,
+                                    'loan_team': loan.loan_team_name,
+                                    'player_id': old_player_id,
+                                    'duplicate_name': duplicate_record.player_name,
+                                    'duplicate_team': duplicate_record.loan_team_name,
+                                    'duplicate_id': duplicate_record.player_id,
+                                    'action': 'duplicate_detected',
+                                    'status': 'would_deactivate' if dry_run else 'deactivated'
+                                }
+                                
+                                if not dry_run:
+                                    loan.is_active = False
+                                    loan.reviewer_notes = (loan.reviewer_notes or '') + f' | Duplicate: newer record exists as {duplicate_record.player_name} at {duplicate_record.loan_team_name}'
+                                    loan.updated_at = datetime.now(timezone.utc)
+                                
+                                duplicate_detected += 1
+                                details.append(detail)
+                            else:
+                                # No newer loan found - truly not in squad
+                                detail = {
+                                    'loan_id': loan.id,
+                                    'player_name': player_name,
+                                    'loan_team': loan.loan_team_name,
+                                    'player_id': old_player_id,
+                                    'action': 'not_in_squad',
+                                    'status': 'not_found'
+                                }
+                                
+                                not_in_squad += 1
+                                details.append(detail)
+                
+            except Exception as e:
+                logger.warning(f"Error processing player {loan.player_id}: {e}")
+                details.append({
+                    'loan_id': loan.id,
+                    'player_name': player_name,
+                    'status': 'error',
+                    'error': str(e)
+                })
+        
+        if not dry_run:
+            db.session.commit()
+        
+        total_id_fixed = id_reconciled + id_reconciled_via_squad
+        logger.info(f"Reconcile & sync: dry_run={dry_run}, checked={len(loans_with_no_stats)}, "
+                   f"id_reconciled={id_reconciled}, id_via_squad={id_reconciled_via_squad}, "
+                   f"stats_synced={stats_synced}, verified_no_appearances={verified_no_appearances}, "
+                   f"loan_destination_changed={loan_destination_changed}, player_left={player_left_club_count}, "
+                   f"duplicates={duplicate_detected}, not_in_squad={not_in_squad}")
+        
+        return {
+            'message': 'Player ID reconciliation and stats sync complete',
+            'dry_run': dry_run,
+            'checked': len(loans_with_no_stats),
+            'id_reconciled': id_reconciled,
+            'id_reconciled_via_squad': id_reconciled_via_squad,
+            'stats_synced': stats_synced,
+            'verified_no_appearances': verified_no_appearances,
+            'loan_destination_changed': loan_destination_changed,
+            'player_left_club': player_left_club_count,
+            'duplicate_detected': duplicate_detected,
+            'not_in_squad': not_in_squad,
+            'details': details,
+        }
+        
+    except Exception as e:
+        logger.exception('_run_reconcile_ids_logic failed')
+        db.session.rollback()
+        raise
 
 
 # --- Admin: Missing names helpers ---
@@ -7237,8 +8911,9 @@ def admin_sync_player_fixtures(player_id: int):
         dry_run = data.get('dry_run', False)
         
         # Get current season
-        current_year = datetime.now().year
-        current_month = datetime.now().month
+        now_utc = datetime.now(timezone.utc)
+        current_year = now_utc.year
+        current_month = now_utc.month
         season = data.get('season', current_year if current_month >= 8 else current_year - 1)
         
         # Find the player's MOST RECENT loan team (order by updated_at to get current loan)
@@ -7387,6 +9062,9 @@ def admin_sync_player_fixtures(player_id: int):
         
         if not dry_run:
             db.session.commit()
+            
+            # Sync denormalized stats for this player
+            _sync_denormalized_stats_for_player(loaned)
         
         return jsonify({
             'player_id': player_id,
@@ -7406,6 +9084,328 @@ def admin_sync_player_fixtures(player_id: int):
         traceback.print_exc()
         db.session.rollback()
         return jsonify(_safe_error_payload(e, 'Failed to sync player fixtures')), 500
+
+@api_bp.route('/admin/teams/<int:team_id>/sync-all-fixtures', methods=['POST'])
+@require_api_key
+def admin_sync_team_fixtures(team_id: int):
+    """
+    Sync/backfill all fixtures for ALL active players loaned from a specific team.
+    This goes through each player loaned FROM the team (where team is primary_team)
+    and re-fetches their fixture stats from API-Football.
+    
+    Supports background processing for large teams.
+    
+    Body:
+    - background: true/false (default: false)
+    - dry_run: true/false (default: false)
+    - season: int (default: current season)
+    """
+    try:
+        data = request.get_json() or {}
+        background = bool(data.get('background', False))
+        job_id = str(uuid4()) if background else None
+        
+        if background:
+            _create_background_job('team_fixtures_sync')
+            # Override job_id from uuid() to use the one from _create_background_job
+            def run_sync_in_background():
+                try:
+                    result = _run_team_fixtures_sync(team_id, data, job_id)
+                    _update_job(job_id, status='completed', results=result, completed_at=datetime.now(timezone.utc).isoformat())
+                except Exception as e:
+                    logger.exception(f'Background team sync job {job_id} failed')
+                    _update_job(job_id, status='failed', error=str(e), completed_at=datetime.now(timezone.utc).isoformat())
+            
+            thread = threading.Thread(target=run_sync_in_background)
+            thread.start()
+            return jsonify({'message': 'Team fixture sync started in background', 'job_id': job_id}), 202
+        else:
+            result = _run_team_fixtures_sync(team_id, data)
+            return jsonify(result), 200
+            
+    except Exception as e:
+        logger.exception(f"admin_sync_team_fixtures failed for team {team_id}")
+        return jsonify(_safe_error_payload(e, 'Failed to sync team fixtures')), 500
+
+
+def _run_team_fixtures_sync(team_id: int, data: dict, job_id: str = None) -> dict:
+    """Run the team fixture sync logic, optionally with progress updates."""
+    from src.api_football_client import APIFootballClient
+    from src.models.weekly import Fixture, FixturePlayerStats
+    
+    try:
+        dry_run = data.get('dry_run', False)
+        
+        # Get current season
+        now_utc = datetime.now(timezone.utc)
+        current_year = now_utc.year
+        current_month = now_utc.month
+        season = data.get('season', current_year if current_month >= 8 else current_year - 1)
+        
+        team = Team.query.get(team_id)
+        if not team:
+            result = {'error': f'Team {team_id} not found'}
+            return result
+        
+        # Get all active players loaned FROM this team
+        players = LoanedPlayer.query.filter_by(
+            primary_team_id=team_id, 
+            is_active=True
+        ).all()
+        
+        total_players = len(players)
+        if job_id:
+            _update_job(job_id, total=total_players, progress=0, current_player=f'Syncing {total_players} players from {team.name}...')
+        
+        api_client = APIFootballClient()
+        
+        results = []
+        total_synced = 0
+        total_skipped = 0
+        total_errors = 0
+        
+        for idx, loaned in enumerate(players):
+            player_result = {
+                'player_id': loaned.player_id,
+                'player_name': loaned.player_name,
+                'loan_team': loaned.loan_team_name,
+                'synced': 0,
+                'skipped': 0,
+                'errors': []
+            }
+            
+            try:
+                loan_team = Team.query.get(loaned.loan_team_id)
+                if not loan_team:
+                    player_result['errors'].append('Loan team not found')
+                    results.append(player_result)
+                    total_errors += 1
+                    continue
+                
+                loan_team_api_id = loan_team.team_id
+                
+                # Fetch all fixtures for the loan team this season
+                season_start = f"{season}-08-01"
+                season_end = f"{season + 1}-06-30"
+                
+                fixtures = api_client.get_fixtures_for_team(
+                    loan_team_api_id, 
+                    season, 
+                    season_start, 
+                    season_end
+                )
+                
+                for fx in fixtures:
+                    fixture_info = fx.get('fixture', {})
+                    fixture_id_api = fixture_info.get('id')
+                    fixture_status = fixture_info.get('status', {}).get('short', '')
+                    
+                    # Only process finished games
+                    if fixture_status not in ('FT', 'AET', 'PEN'):
+                        player_result['skipped'] += 1
+                        continue
+                    
+                    # Check if we already have this fixture
+                    existing_fixture = Fixture.query.filter_by(fixture_id_api=fixture_id_api).first()
+                    
+                    if not existing_fixture:
+                        # Create the fixture
+                        if not dry_run:
+                            teams = fx.get('teams', {})
+                            goals = fx.get('goals', {})
+                            league = fx.get('league', {})
+                            
+                            existing_fixture = Fixture(
+                                fixture_id_api=fixture_id_api,
+                                date_utc=datetime.fromisoformat(fixture_info.get('date', '').replace('Z', '+00:00')) if fixture_info.get('date') else None,
+                                season=season,
+                                competition_name=league.get('name'),
+                                home_team_api_id=teams.get('home', {}).get('id'),
+                                away_team_api_id=teams.get('away', {}).get('id'),
+                                home_goals=goals.get('home'),
+                                away_goals=goals.get('away'),
+                            )
+                            db.session.add(existing_fixture)
+                            db.session.flush()
+                    
+                    # Check if we have player stats for this fixture
+                    if existing_fixture:
+                        existing_stats = FixturePlayerStats.query.filter_by(
+                            fixture_id=existing_fixture.id,
+                            player_api_id=loaned.player_id
+                        ).first()
+                        
+                        if existing_stats:
+                            player_result['skipped'] += 1
+                            continue
+                    
+                    # Fetch player stats for this fixture
+                    try:
+                        player_stats = api_client.get_player_stats_for_fixture(loaned.player_id, season, fixture_id_api)
+                        
+                        if player_stats and player_stats.get('statistics'):
+                            stat_list = player_stats['statistics']
+                            if not stat_list:
+                                player_result['skipped'] += 1
+                                continue
+                            st = stat_list[0] if isinstance(stat_list, list) else stat_list
+                            
+                            # Extract stats
+                            games = st.get('games', {}) or {}
+                            goals_block = st.get('goals', {}) or {}
+                            cards = st.get('cards', {}) or {}
+                            shots = st.get('shots', {}) or {}
+                            passes = st.get('passes', {}) or {}
+                            tackles = st.get('tackles', {}) or {}
+                            duels = st.get('duels', {}) or {}
+                            dribbles = st.get('dribbles', {}) or {}
+                            fouls = st.get('fouls', {}) or {}
+                            penalty = st.get('penalty', {}) or {}
+                            
+                            minutes = games.get('minutes', 0) or 0
+                            
+                            if minutes and minutes > 0 and not dry_run and existing_fixture:
+                                fps = FixturePlayerStats(
+                                    fixture_id=existing_fixture.id,
+                                    player_api_id=loaned.player_id,
+                                    player_name=loaned.player_name,
+                                    team_api_id=loan_team_api_id,
+                                    minutes=minutes,
+                                    position=games.get('position'),
+                                    rating=games.get('rating'),
+                                    goals=goals_block.get('total', 0) or 0,
+                                    assists=goals_block.get('assists', 0) or 0,
+                                    yellows=cards.get('yellow', 0) or 0,
+                                    reds=cards.get('red', 0) or 0,
+                                    shots_total=shots.get('total'),
+                                    shots_on=shots.get('on'),
+                                    passes_total=passes.get('total'),
+                                    passes_key=passes.get('key'),
+                                    tackles_total=tackles.get('total'),
+                                    duels_won=duels.get('won'),
+                                    duels_total=duels.get('total'),
+                                    dribbles_success=dribbles.get('success'),
+                                    saves=goals_block.get('saves'),
+                                    goals_conceded=goals_block.get('conceded'),
+                                    fouls_drawn=fouls.get('drawn'),
+                                    fouls_committed=fouls.get('committed'),
+                                    penalty_saved=penalty.get('saved'),
+                                )
+                                db.session.add(fps)
+                                player_result['synced'] += 1
+                            elif minutes and minutes > 0:
+                                player_result['synced'] += 1  # Dry run counts this
+                            else:
+                                player_result['skipped'] += 1
+                        else:
+                            player_result['skipped'] += 1
+                            
+                    except Exception as e:
+                        player_result['errors'].append(f"Fixture {fixture_id_api}: {str(e)[:50]}")
+                
+                if not dry_run:
+                    db.session.commit()
+                    
+            except Exception as e:
+                player_result['errors'].append(str(e)[:100])
+                total_errors += 1
+            
+            total_synced += player_result['synced']
+            total_skipped += player_result['skipped']
+            results.append(player_result)
+            
+            if job_id and idx % 5 == 0:
+                _update_job(job_id, progress=idx + 1, current_player=f"{loaned.player_name} ({player_result['synced']} new)")
+        
+        # Update denormalized stats after syncing
+        if not dry_run:
+            _sync_denormalized_stats_for_team(team_id)
+        
+        final_result = {
+            'team_id': team_id,
+            'team_name': team.name,
+            'season': season,
+            'dry_run': dry_run,
+            'players_processed': total_players,
+            'total_synced': total_synced,
+            'total_skipped': total_skipped,
+            'total_errors': total_errors,
+            'details': results[:50],  # Limit details for response size
+        }
+        
+        # Note: completion status is handled by the wrapper function for background jobs
+        return final_result
+        
+    except Exception as e:
+        logger.exception(f"_run_team_fixtures_sync failed for team {team_id}")
+        db.session.rollback()
+        return {'error': str(e)}
+
+
+def _sync_denormalized_stats_for_player(loan: LoanedPlayer):
+    """Update denormalized stats in loaned_players for a specific player."""
+    from src.models.weekly import FixturePlayerStats
+    from sqlalchemy import func
+    
+    loan_team = Team.query.get(loan.loan_team_id)
+    if not loan_team:
+        return
+    
+    # Aggregate stats from fixture_player_stats
+    stats = db.session.query(
+        func.count().label('appearances'),
+        func.sum(FixturePlayerStats.goals).label('goals'),
+        func.sum(FixturePlayerStats.assists).label('assists'),
+        func.sum(FixturePlayerStats.minutes).label('minutes'),
+        func.sum(FixturePlayerStats.saves).label('saves')
+    ).filter(
+        FixturePlayerStats.player_api_id == loan.player_id,
+        FixturePlayerStats.team_api_id == loan_team.team_id
+    ).first()
+    
+    if stats:
+        loan.appearances = stats.appearances or 0
+        loan.goals = stats.goals or 0
+        loan.assists = stats.assists or 0
+        loan.minutes_played = stats.minutes or 0
+        loan.saves = stats.saves or 0
+        db.session.commit()
+
+
+def _sync_denormalized_stats_for_team(team_id: int):
+    """Update denormalized stats in loaned_players for a specific team."""
+    from src.models.weekly import FixturePlayerStats
+    from sqlalchemy import func
+    
+    # Get all active loans for this team
+    loans = LoanedPlayer.query.filter_by(primary_team_id=team_id, is_active=True).all()
+    
+    for loan in loans:
+        loan_team = Team.query.get(loan.loan_team_id)
+        if not loan_team:
+            continue
+        
+        # Aggregate stats from fixture_player_stats
+        stats = db.session.query(
+            func.count().label('appearances'),
+            func.sum(FixturePlayerStats.goals).label('goals'),
+            func.sum(FixturePlayerStats.assists).label('assists'),
+            func.sum(FixturePlayerStats.minutes).label('minutes'),
+            func.sum(FixturePlayerStats.saves).label('saves')
+        ).filter(
+            FixturePlayerStats.player_api_id == loan.player_id,
+            FixturePlayerStats.team_api_id == loan_team.team_id
+        ).first()
+        
+        if stats:
+            loan.appearances = stats.appearances or 0
+            loan.goals = stats.goals or 0
+            loan.assists = stats.assists or 0
+            loan.minutes_played = stats.minutes or 0
+            loan.saves = stats.saves or 0
+    
+    db.session.commit()
+
 
 # --- Admin: Flags management (list/update) ---
 @api_bp.route('/admin/flags', methods=['GET'])
@@ -8897,7 +10897,7 @@ def admin_check_pending_games(team_id: int):
         if target_date_str:
             target_date = datetime.strptime(target_date_str, '%Y-%m-%d').date()
         else:
-            target_date = datetime.now().date()
+            target_date = datetime.now(timezone.utc).date()
 
         # Calculate week range (Monday to Sunday) for the newsletter
         week_start = target_date - timedelta(days=target_date.weekday())
@@ -9030,7 +11030,7 @@ def admin_check_newsletter_readiness():
         if target_date_str:
             target_date = datetime.strptime(target_date_str, '%Y-%m-%d').date()
         else:
-            target_date = datetime.now().date()
+            target_date = datetime.now(timezone.utc).date()
 
         # Calculate week range (Monday to Sunday)
         week_start = target_date - timedelta(days=target_date.weekday())
@@ -10141,6 +12141,45 @@ def admin_delete_supplemental_loan(loan_id: int):
         logger.exception('admin_delete_supplemental_loan failed')
         db.session.rollback()
         return jsonify(_safe_error_payload(e, 'An unexpected error occurred. Please try again later.')), 500
+
+
+# --- Admin: Dashboard Stats ---
+@api_bp.route('/admin/dashboard-stats', methods=['GET'])
+@require_api_key
+def admin_dashboard_stats():
+    """Get overview stats for the admin dashboard."""
+    try:
+        from src.models.league import Newsletter, LoanedPlayer, Player
+        
+        # Newsletter stats
+        total_newsletters = Newsletter.query.count()
+        published_newsletters = Newsletter.query.filter_by(published=True).count()
+        draft_newsletters = total_newsletters - published_newsletters
+        
+        # Loan stats
+        total_loans = LoanedPlayer.query.count()
+        active_loans = LoanedPlayer.query.filter_by(is_active=True).count()
+        
+        # Player stats
+        total_players = Player.query.count()
+        
+        return jsonify({
+            'newsletters': {
+                'total': total_newsletters,
+                'published': published_newsletters,
+                'drafts': draft_newsletters,
+            },
+            'loans': {
+                'total': total_loans,
+                'active': active_loans,
+            },
+            'players': {
+                'total': total_players,
+            }
+        })
+    except Exception as e:
+        logger.exception('admin_dashboard_stats failed')
+        return jsonify(_safe_error_payload(e, 'Failed to fetch dashboard stats')), 500
 
 
 # --- Admin: Subscriber Analytics ---

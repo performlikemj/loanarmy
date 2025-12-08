@@ -12,6 +12,7 @@ import {
   PlayerStatTable 
 } from '@/components/charts'
 import { cn } from '@/lib/utils'
+import { formatTextToHtml } from '@/lib/formatText'
 
 // Render a single chart block
 function ChartBlock({ block, playerId, weekRange }) {
@@ -152,10 +153,11 @@ export function BlockRenderer({
                 key={block.id || index}
                 className="prose prose-gray max-w-none
                   prose-headings:text-gray-900 prose-headings:font-bold
-                  prose-p:text-gray-700 prose-p:leading-relaxed
+                  prose-p:text-gray-700 prose-p:leading-relaxed prose-p:my-2
+                  prose-ul:my-2 prose-ul:pl-5 prose-li:my-1
                   prose-strong:text-gray-900
                   prose-a:text-violet-600 prose-a:no-underline hover:prose-a:underline"
-                dangerouslySetInnerHTML={{ __html: block.content }}
+                dangerouslySetInnerHTML={{ __html: formatTextToHtml(block.content) }}
               />
             )
 

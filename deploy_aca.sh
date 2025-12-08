@@ -32,10 +32,88 @@ BACKEND_DIR="$ROOT_DIR/loan-army-backend"
 FRONTEND_DIR="$ROOT_DIR/loan-army-frontend"
 
 log() { printf "\n==> %s\n" "$*"; }
+warn() { printf "\n⚠️  %s\n" "$*"; }
+err() { printf "\n❌ %s\n" "$*"; }
 need() { command -v "$1" >/dev/null 2>&1 || { echo "Missing required command: $1"; exit 1; }; }
+
+# ---------------------------
+# Supabase Security Checks
+# ---------------------------
+# Set SKIP_SECURITY_CHECKS=1 to bypass (not recommended)
+SKIP_SECURITY_CHECKS="${SKIP_SECURITY_CHECKS:-0}"
+# Supabase connection (uses SUPA_ prefixed vars to avoid conflict with local DB)
+SUPA_DB_HOST="${SUPA_DB_HOST:-db.snqwamzutbcbjgusubsa.supabase.co}"
+SUPA_DB_NAME="${SUPA_DB_NAME:-postgres}"
+SUPA_DB_USER="${SUPA_DB_USER:-postgres}"
+SUPA_DB_PORT="${SUPA_DB_PORT:-5432}"
+# SUPA_DB_PASSWORD should be set in environment
+
+run_security_checks() {
+  log "Running pre-deployment security checks..."
+  
+  if [[ -z "${SUPA_DB_PASSWORD:-}" ]]; then
+    warn "SUPA_DB_PASSWORD not set - skipping database security checks"
+    warn "Set SUPA_DB_PASSWORD to enable RLS verification"
+    return 0
+  fi
+  
+  if ! command -v psql >/dev/null 2>&1; then
+    warn "psql not found - skipping database security checks"
+    warn "Install postgresql-client to enable RLS verification"
+    return 0
+  fi
+  
+  # Query for tables in public schema without RLS enabled
+  local rls_query="
+    SELECT schemaname || '.' || tablename as table_name
+    FROM pg_tables t
+    LEFT JOIN pg_class c ON c.relname = t.tablename
+    LEFT JOIN pg_namespace n ON n.oid = c.relnamespace AND n.nspname = t.schemaname
+    WHERE t.schemaname = 'public'
+      AND c.relrowsecurity = false
+      AND t.tablename NOT LIKE 'pg_%'
+      AND t.tablename NOT IN ('alembic_version', 'schema_migrations')
+    ORDER BY t.tablename;
+  "
+  
+  local tables_without_rls
+  tables_without_rls=$(PGPASSWORD="$SUPA_DB_PASSWORD" psql \
+    -h "$SUPA_DB_HOST" \
+    -p "$SUPA_DB_PORT" \
+    -U "$SUPA_DB_USER" \
+    -d "$SUPA_DB_NAME" \
+    -t -A \
+    -c "$rls_query" 2>/dev/null) || {
+    warn "Could not connect to Supabase database for security checks"
+    return 0
+  }
+  
+  if [[ -n "$tables_without_rls" ]]; then
+    err "SECURITY CHECK FAILED: Tables without Row Level Security enabled:"
+    echo ""
+    echo "$tables_without_rls" | while read -r table; do
+      echo "  ❌ $table"
+    done
+    echo ""
+    err "All tables in public schema must have RLS enabled."
+    err "Run: ALTER TABLE <table_name> ENABLE ROW LEVEL SECURITY;"
+    err ""
+    err "To bypass this check (NOT RECOMMENDED): SKIP_SECURITY_CHECKS=1 ./deploy_aca.sh"
+    exit 1
+  fi
+  
+  log "✅ Security checks passed - all tables have RLS enabled"
+}
 
 need az
 need jq || true
+
+# Run security checks before deployment (unless skipped)
+if [[ "$SKIP_SECURITY_CHECKS" != "1" ]]; then
+  run_security_checks
+else
+  warn "Security checks skipped (SKIP_SECURITY_CHECKS=1)"
+fi
 
 log "Setting subscription"
 az account set --subscription "$SUBSCRIPTION_ID"
