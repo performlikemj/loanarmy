@@ -1944,13 +1944,31 @@ class APIFootballClient:
                 )
                 
                 minutes = player_stats_row.minutes or 0
-                if minutes > 0:
+                goals_from_db = player_stats_row.goals or 0
+                assists_from_db = player_stats_row.assists or 0
+                
+                # For limited coverage (FA Cup, etc.), minutes may be 0 but goals/assists exist
+                # Include the match if: minutes > 0 OR goals > 0 OR assists > 0
+                player_participated_db = minutes > 0 or goals_from_db > 0 or assists_from_db > 0
+                
+                if player_participated_db:
                     played = True
-                    match_stats_coverage = 'full'  # Full stats from database
+                    # Determine coverage: full if we have minutes, limited if only goals/assists
+                    if minutes > 0:
+                        match_stats_coverage = 'full'
+                    else:
+                        match_stats_coverage = 'limited'
+                        # Assign estimated minutes for limited coverage
+                        minutes = 45  # Assume ~45 mins for limited coverage matches
+                        logger.info(
+                            f"📊 LIMITED STATS (DB): player_id={player_id}, fixture_id={fixture_id}, "
+                            f"goals={goals_from_db}, assists={assists_from_db} (no minutes data)"
+                        )
+                    
                     player_line = {
                         'minutes': minutes,
-                        'goals': player_stats_row.goals or 0,
-                        'assists': player_stats_row.assists or 0,
+                        'goals': goals_from_db,
+                        'assists': assists_from_db,
                         'yellows': player_stats_row.yellows or 0,
                         'reds': player_stats_row.reds or 0,
                         'position': player_stats_row.position,

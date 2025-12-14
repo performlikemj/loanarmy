@@ -2948,6 +2948,11 @@ def get_public_player_stats(player_id: int):
             stats_dict['loan_team_logo'] = team_info.get('logo')
             stats_dict['loan_window'] = team_info.get('window_type', 'Summer')
             
+            # Include match score for context
+            stats_dict['home_goals'] = fixture.home_goals
+            stats_dict['away_goals'] = fixture.away_goals
+            stats_dict['opponent_api_id'] = opponent_api_id
+            
             result.append(stats_dict)
 
         return jsonify(result)

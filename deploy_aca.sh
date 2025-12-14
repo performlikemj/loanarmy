@@ -31,6 +31,20 @@ ROOT_DIR="$(cd "$(dirname "$0")" && pwd)"
 BACKEND_DIR="$ROOT_DIR/loan-army-backend"
 FRONTEND_DIR="$ROOT_DIR/loan-army-frontend"
 
+# Load .env file if it exists (for SUPA_DB_PASSWORD and other secrets)
+if [[ -f "$ROOT_DIR/.env" ]]; then
+  while IFS= read -r line || [[ -n "$line" ]]; do
+    # Skip empty lines and comments
+    [[ -z "$line" || "$line" =~ ^[[:space:]]*# ]] && continue
+    # Remove leading/trailing whitespace and export valid KEY=value lines
+    line="${line#"${line%%[![:space:]]*}"}"  # trim leading
+    line="${line%"${line##*[![:space:]]}"}"  # trim trailing
+    if [[ "$line" =~ ^[A-Za-z_][A-Za-z0-9_]*= ]]; then
+      export "$line"
+    fi
+  done < "$ROOT_DIR/.env"
+fi
+
 log() { printf "\n==> %s\n" "$*"; }
 warn() { printf "\n⚠️  %s\n" "$*"; }
 err() { printf "\n❌ %s\n" "$*"; }

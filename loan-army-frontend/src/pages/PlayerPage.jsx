@@ -24,12 +24,13 @@ import {
     ResponsiveContainer,
     ReferenceLine,
 } from 'recharts'
-import { Loader2, ArrowLeft, User, TrendingUp, Calendar, Target, PenTool, ChevronRight, Users, Info } from 'lucide-react'
+import { Loader2, ArrowLeft, User, TrendingUp, Calendar, Target, PenTool, ChevronRight, Users, Info, ExternalLink } from 'lucide-react'
 import { APIService } from '@/lib/api'
 import { format } from 'date-fns'
 import { Avatar, AvatarFallback, AvatarImage } from '@/components/ui/avatar'
 import { SponsorSidebar, SponsorStrip } from '@/components/SponsorSidebar'
 import { Tooltip as UITooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip'
+import { MatchDetailDrawer } from '@/components/MatchDetailDrawer'
 
 const METRIC_CONFIG = {
     'Attacker': {
@@ -100,6 +101,10 @@ export function PlayerPage() {
     const [loanTeamPlayers, setLoanTeamPlayers] = useState([])
     const [loadingLoanTeamPlayers, setLoadingLoanTeamPlayers] = useState(false)
     const [selectedLoanTeam, setSelectedLoanTeam] = useState(null)
+    
+    // Match detail drawer state
+    const [matchDetailOpen, setMatchDetailOpen] = useState(false)
+    const [selectedMatch, setSelectedMatch] = useState(null)
 
     // Smart back navigation - goes to previous page, or home if no history
     const handleBack = () => {
@@ -776,7 +781,7 @@ export function PlayerPage() {
                                     <TabsContent value="matches" className="mt-0">
                                         <ScrollArea className="h-[500px]">
                                             <table className="w-full text-sm text-left">
-                                                <thead className="bg-gray-50 sticky top-0">
+                                                <thead className="bg-gray-50 sticky top-0 z-10">
                                                     <tr>
                                                         <th className="p-3 font-medium text-gray-500">Date</th>
                                                         <th className="p-3 font-medium text-gray-500">Club</th>
@@ -789,7 +794,14 @@ export function PlayerPage() {
                                                 </thead>
                                                 <tbody className="divide-y">
                                                     {stats.slice().reverse().map((s, i) => (
-                                                        <tr key={i} className="hover:bg-gray-50">
+                                                        <tr 
+                                                            key={i} 
+                                                            className="hover:bg-blue-50 cursor-pointer transition-colors group"
+                                                            onClick={() => {
+                                                                setSelectedMatch(s)
+                                                                setMatchDetailOpen(true)
+                                                            }}
+                                                        >
                                                             <td className="p-3 whitespace-nowrap">
                                                                 {s.fixture_date ? format(new Date(s.fixture_date), 'MMM d, yyyy') : '-'}
                                                             </td>
@@ -809,8 +821,13 @@ export function PlayerPage() {
                                                                 )}
                                                             </td>
                                                             <td className="p-3">
-                                                                <div className="font-medium">{s.opponent}</div>
-                                                                <div className="text-xs text-gray-500">{s.competition}</div>
+                                                                <div className="flex items-center gap-2">
+                                                                    <div>
+                                                                        <div className="font-medium group-hover:text-blue-700 transition-colors">{s.opponent}</div>
+                                                                        <div className="text-xs text-gray-500">{s.competition}</div>
+                                                                    </div>
+                                                                    <ExternalLink className="h-3.5 w-3.5 text-gray-300 group-hover:text-blue-500 transition-colors opacity-0 group-hover:opacity-100" />
+                                                                </div>
                                                             </td>
                                                             <td className="p-3">{s.minutes}'</td>
                                                             <td className="p-3">
@@ -1065,6 +1082,15 @@ export function PlayerPage() {
                     </div>
                 </DrawerContent>
             </Drawer>
+
+            {/* Match Detail Drawer - shows detailed stats for a single match */}
+            <MatchDetailDrawer
+                open={matchDetailOpen}
+                onOpenChange={setMatchDetailOpen}
+                match={selectedMatch}
+                playerName={playerName}
+                position={position}
+            />
 
             {/* Loan Team Players Drawer - shows players loaned TO this team */}
             <Drawer open={loanTeamDrawerOpen} onOpenChange={setLoanTeamDrawerOpen}>
