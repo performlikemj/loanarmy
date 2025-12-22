@@ -86,6 +86,7 @@ import { AdminSettings } from '@/pages/admin/AdminSettings'
 import { AdminUsers } from '@/pages/admin/AdminUsers'
 import { AdminTeams } from '@/pages/admin/AdminTeams'
 import { AdminSponsors } from '@/pages/admin/AdminSponsors'
+import { AdminReddit } from '@/pages/admin/AdminReddit'
 import { WriterLogin } from '@/pages/writer/WriterLogin'
 import { WriterDashboard } from '@/pages/writer/WriterDashboard'
 import { WriteupEditor } from '@/pages/writer/WriteupEditor'
@@ -6544,6 +6545,26 @@ function AdminPage({ defaultTab = 'newsletters', includeSandbox = true, forcedTa
 }
 // Navigation component
 const BRAND_LOGO_SRC = '/assets/loan_army_assets/apple-touch-icon.png'
+const SITE_UNDER_CONSTRUCTION = true
+
+function UnderConstructionPage() {
+  return (
+    <div className="min-h-screen bg-gray-50 text-gray-900">
+      <div className="mx-auto flex min-h-screen max-w-3xl flex-col items-center justify-center px-6 py-16 text-center">
+        <div className="w-full rounded-2xl border border-gray-200 bg-white/90 p-10 shadow-sm backdrop-blur">
+          <div className="flex items-center justify-center gap-3">
+            <img src={BRAND_LOGO_SRC} alt="Go On Loan logo" className="h-12 w-12" />
+            <span className="text-xl font-semibold tracking-tight">Go On Loan</span>
+          </div>
+          <h1 className="mt-6 text-3xl font-semibold tracking-tight">We're Making Improvements</h1>
+          <p className="mt-3 text-base text-gray-600">
+            The site is under construction. Please check back soon.
+          </p>
+        </div>
+      </div>
+    </div>
+  )
+}
 
 function SoccerBallToggleIcon({ spinning }) {
   return (
@@ -11223,6 +11244,14 @@ function App() {
     syncAuth({ token: null, displayName: null, displayNameConfirmed: false })
   }, [syncAuth])
 
+  if (SITE_UNDER_CONSTRUCTION) {
+    return (
+      <StripeProvider>
+        <UnderConstructionPage />
+      </StripeProvider>
+    )
+  }
+
   return (
     <StripeProvider>
       <AuthContext.Provider value={authSnapshot}>
@@ -11266,6 +11295,7 @@ function App() {
                     <Route path="players" element={<AdminPlayers />} />
                     <Route path="teams" element={<AdminTeams />} />
                     <Route path="sponsors" element={<AdminSponsors />} />
+                    <Route path="reddit" element={<AdminReddit />} />
                     <Route path="settings" element={<AdminSettings />} />
                     <Route path="revenue" element={<AdminRevenueDashboard />} />
                   </Route>

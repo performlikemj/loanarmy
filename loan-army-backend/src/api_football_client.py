@@ -12,7 +12,7 @@ from copy import deepcopy
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from sqlalchemy.exc import IntegrityError, DataError
 from src.data.transfer_windows import WINDOWS
-from src.utils.external_stats import fetch_external_stats
+# external_stats is lazy-loaded where needed to reduce cold start time
 import dotenv
 dotenv.load_dotenv(dotenv.find_dotenv())
 
@@ -1131,6 +1131,8 @@ class APIFootballClient:
                 
                 if player_name and match_date:
                     logger.info(f"⚠️ Triggering external stats fetch for {player_name} in {team_name}")
+                    # Lazy import to reduce cold start time
+                    from src.utils.external_stats import fetch_external_stats
                     external_stats = fetch_external_stats(player_name, team_name, match_date, competition)
                     
                     if external_stats:

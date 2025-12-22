@@ -15,16 +15,18 @@ from src.mcp.brave import BraveApiError, brave_search
 from pydantic import BaseModel, Field
 from pydantic.config import ConfigDict
 logger = logging.getLogger(__name__)
-try:  # Allow running without Groq SDK installed (e.g., in tests)
-    from groq import Groq
-except ImportError:  # pragma: no cover - optional dependency
-    Groq = None
+
+# Groq SDK is lazy-loaded in _get_groq_client() to reduce cold start time
 
 def _get_groq_client():
+    """Get Groq client with lazy import to reduce cold start time."""
     try:
+        from groq import Groq  # Lazy import - only loaded when actually needed
         api_key = os.getenv('GROQ_API_KEY')
-        if api_key and Groq is not None:
+        if api_key:
             return Groq(api_key=api_key)
+    except ImportError:  # pragma: no cover - optional dependency
+        pass
     except Exception:
         pass
     return None

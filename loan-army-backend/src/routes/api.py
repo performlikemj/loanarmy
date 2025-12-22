@@ -1,5 +1,5 @@
 from flask import Blueprint, request, jsonify, make_response, render_template, Response, current_app, g
-from src.models.league import db, League, Team, LoanedPlayer, Newsletter, UserSubscription, EmailToken, LoanFlag, AdminSetting, NewsletterComment, UserAccount, SupplementalLoan, NewsletterPlayerYoutubeLink, NewsletterCommentary, Player, JournalistTeamAssignment, CommentaryApplause, TeamTrackingRequest, StripeSubscription, NewsletterDigestQueue, JournalistSubscription, BackgroundJob, _as_utc, _dedupe_loans
+from src.models.league import db, League, Team, LoanedPlayer, Newsletter, UserSubscription, EmailToken, LoanFlag, AdminSetting, NewsletterComment, UserAccount, SupplementalLoan, NewsletterPlayerYoutubeLink, NewsletterCommentary, Player, JournalistTeamAssignment, CommentaryApplause, TeamTrackingRequest, StripeSubscription, NewsletterDigestQueue, JournalistSubscription, BackgroundJob, TeamSubreddit, RedditPost, _as_utc, _dedupe_loans
 from src.models.sponsor import Sponsor
 from src.api_football_client import APIFootballClient
 from src.admin.sandbox_tasks import (
@@ -36,6 +36,7 @@ from src.extensions import limiter
 from src.utils.sanitize import sanitize_comment_body, sanitize_plain_text, sanitize_commentary_html
 from src.agents.errors import NoActiveLoaneesError
 from src.utils.newsletter_slug import compose_newsletter_public_slug
+from src.services.email_service import email_service
 import threading
 
 logger = logging.getLogger(__name__)
@@ -565,14 +566,9 @@ def _safe_error_payload(exc: Exception, fallback_message: str, include_detail: b
     return payload
 
 def _send_login_code(email: str, code: str):
-    """Dev: print code to terminal; Prod: integrate with email provider (future).
-    Never prints the code in production logs.
+    """Send login code via email service (Mailgun/SMTP).
+    In development, also prints the code to terminal for testing.
     """
-    webhook_url = os.getenv('N8N_EMAIL_WEBHOOK_URL')
-    method = (os.getenv('N8N_EMAIL_HTTP_METHOD') or 'POST').strip().upper()
-    if method not in {'GET', 'POST'}:
-        method = 'POST'
-
     expires_minutes = 5
     subject = 'Your Login Code'
 
@@ -588,55 +584,25 @@ def _send_login_code(email: str, code: str):
         "If you did not request it, you can ignore this email."
     )
 
-    if webhook_url:
-        headers: dict[str, str] = {}
-        if method == 'POST':
-            headers['Content-Type'] = 'application/json'
-        bearer = os.getenv('N8N_EMAIL_AUTH_BEARER')
-        if bearer:
-            headers['Authorization'] = f'Bearer {bearer}'
-
-        payload = {
-            'kind': 'login_code',
-            'email': email,
-            'code': code,
-            'expires_in_minutes': expires_minutes,
-            'subject': subject,
-            'email': [email],
-            'html': html_body,
-            'text': text_body,
-            'meta': {
-                'from': {
-                    'name': os.getenv('EMAIL_FROM_NAME', 'Go On Loan'),
-                    'email': os.getenv('EMAIL_FROM_ADDRESS', 'no-reply@loan.army'),
-                },
-            },
-        }
-
-        request_kwargs: dict[str, Any]
-        if method == 'GET':
-            param_name = os.getenv('N8N_EMAIL_GET_PARAM', 'payload').strip() or 'payload'
-            request_kwargs = {'params': {param_name: json.dumps(payload)}}
-            request_fn = requests.get
-        else:
-            request_kwargs = {'json': payload}
-            request_fn = requests.post
-
+    # Send via email service if configured
+    if email_service.is_configured():
         try:
-            resp = request_fn(webhook_url, headers=headers, timeout=10, **request_kwargs)
-            if resp.status_code >= 300:
-                logger.warning(
-                    "Login webhook responded with non-2xx for %s status=%s body=%s",
-                    email,
-                    resp.status_code,
-                    resp.text[:500] if isinstance(getattr(resp, 'text', ''), str) else '',
-                )
+            result = email_service.send_email(
+                to=email,
+                subject=subject,
+                html=html_body,
+                text=text_body,
+                tags=['login_code'],
+            )
+            if result.success:
+                logger.info("Login code sent to %s via %s", email, result.provider)
             else:
-                logger.info("Login code delivered via webhook for %s status=%s", email, resp.status_code)
+                logger.warning("Failed to send login code to %s: %s", email, result.error)
         except Exception:
-            logger.exception("Failed to call login webhook for %s", email)
-    if not webhook_url or not _is_production():
-        # In development, still surface the code for manual testing.
+            logger.exception("Failed to send login code to %s", email)
+    
+    # In development, also print to terminal for testing
+    if not _is_production():
         msg = f"[DEV] Login code for {email}: {code} (expires in 5 minutes)"
         try:
             print(msg)
@@ -654,52 +620,35 @@ def _send_email_via_webhook(
     meta: dict | None = None,
     http_method_override: str | None = None,
 ) -> dict:
-    webhook_url = os.getenv('N8N_EMAIL_WEBHOOK_URL')
-    if not webhook_url:
-        raise RuntimeError('N8N_EMAIL_WEBHOOK_URL is not configured')
+    """Send email via email service (Mailgun/SMTP).
+    
+    This function maintains backward compatibility with the old n8n webhook interface.
+    The meta and http_method_override parameters are ignored but kept for compatibility.
+    """
+    if not email_service.is_configured():
+        raise RuntimeError('Email service is not configured (set MAILGUN_* or SMTP_* env vars)')
 
-    method = (http_method_override or os.getenv('N8N_EMAIL_HTTP_METHOD') or 'POST').strip().upper()
-    if method not in {'GET', 'POST'}:
-        method = 'POST'
-
-    headers: dict[str, str] = {}
-    if method == 'POST':
-        headers['Content-Type'] = 'application/json'
-
-    bearer = os.getenv('N8N_EMAIL_AUTH_BEARER')
-    if bearer:
-        headers['Authorization'] = f'Bearer {bearer}'
-
-    payload = {
-        'email': email,
-        'subject': subject,
-        'text': text,
-        'html': html or text,
-        'meta': meta or {},
-    }
+    # Extract tags from meta if present
+    tags = None
+    if meta and 'kind' in meta:
+        tags = [meta['kind']]
 
     try:
-        if method == 'GET':
-            param_name = os.getenv('N8N_EMAIL_GET_PARAM', 'payload').strip() or 'payload'
-            response = requests.get(
-                webhook_url,
-                params={param_name: json.dumps(payload)},
-                timeout=10,
-            )
-        else:
-            response = requests.post(
-                webhook_url,
-                headers=headers,
-                data=json.dumps(payload),
-                timeout=10,
-            )
+        result = email_service.send_email(
+            to=email,
+            subject=subject,
+            html=html or text,
+            text=text,
+            tags=tags,
+        )
         return {
-            'status': 'ok' if response.ok else 'error',
-            'http_status': response.status_code,
-            'response_text': response.text,
+            'status': 'ok' if result.success else 'error',
+            'http_status': result.http_status or (200 if result.success else 500),
+            'response_text': result.message_id or result.error or '',
+            'provider': result.provider,
         }
     except Exception as exc:
-        logger.exception('Failed to send webhook email to %s', email)
+        logger.exception('Failed to send email to %s', email)
         raise RuntimeError(f'Email delivery failed: {exc}') from exc
 
 
@@ -5495,23 +5444,15 @@ def _deliver_newsletter_via_webhook(
     http_method_override: str | None = None,
     dry_run: bool = False,
 ) -> dict:
-    """Render newsletter to HTML/TXT and POST to n8n webhook.
+    """Render newsletter to HTML/TXT and send via email service.
     Returns dict with 'status', 'http_status', and 'recipient_count'.
+    
+    Note: webhook_url_override and http_method_override are kept for backward
+    compatibility but are ignored when using the direct email service.
     """
-    # Resolve webhook URL and headers
-    webhook_url = webhook_url_override or os.getenv('N8N_EMAIL_WEBHOOK_URL')
-    if not webhook_url:
-        raise RuntimeError('N8N_EMAIL_WEBHOOK_URL is not configured')
-    method = (http_method_override or os.getenv('N8N_EMAIL_HTTP_METHOD') or 'POST').strip().upper()
-    if method not in {'GET', 'POST'}:
-        method = 'POST'
-
-    headers = {}
-    if method == 'POST':
-        headers['Content-Type'] = 'application/json'
-    bearer = os.getenv('N8N_EMAIL_AUTH_BEARER')
-    if bearer:
-        headers['Authorization'] = f'Bearer {bearer}'
+    # Check email service is configured
+    if not email_service.is_configured():
+        raise RuntimeError('Email service is not configured (set MAILGUN_* or SMTP_* env vars)')
 
     team_ids: list[int] = []
     if n.team_id:
@@ -5581,7 +5522,7 @@ def _deliver_newsletter_via_webhook(
             'status': 'no_recipients',
             'http_status': None,
             'recipient_count': 0,
-            'webhook_url': webhook_url,
+            'provider': 'none',
             'response_text': '',
         }
 
@@ -5619,6 +5560,7 @@ def _deliver_newsletter_via_webhook(
     failures: list[dict[str, Any]] = []
     last_status_code: int | None = None
     last_response_text = ''
+    last_provider = 'none'
 
     # Import digest queue function
     from src.services.newsletter_deadline_service import queue_newsletter_for_digest
@@ -5681,51 +5623,34 @@ def _deliver_newsletter_via_webhook(
         if unsubscribe_url:
             text = f"{text_base}\n\nTo unsubscribe from this team, visit: {unsubscribe_url}\n"
 
-        meta_payload = meta_base.copy()
-        meta_payload.update({
-            'unsubscribe_url': unsubscribe_url,
-            'one_click_unsubscribe_url': one_click_url,
-            'subscription_id': subscription.id if subscription else None,
-            'manage_url': manage_url,
-        })
-
-        payload = {
-            'newsletter_id': n.id,
-            'team_id': n.team_id,
-            'team_name': n.team.name if n.team else None,
-            'subject': subject,
-            'from': from_addr,
-            'email': email,
-            'html': html,
-            'text': text,
-            'headers': email_headers,  # RFC 8058 List-Unsubscribe headers
-            'meta': meta_payload,
-        }
-
-        request_kwargs: dict[str, Any]
-        if method == 'GET':
-            param_name = os.getenv('N8N_EMAIL_GET_PARAM', 'payload').strip() or 'payload'
-            request_kwargs = {'params': {param_name: json.dumps(payload)}}
-            request_fn = requests.get
-        else:
-            request_kwargs = {'json': payload}
-            request_fn = requests.post
-
+        # Send via email service
         try:
-            r = request_fn(webhook_url, headers=headers, timeout=20, **request_kwargs)
-            last_status_code = r.status_code
-            last_response_text = (r.text[:5000] if isinstance(getattr(r, 'text', ''), str) else '')
-            if 200 <= r.status_code < 300:
+            result = email_service.send_email(
+                to=email,
+                subject=subject,
+                html=html,
+                text=text,
+                from_name=from_addr['name'],
+                from_email=from_addr['email'],
+                tags=['newsletter', f'newsletter_{n.id}'],
+            )
+            last_status_code = result.http_status or (200 if result.success else 500)
+            last_response_text = result.message_id or result.error or ''
+            last_provider = result.provider
+            
+            if result.success:
                 delivered_count += 1
             else:
                 failures.append({
                     'email': email,
-                    'http_status': r.status_code,
-                    'response_text': last_response_text,
+                    'error': result.error,
+                    'http_status': last_status_code,
+                    'provider': result.provider,
                 })
-        except requests.RequestException as exc:
-            last_status_code = getattr(getattr(exc, 'response', None), 'status_code', None)
+        except Exception as exc:
+            last_status_code = 500
             last_response_text = str(exc)[:5000]
+            last_provider = 'error'
             failures.append({
                 'email': email,
                 'error': str(exc),
@@ -5741,7 +5666,7 @@ def _deliver_newsletter_via_webhook(
         'recipient_count': total_recipients,
         'delivered_count': delivered_count,
         'digest_queued_count': digest_queued_count,
-        'webhook_url': webhook_url,
+        'provider': last_provider,
         'response_text': last_response_text,
     }
     if failures:
@@ -10425,9 +10350,18 @@ def admin_update_newsletter(nid: int):
 @api_bp.route('/admin/newsletters/bulk-publish', methods=['POST'])
 @require_api_key
 def admin_bulk_publish_newsletters():
+    """Bulk publish or unpublish newsletters.
+    
+    Body:
+      - publish: Boolean, whether to publish (true) or unpublish (false)
+      - ids: Array of newsletter IDs (if not using filter_params)
+      - filter_params: Object with filter criteria (alternative to ids)
+      - post_to_reddit: Boolean, if true and publishing, also post to Reddit
+    """
     try:
         data = request.get_json() or {}
         publish_flag = bool(data.get('publish'))
+        post_to_reddit = bool(data.get('post_to_reddit', False))
         filter_params = data.get('filter_params') or data.get('filters')
 
         meta: dict[str, Any] | None = None
@@ -10521,18 +10455,143 @@ def admin_bulk_publish_newsletters():
             for target in auto_send_targets:
                 _maybe_auto_send_on_publish(target, auto_send_trigger=True)
 
-        return jsonify({
+        # Post to Reddit if requested
+        reddit_results = []
+        if publish_flag and post_to_reddit and auto_send_targets:
+            reddit_results = _maybe_post_to_reddit_on_publish(auto_send_targets)
+
+        response_data = {
             'updated': updated,
             'missing': missing,
             'publish': publish_flag,
             'unchanged': unchanged,
             'total_requested': meta.get('total_requested', len(target_ids)),
             'meta': meta,
-        })
+        }
+        
+        if post_to_reddit:
+            response_data['reddit'] = {
+                'requested': post_to_reddit,
+                'results': reddit_results,
+                'posted_count': sum(1 for r in reddit_results if r.get('success_count', 0) > 0)
+            }
+
+        return jsonify(response_data)
     except Exception as e:
         logger.exception('admin_bulk_publish_newsletters failed')
         db.session.rollback()
         return jsonify(_safe_error_payload(e, 'Failed to update newsletter status. Please try again later.')), 500
+
+
+def _maybe_post_to_reddit_on_publish(newsletters: list) -> list:
+    """Attempt to post newsletters to Reddit after publishing.
+    
+    Args:
+        newsletters: List of Newsletter objects that were just published
+        
+    Returns:
+        List of result dicts per newsletter
+    """
+    results = []
+    
+    try:
+        from src.services.reddit_service import (
+            RedditService, RedditServiceError, post_newsletter_to_reddit
+        )
+        from src.utils.newsletter_markdown import (
+            convert_newsletter_to_markdown,
+            convert_newsletter_to_compact_markdown,
+            generate_post_title
+        )
+        
+        service = RedditService.get_instance()
+        if not service.is_configured():
+            logger.warning('Reddit not configured, skipping auto-post')
+            return [{'newsletter_id': n.id, 'skipped': True, 'reason': 'Reddit not configured'} for n in newsletters]
+        
+        for newsletter in newsletters:
+            newsletter_result = {
+                'newsletter_id': newsletter.id,
+                'team_name': newsletter.team.name if newsletter.team else None,
+                'subreddit_posts': [],
+                'success_count': 0,
+                'failed_count': 0
+            }
+            
+            # Get active subreddits for this team
+            subreddits = TeamSubreddit.query.filter_by(
+                team_id=newsletter.team_id,
+                is_active=True
+            ).all()
+            
+            if not subreddits:
+                newsletter_result['skipped'] = True
+                newsletter_result['reason'] = 'No active subreddits configured'
+                results.append(newsletter_result)
+                continue
+            
+            # Get newsletter data
+            newsletter_data = newsletter.to_dict()
+            team_name = newsletter.team.name if newsletter.team else 'Unknown Team'
+            title = generate_post_title(newsletter_data, team_name)
+            
+            web_url = None
+            if newsletter.public_slug:
+                web_url = f"https://goonloan.com/newsletters/{newsletter.public_slug}"
+            
+            for sub in subreddits:
+                try:
+                    # Generate markdown
+                    if sub.post_format == 'compact':
+                        markdown = convert_newsletter_to_compact_markdown(newsletter_data)
+                    else:
+                        markdown = convert_newsletter_to_markdown(
+                            newsletter_data,
+                            include_expanded_stats=True,
+                            include_links=True,
+                            web_url=web_url
+                        )
+                    
+                    result = post_newsletter_to_reddit(
+                        newsletter_id=newsletter.id,
+                        team_subreddit_id=sub.id,
+                        title=title,
+                        markdown_content=markdown,
+                        post_format=sub.post_format
+                    )
+                    
+                    if result.get('status') == 'success':
+                        newsletter_result['success_count'] += 1
+                    elif result.get('status') == 'failed':
+                        newsletter_result['failed_count'] += 1
+                    
+                    newsletter_result['subreddit_posts'].append({
+                        'subreddit': sub.subreddit_name,
+                        **result
+                    })
+                    
+                except Exception as e:
+                    newsletter_result['failed_count'] += 1
+                    newsletter_result['subreddit_posts'].append({
+                        'subreddit': sub.subreddit_name,
+                        'status': 'failed',
+                        'error': str(e)
+                    })
+            
+            results.append(newsletter_result)
+            
+            logger.info(
+                'Auto-posted newsletter %s to Reddit: success=%s failed=%s',
+                newsletter.id,
+                newsletter_result['success_count'],
+                newsletter_result['failed_count']
+            )
+        
+    except Exception as e:
+        logger.exception('_maybe_post_to_reddit_on_publish failed')
+        return [{'newsletter_id': n.id, 'error': str(e)} for n in newsletters]
+    
+    return results
 
 # --- Simple run-history using AdminSetting key 'run_history' ---
 
@@ -10787,6 +10846,382 @@ def admin_get_digest_queue():
     except Exception as e:
         logger.exception('admin_get_digest_queue failed')
         return jsonify(_safe_error_payload(e, 'Failed to get digest queue. Please try again later.')), 500
+
+
+# --- Admin: Reddit Integration Endpoints ---
+
+@api_bp.route('/admin/team-subreddits', methods=['GET'])
+@require_api_key
+def admin_list_team_subreddits():
+    """List all team-subreddit mappings.
+    
+    Query params:
+      - team_id: Filter by specific team ID
+      - active_only: If 'true', only return active subreddits
+    """
+    try:
+        team_id = request.args.get('team_id', type=int)
+        active_only = request.args.get('active_only', '').lower() in ('true', '1', 'yes')
+        
+        query = TeamSubreddit.query
+        if team_id:
+            query = query.filter_by(team_id=team_id)
+        if active_only:
+            query = query.filter_by(is_active=True)
+        
+        query = query.order_by(TeamSubreddit.team_id, TeamSubreddit.subreddit_name)
+        subreddits = query.all()
+        
+        return jsonify({
+            'subreddits': [s.to_dict() for s in subreddits],
+            'count': len(subreddits)
+        })
+    except Exception as e:
+        logger.exception('admin_list_team_subreddits failed')
+        return jsonify(_safe_error_payload(e, 'Failed to list subreddits')), 500
+
+
+@api_bp.route('/admin/team-subreddits', methods=['POST'])
+@require_api_key
+def admin_add_team_subreddit():
+    """Add a subreddit mapping for a team.
+    
+    Body:
+      - team_id: Required team database ID
+      - subreddit_name: Required subreddit name (without r/)
+      - post_format: Optional, 'full' or 'compact' (default: 'full')
+      - is_active: Optional boolean (default: true)
+    """
+    try:
+        data = request.get_json() or {}
+        
+        team_id = data.get('team_id')
+        subreddit_name = (data.get('subreddit_name') or '').strip().lower()
+        
+        if not team_id:
+            return jsonify({'error': 'team_id is required'}), 400
+        if not subreddit_name:
+            return jsonify({'error': 'subreddit_name is required'}), 400
+        
+        # Remove r/ prefix if provided
+        if subreddit_name.startswith('r/'):
+            subreddit_name = subreddit_name[2:]
+        
+        # Validate team exists
+        team = Team.query.get(team_id)
+        if not team:
+            return jsonify({'error': f'Team {team_id} not found'}), 404
+        
+        # Check for duplicate
+        existing = TeamSubreddit.query.filter_by(
+            team_id=team_id,
+            subreddit_name=subreddit_name
+        ).first()
+        if existing:
+            return jsonify({
+                'error': f'Subreddit r/{subreddit_name} already configured for this team',
+                'existing': existing.to_dict()
+            }), 409
+        
+        post_format = data.get('post_format', 'full')
+        if post_format not in ('full', 'compact'):
+            post_format = 'full'
+        
+        is_active = data.get('is_active', True)
+        if isinstance(is_active, str):
+            is_active = is_active.lower() in ('true', '1', 'yes')
+        
+        subreddit = TeamSubreddit(
+            team_id=team_id,
+            subreddit_name=subreddit_name,
+            post_format=post_format,
+            is_active=bool(is_active)
+        )
+        db.session.add(subreddit)
+        db.session.commit()
+        
+        logger.info(
+            'Admin added team subreddit user=%s team_id=%s subreddit=%s',
+            getattr(g, 'user_email', None),
+            team_id,
+            subreddit_name
+        )
+        
+        return jsonify({
+            'subreddit': subreddit.to_dict(),
+            'message': f'Added r/{subreddit_name} for {team.name}'
+        }), 201
+    except Exception as e:
+        logger.exception('admin_add_team_subreddit failed')
+        db.session.rollback()
+        return jsonify(_safe_error_payload(e, 'Failed to add subreddit')), 500
+
+
+@api_bp.route('/admin/team-subreddits/<int:subreddit_id>', methods=['PUT'])
+@require_api_key
+def admin_update_team_subreddit(subreddit_id: int):
+    """Update a team subreddit mapping.
+    
+    Body:
+      - post_format: Optional, 'full' or 'compact'
+      - is_active: Optional boolean
+    """
+    try:
+        subreddit = TeamSubreddit.query.get(subreddit_id)
+        if not subreddit:
+            return jsonify({'error': 'Subreddit mapping not found'}), 404
+        
+        data = request.get_json() or {}
+        
+        if 'post_format' in data:
+            post_format = data['post_format']
+            if post_format in ('full', 'compact'):
+                subreddit.post_format = post_format
+        
+        if 'is_active' in data:
+            is_active = data['is_active']
+            if isinstance(is_active, str):
+                is_active = is_active.lower() in ('true', '1', 'yes')
+            subreddit.is_active = bool(is_active)
+        
+        db.session.commit()
+        
+        logger.info(
+            'Admin updated team subreddit user=%s subreddit_id=%s',
+            getattr(g, 'user_email', None),
+            subreddit_id
+        )
+        
+        return jsonify({
+            'subreddit': subreddit.to_dict(),
+            'message': 'Subreddit mapping updated'
+        })
+    except Exception as e:
+        logger.exception('admin_update_team_subreddit failed')
+        db.session.rollback()
+        return jsonify(_safe_error_payload(e, 'Failed to update subreddit')), 500
+
+
+@api_bp.route('/admin/team-subreddits/<int:subreddit_id>', methods=['DELETE'])
+@require_api_key
+def admin_delete_team_subreddit(subreddit_id: int):
+    """Delete a team subreddit mapping."""
+    try:
+        subreddit = TeamSubreddit.query.get(subreddit_id)
+        if not subreddit:
+            return jsonify({'error': 'Subreddit mapping not found'}), 404
+        
+        subreddit_name = subreddit.subreddit_name
+        team_id = subreddit.team_id
+        
+        db.session.delete(subreddit)
+        db.session.commit()
+        
+        logger.info(
+            'Admin deleted team subreddit user=%s subreddit_id=%s team_id=%s subreddit=%s',
+            getattr(g, 'user_email', None),
+            subreddit_id,
+            team_id,
+            subreddit_name
+        )
+        
+        return jsonify({
+            'message': f'Deleted r/{subreddit_name} mapping',
+            'deleted_id': subreddit_id
+        })
+    except Exception as e:
+        logger.exception('admin_delete_team_subreddit failed')
+        db.session.rollback()
+        return jsonify(_safe_error_payload(e, 'Failed to delete subreddit mapping')), 500
+
+
+@api_bp.route('/admin/newsletters/<int:newsletter_id>/reddit-posts', methods=['GET'])
+@require_api_key
+def admin_get_newsletter_reddit_posts(newsletter_id: int):
+    """Get all Reddit posts for a specific newsletter."""
+    try:
+        newsletter = Newsletter.query.get(newsletter_id)
+        if not newsletter:
+            return jsonify({'error': 'Newsletter not found'}), 404
+        
+        posts = RedditPost.query.filter_by(newsletter_id=newsletter_id).all()
+        
+        return jsonify({
+            'newsletter_id': newsletter_id,
+            'posts': [p.to_dict() for p in posts],
+            'count': len(posts)
+        })
+    except Exception as e:
+        logger.exception('admin_get_newsletter_reddit_posts failed')
+        return jsonify(_safe_error_payload(e, 'Failed to get Reddit posts')), 500
+
+
+@api_bp.route('/admin/newsletters/<int:newsletter_id>/post-to-reddit', methods=['POST'])
+@require_api_key
+def admin_post_newsletter_to_reddit(newsletter_id: int):
+    """Post a newsletter to Reddit.
+    
+    Body:
+      - subreddit_id: Optional specific subreddit ID to post to.
+                      If not provided, posts to all active subreddits for the team.
+    """
+    try:
+        from src.services.reddit_service import (
+            RedditService, RedditServiceError, post_newsletter_to_reddit
+        )
+        from src.utils.newsletter_markdown import (
+            convert_newsletter_to_markdown,
+            convert_newsletter_to_compact_markdown,
+            generate_post_title
+        )
+        
+        newsletter = Newsletter.query.get(newsletter_id)
+        if not newsletter:
+            return jsonify({'error': 'Newsletter not found'}), 404
+        
+        if not newsletter.published:
+            return jsonify({'error': 'Newsletter must be published before posting to Reddit'}), 400
+        
+        # Check if Reddit is configured
+        service = RedditService.get_instance()
+        if not service.is_configured():
+            return jsonify({
+                'error': 'Reddit credentials not configured',
+                'message': 'Please set REDDIT_CLIENT_ID, REDDIT_CLIENT_SECRET, REDDIT_USERNAME, and REDDIT_PASSWORD environment variables'
+            }), 503
+        
+        data = request.get_json() or {}
+        specific_subreddit_id = data.get('subreddit_id')
+        
+        # Get target subreddits
+        if specific_subreddit_id:
+            subreddits = TeamSubreddit.query.filter_by(
+                id=specific_subreddit_id,
+                team_id=newsletter.team_id,
+                is_active=True
+            ).all()
+            if not subreddits:
+                return jsonify({'error': 'Subreddit not found or not active'}), 404
+        else:
+            subreddits = TeamSubreddit.query.filter_by(
+                team_id=newsletter.team_id,
+                is_active=True
+            ).all()
+        
+        if not subreddits:
+            return jsonify({
+                'error': 'No subreddits configured for this team',
+                'message': 'Please configure subreddit(s) for this team first'
+            }), 400
+        
+        # Get newsletter data for markdown conversion
+        newsletter_data = newsletter.to_dict()
+        team_name = newsletter.team.name if newsletter.team else 'Unknown Team'
+        
+        # Generate the post title
+        title = generate_post_title(newsletter_data, team_name)
+        
+        # Get web URL for linking back
+        web_url = None
+        if newsletter.public_slug:
+            web_url = f"https://goonloan.com/newsletters/{newsletter.public_slug}"
+        
+        results = []
+        for sub in subreddits:
+            try:
+                # Generate markdown based on format preference
+                if sub.post_format == 'compact':
+                    markdown = convert_newsletter_to_compact_markdown(newsletter_data)
+                else:
+                    markdown = convert_newsletter_to_markdown(
+                        newsletter_data,
+                        include_expanded_stats=True,
+                        include_links=True,
+                        web_url=web_url
+                    )
+                
+                result = post_newsletter_to_reddit(
+                    newsletter_id=newsletter_id,
+                    team_subreddit_id=sub.id,
+                    title=title,
+                    markdown_content=markdown,
+                    post_format=sub.post_format
+                )
+                results.append({
+                    'subreddit': sub.subreddit_name,
+                    **result
+                })
+            except RedditServiceError as e:
+                results.append({
+                    'subreddit': sub.subreddit_name,
+                    'status': 'failed',
+                    'error': str(e)
+                })
+        
+        success_count = sum(1 for r in results if r.get('status') == 'success')
+        already_posted = sum(1 for r in results if r.get('status') == 'already_posted')
+        failed_count = sum(1 for r in results if r.get('status') == 'failed')
+        
+        logger.info(
+            'Admin posted newsletter to Reddit user=%s newsletter_id=%s success=%s already=%s failed=%s',
+            getattr(g, 'user_email', None),
+            newsletter_id,
+            success_count,
+            already_posted,
+            failed_count
+        )
+        
+        return jsonify({
+            'newsletter_id': newsletter_id,
+            'results': results,
+            'summary': {
+                'success': success_count,
+                'already_posted': already_posted,
+                'failed': failed_count,
+                'total': len(results)
+            }
+        })
+    except Exception as e:
+        logger.exception('admin_post_newsletter_to_reddit failed')
+        db.session.rollback()
+        return jsonify(_safe_error_payload(e, 'Failed to post to Reddit')), 500
+
+
+@api_bp.route('/admin/reddit/status', methods=['GET'])
+@require_api_key
+def admin_reddit_status():
+    """Check Reddit integration status and credentials."""
+    try:
+        from src.services.reddit_service import RedditService, RedditAuthenticationError
+        
+        service = RedditService.get_instance()
+        
+        if not service.is_configured():
+            return jsonify({
+                'configured': False,
+                'authenticated': False,
+                'message': 'Reddit credentials not configured'
+            })
+        
+        # Try to authenticate
+        try:
+            reddit = service.authenticate()
+            user = reddit.user.me()
+            return jsonify({
+                'configured': True,
+                'authenticated': True,
+                'username': user.name if user else service.username,
+                'message': 'Reddit connection successful'
+            })
+        except RedditAuthenticationError as e:
+            return jsonify({
+                'configured': True,
+                'authenticated': False,
+                'message': str(e)
+            })
+    except Exception as e:
+        logger.exception('admin_reddit_status failed')
+        return jsonify(_safe_error_payload(e, 'Failed to check Reddit status')), 500
 
 
 # Newsletter YouTube Links endpoints

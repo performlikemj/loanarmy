@@ -78,6 +78,10 @@ export function AdminNewsletters() {
     // Bulk operations busy states
     const [bulkPublishBusy, setBulkPublishBusy] = useState(false)
     const [bulkDeleteBusy, setBulkDeleteBusy] = useState(false)
+    
+    // Reddit integration state
+    const [postToReddit, setPostToReddit] = useState(false)
+    const [redditConfigured, setRedditConfigured] = useState(null) // null = unknown, true/false = status
 
     // JSON/Markdown viewer modal
     const [jsonViewerOpen, setJsonViewerOpen] = useState(false)
@@ -125,6 +129,20 @@ export function AdminNewsletters() {
             }
         }
         loadConfig()
+    }, [])
+
+    // Check Reddit integration status
+    useEffect(() => {
+        const checkRedditStatus = async () => {
+            try {
+                const status = await APIService.adminRedditStatus()
+                setRedditConfigured(status?.configured && status?.authenticated)
+            } catch (err) {
+                console.warn('Failed to check Reddit status', err)
+                setRedditConfigured(false)
+            }
+        }
+        checkRedditStatus()
     }, [])
 
     // Load teams
@@ -326,11 +344,26 @@ export function AdminNewsletters() {
                 return
             }
 
-            await APIService.adminNewsletterBulkPublish(idsToPublish, publish)
-            setMessage({
-                type: 'success',
-                text: `${idsToPublish.length} newsletter(s) ${publish ? 'published' : 'unpublished'}`
-            })
+            const options = publish && postToReddit ? { postToReddit: true } : {}
+            const result = await APIService.adminNewsletterBulkPublish(idsToPublish, publish, options)
+            
+            let successText = `${idsToPublish.length} newsletter(s) ${publish ? 'published' : 'unpublished'}`
+            
+            // Add Reddit posting info if applicable
+            if (publish && postToReddit && result?.reddit) {
+                const redditInfo = result.reddit
+                if (redditInfo.posted_count > 0) {
+                    successText += `. Posted ${redditInfo.posted_count} to Reddit.`
+                } else if (redditInfo.results?.length > 0) {
+                    const failures = redditInfo.results.filter(r => r.failed_count > 0 || r.skipped)
+                    if (failures.length > 0) {
+                        successText += `. Reddit posting had issues - check console.`
+                        console.log('Reddit posting results:', redditInfo.results)
+                    }
+                }
+            }
+            
+            setMessage({ type: 'success', text: successText })
             clearSelection()
             await loadNewsletters()
         } catch (error) {
@@ -338,7 +371,7 @@ export function AdminNewsletters() {
         } finally {
             setBulkPublishBusy(false)
         }
-    }, [selectAllFiltered, newsletters, selectedIds, loadNewsletters])
+    }, [selectAllFiltered, newsletters, selectedIds, loadNewsletters, postToReddit])
 
     // Delete newsletter
     const confirmDelete = (newsletter) => {
@@ -1044,13 +1077,27 @@ export function AdminNewsletters() {
                                     <span className="text-xs text-muted-foreground">Excluding {selectedIds.length}</span>
                                 )}
                                 <span className="text-xs font-semibold">Selected {selectedCount}</span>
+                                
+                                {/* Reddit toggle */}
+                                {redditConfigured && (
+                                    <label className="flex items-center gap-2 text-xs border-l pl-2 ml-1">
+                                        <input
+                                            type="checkbox"
+                                            checked={postToReddit}
+                                            onChange={(e) => setPostToReddit(e.target.checked)}
+                                            className="h-4 w-4"
+                                        />
+                                        <span className="text-orange-600 font-medium">Post to Reddit</span>
+                                    </label>
+                                )}
+                                
                                 <Button
                                     size="sm"
                                     onClick={() => bulkPublish(true)}
                                     disabled={selectedCount === 0 || bulkPublishBusy || bulkDeleteBusy}
                                 >
                                     {bulkPublishBusy && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
-                                    Publish Selected
+                                    {postToReddit ? 'Publish & Post to Reddit' : 'Publish Selected'}
                                 </Button>
                                 <Button
                                     size="sm"

@@ -2,7 +2,8 @@
 set -euo pipefail
 
 # Go On Loan - ACA deployment script (local use)
-# - Builds backend and frontend images and pushes to ACR
+# - Builds backend image and pushes to ACR
+# - Deploys frontend to Azure Static Web App
 # - Grants AcrPull to app identities and updates Container Apps
 # - Sets/updates ingress ports and prints FQDNs
 #
@@ -19,8 +20,12 @@ ENV_NAME="${ENV_NAME:-cae-loan-army}"
 ACR_NAME="${ACR_NAME:-acrloanarmy}"
 KV_NAME="${KV_NAME:-kv-loan-army}"
 APP_BACKEND="${APP_BACKEND:-ca-loan-army-backend}"
-APP_FRONTEND="${APP_FRONTEND:-ca-loan-army-frontend}"
+# n8n is DEPRECATED - emails are now sent directly via Mailgun/SMTP from Flask
+# Set DEPLOY_N8N=1 to continue deploying n8n (for migration period only)
+# To fully remove n8n: az containerapp delete -g "$RG" -n "$APP_N8N" --yes
 APP_N8N="${APP_N8N:-ca-loan-army-n8n}"
+DEPLOY_N8N="${DEPLOY_N8N:-0}"
+SWA_NAME="${SWA_NAME:-swa-goonloan}"
 TAG="${TAG:-prod}"
 # Optional: weekly job name to keep in sync with backend image tag
 JOB_WEEKLY_NAME="${JOB_WEEKLY_NAME:-job-weekly-newsletters}"
@@ -144,7 +149,7 @@ log "Building backend image in ACR ($TAG)"
 az acr build -r "$ACR_NAME" -t "loanarmy/backend:$TAG" -f "$BACKEND_DIR/Dockerfile" "$BACKEND_DIR"
 
 # ---------------------------
-# Build frontend (Vite)
+# Build and deploy frontend to Static Web App
 # ---------------------------
 if [[ -z "${VITE_API_BASE}" ]]; then
   log "Deriving VITE_API_BASE from backend FQDN"
@@ -159,35 +164,25 @@ else
   ( cd "$FRONTEND_DIR" && npm ci && VITE_API_BASE="$VITE_API_BASE" npm run build )
 fi
 
-# Ensure nginx.conf and Dockerfile.frontend exist (SPA fallback)
-if [[ ! -f "$FRONTEND_DIR/nginx.conf" ]]; then
-  cat > "$FRONTEND_DIR/nginx.conf" <<'NGINX'
-server {
-  listen 80;
-  server_name _;
-  root /usr/share/nginx/html;
-  location / {
-    try_files $uri $uri/ /index.html;
-  }
-}
-NGINX
-fi
-if [[ ! -f "$FRONTEND_DIR/Dockerfile.frontend" ]]; then
-  cat > "$FRONTEND_DIR/Dockerfile.frontend" <<'DF'
-FROM nginx:1.25-alpine
-COPY dist/ /usr/share/nginx/html/
-COPY nginx.conf /etc/nginx/conf.d/default.conf
-DF
-fi
-
-log "Building frontend image in ACR ($TAG)"
-az acr build -r "$ACR_NAME" -t "loanarmy/frontend:$TAG" -f "$FRONTEND_DIR/Dockerfile.frontend" "$FRONTEND_DIR"
+log "Deploying frontend to Static Web App ($SWA_NAME)"
+SWA_TOKEN="$(az staticwebapp secrets list --name "$SWA_NAME" -g "$RG" --query 'properties.apiKey' -o tsv)"
+npx --yes @azure/static-web-apps-cli deploy "$FRONTEND_DIR/dist" \
+  --deployment-token "$SWA_TOKEN" \
+  --env production
 
 # ---------------------------
-# Grant ACR pull to app identities (backend, frontend, n8n)
+# Grant ACR pull to app identities (backend, optionally n8n)
 # ---------------------------
 AcrScope="$(az acr show -g "$RG" -n "$ACR_NAME" --query id -o tsv)"
-for APP in "$APP_BACKEND" "$APP_FRONTEND" "$APP_N8N"; do
+APPS_TO_CONFIGURE=("$APP_BACKEND")
+if [[ "$DEPLOY_N8N" == "1" ]]; then
+  APPS_TO_CONFIGURE+=("$APP_N8N")
+  log "n8n deployment enabled (DEPLOY_N8N=1)"
+else
+  log "n8n deployment SKIPPED (emails now sent directly via Mailgun/SMTP)"
+fi
+
+for APP in "${APPS_TO_CONFIGURE[@]}"; do
   if az containerapp show -g "$RG" -n "$APP" >/dev/null 2>&1; then
     log "Assigning system identity to $APP"
     az containerapp identity assign -g "$RG" -n "$APP" --system-assigned >/dev/null
@@ -202,20 +197,13 @@ for APP in "$APP_BACKEND" "$APP_FRONTEND" "$APP_N8N"; do
 done
 
 # ---------------------------
-# Update apps to ACR images and ingress
+# Update backend to ACR image and ingress
 # ---------------------------
 if az containerapp show -g "$RG" -n "$APP_BACKEND" >/dev/null 2>&1; then
   log "Updating backend image + ingress (force new revision)"
   az containerapp revision set-mode -g "$RG" -n "$APP_BACKEND" --mode single >/dev/null 2>&1 || true
   az containerapp update -g "$RG" -n "$APP_BACKEND" --image "$ACR_SERVER/loanarmy/backend:$TAG" --revision-suffix "r$RANDOM$RANDOM" >/dev/null
   az containerapp ingress enable -g "$RG" -n "$APP_BACKEND" --type external --target-port 5001 >/dev/null 2>&1 || true
-fi
-
-if az containerapp show -g "$RG" -n "$APP_FRONTEND" >/dev/null 2>&1; then
-  log "Updating frontend image + ingress (force new revision)"
-  az containerapp revision set-mode -g "$RG" -n "$APP_FRONTEND" --mode single >/dev/null 2>&1 || true
-  az containerapp update -g "$RG" -n "$APP_FRONTEND" --image "$ACR_SERVER/loanarmy/frontend:$TAG" --revision-suffix "r$RANDOM$RANDOM" >/dev/null
-  az containerapp ingress enable -g "$RG" -n "$APP_FRONTEND" --type external --target-port 80 >/dev/null 2>&1 || true
 fi
 
 # ---------------------------
@@ -233,16 +221,31 @@ fi
 # Output endpoints
 # ---------------------------
 BE_FQDN="$(az containerapp show -g "$RG" -n "$APP_BACKEND" --query properties.configuration.ingress.fqdn -o tsv || true)"
-FE_FQDN="$(az containerapp show -g "$RG" -n "$APP_FRONTEND" --query properties.configuration.ingress.fqdn -o tsv || true)"
-N8N_FQDN="$(az containerapp show -g "$RG" -n "$APP_N8N" --query properties.configuration.ingress.fqdn -o tsv || true)"
+SWA_HOSTNAME="$(az staticwebapp show -g "$RG" -n "$SWA_NAME" --query defaultHostname -o tsv || true)"
+SWA_CUSTOM_DOMAINS="$(az staticwebapp hostname list -g "$RG" -n "$SWA_NAME" --query '[].domainName' -o tsv 2>/dev/null || true)"
 
-log "Deployed images:"
+log "Deployed:"
 echo "  Backend:  $ACR_SERVER/loanarmy/backend:$TAG"
-echo "  Frontend: $ACR_SERVER/loanarmy/frontend:$TAG"
+echo "  Frontend: Azure Static Web App ($SWA_NAME)"
 
 log "Endpoints:"
-[[ -n "$FE_FQDN" ]] && echo "  Frontend: https://$FE_FQDN"
+[[ -n "$SWA_HOSTNAME" ]] && echo "  Frontend: https://$SWA_HOSTNAME"
+[[ -n "$SWA_CUSTOM_DOMAINS" ]] && echo "$SWA_CUSTOM_DOMAINS" | while read -r domain; do
+  [[ -n "$domain" ]] && echo "  Frontend: https://$domain (custom domain)"
+done
 [[ -n "$BE_FQDN" ]] && echo "  Backend:  https://$BE_FQDN/api"
-[[ -n "$N8N_FQDN" ]] && echo "  n8n:      https://$N8N_FQDN"
+
+# Only show n8n endpoint if deployed
+if [[ "$DEPLOY_N8N" == "1" ]]; then
+  N8N_FQDN="$(az containerapp show -g "$RG" -n "$APP_N8N" --query properties.configuration.ingress.fqdn -o tsv || true)"
+  [[ -n "$N8N_FQDN" ]] && echo "  n8n:      https://$N8N_FQDN (DEPRECATED)"
+fi
 
 log "Done."
+
+# Remind about n8n removal if not deploying it
+if [[ "$DEPLOY_N8N" != "1" ]]; then
+  log "NOTE: n8n container is deprecated. Emails are now sent directly via Mailgun/SMTP."
+  log "To delete the n8n container and save costs:"
+  echo "  az containerapp delete -g \"$RG\" -n \"$APP_N8N\" --yes"
+fi

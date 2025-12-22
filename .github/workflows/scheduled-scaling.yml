@@ -1,0 +1,91 @@
+# Scheduled Scaling for Go On Loan Backend
+#
+# This workflow automatically toggles minReplicas based on traffic patterns:
+# - 02:00 UTC: Set minReplicas=1 (peak UK evening / US afternoon traffic)
+# - 10:00 UTC: Set minReplicas=0 (allow scale to zero during off-peak)
+#
+# Required secrets:
+# - AZURE_CREDENTIALS: Service principal JSON for Azure authentication
+#   Create with: az ad sp create-for-rbac --name "gol-scaling" --role contributor \
+#                --scopes /subscriptions/{sub-id}/resourceGroups/rg-loan-army-westus2 \
+#                --sdk-auth
+
+name: Scheduled Scaling
+
+on:
+  schedule:
+    # Peak hours start: 02:00 UTC (UK 2am, US 9pm ET / 6pm PT)
+    - cron: '0 2 * * *'
+    # Off-peak starts: 10:00 UTC (UK 10am, US 5am ET / 2am PT)
+    - cron: '0 10 * * *'
+  workflow_dispatch:
+    inputs:
+      mode:
+        description: 'Scaling mode'
+        required: true
+        default: 'peak'
+        type: choice
+        options:
+          - peak
+          - off-peak
+
+env:
+  RESOURCE_GROUP: rg-loan-army-westus2
+  APP_NAME: ca-loan-army-backend
+
+jobs:
+  scale:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Determine scaling mode
+        id: mode
+        run: |
+          if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
+            echo "mode=${{ github.event.inputs.mode }}" >> $GITHUB_OUTPUT
+          elif [ "${{ github.event.schedule }}" = "0 2 * * *" ]; then
+            echo "mode=peak" >> $GITHUB_OUTPUT
+          else
+            echo "mode=off-peak" >> $GITHUB_OUTPUT
+          fi
+
+      - name: Azure Login
+        uses: azure/login@v2
+        with:
+          creds: ${{ secrets.AZURE_CREDENTIALS }}
+
+      - name: Set Peak Scaling (minReplicas=1)
+        if: steps.mode.outputs.mode == 'peak'
+        run: |
+          echo "🌅 Setting peak hours scaling: minReplicas=1"
+          az containerapp update \
+            --name ${{ env.APP_NAME }} \
+            --resource-group ${{ env.RESOURCE_GROUP }} \
+            --min-replicas 1 \
+            --output none
+          echo "✅ Backend will maintain at least 1 replica"
+
+      - name: Set Off-Peak Scaling (minReplicas=0)
+        if: steps.mode.outputs.mode == 'off-peak'
+        run: |
+          echo "🌙 Setting off-peak scaling: minReplicas=0"
+          az containerapp update \
+            --name ${{ env.APP_NAME }} \
+            --resource-group ${{ env.RESOURCE_GROUP }} \
+            --min-replicas 0 \
+            --output none
+          echo "✅ Backend can now scale to zero when idle"
+
+      - name: Show Current Configuration
+        run: |
+          echo "📊 Current scaling configuration:"
+          az containerapp show \
+            --name ${{ env.APP_NAME }} \
+            --resource-group ${{ env.RESOURCE_GROUP }} \
+            --query 'properties.template.scale.{minReplicas:minReplicas,maxReplicas:maxReplicas}' \
+            --output table
+
+
+
+
+
+

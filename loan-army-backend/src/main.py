@@ -107,6 +107,10 @@ Talisman(
 
 limiter.init_app(app)
 
+# Initialize email service for background job support
+from src.services.email_service import email_service
+email_service.init_app(app)
+
 
 def _env_value(key: str, *, allow_inline_comment: bool = False) -> str | None:
     raw = os.getenv(key)

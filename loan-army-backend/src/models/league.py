@@ -1150,3 +1150,86 @@ class BackgroundJob(db.Model):
             'started_at': self.started_at.isoformat() if self.started_at else None,
             'completed_at': self.completed_at.isoformat() if self.completed_at else None,
         }
+
+
+class TeamSubreddit(db.Model):
+    """Maps teams to their subreddit(s) for Reddit posting.
+    
+    Each team can have multiple subreddits configured with different
+    posting formats (full or compact markdown).
+    """
+    __tablename__ = 'team_subreddits'
+
+    id = db.Column(db.Integer, primary_key=True)
+    team_id = db.Column(db.Integer, db.ForeignKey('teams.id'), nullable=False)
+    subreddit_name = db.Column(db.String(50), nullable=False)  # e.g., "reddevils" without r/
+    post_format = db.Column(db.String(20), nullable=False, default='full')  # 'full' or 'compact'
+    is_active = db.Column(db.Boolean, default=True, nullable=False)
+    created_at = db.Column(db.DateTime, default=datetime.now(timezone.utc))
+    updated_at = db.Column(db.DateTime, default=datetime.now(timezone.utc), onupdate=datetime.now(timezone.utc))
+
+    # Relationships
+    team = db.relationship('Team', backref=db.backref('subreddits', lazy=True))
+    posts = db.relationship('RedditPost', backref='team_subreddit', lazy=True)
+
+    __table_args__ = (
+        db.UniqueConstraint('team_id', 'subreddit_name', name='uq_team_subreddit'),
+    )
+
+    def to_dict(self):
+        return {
+            'id': self.id,
+            'team_id': self.team_id,
+            'team_name': self.team.name if self.team else None,
+            'subreddit_name': self.subreddit_name,
+            'subreddit_url': f'https://reddit.com/r/{self.subreddit_name}',
+            'post_format': self.post_format,
+            'is_active': self.is_active,
+            'created_at': self.created_at.isoformat() if self.created_at else None,
+            'updated_at': self.updated_at.isoformat() if self.updated_at else None,
+        }
+
+
+class RedditPost(db.Model):
+    """Tracks posts made to Reddit for history and preventing duplicates.
+    
+    Each newsletter can be posted to multiple subreddits, and this table
+    tracks the status and URL of each post.
+    """
+    __tablename__ = 'reddit_posts'
+
+    id = db.Column(db.Integer, primary_key=True)
+    newsletter_id = db.Column(db.Integer, db.ForeignKey('newsletters.id', ondelete='CASCADE'), nullable=False)
+    team_subreddit_id = db.Column(db.Integer, db.ForeignKey('team_subreddits.id', ondelete='CASCADE'), nullable=False)
+    reddit_post_id = db.Column(db.String(20))  # Reddit's post ID (e.g., "abc123")
+    reddit_post_url = db.Column(db.String(255))  # Full URL to the post
+    post_title = db.Column(db.String(300), nullable=False)  # Title used for the post
+    status = db.Column(db.String(20), nullable=False, default='pending')  # 'pending', 'success', 'failed', 'deleted'
+    error_message = db.Column(db.Text)  # Error details if posting failed
+    posted_at = db.Column(db.DateTime)
+    created_at = db.Column(db.DateTime, default=datetime.now(timezone.utc))
+    updated_at = db.Column(db.DateTime, default=datetime.now(timezone.utc), onupdate=datetime.now(timezone.utc))
+
+    # Relationships
+    newsletter = db.relationship('Newsletter', backref=db.backref('reddit_posts', lazy=True))
+
+    __table_args__ = (
+        db.UniqueConstraint('newsletter_id', 'team_subreddit_id', name='uq_newsletter_subreddit_post'),
+        db.Index('ix_reddit_posts_status', 'status'),
+    )
+
+    def to_dict(self):
+        return {
+            'id': self.id,
+            'newsletter_id': self.newsletter_id,
+            'team_subreddit_id': self.team_subreddit_id,
+            'subreddit_name': self.team_subreddit.subreddit_name if self.team_subreddit else None,
+            'reddit_post_id': self.reddit_post_id,
+            'reddit_post_url': self.reddit_post_url,
+            'post_title': self.post_title,
+            'status': self.status,
+            'error_message': self.error_message,
+            'posted_at': self.posted_at.isoformat() if self.posted_at else None,
+            'created_at': self.created_at.isoformat() if self.created_at else None,
+            'updated_at': self.updated_at.isoformat() if self.updated_at else None,
+        }

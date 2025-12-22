@@ -29,11 +29,13 @@ USER app
 EXPOSE 5001
 
 # Health check for Azure Container Apps health probes
-HEALTHCHECK --interval=30s --timeout=10s --start-period=5s --retries=3 \
+# Increased start-period to 30s to allow for preloading on cold start
+HEALTHCHECK --interval=30s --timeout=10s --start-period=30s --retries=3 \
     CMD curl -f http://localhost:5001/api/auth/status || exit 1
 
 # Run the application with Gunicorn (production-grade WSGI server)
-CMD ["gunicorn", "-w", "4", "--threads", "4", "-b", "0.0.0.0:5001", "--access-logfile", "-", "--error-logfile", "-", "src.main:app"]
+# Optimized for cold start: fewer workers (2 vs 4), preload app code, longer timeout
+CMD ["gunicorn", "-w", "2", "--threads", "2", "--preload", "--timeout", "120", "-b", "0.0.0.0:5001", "--access-logfile", "-", "--error-logfile", "-", "src.main:app"]
 
 # Environment variables will be set by Azure Container Apps:
 # ADMIN_API_KEY - Your secure admin API key
