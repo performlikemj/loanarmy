@@ -463,6 +463,16 @@ class Newsletter(db.Model):
     generated_date = db.Column(db.DateTime, default=datetime.now(timezone.utc))
     created_at = db.Column(db.DateTime, default=datetime.now(timezone.utc))
     updated_at = db.Column(db.DateTime, default=datetime.now(timezone.utc), onupdate=datetime.now(timezone.utc))
+
+    __table_args__ = (
+        db.UniqueConstraint(
+            'team_id',
+            'newsletter_type',
+            'week_start_date',
+            'week_end_date',
+            name='uq_newsletter_week_window',
+        ),
+    )
     
     def to_dict(self):
         return {
@@ -642,6 +652,8 @@ class UserAccount(db.Model):
     is_journalist = db.Column(db.Boolean, default=False, nullable=False)
     bio = db.Column(db.Text)
     profile_image_url = db.Column(db.Text)
+    attribution_url = db.Column(db.String(500))
+    attribution_name = db.Column(db.String(120))
 
     # Email preferences
     email_delivery_preference = db.Column(db.String(20), default='individual', nullable=False)  # 'individual' | 'digest'
@@ -671,6 +683,8 @@ class UserAccount(db.Model):
             'is_journalist': self.is_journalist,
             'bio': sanitize_plain_text(self.bio) if self.bio else None,
             'profile_image_url': self.profile_image_url,
+            'attribution_url': self.attribution_url,
+            'attribution_name': self.attribution_name,
             'email_delivery_preference': self.email_delivery_preference or 'individual',
         }
 
@@ -938,6 +952,100 @@ class JournalistTeamAssignment(db.Model):
             'team_name': self.team.name if self.team else None,
             'assigned_at': self.assigned_at.isoformat() if self.assigned_at else None,
             'assigned_by': self.assigned_by
+        }
+
+
+class JournalistLoanTeamAssignment(db.Model):
+    """Assignment of a journalist to cover players at a specific loan destination.
+    
+    This enables a writer who watches a specific club (e.g., Falkirk) to write
+    about ANY player loaned TO that club, regardless of parent club.
+    
+    Supports both DB-tracked teams (loan_team_id set) and custom teams
+    (loan_team_name only, loan_team_id NULL).
+    """
+    __tablename__ = 'journalist_loan_team_assignments'
+
+    id = db.Column(db.Integer, primary_key=True)
+    user_id = db.Column(db.Integer, db.ForeignKey('user_accounts.id'), nullable=False)
+    loan_team_name = db.Column(db.String(100), nullable=False)  # Always stored for display
+    loan_team_id = db.Column(db.Integer, db.ForeignKey('teams.id'), nullable=True)  # Nullable for custom teams
+    assigned_at = db.Column(db.DateTime, default=datetime.now(timezone.utc))
+    assigned_by = db.Column(db.Integer, db.ForeignKey('user_accounts.id'), nullable=True)
+
+    # Relationships
+    journalist = db.relationship('UserAccount', foreign_keys=[user_id], 
+                                  backref=db.backref('loan_team_assignments', lazy=True))
+    loan_team = db.relationship('Team', backref=db.backref('loan_team_journalists', lazy=True))
+    assigner = db.relationship('UserAccount', foreign_keys=[assigned_by])
+
+    __table_args__ = (
+        # Unique per user + team name (handles both DB and custom teams)
+        db.UniqueConstraint('user_id', 'loan_team_name', name='uq_journalist_loan_team_assignment'),
+    )
+
+    def to_dict(self):
+        return {
+            'id': self.id,
+            'user_id': self.user_id,
+            'loan_team_id': self.loan_team_id,
+            'loan_team_name': self.loan_team_name,
+            'loan_team_logo': self.loan_team.logo if self.loan_team else None,
+            'is_custom_team': self.loan_team_id is None,
+            'assigned_at': self.assigned_at.isoformat() if self.assigned_at else None,
+            'assigned_by': self.assigned_by
+        }
+
+
+class WriterCoverageRequest(db.Model):
+    """Request from a writer to cover a specific team (parent club or loan destination).
+    
+    Writers submit requests which admins can approve or deny. On approval,
+    the appropriate assignment record is created (JournalistTeamAssignment 
+    for parent clubs, JournalistLoanTeamAssignment for loan destinations).
+    """
+    __tablename__ = 'writer_coverage_requests'
+
+    id = db.Column(db.Integer, primary_key=True)
+    user_id = db.Column(db.Integer, db.ForeignKey('user_accounts.id'), nullable=False)
+    coverage_type = db.Column(db.String(20), nullable=False)  # 'parent_club' | 'loan_team'
+    team_id = db.Column(db.Integer, db.ForeignKey('teams.id'), nullable=True)  # FK if team in DB
+    team_name = db.Column(db.String(100), nullable=False)  # Always stored (for custom teams too)
+    status = db.Column(db.String(20), nullable=False, default='pending')  # 'pending' | 'approved' | 'denied'
+    request_message = db.Column(db.Text, nullable=True)  # Why they want coverage
+    denial_reason = db.Column(db.Text, nullable=True)  # Admin's reason for denial
+    requested_at = db.Column(db.DateTime, default=datetime.now(timezone.utc))
+    reviewed_at = db.Column(db.DateTime, nullable=True)
+    reviewed_by = db.Column(db.Integer, db.ForeignKey('user_accounts.id'), nullable=True)
+
+    # Relationships
+    writer = db.relationship('UserAccount', foreign_keys=[user_id],
+                              backref=db.backref('coverage_requests', lazy=True))
+    team = db.relationship('Team', lazy=True)
+    reviewer = db.relationship('UserAccount', foreign_keys=[reviewed_by])
+
+    __table_args__ = (
+        db.Index('ix_coverage_requests_status', 'status'),
+        db.Index('ix_coverage_requests_user', 'user_id'),
+    )
+
+    def to_dict(self):
+        return {
+            'id': self.id,
+            'user_id': self.user_id,
+            'writer_name': self.writer.display_name if self.writer else None,
+            'writer_email': self.writer.email if self.writer else None,
+            'coverage_type': self.coverage_type,
+            'team_id': self.team_id,
+            'team_name': self.team_name,
+            'team_logo': self.team.logo if self.team else None,
+            'is_custom_team': self.team_id is None,
+            'status': self.status,
+            'request_message': self.request_message,
+            'denial_reason': self.denial_reason,
+            'requested_at': self.requested_at.isoformat() if self.requested_at else None,
+            'reviewed_at': self.reviewed_at.isoformat() if self.reviewed_at else None,
+            'reviewed_by': self.reviewed_by
         }
 
 

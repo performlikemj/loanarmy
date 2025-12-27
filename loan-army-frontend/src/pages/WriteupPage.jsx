@@ -4,8 +4,8 @@ import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 import { Avatar, AvatarImage, AvatarFallback } from '@/components/ui/avatar'
-import { 
-  Loader2, ArrowLeft, Lock, Calendar, Trophy, 
+import {
+  Loader2, ArrowLeft, Lock, Calendar, Trophy,
   Clock, Target, Users, Shield, Footprints, AlertTriangle,
   Sparkles, ExternalLink
 } from 'lucide-react'
@@ -40,14 +40,14 @@ function FixtureCard({ fixture }) {
   const { home_team, away_team, stats, date, competition, is_home } = fixture
   const playerTeam = is_home ? home_team : away_team
   const opponentTeam = is_home ? away_team : home_team
-  
+
   // Determine result
   const playerScore = is_home ? home_team.score : away_team.score
   const opponentScore = is_home ? away_team.score : home_team.score
   let result = 'draw'
   if (playerScore > opponentScore) result = 'win'
   else if (playerScore < opponentScore) result = 'loss'
-  
+
   const resultColors = {
     win: 'bg-emerald-500',
     loss: 'bg-red-500',
@@ -70,7 +70,7 @@ function FixtureCard({ fixture }) {
           </Badge>
           <span className="text-xs text-gray-300">{formattedDate}</span>
         </div>
-        
+
         {/* Score Display */}
         <div className="flex items-center justify-center gap-4">
           <div className="flex items-center gap-2 flex-1 justify-end">
@@ -85,13 +85,13 @@ function FixtureCard({ fixture }) {
               {home_team.name}
             </span>
           </div>
-          
+
           <div className="flex items-center gap-2 px-4">
             <span className="text-2xl font-bold">{home_team.score ?? '-'}</span>
             <span className="text-gray-400">-</span>
             <span className="text-2xl font-bold">{away_team.score ?? '-'}</span>
           </div>
-          
+
           <div className="flex items-center gap-2 flex-1">
             <span className={cn(
               'font-semibold text-sm truncate',
@@ -105,7 +105,7 @@ function FixtureCard({ fixture }) {
             )}
           </div>
         </div>
-        
+
         {/* Result indicator */}
         <div className="flex justify-center mt-3">
           <Badge className={cn(resultColors[result], 'text-white border-none')}>
@@ -113,7 +113,7 @@ function FixtureCard({ fixture }) {
           </Badge>
         </div>
       </div>
-      
+
       {/* Player Stats */}
       <CardContent className="p-4 space-y-4">
         {/* Key Stats Row */}
@@ -147,81 +147,81 @@ function FixtureCard({ fixture }) {
             <div className="text-xs text-gray-500 uppercase tracking-wide">Assists</div>
           </div>
         </div>
-        
+
         {/* Rating if available */}
         {stats.rating && (
           <div className="flex items-center justify-center">
-            <Badge 
-              variant="outline" 
+            <Badge
+              variant="outline"
               className={cn(
                 'text-lg font-bold px-4 py-1',
                 stats.rating >= 7.5 ? 'border-emerald-500 text-emerald-700 bg-emerald-50' :
-                stats.rating >= 6.5 ? 'border-blue-500 text-blue-700 bg-blue-50' :
-                stats.rating >= 5.5 ? 'border-gray-500 text-gray-700 bg-gray-50' :
-                'border-red-500 text-red-700 bg-red-50'
+                  stats.rating >= 6.5 ? 'border-blue-500 text-blue-700 bg-blue-50' :
+                    stats.rating >= 5.5 ? 'border-gray-500 text-gray-700 bg-gray-50' :
+                      'border-red-500 text-red-700 bg-red-50'
               )}
             >
               {stats.rating.toFixed(1)} Rating
             </Badge>
           </div>
         )}
-        
+
         {/* Detailed Stats Grid */}
         <div className="grid grid-cols-2 gap-2">
           {stats.shots?.total != null && (
-            <StatItem 
-              icon={Target} 
-              label="Shots" 
+            <StatItem
+              icon={Target}
+              label="Shots"
               value={`${stats.shots.on_target ?? 0}/${stats.shots.total}`}
             />
           )}
           {stats.passes?.total != null && (
-            <StatItem 
-              icon={Footprints} 
-              label="Passes" 
+            <StatItem
+              icon={Footprints}
+              label="Passes"
               value={`${stats.passes.total} (${stats.passes.accuracy || '-'})`}
             />
           )}
           {stats.passes?.key != null && stats.passes.key > 0 && (
-            <StatItem 
-              icon={Sparkles} 
-              label="Key Passes" 
+            <StatItem
+              icon={Sparkles}
+              label="Key Passes"
               value={stats.passes.key}
               highlight
             />
           )}
           {stats.tackles?.total != null && (
-            <StatItem 
-              icon={Shield} 
-              label="Tackles" 
+            <StatItem
+              icon={Shield}
+              label="Tackles"
               value={stats.tackles.total}
             />
           )}
           {stats.duels?.total != null && (
-            <StatItem 
-              icon={Users} 
-              label="Duels Won" 
+            <StatItem
+              icon={Users}
+              label="Duels Won"
               value={`${stats.duels.won ?? 0}/${stats.duels.total}`}
             />
           )}
           {stats.dribbles?.attempts != null && stats.dribbles.attempts > 0 && (
-            <StatItem 
-              icon={Footprints} 
-              label="Dribbles" 
+            <StatItem
+              icon={Footprints}
+              label="Dribbles"
               value={`${stats.dribbles.success ?? 0}/${stats.dribbles.attempts}`}
             />
           )}
           {/* Goalkeeper stats */}
           {stats.saves != null && stats.saves > 0 && (
-            <StatItem 
-              icon={Shield} 
-              label="Saves" 
+            <StatItem
+              icon={Shield}
+              label="Saves"
               value={stats.saves}
               highlight
             />
           )}
         </div>
-        
+
         {/* Cards */}
         {(stats.yellows > 0 || stats.reds > 0) && (
           <div className="flex items-center gap-2 justify-center pt-2 border-t">
@@ -313,9 +313,9 @@ export function WriteupPage() {
       {/* Header */}
       <div className="bg-white border-b sticky top-0 z-10">
         <div className="max-w-3xl mx-auto px-4 py-3">
-          <Button 
-            variant="ghost" 
-            size="sm" 
+          <Button
+            variant="ghost"
+            size="sm"
             onClick={() => navigate(-1)}
             className="-ml-2"
           >
@@ -325,26 +325,26 @@ export function WriteupPage() {
       </div>
 
       <div className="max-w-3xl mx-auto px-4 py-6 space-y-6">
-        
+
         {/* Article Header Card */}
         <Card className="overflow-hidden">
           {/* Hero section with team/player */}
           <div className="bg-gradient-to-br from-gray-900 via-gray-800 to-gray-900 text-white p-6">
             <div className="flex items-start gap-4">
               {player?.photo_url ? (
-                <img 
-                  src={player.photo_url} 
+                <img
+                  src={player.photo_url}
                   alt={player.name}
                   className="h-20 w-20 rounded-full object-cover border-4 border-white/20 shadow-lg"
                 />
               ) : team?.logo ? (
-                <img 
-                  src={team.logo} 
+                <img
+                  src={team.logo}
                   alt={team.name}
                   className="h-20 w-20 object-contain"
                 />
               ) : null}
-              
+
               <div className="flex-1 min-w-0">
                 {player && (
                   <h2 className="text-xl sm:text-2xl font-bold truncate">{player.name}</h2>
@@ -364,7 +364,7 @@ export function WriteupPage() {
                     <span className="text-sm text-gray-400">{player.nationality}</span>
                   )}
                 </div>
-                
+
                 {/* Week context */}
                 {data.week_start_date && data.week_end_date && (
                   <div className="flex items-center gap-2 mt-3 text-sm text-gray-400">
@@ -375,7 +375,7 @@ export function WriteupPage() {
               </div>
             </div>
           </div>
-          
+
           {/* Author & Article Info */}
           <CardContent className="p-4 sm:p-6">
             {/* Author Row */}
@@ -389,8 +389,28 @@ export function WriteupPage() {
                 </AvatarFallback>
               </Avatar>
               <div className="flex-1">
-                <div className="font-semibold text-gray-900">
+                <div className="font-semibold text-gray-900 flex items-center gap-2">
                   {author?.display_name || data.author_name}
+                  {(author?.attribution_url || author?.attribution_name) && (
+                    <>
+                      <span className="text-gray-300">•</span>
+                      {author.attribution_url ? (
+                        <a
+                          href={author.attribution_url}
+                          target="_blank"
+                          rel="noopener noreferrer"
+                          className="text-sm font-normal text-gray-500 hover:text-blue-600 hover:underline flex items-center gap-1"
+                        >
+                          {author.attribution_name || 'Visit Site'}
+                          <ExternalLink className="h-3 w-3" />
+                        </a>
+                      ) : (
+                        <span className="text-sm font-normal text-gray-500">
+                          {author.attribution_name}
+                        </span>
+                      )}
+                    </>
+                  )}
                 </div>
                 <div className="text-sm text-gray-500">
                   {data.created_at && new Date(data.created_at).toLocaleDateString(undefined, {
@@ -407,14 +427,14 @@ export function WriteupPage() {
                 </Badge>
               )}
             </div>
-            
+
             {/* Title */}
             {data.title && (
               <h1 className="text-2xl sm:text-3xl font-bold text-gray-900 leading-tight mb-4">
                 {data.title}
               </h1>
             )}
-            
+
             {/* Content - supports both structured blocks and legacy HTML */}
             {data.structured_blocks && data.structured_blocks.length > 0 ? (
               // New block-based content rendering
@@ -433,7 +453,7 @@ export function WriteupPage() {
             ) : isLocked ? (
               // Legacy locked content
               <div className="relative">
-                <div 
+                <div
                   className="prose prose-gray max-w-none blur-sm select-none line-clamp-4"
                   dangerouslySetInnerHTML={{ __html: formatTextToHtml(data.content) }}
                 />
@@ -442,7 +462,7 @@ export function WriteupPage() {
                   <p className="text-gray-600 mb-3 text-center">
                     Subscribe to {author?.display_name || 'this writer'} to read the full analysis
                   </p>
-                  <Button 
+                  <Button
                     onClick={() => author?.id && navigate(`/journalists/${author.id}`)}
                     className="bg-gray-900 hover:bg-gray-800 text-white rounded-full px-6"
                   >
@@ -452,7 +472,7 @@ export function WriteupPage() {
               </div>
             ) : (
               // Legacy unlocked content
-              <div 
+              <div
                 className="prose prose-gray max-w-none
                   prose-headings:text-gray-900 prose-headings:font-bold
                   prose-p:text-gray-700 prose-p:leading-relaxed prose-p:my-2
@@ -462,7 +482,7 @@ export function WriteupPage() {
                 dangerouslySetInnerHTML={{ __html: formatTextToHtml(data.content) }}
               />
             )}
-            
+
             {/* Footer actions */}
             {!isLocked && (
               <div className="flex items-center gap-4 mt-6 pt-4 border-t">
@@ -471,8 +491,8 @@ export function WriteupPage() {
                   disabled={hasApplauded}
                   className={cn(
                     'flex items-center gap-2 px-4 py-2 rounded-full transition-all',
-                    hasApplauded 
-                      ? 'bg-violet-100 text-violet-700' 
+                    hasApplauded
+                      ? 'bg-violet-100 text-violet-700'
                       : 'bg-gray-100 text-gray-600 hover:bg-violet-50 hover:text-violet-600'
                   )}
                 >
@@ -484,10 +504,10 @@ export function WriteupPage() {
                     {applauseCount > 0 ? applauseCount : 'Applaud'}
                   </span>
                 </button>
-                
+
                 {author?.id && (
-                  <Button 
-                    variant="outline" 
+                  <Button
+                    variant="outline"
                     size="sm"
                     onClick={() => navigate(`/journalists/${author.id}`)}
                   >
@@ -506,7 +526,7 @@ export function WriteupPage() {
               <Trophy className="h-5 w-5 text-amber-500" />
               This Week's Performance
             </h2>
-            
+
             <div className="space-y-4">
               {weekFixtures.map((fixture, idx) => (
                 <FixtureCard key={idx} fixture={fixture} />
@@ -525,7 +545,7 @@ export function WriteupPage() {
                   See all player performances and analysis for this week
                 </p>
               </div>
-              <Button 
+              <Button
                 onClick={() => navigate(`/newsletters/${data.newsletter_id}`)}
                 className="bg-violet-600 hover:bg-violet-700 text-white"
               >

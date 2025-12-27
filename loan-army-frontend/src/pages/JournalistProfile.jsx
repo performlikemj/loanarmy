@@ -5,8 +5,11 @@ import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/com
 import { Avatar, AvatarImage, AvatarFallback } from '@/components/ui/avatar.jsx'
 import { Badge } from '@/components/ui/badge.jsx'
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs.jsx'
-import { Loader2, UserPlus, UserCheck, ArrowLeft, Calendar, Users, Trophy, Lock } from 'lucide-react'
+import { Loader2, UserPlus, UserCheck, ArrowLeft, Calendar, Users, Trophy, Lock, ExternalLink } from 'lucide-react'
+
+
 import { APIService } from '@/lib/api'
+import SubscribeToJournalist from '@/components/SubscribeToJournalist.jsx'
 
 export function JournalistProfile() {
     const { id } = useParams()
@@ -128,6 +131,26 @@ export function JournalistProfile() {
                             <div>
                                 <h1 className="text-4xl font-serif font-bold text-gray-900 tracking-tight">{journalist.display_name}</h1>
                                 <p className="text-lg text-gray-600 mt-2 font-serif leading-relaxed max-w-2xl">{journalist.bio || 'Football Scout & Analyst'}</p>
+
+                                {(journalist.attribution_url || journalist.attribution_name) && (
+                                    <div className="mt-3 flex items-center gap-2">
+                                        {journalist.attribution_url ? (
+                                            <a
+                                                href={journalist.attribution_url}
+                                                target="_blank"
+                                                rel="noopener noreferrer"
+                                                className="inline-flex items-center gap-1 text-sm font-medium text-blue-600 hover:text-blue-800 hover:underline"
+                                            >
+                                                {journalist.attribution_name || 'Visit Website'}
+                                                <ExternalLink className="h-3 w-3" />
+                                            </a>
+                                        ) : (
+                                            <span className="text-sm font-medium text-gray-600">
+                                                {journalist.attribution_name}
+                                            </span>
+                                        )}
+                                    </div>
+                                )}
                             </div>
                             <Button
                                 size="lg"
@@ -173,12 +196,12 @@ export function JournalistProfile() {
                         {journalist.assigned_teams && journalist.assigned_teams.length > 0 && (
                             <div className="flex flex-wrap gap-2 pt-2">
                                 {journalist.assigned_teams.map(team => (
-                                    <Link 
-                                        key={team.id} 
+                                    <Link
+                                        key={team.id}
                                         to={`/newsletters?team=${team.id}&team_name=${encodeURIComponent(team.name)}`}
                                     >
-                                        <Badge 
-                                            variant="outline" 
+                                        <Badge
+                                            variant="outline"
                                             className="px-3 py-1 text-sm flex items-center gap-2 border-gray-300 text-gray-700 rounded-full font-normal hover:bg-gray-100 hover:border-gray-400 cursor-pointer transition-colors"
                                         >
                                             {team.logo && <img src={team.logo} alt="" className="w-4 h-4 object-contain" />}
@@ -190,6 +213,14 @@ export function JournalistProfile() {
                         )}
                     </div>
                 </div>
+            </div>
+
+            <div className="bg-white border border-gray-200 rounded-lg p-6">
+                <SubscribeToJournalist
+                    journalistId={journalist.id}
+                    journalistName={journalist.display_name}
+                    onSubscribed={loadData}
+                />
             </div>
 
             {/* Content Tabs */}

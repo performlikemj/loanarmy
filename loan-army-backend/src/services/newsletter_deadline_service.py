@@ -167,12 +167,15 @@ def _send_single_digest(user_id: int, week_key: str) -> dict:
         for n in newsletters:
             # Parse newsletter content
             content = {}
-            if n.enriched_content:
-                content = n.enriched_content if isinstance(n.enriched_content, dict) else {}
-            elif n.content:
+            try:
+                from src.routes.api import _load_newsletter_json
+                content = _load_newsletter_json(n) or {}
+            except Exception:
+                content = {}
+            if not content and n.content:
                 try:
                     content = json.loads(n.content) if isinstance(n.content, str) else (n.content or {})
-                except:
+                except Exception:
                     content = {}
             
             team_logo = content.get('team_logo')
@@ -662,4 +665,3 @@ def check_writer_submission_status(journalist_id: int, week_start_date=None) -> 
     except Exception as e:
         logger.exception(f"Error checking writer submission status")
         return {'error': str(e)}
-

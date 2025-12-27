@@ -14,43 +14,51 @@ import {
     AlertDialogHeader,
     AlertDialogTitle,
 } from '@/components/ui/alert-dialog'
-import { Loader2, Plus, FileText, Users, LogOut, TrendingUp, UserPlus, Trash2 } from 'lucide-react'
+import { Loader2, Plus, FileText, Users, LogOut, TrendingUp, UserPlus, Trash2, MapPin, Building2, Clock, CheckCircle, XCircle } from 'lucide-react'
 import { LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer } from 'recharts'
 import { APIService } from '@/lib/api'
 import { useAuthUI } from '@/context/AuthContext'
+import { CoverageRequestModal } from '@/components/CoverageRequestModal'
 
 export function WriterDashboard() {
     const navigate = useNavigate()
     const { logout } = useAuthUI()
     const [loading, setLoading] = useState(true)
-    const [teams, setTeams] = useState([])
+    const [teams, setTeams] = useState({ parent_club_assignments: [], loan_team_assignments: [], assignments: [] })
+    const [coverageRequests, setCoverageRequests] = useState([])
     const [commentaries, setCommentaries] = useState([])
     const [stats, setStats] = useState(null)
     const [error, setError] = useState('')
     const [deletingId, setDeletingId] = useState(null)
     const [showDeleteConfirm, setShowDeleteConfirm] = useState(false)
+    const [showCoverageModal, setShowCoverageModal] = useState(false)
+
+    const loadData = async () => {
+        try {
+            const [teamsData, requestsData, commentariesData, statsData] = await Promise.all([
+                APIService.getWriterTeams(),
+                APIService.getWriterCoverageRequests().catch(() => []),
+                APIService.getWriterCommentaries(),
+                APIService.getJournalistOwnStats().catch(() => null)
+            ])
+            // Handle both new format (object with arrays) and legacy format (array)
+            if (Array.isArray(teamsData)) {
+                setTeams({ parent_club_assignments: teamsData, loan_team_assignments: [], assignments: teamsData })
+            } else {
+                setTeams(teamsData || { parent_club_assignments: [], loan_team_assignments: [], assignments: [] })
+            }
+            setCoverageRequests(requestsData || [])
+            setCommentaries(commentariesData || [])
+            setStats(statsData)
+        } catch (err) {
+            console.error('Failed to load writer data', err)
+            setError('Failed to load dashboard data. Please try again.')
+        } finally {
+            setLoading(false)
+        }
+    }
 
     useEffect(() => {
-        const loadData = async () => {
-            try {
-                const [teamsData, commentariesData, statsData] = await Promise.all([
-                    APIService.getWriterTeams(),
-                    APIService.getWriterCommentaries(),
-                    APIService.getJournalistOwnStats().catch(() => null) // Graceful fallback
-                ])
-                setTeams(teamsData || [])
-                setCommentaries(commentariesData || [])
-                setStats(statsData)
-            } catch (err) {
-                console.error('Failed to load writer data', err)
-                setError('Failed to load dashboard data. Please try again.')
-                if (err.status === 401 || err.status === 403) {
-                    // Maybe redirect to login if auth failed
-                }
-            } finally {
-                setLoading(false)
-            }
-        }
         loadData()
     }, [])
 
@@ -221,25 +229,130 @@ export function WriterDashboard() {
                         </>
                     )}
 
-                    {/* Assigned Teams */}
+                    {/* Assigned Teams & Coverage */}
                     <Card>
-                        <CardHeader>
-                            <CardTitle className="flex items-center">
-                                <Users className="mr-2 h-5 w-5" /> Assigned Teams
-                            </CardTitle>
-                            <CardDescription>Teams you are authorized to write for</CardDescription>
+                        <CardHeader className="flex flex-row items-center justify-between">
+                            <div>
+                                <CardTitle className="flex items-center">
+                                    <Users className="mr-2 h-5 w-5" /> Your Coverage
+                                </CardTitle>
+                                <CardDescription>Teams and players you are authorized to write about</CardDescription>
+                            </div>
+                            <Button variant="outline" size="sm" onClick={() => setShowCoverageModal(true)}>
+                                <Plus className="mr-2 h-4 w-4" /> Request Coverage
+                            </Button>
                         </CardHeader>
-                        <CardContent>
-                            {teams.length > 0 ? (
-                                <div className="flex flex-wrap gap-2">
-                                    {teams.map(assignment => (
-                                        <Badge key={assignment.team_id} variant="secondary" className="text-sm py-1 px-3">
-                                            {assignment.team_name}
-                                        </Badge>
-                                    ))}
+                        <CardContent className="space-y-4">
+                            {/* Parent Club Assignments */}
+                            {teams.parent_club_assignments?.length > 0 && (
+                                <div>
+                                    <h4 className="text-sm font-medium text-gray-700 mb-2 flex items-center">
+                                        <Building2 className="h-4 w-4 mr-1 text-blue-600" />
+                                        Parent Clubs (all loanees)
+                                    </h4>
+                                    <div className="flex flex-wrap gap-2">
+                                        {teams.parent_club_assignments.map(assignment => (
+                                            <Badge key={assignment.team_id} variant="secondary" className="text-sm py-1 px-3 bg-blue-50 text-blue-700 border-blue-200">
+                                                {assignment.team_name}
+                                            </Badge>
+                                        ))}
+                                    </div>
                                 </div>
-                            ) : (
-                                <p className="text-gray-500">No teams assigned yet.</p>
+                            )}
+                            
+                            {/* Loan Team Assignments */}
+                            {teams.loan_team_assignments?.length > 0 && (
+                                <div>
+                                    <h4 className="text-sm font-medium text-gray-700 mb-2 flex items-center">
+                                        <MapPin className="h-4 w-4 mr-1 text-green-600" />
+                                        Loan Destinations (players on loan there)
+                                    </h4>
+                                    <div className="flex flex-wrap gap-2">
+                                        {teams.loan_team_assignments.map(assignment => (
+                                            <Badge 
+                                                key={assignment.loan_team_name} 
+                                                variant="secondary" 
+                                                className={`text-sm py-1 px-3 ${
+                                                    assignment.is_custom_team 
+                                                        ? 'bg-amber-50 text-amber-700 border-amber-200' 
+                                                        : 'bg-green-50 text-green-700 border-green-200'
+                                                }`}
+                                            >
+                                                {assignment.loan_team_name}
+                                                {assignment.is_custom_team && <span className="ml-1 text-xs">(custom)</span>}
+                                            </Badge>
+                                        ))}
+                                    </div>
+                                </div>
+                            )}
+                            
+                            {/* Empty State */}
+                            {!teams.parent_club_assignments?.length && !teams.loan_team_assignments?.length && (
+                                <p className="text-gray-500">No teams assigned yet. Request coverage to get started!</p>
+                            )}
+                            
+                            {/* Pending Requests */}
+                            {coverageRequests.filter(r => r.status === 'pending').length > 0 && (
+                                <div className="border-t pt-4 mt-4">
+                                    <h4 className="text-sm font-medium text-gray-700 mb-2 flex items-center">
+                                        <Clock className="h-4 w-4 mr-1 text-amber-600" />
+                                        Pending Requests
+                                    </h4>
+                                    <div className="space-y-2">
+                                        {coverageRequests.filter(r => r.status === 'pending').map(req => (
+                                            <div key={req.id} className="flex items-center justify-between p-2 bg-amber-50 rounded-lg text-sm">
+                                                <div className="flex items-center gap-2">
+                                                    {req.coverage_type === 'parent_club' ? (
+                                                        <Building2 className="h-4 w-4 text-amber-600" />
+                                                    ) : (
+                                                        <MapPin className="h-4 w-4 text-amber-600" />
+                                                    )}
+                                                    <span>{req.team_name}</span>
+                                                    <Badge variant="outline" className="text-xs">
+                                                        {req.coverage_type === 'parent_club' ? 'Parent Club' : 'Loan Team'}
+                                                    </Badge>
+                                                </div>
+                                                <Button 
+                                                    variant="ghost" 
+                                                    size="sm" 
+                                                    className="text-red-600 hover:text-red-700"
+                                                    onClick={async () => {
+                                                        try {
+                                                            await APIService.cancelCoverageRequest(req.id)
+                                                            setCoverageRequests(prev => prev.filter(r => r.id !== req.id))
+                                                        } catch (err) {
+                                                            console.error('Failed to cancel request', err)
+                                                        }
+                                                    }}
+                                                >
+                                                    Cancel
+                                                </Button>
+                                            </div>
+                                        ))}
+                                    </div>
+                                </div>
+                            )}
+                            
+                            {/* Recent Request History */}
+                            {coverageRequests.filter(r => r.status !== 'pending').length > 0 && (
+                                <div className="border-t pt-4 mt-4">
+                                    <h4 className="text-sm font-medium text-gray-700 mb-2">Recent Requests</h4>
+                                    <div className="space-y-1">
+                                        {coverageRequests.filter(r => r.status !== 'pending').slice(0, 5).map(req => (
+                                            <div key={req.id} className="flex items-center gap-2 text-sm text-gray-500">
+                                                {req.status === 'approved' ? (
+                                                    <CheckCircle className="h-4 w-4 text-green-500" />
+                                                ) : (
+                                                    <XCircle className="h-4 w-4 text-red-500" />
+                                                )}
+                                                <span>{req.team_name}</span>
+                                                <span className="text-xs">
+                                                    ({req.status === 'approved' ? 'Approved' : 'Denied'})
+                                                </span>
+                                            </div>
+                                        ))}
+                                    </div>
+                                </div>
                             )}
                         </CardContent>
                     </Card>
@@ -317,6 +430,15 @@ export function WriterDashboard() {
                     </AlertDialogFooter>
                 </AlertDialogContent>
             </AlertDialog>
+
+            {/* Coverage Request Modal */}
+            <CoverageRequestModal 
+                open={showCoverageModal}
+                onOpenChange={setShowCoverageModal}
+                onSuccess={() => {
+                    loadData()
+                }}
+            />
         </div>
     )
 }

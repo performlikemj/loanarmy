@@ -87,6 +87,7 @@ import { AdminUsers } from '@/pages/admin/AdminUsers'
 import { AdminTeams } from '@/pages/admin/AdminTeams'
 import { AdminSponsors } from '@/pages/admin/AdminSponsors'
 import { AdminReddit } from '@/pages/admin/AdminReddit'
+import { AdminCoverageRequests } from '@/pages/admin/AdminCoverageRequests'
 import { WriterLogin } from '@/pages/writer/WriterLogin'
 import { WriterDashboard } from '@/pages/writer/WriterDashboard'
 import { WriteupEditor } from '@/pages/writer/WriteupEditor'
@@ -94,8 +95,8 @@ import { WriteupPage } from '@/pages/WriteupPage'
 import { PlayerPage } from '@/pages/PlayerPage'
 import { JournalistProfile } from '@/pages/JournalistProfile'
 import { JournalistNewsletterView } from '@/components/JournalistNewsletterView'
-import { 
-  NewsletterWriterOverlay, 
+import {
+  NewsletterWriterOverlay,
   NewsletterWriterProvider,
   WriterHeaderSection,
   InlinePlayerWriteups,
@@ -636,7 +637,7 @@ function AdminNewsletterDetailPage() {
                           <div className="flex flex-wrap items-start justify-between gap-3">
                             <div>
                               {(item.player_api_id || item.player_id) ? (
-                                <Link 
+                                <Link
                                   to={`/players/${item.player_api_id || item.player_id}`}
                                   className="text-lg font-semibold text-gray-900 hover:text-blue-600 hover:underline transition-colors"
                                 >
@@ -685,11 +686,10 @@ function AdminNewsletterDetailPage() {
                                   {match.competition && <span className="text-xs text-gray-500 ml-2">({match.competition})</span>}
                                 </div>
                                 {match.score && (
-                                  <span className={`px-2 py-1 rounded text-xs font-bold ${
-                                    match.result === 'W' ? 'bg-green-100 text-green-800' :
+                                  <span className={`px-2 py-1 rounded text-xs font-bold ${match.result === 'W' ? 'bg-green-100 text-green-800' :
                                     match.result === 'D' ? 'bg-gray-100 text-gray-700' :
-                                    'bg-red-100 text-red-800'
-                                  }`}>
+                                      'bg-red-100 text-red-800'
+                                    }`}>
                                     {match.score.home ?? 0}-{match.score.away ?? 0}
                                   </span>
                                 )}
@@ -4022,7 +4022,7 @@ function AdminPage({ defaultTab = 'newsletters', includeSandbox = true, forcedTa
                                           method: 'POST',
                                           body: JSON.stringify({ season: y, overwrite: true, background: true })
                                         }, { admin: true })
-                                        
+
                                         if (res.job_id) {
                                           // Poll for job completion
                                           const pollJob = async () => {
@@ -6545,26 +6545,6 @@ function AdminPage({ defaultTab = 'newsletters', includeSandbox = true, forcedTa
 }
 // Navigation component
 const BRAND_LOGO_SRC = '/assets/loan_army_assets/apple-touch-icon.png'
-const SITE_UNDER_CONSTRUCTION = true
-
-function UnderConstructionPage() {
-  return (
-    <div className="min-h-screen bg-gray-50 text-gray-900">
-      <div className="mx-auto flex min-h-screen max-w-3xl flex-col items-center justify-center px-6 py-16 text-center">
-        <div className="w-full rounded-2xl border border-gray-200 bg-white/90 p-10 shadow-sm backdrop-blur">
-          <div className="flex items-center justify-center gap-3">
-            <img src={BRAND_LOGO_SRC} alt="Go On Loan logo" className="h-12 w-12" />
-            <span className="text-xl font-semibold tracking-tight">Go On Loan</span>
-          </div>
-          <h1 className="mt-6 text-3xl font-semibold tracking-tight">We're Making Improvements</h1>
-          <p className="mt-3 text-base text-gray-600">
-            The site is under construction. Please check back soon.
-          </p>
-        </div>
-      </div>
-    </div>
-  )
-}
 
 function SoccerBallToggleIcon({ spinning }) {
   return (
@@ -7463,99 +7443,99 @@ function HomePage() {
             </div>
           </div>
 
-        {/* Stats Cards */}
-        {loading ? (
-          <div className="text-center py-8">
-            <div className="animate-spin rounded-full h-32 w-32 border-b-2 border-blue-600 mx-auto"></div>
-            <p className="mt-4 text-gray-600">Loading statistics...</p>
-          </div>
-        ) : stats ? (
-          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6 mb-12">
-            <Card>
-              <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
-                <CardTitle className="text-sm font-medium">Clubs with Active Loans</CardTitle>
-                <Users className="h-4 w-4 text-muted-foreground" />
-              </CardHeader>
-              <CardContent>
-                <div className="text-2xl font-bold">{stats.teams_with_loans}</div>
-                <p className="text-xs text-muted-foreground">
-                  Currently tracking loanees
-                </p>
-              </CardContent>
-            </Card>
-
-            <Card>
-              <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
-                <CardTitle className="text-sm font-medium">Active Loans</CardTitle>
-                <TrendingUp className="h-4 w-4 text-muted-foreground" />
-              </CardHeader>
-              <CardContent>
-                <div className="text-2xl font-bold">{stats.total_active_loans}</div>
-                <p className="text-xs text-muted-foreground">
-                  Players out on loan
-                </p>
-              </CardContent>
-            </Card>
-
-            <Card>
-              <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
-                <CardTitle className="text-sm font-medium">Newsletters</CardTitle>
-                <FileText className="h-4 w-4 text-muted-foreground" />
-              </CardHeader>
-              <CardContent>
-                <div className="text-2xl font-bold">{stats.total_newsletters}</div>
-                <p className="text-xs text-muted-foreground">
-                  AI-generated reports
-                </p>
-              </CardContent>
-            </Card>
-          </div>
-        ) : (
-          <div className="text-center py-8">
-            <Alert className="max-w-md mx-auto">
-              <AlertCircle className="h-4 w-4" />
-              <AlertDescription>
-                No data available. Initialize sample data to get started.
-              </AlertDescription>
-            </Alert>
-            <Button onClick={handleInitializeData} className="mt-4">
-              Initialize Sample Data
-            </Button>
-          </div>
-        )}
-
-        {/* Features Section */}
-        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-8">
-          <div className="text-center">
-            <div className="bg-blue-100 rounded-full p-3 w-12 h-12 mx-auto mb-4">
-              <Globe className="h-6 w-6 text-blue-600" />
+          {/* Stats Cards */}
+          {loading ? (
+            <div className="text-center py-8">
+              <div className="animate-spin rounded-full h-32 w-32 border-b-2 border-blue-600 mx-auto"></div>
+              <p className="mt-4 text-gray-600">Loading statistics...</p>
             </div>
-            <h3 className="text-lg font-semibold mb-2">European Focus</h3>
-            <p className="text-gray-600">
-              Track loans from Premier League, La Liga, Serie A, Bundesliga, and Ligue 1
-            </p>
-          </div>
+          ) : stats ? (
+            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6 mb-12">
+              <Card>
+                <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
+                  <CardTitle className="text-sm font-medium">Clubs with Active Loans</CardTitle>
+                  <Users className="h-4 w-4 text-muted-foreground" />
+                </CardHeader>
+                <CardContent>
+                  <div className="text-2xl font-bold">{stats.teams_with_loans}</div>
+                  <p className="text-xs text-muted-foreground">
+                    Currently tracking loanees
+                  </p>
+                </CardContent>
+              </Card>
 
-          <div className="text-center">
-            <div className="bg-green-100 rounded-full p-3 w-12 h-12 mx-auto mb-4">
-              <Star className="h-6 w-6 text-green-600" />
-            </div>
-            <h3 className="text-lg font-semibold mb-2">AI-Powered</h3>
-            <p className="text-gray-600">
-              Get intelligent analysis and insights about player development
-            </p>
-          </div>
+              <Card>
+                <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
+                  <CardTitle className="text-sm font-medium">Active Loans</CardTitle>
+                  <TrendingUp className="h-4 w-4 text-muted-foreground" />
+                </CardHeader>
+                <CardContent>
+                  <div className="text-2xl font-bold">{stats.total_active_loans}</div>
+                  <p className="text-xs text-muted-foreground">
+                    Players out on loan
+                  </p>
+                </CardContent>
+              </Card>
 
-          <div className="text-center">
-            <div className="bg-purple-100 rounded-full p-3 w-12 h-12 mx-auto mb-4">
-              <Mail className="h-6 w-6 text-purple-600" />
+              <Card>
+                <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
+                  <CardTitle className="text-sm font-medium">Newsletters</CardTitle>
+                  <FileText className="h-4 w-4 text-muted-foreground" />
+                </CardHeader>
+                <CardContent>
+                  <div className="text-2xl font-bold">{stats.total_newsletters}</div>
+                  <p className="text-xs text-muted-foreground">
+                    AI-generated reports
+                  </p>
+                </CardContent>
+              </Card>
             </div>
-            <h3 className="text-lg font-semibold mb-2">Weekly Updates</h3>
-            <p className="text-gray-600">
-              Receive regular newsletters with the latest loan developments
-            </p>
+          ) : (
+            <div className="text-center py-8">
+              <Alert className="max-w-md mx-auto">
+                <AlertCircle className="h-4 w-4" />
+                <AlertDescription>
+                  No data available. Initialize sample data to get started.
+                </AlertDescription>
+              </Alert>
+              <Button onClick={handleInitializeData} className="mt-4">
+                Initialize Sample Data
+              </Button>
+            </div>
+          )}
+
+          {/* Features Section */}
+          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-8">
+            <div className="text-center">
+              <div className="bg-blue-100 rounded-full p-3 w-12 h-12 mx-auto mb-4">
+                <Globe className="h-6 w-6 text-blue-600" />
+              </div>
+              <h3 className="text-lg font-semibold mb-2">European Focus</h3>
+              <p className="text-gray-600">
+                Track loans from Premier League, La Liga, Serie A, Bundesliga, and Ligue 1
+              </p>
+            </div>
+
+            <div className="text-center">
+              <div className="bg-green-100 rounded-full p-3 w-12 h-12 mx-auto mb-4">
+                <Star className="h-6 w-6 text-green-600" />
+              </div>
+              <h3 className="text-lg font-semibold mb-2">AI-Powered</h3>
+              <p className="text-gray-600">
+                Get intelligent analysis and insights about player development
+              </p>
+            </div>
+
+            <div className="text-center">
+              <div className="bg-purple-100 rounded-full p-3 w-12 h-12 mx-auto mb-4">
+                <Mail className="h-6 w-6 text-purple-600" />
+              </div>
+              <h3 className="text-lg font-semibold mb-2">Weekly Updates</h3>
+              <p className="text-gray-600">
+                Receive regular newsletters with the latest loan developments
+              </p>
+            </div>
           </div>
-        </div>
         </div>
 
         {/* Sponsor Sidebar - visible on larger screens */}
@@ -7970,20 +7950,20 @@ function TeamsPage() {
   const searchQuery = teamSearch.trim().toLowerCase()
   const searchedTeams = searchQuery
     ? teams
-        .filter(team => team.name.toLowerCase().startsWith(searchQuery))
-        .sort((a, b) => a.name.localeCompare(b.name))
+      .filter(team => team.name.toLowerCase().startsWith(searchQuery))
+      .sort((a, b) => a.name.localeCompare(b.name))
     : []
-  
+
   // Also include teams that contain (but don't start with) the query, sorted after
   const containsTeams = searchQuery
     ? teams
-        .filter(team => 
-          !team.name.toLowerCase().startsWith(searchQuery) && 
-          team.name.toLowerCase().includes(searchQuery)
-        )
-        .sort((a, b) => a.name.localeCompare(b.name))
+      .filter(team =>
+        !team.name.toLowerCase().startsWith(searchQuery) &&
+        team.name.toLowerCase().includes(searchQuery)
+      )
+      .sort((a, b) => a.name.localeCompare(b.name))
     : []
-  
+
   const allSearchResults = [...searchedTeams, ...containsTeams]
   const isSearching = searchQuery.length > 0
 
@@ -8021,314 +8001,314 @@ function TeamsPage() {
                 </Select>
               </div>
             </div>
-            
+
             {/* Compact Search Bar */}
-          <div className="relative">
-            <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 h-4 w-4 text-gray-400" />
-            <Input
-              type="text"
-              placeholder="Search teams by name..."
-              value={teamSearch}
-              onChange={(e) => setTeamSearch(e.target.value)}
-              className="pl-10 pr-10"
-            />
-            {teamSearch && (
+            <div className="relative">
+              <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 h-4 w-4 text-gray-400" />
+              <Input
+                type="text"
+                placeholder="Search teams by name..."
+                value={teamSearch}
+                onChange={(e) => setTeamSearch(e.target.value)}
+                className="pl-10 pr-10"
+              />
+              {teamSearch && (
+                <button
+                  onClick={() => setTeamSearch('')}
+                  className="absolute right-3 top-1/2 transform -translate-y-1/2 text-gray-400 hover:text-gray-600"
+                >
+                  <X className="h-4 w-4" />
+                </button>
+              )}
+            </div>
+
+            {/* Collapsible Subscribe Section */}
+            <div className="border rounded-lg bg-white">
               <button
-                onClick={() => setTeamSearch('')}
-                className="absolute right-3 top-1/2 transform -translate-y-1/2 text-gray-400 hover:text-gray-600"
+                onClick={() => setShowSubscribeSection(!showSubscribeSection)}
+                className="w-full flex items-center justify-between p-3 text-left hover:bg-gray-50 transition-colors"
               >
-                <X className="h-4 w-4" />
-              </button>
-            )}
-          </div>
-          
-          {/* Collapsible Subscribe Section */}
-          <div className="border rounded-lg bg-white">
-            <button
-              onClick={() => setShowSubscribeSection(!showSubscribeSection)}
-              className="w-full flex items-center justify-between p-3 text-left hover:bg-gray-50 transition-colors"
-            >
-              <div className="flex items-center gap-2">
-                <Mail className="h-4 w-4 text-blue-600" />
-                <span className="font-medium text-sm">Subscribe to Team Updates</span>
-                {selectedTeams.length > 0 && (
-                  <Badge variant="secondary" className="bg-blue-100 text-blue-800">
-                    {selectedTeams.length} selected
-                  </Badge>
-                )}
-              </div>
-              <ChevronDown className={`h-4 w-4 text-gray-400 transition-transform ${showSubscribeSection ? 'rotate-180' : ''}`} />
-            </button>
-            
-            {showSubscribeSection && (
-              <div className="px-3 pb-3 border-t">
-                <div className="pt-3 space-y-3">
-                  <TeamMultiSelect
-                    teams={teams}
-                    value={selectedTeams}
-                    onChange={setSelectedTeams}
-                    placeholder="Search and select teams…"
-                    className="w-full"
-                  />
-                  {message && (
-                    <Alert className={`${message.type === 'error' ? 'border-red-500' : message.type === 'info' ? 'border-blue-500' : 'border-green-500'}`}>
-                      <AlertCircle className="h-4 w-4" />
-                      <AlertDescription>{message.text}</AlertDescription>
-                    </Alert>
+                <div className="flex items-center gap-2">
+                  <Mail className="h-4 w-4 text-blue-600" />
+                  <span className="font-medium text-sm">Subscribe to Team Updates</span>
+                  {selectedTeams.length > 0 && (
+                    <Badge variant="secondary" className="bg-blue-100 text-blue-800">
+                      {selectedTeams.length} selected
+                    </Badge>
                   )}
-                  <div className="flex flex-col sm:flex-row gap-2 items-stretch sm:items-end">
-                    <div className="flex-1">
-                      <Label htmlFor="bulk-email" className="text-xs">Email Address</Label>
-                      <Input id="bulk-email" type="email" value={email} onChange={(e) => setEmail(e.target.value)} placeholder="your.email@example.com" className="h-9" required />
+                </div>
+                <ChevronDown className={`h-4 w-4 text-gray-400 transition-transform ${showSubscribeSection ? 'rotate-180' : ''}`} />
+              </button>
+
+              {showSubscribeSection && (
+                <div className="px-3 pb-3 border-t">
+                  <div className="pt-3 space-y-3">
+                    <TeamMultiSelect
+                      teams={teams}
+                      value={selectedTeams}
+                      onChange={setSelectedTeams}
+                      placeholder="Search and select teams…"
+                      className="w-full"
+                    />
+                    {message && (
+                      <Alert className={`${message.type === 'error' ? 'border-red-500' : message.type === 'info' ? 'border-blue-500' : 'border-green-500'}`}>
+                        <AlertCircle className="h-4 w-4" />
+                        <AlertDescription>{message.text}</AlertDescription>
+                      </Alert>
+                    )}
+                    <div className="flex flex-col sm:flex-row gap-2 items-stretch sm:items-end">
+                      <div className="flex-1">
+                        <Label htmlFor="bulk-email" className="text-xs">Email Address</Label>
+                        <Input id="bulk-email" type="email" value={email} onChange={(e) => setEmail(e.target.value)} placeholder="your.email@example.com" className="h-9" required />
+                      </div>
+                      <Button onClick={handleBulkSubscribe} disabled={submitting || selectedTeams.length === 0} className="bg-blue-600 hover:bg-blue-700 h-9">
+                        {submitting ? 'Subscribing…' : `Subscribe (${selectedTeams.length})`}
+                      </Button>
                     </div>
-                    <Button onClick={handleBulkSubscribe} disabled={submitting || selectedTeams.length === 0} className="bg-blue-600 hover:bg-blue-700 h-9">
-                      {submitting ? 'Subscribing…' : `Subscribe (${selectedTeams.length})`}
-                    </Button>
                   </div>
                 </div>
-              </div>
-            )}
-          </div>
-        </div>
-        {loading ? (
-          <div className="text-center py-12">
-            <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-blue-600 mx-auto"></div>
-            <p className="mt-4 text-gray-600">Loading teams...</p>
-          </div>
-        ) : isSearching ? (
-          /* Search Results View - flat list of matching teams */
-          <div className="space-y-4">
-            <div className="flex items-center justify-between px-1">
-              <h2 className="text-lg font-semibold text-gray-900">
-                {allSearchResults.length === 0 
-                  ? 'No teams found' 
-                  : `${allSearchResults.length} team${allSearchResults.length !== 1 ? 's' : ''} matching "${teamSearch}"`
-                }
-              </h2>
-              <Button variant="ghost" size="sm" onClick={() => setTeamSearch('')}>
-                Clear search
-              </Button>
+              )}
             </div>
-            {allSearchResults.length > 0 && (
-              <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-4">
-                {allSearchResults.map((team) => (
-                  <Card key={team.id} className={`hover:shadow-lg transition-shadow cursor-pointer ${selectedTeams.includes(team.id) ? 'ring-2 ring-blue-400' : ''}`} onClick={(e) => handleCardClick(e, team.id)}>
-                    <CardHeader className="pb-3">
-                      <div className="flex flex-col sm:flex-row items-center sm:items-start gap-2 sm:gap-3 mb-2">
-                        {team.logo ? (
-                          <Avatar className="h-10 w-10 sm:h-12 sm:w-12 shrink-0">
-                            <AvatarImage src={team.logo} alt={`${team.name} logo`} />
-                            <AvatarFallback className="text-xs bg-gray-200">
-                              {team.name.split(' ').map(n => n[0]).join('').slice(0, 2).toUpperCase()}
-                            </AvatarFallback>
-                          </Avatar>
-                        ) : (
-                          <Avatar className="h-10 w-10 sm:h-12 sm:w-12 shrink-0 bg-gray-200">
-                            <AvatarFallback className="text-xs">
-                              {team.name.split(' ').map(n => n[0]).join('').slice(0, 2).toUpperCase()}
-                            </AvatarFallback>
-                          </Avatar>
-                        )}
-                        <div className="flex-1 min-w-0 text-center sm:text-left">
-                          <CardTitle className="text-base sm:text-lg truncate">{team.name}</CardTitle>
-                          <CardDescription className="text-xs break-words sm:break-normal">
-                            {team.league_name && <span className="text-blue-600">{team.league_name}</span>}
-                            {team.league_name && ' • '}
-                            {team.country} • Founded {team.founded || 'N/A'}
-                          </CardDescription>
-                        </div>
-                      </div>
-                    </CardHeader>
-                    <CardContent>
-                      {/* Tracking Status Badge */}
-                      {team.is_tracked === false && (
-                        <div className="mb-3 p-2 bg-amber-50 border border-amber-200 rounded-md">
-                          <div className="flex items-center justify-between gap-2">
-                            <div className="flex items-center gap-1.5">
-                              <AlertCircle className="h-3.5 w-3.5 text-amber-600" />
-                              <span className="text-xs text-amber-700 font-medium">Not currently tracked</span>
-                            </div>
-                            <Button 
-                              size="sm" 
-                              variant="ghost" 
-                              className="h-6 px-2 text-xs text-amber-700 hover:text-amber-900 hover:bg-amber-100"
-                              onClick={(e) => { e.stopPropagation(); openRequestTracking(team) }}
-                            >
-                              Request Tracking
-                            </Button>
-                          </div>
-                        </div>
-                      )}
-                      <div className="flex items-center gap-2 mb-3">
-                        <input type="checkbox" checked={selectedTeams.includes(team.id)} onChange={() => handleTeamToggle(team.id)} className="rounded border-gray-300 text-blue-600 focus:ring-blue-500" />
-                        <span className="text-sm">{selectedTeams.includes(team.id) ? 'Selected' : 'Select team'}</span>
-                      </div>
-                      <div className="flex justify-between items-center">
-                        <div className="text-sm text-gray-600">
-                          <div className="flex items-center">
-                            <TrendingUp className="h-4 w-4 mr-1" />
-                            {team.is_tracked ? `${team.current_loaned_out_count} active loans` : 'No loan data'}
-                          </div>
-                        </div>
-                        {team.is_tracked !== false && (
-                          <Button size="sm" variant="outline" onClick={(e) => { e.stopPropagation(); toggleExpand(team.id) }}>
-                            {expandedTeamId === team.id ? 'Hide Loans' : 'Show Loans'}
-                            <ArrowRight className="h-4 w-4 ml-1" />
-                          </Button>
-                        )}
-                      </div>
-                      {expandedTeamId === team.id && (
-                        <div className="mt-4 space-y-3">
-                          {loadingLoans[team.id] ? (
-                            <div className="flex items-center justify-center py-8">
-                              <Loader2 className="h-5 w-5 animate-spin text-gray-400 mr-2" />
-                              <span className="text-sm text-gray-500">Loading loans...</span>
-                            </div>
-                          ) : (teamLoans[team.id] || []).length === 0 ? (
-                            <div className="text-sm text-gray-500 text-center py-4">No loans found.</div>
-                          ) : (
-                            <div className="space-y-2">
-                              {(teamLoans[team.id] || []).map((loan) => (
-                                <Link
-                                  key={loan.id}
-                                  to={`/players/${loan.player_id}`}
-                                  className="flex items-center gap-3 p-2 rounded-lg hover:bg-gray-100 transition-colors group"
-                                  onClick={(e) => e.stopPropagation()}
-                                >
-                                  {loan.player_photo ? (
-                                    <Avatar className="h-8 w-8 ring-2 ring-transparent group-hover:ring-blue-300 transition-all">
-                                      <AvatarImage src={loan.player_photo} alt={loan.player_name} />
-                                      <AvatarFallback className="text-xs bg-blue-100">
-                                        {loan.player_name.split(' ').map(n => n[0]).join('').slice(0, 2).toUpperCase()}
-                                      </AvatarFallback>
-                                    </Avatar>
-                                  ) : (
-                                    <Avatar className="h-8 w-8 bg-blue-100 ring-2 ring-transparent group-hover:ring-blue-300 transition-all">
-                                      <AvatarFallback className="text-xs">
-                                        {loan.player_name.split(' ').map(n => n[0]).join('').slice(0, 2).toUpperCase()}
-                                      </AvatarFallback>
-                                    </Avatar>
-                                  )}
-                                  <div className="flex-1 min-w-0">
-                                    <div className="font-medium text-sm text-gray-900 group-hover:text-blue-600 transition-colors truncate">
-                                      {loan.player_name}
-                                    </div>
-                                    <div className="text-xs text-gray-500 truncate">
-                                      → {loan.loan_team_name}
-                                    </div>
-                                  </div>
-                                  <ChevronRight className="h-4 w-4 text-gray-400 group-hover:text-blue-500 transition-colors" />
-                                </Link>
-                              ))}
-                            </div>
-                          )}
-                        </div>
-                      )}
-                    </CardContent>
-                  </Card>
-                ))}
-              </div>
-            )}
           </div>
-        ) : (
-          <Accordion type="single" collapsible className="space-y-4">
-            {Object.entries(teamsByLeague).map(([league, leagueTeams]) => (
-              <AccordionItem key={league} value={league} className="border rounded-md">
-                <AccordionTrigger className="px-4">
-                  <div className="flex items-center">
-                    <div className="w-6 h-6 rounded mr-3" style={{ backgroundColor: LEAGUE_COLORS[league] || '#666' }} />
-                    <span className="text-lg font-semibold">{league}</span>
-                    <Badge variant="secondary" className="ml-2">{leagueTeams.length} teams</Badge>
-                  </div>
-                </AccordionTrigger>
-                <AccordionContent>
-                  <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-4 px-4">
-                    {leagueTeams.map((team) => (
-                      <Card key={team.id} className={`hover:shadow-lg transition-shadow cursor-pointer ${selectedTeams.includes(team.id) ? 'ring-2 ring-blue-400' : ''}`} onClick={(e) => handleCardClick(e, team.id)}>
-                        <CardHeader className="pb-3">
-                          <div className="flex flex-col sm:flex-row items-center sm:items-start gap-2 sm:gap-3 mb-2">
-                            {team.logo ? (
-                              <Avatar className="h-10 w-10 sm:h-12 sm:w-12 shrink-0">
-                                <AvatarImage src={team.logo} alt={`${team.name} logo`} />
-                                <AvatarFallback className="text-xs bg-gray-200">
-                                  {team.name.split(' ').map(n => n[0]).join('').slice(0, 2).toUpperCase()}
-                                </AvatarFallback>
-                              </Avatar>
-                            ) : (
-                              <Avatar className="h-10 w-10 sm:h-12 sm:w-12 shrink-0 bg-gray-200">
-                                <AvatarFallback className="text-xs">
-                                  {team.name.split(' ').map(n => n[0]).join('').slice(0, 2).toUpperCase()}
-                                </AvatarFallback>
-                              </Avatar>
-                            )}
-                            <div className="flex-1 min-w-0 text-center sm:text-left">
-                              <CardTitle className="text-base sm:text-lg truncate">{team.name}</CardTitle>
-                              <CardDescription className="text-xs break-words sm:break-normal">
-                                {team.country} • Founded {team.founded || 'N/A'}
-                              </CardDescription>
-                            </div>
+          {loading ? (
+            <div className="text-center py-12">
+              <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-blue-600 mx-auto"></div>
+              <p className="mt-4 text-gray-600">Loading teams...</p>
+            </div>
+          ) : isSearching ? (
+            /* Search Results View - flat list of matching teams */
+            <div className="space-y-4">
+              <div className="flex items-center justify-between px-1">
+                <h2 className="text-lg font-semibold text-gray-900">
+                  {allSearchResults.length === 0
+                    ? 'No teams found'
+                    : `${allSearchResults.length} team${allSearchResults.length !== 1 ? 's' : ''} matching "${teamSearch}"`
+                  }
+                </h2>
+                <Button variant="ghost" size="sm" onClick={() => setTeamSearch('')}>
+                  Clear search
+                </Button>
+              </div>
+              {allSearchResults.length > 0 && (
+                <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-4">
+                  {allSearchResults.map((team) => (
+                    <Card key={team.id} className={`hover:shadow-lg transition-shadow cursor-pointer ${selectedTeams.includes(team.id) ? 'ring-2 ring-blue-400' : ''}`} onClick={(e) => handleCardClick(e, team.id)}>
+                      <CardHeader className="pb-3">
+                        <div className="flex flex-col sm:flex-row items-center sm:items-start gap-2 sm:gap-3 mb-2">
+                          {team.logo ? (
+                            <Avatar className="h-10 w-10 sm:h-12 sm:w-12 shrink-0">
+                              <AvatarImage src={team.logo} alt={`${team.name} logo`} />
+                              <AvatarFallback className="text-xs bg-gray-200">
+                                {team.name.split(' ').map(n => n[0]).join('').slice(0, 2).toUpperCase()}
+                              </AvatarFallback>
+                            </Avatar>
+                          ) : (
+                            <Avatar className="h-10 w-10 sm:h-12 sm:w-12 shrink-0 bg-gray-200">
+                              <AvatarFallback className="text-xs">
+                                {team.name.split(' ').map(n => n[0]).join('').slice(0, 2).toUpperCase()}
+                              </AvatarFallback>
+                            </Avatar>
+                          )}
+                          <div className="flex-1 min-w-0 text-center sm:text-left">
+                            <CardTitle className="text-base sm:text-lg truncate">{team.name}</CardTitle>
+                            <CardDescription className="text-xs break-words sm:break-normal">
+                              {team.league_name && <span className="text-blue-600">{team.league_name}</span>}
+                              {team.league_name && ' • '}
+                              {team.country} • Founded {team.founded || 'N/A'}
+                            </CardDescription>
                           </div>
-                        </CardHeader>
-                        <CardContent>
-                          <div className="flex items-center gap-2 mb-3">
-                            <input type="checkbox" checked={selectedTeams.includes(team.id)} onChange={() => handleTeamToggle(team.id)} className="rounded border-gray-300 text-blue-600 focus:ring-blue-500" />
-                            <span className="text-sm">{selectedTeams.includes(team.id) ? 'Selected' : 'Select team'}</span>
-                          </div>
-                          <div className="flex justify-between items-center">
-                            <div className="text-sm text-gray-600">
-                              <div className="flex items-center">
-                                <TrendingUp className="h-4 w-4 mr-1" />
-                                {team.current_loaned_out_count} active loans
+                        </div>
+                      </CardHeader>
+                      <CardContent>
+                        {/* Tracking Status Badge */}
+                        {team.is_tracked === false && (
+                          <div className="mb-3 p-2 bg-amber-50 border border-amber-200 rounded-md">
+                            <div className="flex items-center justify-between gap-2">
+                              <div className="flex items-center gap-1.5">
+                                <AlertCircle className="h-3.5 w-3.5 text-amber-600" />
+                                <span className="text-xs text-amber-700 font-medium">Not currently tracked</span>
                               </div>
+                              <Button
+                                size="sm"
+                                variant="ghost"
+                                className="h-6 px-2 text-xs text-amber-700 hover:text-amber-900 hover:bg-amber-100"
+                                onClick={(e) => { e.stopPropagation(); openRequestTracking(team) }}
+                              >
+                                Request Tracking
+                              </Button>
                             </div>
+                          </div>
+                        )}
+                        <div className="flex items-center gap-2 mb-3">
+                          <input type="checkbox" checked={selectedTeams.includes(team.id)} onChange={() => handleTeamToggle(team.id)} className="rounded border-gray-300 text-blue-600 focus:ring-blue-500" />
+                          <span className="text-sm">{selectedTeams.includes(team.id) ? 'Selected' : 'Select team'}</span>
+                        </div>
+                        <div className="flex justify-between items-center">
+                          <div className="text-sm text-gray-600">
+                            <div className="flex items-center">
+                              <TrendingUp className="h-4 w-4 mr-1" />
+                              {team.is_tracked ? `${team.current_loaned_out_count} active loans` : 'No loan data'}
+                            </div>
+                          </div>
+                          {team.is_tracked !== false && (
                             <Button size="sm" variant="outline" onClick={(e) => { e.stopPropagation(); toggleExpand(team.id) }}>
                               {expandedTeamId === team.id ? 'Hide Loans' : 'Show Loans'}
                               <ArrowRight className="h-4 w-4 ml-1" />
                             </Button>
-                          </div>
-                          {expandedTeamId === team.id && (
-                            <div className="mt-4 space-y-3">
-                              {loadingLoans[team.id] ? (
-                                <div className="flex items-center justify-center py-8">
-                                  <Loader2 className="h-5 w-5 animate-spin text-gray-400 mr-2" />
-                                  <span className="text-sm text-gray-500">Loading loans...</span>
-                                </div>
-                              ) : (teamLoans[team.id] || []).length === 0 ? (
-                                <div className="text-sm text-gray-500 text-center py-4">No loans found.</div>
-                              ) : (
-                                (teamLoans[team.id] || []).map((loan) => (
-                                  <div key={loan.id} className="border rounded-lg p-2.5 sm:p-3 bg-gray-50/50 hover:bg-gray-50 transition-colors">
-                                    <div className="flex items-start gap-2 sm:gap-3">
-                                      {/* Player Photo & Name - Clickable Link */}
-                                      <Link 
-                                        to={`/players/${loan.player_id}`}
-                                        className="flex items-start gap-2 sm:gap-3 flex-1 min-w-0 group"
-                                        onClick={(e) => e.stopPropagation()}
-                                      >
-                                        <div className="shrink-0">
-                                          {loan.player_photo ? (
-                                            <Avatar className="h-10 w-10 sm:h-12 sm:w-12 ring-2 ring-transparent group-hover:ring-blue-300 transition-all">
-                                              <AvatarImage src={loan.player_photo} alt={`${loan.player_name} headshot`} />
-                                              <AvatarFallback className="text-xs bg-blue-100">
-                                                {loan.player_name.split(' ').map(n => n[0]).join('').slice(0, 2).toUpperCase()}
-                                              </AvatarFallback>
-                                            </Avatar>
-                                          ) : (
-                                            <Avatar className="h-10 w-10 sm:h-12 sm:w-12 bg-blue-100 ring-2 ring-transparent group-hover:ring-blue-300 transition-all">
-                                              <AvatarFallback className="text-xs">
-                                                {loan.player_name.split(' ').map(n => n[0]).join('').slice(0, 2).toUpperCase()}
-                                              </AvatarFallback>
-                                            </Avatar>
-                                          )}
-                                        </div>
-                                        <div className="flex-1 min-w-0">
-                                          <div className="font-medium text-sm mb-1 break-words text-gray-900 group-hover:text-blue-600 transition-colors">{loan.player_name}</div>
-                                        </div>
-                                      </Link>
+                          )}
+                        </div>
+                        {expandedTeamId === team.id && (
+                          <div className="mt-4 space-y-3">
+                            {loadingLoans[team.id] ? (
+                              <div className="flex items-center justify-center py-8">
+                                <Loader2 className="h-5 w-5 animate-spin text-gray-400 mr-2" />
+                                <span className="text-sm text-gray-500">Loading loans...</span>
+                              </div>
+                            ) : (teamLoans[team.id] || []).length === 0 ? (
+                              <div className="text-sm text-gray-500 text-center py-4">No loans found.</div>
+                            ) : (
+                              <div className="space-y-2">
+                                {(teamLoans[team.id] || []).map((loan) => (
+                                  <Link
+                                    key={loan.id}
+                                    to={`/players/${loan.player_id}`}
+                                    className="flex items-center gap-3 p-2 rounded-lg hover:bg-gray-100 transition-colors group"
+                                    onClick={(e) => e.stopPropagation()}
+                                  >
+                                    {loan.player_photo ? (
+                                      <Avatar className="h-8 w-8 ring-2 ring-transparent group-hover:ring-blue-300 transition-all">
+                                        <AvatarImage src={loan.player_photo} alt={loan.player_name} />
+                                        <AvatarFallback className="text-xs bg-blue-100">
+                                          {loan.player_name.split(' ').map(n => n[0]).join('').slice(0, 2).toUpperCase()}
+                                        </AvatarFallback>
+                                      </Avatar>
+                                    ) : (
+                                      <Avatar className="h-8 w-8 bg-blue-100 ring-2 ring-transparent group-hover:ring-blue-300 transition-all">
+                                        <AvatarFallback className="text-xs">
+                                          {loan.player_name.split(' ').map(n => n[0]).join('').slice(0, 2).toUpperCase()}
+                                        </AvatarFallback>
+                                      </Avatar>
+                                    )}
+                                    <div className="flex-1 min-w-0">
+                                      <div className="font-medium text-sm text-gray-900 group-hover:text-blue-600 transition-colors truncate">
+                                        {loan.player_name}
+                                      </div>
+                                      <div className="text-xs text-gray-500 truncate">
+                                        → {loan.loan_team_name}
+                                      </div>
                                     </div>
+                                    <ChevronRight className="h-4 w-4 text-gray-400 group-hover:text-blue-500 transition-colors" />
+                                  </Link>
+                                ))}
+                              </div>
+                            )}
+                          </div>
+                        )}
+                      </CardContent>
+                    </Card>
+                  ))}
+                </div>
+              )}
+            </div>
+          ) : (
+            <Accordion type="single" collapsible className="space-y-4">
+              {Object.entries(teamsByLeague).map(([league, leagueTeams]) => (
+                <AccordionItem key={league} value={league} className="border rounded-md">
+                  <AccordionTrigger className="px-4">
+                    <div className="flex items-center">
+                      <div className="w-6 h-6 rounded mr-3" style={{ backgroundColor: LEAGUE_COLORS[league] || '#666' }} />
+                      <span className="text-lg font-semibold">{league}</span>
+                      <Badge variant="secondary" className="ml-2">{leagueTeams.length} teams</Badge>
+                    </div>
+                  </AccordionTrigger>
+                  <AccordionContent>
+                    <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-4 px-4">
+                      {leagueTeams.map((team) => (
+                        <Card key={team.id} className={`hover:shadow-lg transition-shadow cursor-pointer ${selectedTeams.includes(team.id) ? 'ring-2 ring-blue-400' : ''}`} onClick={(e) => handleCardClick(e, team.id)}>
+                          <CardHeader className="pb-3">
+                            <div className="flex flex-col sm:flex-row items-center sm:items-start gap-2 sm:gap-3 mb-2">
+                              {team.logo ? (
+                                <Avatar className="h-10 w-10 sm:h-12 sm:w-12 shrink-0">
+                                  <AvatarImage src={team.logo} alt={`${team.name} logo`} />
+                                  <AvatarFallback className="text-xs bg-gray-200">
+                                    {team.name.split(' ').map(n => n[0]).join('').slice(0, 2).toUpperCase()}
+                                  </AvatarFallback>
+                                </Avatar>
+                              ) : (
+                                <Avatar className="h-10 w-10 sm:h-12 sm:w-12 shrink-0 bg-gray-200">
+                                  <AvatarFallback className="text-xs">
+                                    {team.name.split(' ').map(n => n[0]).join('').slice(0, 2).toUpperCase()}
+                                  </AvatarFallback>
+                                </Avatar>
+                              )}
+                              <div className="flex-1 min-w-0 text-center sm:text-left">
+                                <CardTitle className="text-base sm:text-lg truncate">{team.name}</CardTitle>
+                                <CardDescription className="text-xs break-words sm:break-normal">
+                                  {team.country} • Founded {team.founded || 'N/A'}
+                                </CardDescription>
+                              </div>
+                            </div>
+                          </CardHeader>
+                          <CardContent>
+                            <div className="flex items-center gap-2 mb-3">
+                              <input type="checkbox" checked={selectedTeams.includes(team.id)} onChange={() => handleTeamToggle(team.id)} className="rounded border-gray-300 text-blue-600 focus:ring-blue-500" />
+                              <span className="text-sm">{selectedTeams.includes(team.id) ? 'Selected' : 'Select team'}</span>
+                            </div>
+                            <div className="flex justify-between items-center">
+                              <div className="text-sm text-gray-600">
+                                <div className="flex items-center">
+                                  <TrendingUp className="h-4 w-4 mr-1" />
+                                  {team.current_loaned_out_count} active loans
+                                </div>
+                              </div>
+                              <Button size="sm" variant="outline" onClick={(e) => { e.stopPropagation(); toggleExpand(team.id) }}>
+                                {expandedTeamId === team.id ? 'Hide Loans' : 'Show Loans'}
+                                <ArrowRight className="h-4 w-4 ml-1" />
+                              </Button>
+                            </div>
+                            {expandedTeamId === team.id && (
+                              <div className="mt-4 space-y-3">
+                                {loadingLoans[team.id] ? (
+                                  <div className="flex items-center justify-center py-8">
+                                    <Loader2 className="h-5 w-5 animate-spin text-gray-400 mr-2" />
+                                    <span className="text-sm text-gray-500">Loading loans...</span>
+                                  </div>
+                                ) : (teamLoans[team.id] || []).length === 0 ? (
+                                  <div className="text-sm text-gray-500 text-center py-4">No loans found.</div>
+                                ) : (
+                                  (teamLoans[team.id] || []).map((loan) => (
+                                    <div key={loan.id} className="border rounded-lg p-2.5 sm:p-3 bg-gray-50/50 hover:bg-gray-50 transition-colors">
+                                      <div className="flex items-start gap-2 sm:gap-3">
+                                        {/* Player Photo & Name - Clickable Link */}
+                                        <Link
+                                          to={`/players/${loan.player_id}`}
+                                          className="flex items-start gap-2 sm:gap-3 flex-1 min-w-0 group"
+                                          onClick={(e) => e.stopPropagation()}
+                                        >
+                                          <div className="shrink-0">
+                                            {loan.player_photo ? (
+                                              <Avatar className="h-10 w-10 sm:h-12 sm:w-12 ring-2 ring-transparent group-hover:ring-blue-300 transition-all">
+                                                <AvatarImage src={loan.player_photo} alt={`${loan.player_name} headshot`} />
+                                                <AvatarFallback className="text-xs bg-blue-100">
+                                                  {loan.player_name.split(' ').map(n => n[0]).join('').slice(0, 2).toUpperCase()}
+                                                </AvatarFallback>
+                                              </Avatar>
+                                            ) : (
+                                              <Avatar className="h-10 w-10 sm:h-12 sm:w-12 bg-blue-100 ring-2 ring-transparent group-hover:ring-blue-300 transition-all">
+                                                <AvatarFallback className="text-xs">
+                                                  {loan.player_name.split(' ').map(n => n[0]).join('').slice(0, 2).toUpperCase()}
+                                                </AvatarFallback>
+                                              </Avatar>
+                                            )}
+                                          </div>
+                                          <div className="flex-1 min-w-0">
+                                            <div className="font-medium text-sm mb-1 break-words text-gray-900 group-hover:text-blue-600 transition-colors">{loan.player_name}</div>
+                                          </div>
+                                        </Link>
+                                      </div>
 
-                                    {/* Player Info */}
-                                    <div className="ml-12 sm:ml-[60px]">
+                                      {/* Player Info */}
+                                      <div className="ml-12 sm:ml-[60px]">
 
                                         {/* Loan Team with Logo */}
                                         <div className="flex flex-wrap items-center gap-1.5 sm:gap-2 mb-2">
@@ -8485,87 +8465,87 @@ function TeamsPage() {
                                           </div>
                                         )}
                                       </div>
-                                  </div>
-                                ))
-                              )}
-                            </div>
-                          )}
-                        </CardContent>
-                      </Card>
-                    ))}
-                  </div>
-                </AccordionContent>
-              </AccordionItem>
-            ))}
-          </Accordion>
-        )}
+                                    </div>
+                                  ))
+                                )}
+                              </div>
+                            )}
+                          </CardContent>
+                        </Card>
+                      ))}
+                    </div>
+                  </AccordionContent>
+                </AccordionItem>
+              ))}
+            </Accordion>
+          )}
 
-        {/* Tracking Request Dialog */}
-        <Dialog open={trackingRequestState.open} onOpenChange={(open) => !open && closeRequestTracking()}>
-          <DialogContent className="sm:max-w-md">
-            <DialogHeader>
-              <DialogTitle className="flex items-center gap-2">
-                <TrendingUp className="h-5 w-5 text-blue-600" />
-                Request Team Tracking
-              </DialogTitle>
-              <DialogDescription>
-                {trackingRequestState.team && (
-                  <span>Request to track loan players for <strong>{trackingRequestState.team.name}</strong></span>
-                )}
-              </DialogDescription>
-            </DialogHeader>
-            <div className="space-y-4 py-4">
-              <div className="flex items-center gap-3 p-3 bg-muted/50 rounded-lg">
-                {trackingRequestState.team?.logo && (
-                  <Avatar className="h-12 w-12">
-                    <AvatarImage src={trackingRequestState.team.logo} alt={trackingRequestState.team.name} />
-                    <AvatarFallback className="bg-gray-200 text-xs">
-                      {trackingRequestState.team?.name?.split(' ').map(n => n[0]).join('').slice(0, 2).toUpperCase()}
-                    </AvatarFallback>
-                  </Avatar>
-                )}
-                <div>
-                  <p className="font-medium">{trackingRequestState.team?.name}</p>
-                  <p className="text-sm text-muted-foreground">{trackingRequestState.team?.league_name || trackingRequestState.team?.country}</p>
+          {/* Tracking Request Dialog */}
+          <Dialog open={trackingRequestState.open} onOpenChange={(open) => !open && closeRequestTracking()}>
+            <DialogContent className="sm:max-w-md">
+              <DialogHeader>
+                <DialogTitle className="flex items-center gap-2">
+                  <TrendingUp className="h-5 w-5 text-blue-600" />
+                  Request Team Tracking
+                </DialogTitle>
+                <DialogDescription>
+                  {trackingRequestState.team && (
+                    <span>Request to track loan players for <strong>{trackingRequestState.team.name}</strong></span>
+                  )}
+                </DialogDescription>
+              </DialogHeader>
+              <div className="space-y-4 py-4">
+                <div className="flex items-center gap-3 p-3 bg-muted/50 rounded-lg">
+                  {trackingRequestState.team?.logo && (
+                    <Avatar className="h-12 w-12">
+                      <AvatarImage src={trackingRequestState.team.logo} alt={trackingRequestState.team.name} />
+                      <AvatarFallback className="bg-gray-200 text-xs">
+                        {trackingRequestState.team?.name?.split(' ').map(n => n[0]).join('').slice(0, 2).toUpperCase()}
+                      </AvatarFallback>
+                    </Avatar>
+                  )}
+                  <div>
+                    <p className="font-medium">{trackingRequestState.team?.name}</p>
+                    <p className="text-sm text-muted-foreground">{trackingRequestState.team?.league_name || trackingRequestState.team?.country}</p>
+                  </div>
+                </div>
+                <div className="space-y-2">
+                  <Label htmlFor="tracking-reason">Why are you interested in this team? (optional)</Label>
+                  <Textarea
+                    id="tracking-reason"
+                    placeholder="e.g., I'm a fan of this club and want to follow their loan players..."
+                    value={trackingRequestState.reason}
+                    onChange={(e) => setTrackingRequestState(prev => ({ ...prev, reason: e.target.value }))}
+                    rows={3}
+                  />
+                </div>
+                <div className="space-y-2">
+                  <Label htmlFor="tracking-email">Your email (optional)</Label>
+                  <Input
+                    id="tracking-email"
+                    type="email"
+                    placeholder="you@example.com"
+                    value={trackingRequestState.email}
+                    onChange={(e) => setTrackingRequestState(prev => ({ ...prev, email: e.target.value }))}
+                  />
+                  <p className="text-xs text-muted-foreground">We'll notify you when we start tracking this team.</p>
                 </div>
               </div>
-              <div className="space-y-2">
-                <Label htmlFor="tracking-reason">Why are you interested in this team? (optional)</Label>
-                <Textarea
-                  id="tracking-reason"
-                  placeholder="e.g., I'm a fan of this club and want to follow their loan players..."
-                  value={trackingRequestState.reason}
-                  onChange={(e) => setTrackingRequestState(prev => ({ ...prev, reason: e.target.value }))}
-                  rows={3}
-                />
-              </div>
-              <div className="space-y-2">
-                <Label htmlFor="tracking-email">Your email (optional)</Label>
-                <Input
-                  id="tracking-email"
-                  type="email"
-                  placeholder="you@example.com"
-                  value={trackingRequestState.email}
-                  onChange={(e) => setTrackingRequestState(prev => ({ ...prev, email: e.target.value }))}
-                />
-                <p className="text-xs text-muted-foreground">We'll notify you when we start tracking this team.</p>
-              </div>
-            </div>
-            <DialogFooter className="gap-2 sm:gap-0">
-              <Button variant="outline" onClick={closeRequestTracking}>Cancel</Button>
-              <Button onClick={submitTrackingRequest} disabled={submittingTrackingRequest}>
-                {submittingTrackingRequest ? (
-                  <>
-                    <Loader2 className="h-4 w-4 mr-2 animate-spin" />
-                    Submitting...
-                  </>
-                ) : (
-                  'Submit Request'
-                )}
-              </Button>
-            </DialogFooter>
-          </DialogContent>
-        </Dialog>
+              <DialogFooter className="gap-2 sm:gap-0">
+                <Button variant="outline" onClick={closeRequestTracking}>Cancel</Button>
+                <Button onClick={submitTrackingRequest} disabled={submittingTrackingRequest}>
+                  {submittingTrackingRequest ? (
+                    <>
+                      <Loader2 className="h-4 w-4 mr-2 animate-spin" />
+                      Submitting...
+                    </>
+                  ) : (
+                    'Submit Request'
+                  )}
+                </Button>
+              </DialogFooter>
+            </DialogContent>
+          </Dialog>
         </div>
 
         {/* Sponsor Sidebar - visible on larger screens */}
@@ -9192,354 +9172,845 @@ function NewslettersPage() {
             )}
           </div>
           {focusedViewActive && (
-          <div className="mb-4 flex flex-col gap-4">
-            <div className="flex justify-start">
-              <Button variant="ghost" size="sm" onClick={() => navigate('/newsletters')}>
-                <ArrowLeft className="mr-2 h-4 w-4" /> Back to all newsletters
-              </Button>
-            </div>
-            {viewingJournalist && (
-              <Alert className="bg-blue-50 border-blue-200">
-                <div className="flex items-center gap-4">
-                  <Avatar className="h-10 w-10 border border-blue-200">
-                    <AvatarImage src={viewingJournalist.profile_image_url} />
-                    <AvatarFallback>{viewingJournalist.display_name?.substring(0, 2).toUpperCase()}</AvatarFallback>
-                  </Avatar>
-                  <div>
-                    <AlertDescription className="text-blue-900 font-medium">
-                      Viewing analysis by {viewingJournalist.display_name}
-                    </AlertDescription>
-                    <p className="text-sm text-blue-700">
-                      Showing only commentaries written by this journalist.
-                    </p>
-                  </div>
-                  <Button variant="outline" size="sm" className="ml-auto bg-white hover:bg-blue-50 text-blue-700 border-blue-200" onClick={() => navigate(`/journalists/${viewingJournalist.id}`)}>
-                    View Profile
-                  </Button>
-                </div>
-              </Alert>
-            )}
-          </div>
-        )}
-
-        {/* Team filter from URL param banner */}
-        {!focusedViewActive && teamIdParam && (() => {
-          const filteredTeam = allTeams.find(t => String(t.id) === teamIdParam)
-          const teamName = teamNameParam ? decodeURIComponent(teamNameParam) : filteredTeam?.name || 'this team'
-          return (
-            <div className="mb-6 rounded-xl bg-gradient-to-r from-slate-900 to-slate-800 p-4 sm:p-5 shadow-lg">
-              <div className="flex flex-col sm:flex-row sm:items-center gap-4">
-                {/* Team info */}
-                <div className="flex items-center gap-3 flex-1 min-w-0">
-                  {filteredTeam?.logo && (
-                    <div className="shrink-0 w-12 h-12 sm:w-14 sm:h-14 bg-white rounded-lg p-2 shadow-sm">
-                      <img 
-                        src={filteredTeam.logo} 
-                        alt={teamName}
-                        className="w-full h-full object-contain"
-                      />
-                    </div>
-                  )}
-                  <div className="min-w-0">
-                    <h3 className="text-white font-semibold text-lg sm:text-xl truncate">
-                      {teamName}
-                    </h3>
-                    <p className="text-slate-400 text-sm">
-                      Viewing all newsletters for this team
-                    </p>
-                  </div>
-                </div>
-                
-                {/* Action button */}
-                <Button 
-                  variant="secondary"
-                  size="sm"
-                  className="w-full sm:w-auto bg-white/10 hover:bg-white/20 text-white border-0 backdrop-blur-sm"
-                  onClick={() => navigate('/newsletters')}
-                >
-                  <XCircle className="w-4 h-4 mr-2" />
-                  Clear Filter
+            <div className="mb-4 flex flex-col gap-4">
+              <div className="flex justify-start">
+                <Button variant="ghost" size="sm" onClick={() => navigate('/newsletters')}>
+                  <ArrowLeft className="mr-2 h-4 w-4" /> Back to all newsletters
                 </Button>
               </div>
+              {viewingJournalist && (
+                <Alert className="bg-blue-50 border-blue-200">
+                  <div className="flex items-center gap-4">
+                    <Avatar className="h-10 w-10 border border-blue-200">
+                      <AvatarImage src={viewingJournalist.profile_image_url} />
+                      <AvatarFallback>{viewingJournalist.display_name?.substring(0, 2).toUpperCase()}</AvatarFallback>
+                    </Avatar>
+                    <div>
+                      <AlertDescription className="text-blue-900 font-medium">
+                        Viewing analysis by {viewingJournalist.display_name}
+                      </AlertDescription>
+                      <p className="text-sm text-blue-700">
+                        Showing only commentaries written by this journalist.
+                      </p>
+                    </div>
+                    <Button variant="outline" size="sm" className="ml-auto bg-white hover:bg-blue-50 text-blue-700 border-blue-200" onClick={() => navigate(`/journalists/${viewingJournalist.id}`)}>
+                      View Profile
+                    </Button>
+                  </div>
+                </Alert>
+              )}
             </div>
-          )
-        })()}
+          )}
 
-        {!focusedViewActive && (
-          <Card className="mb-6">
-            <CardHeader>
-              <CardTitle>Filter by Date Range</CardTitle>
-              <CardDescription>Select a date range to view newsletters from that period</CardDescription>
-            </CardHeader>
-            <CardContent>
-              <UniversalDatePicker onDateChange={setDateRange} />
-            </CardContent>
-          </Card>
-        )}
+          {/* Team filter from URL param banner */}
+          {!focusedViewActive && teamIdParam && (() => {
+            const filteredTeam = allTeams.find(t => String(t.id) === teamIdParam)
+            const teamName = teamNameParam ? decodeURIComponent(teamNameParam) : filteredTeam?.name || 'this team'
+            return (
+              <div className="mb-6 rounded-xl bg-gradient-to-r from-slate-900 to-slate-800 p-4 sm:p-5 shadow-lg">
+                <div className="flex flex-col sm:flex-row sm:items-center gap-4">
+                  {/* Team info */}
+                  <div className="flex items-center gap-3 flex-1 min-w-0">
+                    {filteredTeam?.logo && (
+                      <div className="shrink-0 w-12 h-12 sm:w-14 sm:h-14 bg-white rounded-lg p-2 shadow-sm">
+                        <img
+                          src={filteredTeam.logo}
+                          alt={teamName}
+                          className="w-full h-full object-contain"
+                        />
+                      </div>
+                    )}
+                    <div className="min-w-0">
+                      <h3 className="text-white font-semibold text-lg sm:text-xl truncate">
+                        {teamName}
+                      </h3>
+                      <p className="text-slate-400 text-sm">
+                        Viewing all newsletters for this team
+                      </p>
+                    </div>
+                  </div>
 
-        {!focusedViewActive && (
-          <Card className="mb-6">
-            <CardHeader>
-              <CardTitle>Filter by Team</CardTitle>
-              <CardDescription>
-                Jump to newsletters from teams you follow or browse by league and team.
-              </CardDescription>
-            </CardHeader>
-            <CardContent className="space-y-4">
-              {followedTeamOptions.length > 0 && (
-                <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
-                  <Label className="text-sm font-medium text-gray-700">Teams you follow</Label>
-                  <div className="flex w-full flex-col gap-2 sm:w-auto sm:flex-row sm:items-center">
+                  {/* Action button */}
+                  <Button
+                    variant="secondary"
+                    size="sm"
+                    className="w-full sm:w-auto bg-white/10 hover:bg-white/20 text-white border-0 backdrop-blur-sm"
+                    onClick={() => navigate('/newsletters')}
+                  >
+                    <XCircle className="w-4 h-4 mr-2" />
+                    Clear Filter
+                  </Button>
+                </div>
+              </div>
+            )
+          })()}
+
+          {!focusedViewActive && (
+            <Card className="mb-6">
+              <CardHeader>
+                <CardTitle>Filter by Date Range</CardTitle>
+                <CardDescription>Select a date range to view newsletters from that period</CardDescription>
+              </CardHeader>
+              <CardContent>
+                <UniversalDatePicker onDateChange={setDateRange} />
+              </CardContent>
+            </Card>
+          )}
+
+          {!focusedViewActive && (
+            <Card className="mb-6">
+              <CardHeader>
+                <CardTitle>Filter by Team</CardTitle>
+                <CardDescription>
+                  Jump to newsletters from teams you follow or browse by league and team.
+                </CardDescription>
+              </CardHeader>
+              <CardContent className="space-y-4">
+                {followedTeamOptions.length > 0 && (
+                  <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
+                    <Label className="text-sm font-medium text-gray-700">Teams you follow</Label>
+                    <div className="flex w-full flex-col gap-2 sm:w-auto sm:flex-row sm:items-center">
+                      <Select
+                        value={followedTeamFilter || 'all'}
+                        onValueChange={(value) => setFollowedTeamFilter(value === 'all' ? '' : value)}
+                      >
+                        <SelectTrigger className="sm:w-64">
+                          <SelectValue placeholder="All followed teams" />
+                        </SelectTrigger>
+                        <SelectContent>
+                          <SelectItem value="all">All followed teams</SelectItem>
+                          {followedTeamOptions.map((team) => (
+                            <SelectItem key={team.id} value={team.id}>{team.name}</SelectItem>
+                          ))}
+                        </SelectContent>
+                      </Select>
+                    </div>
+                  </div>
+                )}
+
+                <div className="space-y-2">
+                  <Label className="text-sm font-medium text-gray-700">Browse by league</Label>
+                  <div className="flex flex-col gap-2 sm:flex-row sm:items-center">
                     <Select
-                      value={followedTeamFilter || 'all'}
-                      onValueChange={(value) => setFollowedTeamFilter(value === 'all' ? '' : value)}
+                      value={leagueFilter || 'all'}
+                      onValueChange={(value) => setLeagueFilter(value === 'all' ? '' : value)}
                     >
                       <SelectTrigger className="sm:w-64">
-                        <SelectValue placeholder="All followed teams" />
+                        <SelectValue placeholder="All leagues" />
                       </SelectTrigger>
                       <SelectContent>
-                        <SelectItem value="all">All followed teams</SelectItem>
-                        {followedTeamOptions.map((team) => (
+                        <SelectItem value="all">All leagues</SelectItem>
+                        {leagueOptions.map((league) => (
+                          <SelectItem key={league} value={league}>{league}</SelectItem>
+                        ))}
+                      </SelectContent>
+                    </Select>
+                    <Select
+                      value={teamFilter || 'all'}
+                      onValueChange={(value) => setTeamFilter(value === 'all' ? '' : value)}
+                      disabled={!leagueFilter || !teamsForSelectedLeague.length}
+                    >
+                      <SelectTrigger className="sm:w-64">
+                        <SelectValue placeholder={leagueFilter ? 'Select a team' : 'Select a league first'} />
+                      </SelectTrigger>
+                      <SelectContent>
+                        <SelectItem value="all">All teams in league</SelectItem>
+                        {teamsForSelectedLeague.map((team) => (
                           <SelectItem key={team.id} value={team.id}>{team.name}</SelectItem>
                         ))}
                       </SelectContent>
                     </Select>
                   </div>
                 </div>
-              )}
 
-              <div className="space-y-2">
-                <Label className="text-sm font-medium text-gray-700">Browse by league</Label>
-                <div className="flex flex-col gap-2 sm:flex-row sm:items-center">
-                  <Select
-                    value={leagueFilter || 'all'}
-                    onValueChange={(value) => setLeagueFilter(value === 'all' ? '' : value)}
-                  >
-                    <SelectTrigger className="sm:w-64">
-                      <SelectValue placeholder="All leagues" />
-                    </SelectTrigger>
-                    <SelectContent>
-                      <SelectItem value="all">All leagues</SelectItem>
-                      {leagueOptions.map((league) => (
-                        <SelectItem key={league} value={league}>{league}</SelectItem>
-                      ))}
-                    </SelectContent>
-                  </Select>
-                  <Select
-                    value={teamFilter || 'all'}
-                    onValueChange={(value) => setTeamFilter(value === 'all' ? '' : value)}
-                    disabled={!leagueFilter || !teamsForSelectedLeague.length}
-                  >
-                    <SelectTrigger className="sm:w-64">
-                      <SelectValue placeholder={leagueFilter ? 'Select a team' : 'Select a league first'} />
-                    </SelectTrigger>
-                    <SelectContent>
-                      <SelectItem value="all">All teams in league</SelectItem>
-                      {teamsForSelectedLeague.map((team) => (
-                        <SelectItem key={team.id} value={team.id}>{team.name}</SelectItem>
-                      ))}
-                    </SelectContent>
-                  </Select>
-                </div>
-              </div>
-
-              <div className="flex flex-wrap items-center justify-between gap-2 text-sm text-gray-600">
-                <span>{filtersActive ? 'Filters applied' : 'No team filters applied'}</span>
-                <Button variant="ghost" size="sm" onClick={clearFilters} disabled={!filtersActive}>
-                  Clear filters
-                </Button>
-              </div>
-              {auth.token && trackedTeamIds.length > 0 && (
-                <div className="flex flex-wrap items-center justify-between gap-2 rounded-md bg-gray-50 p-3 text-sm text-gray-700 border border-gray-200">
-                  <span>You’re following {trackedTeamIds.length} team{trackedTeamIds.length === 1 ? '' : 's'}.</span>
-                  <Button
-                    variant="outline"
-                    size="sm"
-                    onClick={async () => {
-                      try {
-                        const resp = await APIService.unsubscribeEmail({ email: auth.email, team_ids: trackedTeamIds })
-                        const removed = resp?.count ?? 0
-                        setTrackedTeamIds([])
-                        setMessage({ type: 'success', text: removed ? `Unsubscribed from ${removed} team${removed === 1 ? '' : 's'}.` : 'No active subscriptions were found.' })
-                      } catch (error) {
-                        console.error('Failed to unsubscribe', error)
-                        const detail = error?.body?.error || error.message || 'Failed to unsubscribe.'
-                        setMessage({ type: 'error', text: detail })
-                      }
-                    }}
-                  >
-                    Unsubscribe from all followed teams
+                <div className="flex flex-wrap items-center justify-between gap-2 text-sm text-gray-600">
+                  <span>{filtersActive ? 'Filters applied' : 'No team filters applied'}</span>
+                  <Button variant="ghost" size="sm" onClick={clearFilters} disabled={!filtersActive}>
+                    Clear filters
                   </Button>
                 </div>
-              )}
-            </CardContent>
-          </Card>
-        )}
+                {auth.token && trackedTeamIds.length > 0 && (
+                  <div className="flex flex-wrap items-center justify-between gap-2 rounded-md bg-gray-50 p-3 text-sm text-gray-700 border border-gray-200">
+                    <span>You’re following {trackedTeamIds.length} team{trackedTeamIds.length === 1 ? '' : 's'}.</span>
+                    <Button
+                      variant="outline"
+                      size="sm"
+                      onClick={async () => {
+                        try {
+                          const resp = await APIService.unsubscribeEmail({ email: auth.email, team_ids: trackedTeamIds })
+                          const removed = resp?.count ?? 0
+                          setTrackedTeamIds([])
+                          setMessage({ type: 'success', text: removed ? `Unsubscribed from ${removed} team${removed === 1 ? '' : 's'}.` : 'No active subscriptions were found.' })
+                        } catch (error) {
+                          console.error('Failed to unsubscribe', error)
+                          const detail = error?.body?.error || error.message || 'Failed to unsubscribe.'
+                          setMessage({ type: 'error', text: detail })
+                        }
+                      }}
+                    >
+                      Unsubscribe from all followed teams
+                    </Button>
+                  </div>
+                )}
+              </CardContent>
+            </Card>
+          )}
 
-        {loading ? (
-          <div className="text-center py-12">
-            <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-blue-600 mx-auto"></div>
-            <p className="mt-4 text-gray-600">Loading newsletters...</p>
-          </div>
-        ) : newsletters.length === 0 ? (
-          <div className="text-center py-12">
-            <FileText className="h-12 w-12 text-gray-400 mx-auto mb-4" />
-            <h3 className="text-lg font-medium text-gray-900 mb-2">No newsletters yet</h3>
-            <p className="text-gray-600">
-              Newsletters will appear here once they are generated and published.
-            </p>
-          </div>
-        ) : (focusedViewActive && !loading && !focusedNewsletterFound) ? (
-          <div className="text-center py-12">
-            <Alert className="max-w-lg mx-auto">
-              <AlertCircle className="h-4 w-4" />
-              <AlertDescription>
-                We couldn't find that newsletter. It may have been unpublished or removed. Return to the full list to browse other issues.
-              </AlertDescription>
-            </Alert>
-          </div>
-        ) : (!focusedViewActive && filteredNewsletters.length === 0) ? (
-          <div className="text-center py-12">
-            <FileText className="h-12 w-12 text-gray-400 mx-auto mb-4" />
-            <h3 className="text-lg font-medium text-gray-900 mb-2">No newsletters match your filters</h3>
-            <p className="text-gray-600 mb-4">
-              Try adjusting the team filters or clearing them to see all newsletters.
-            </p>
-            <Button variant="outline" onClick={clearFilters} disabled={!filtersActive}>
-              Clear filters
-            </Button>
-          </div>
-        ) : (
-          <div className="space-y-6">
-            {!focusedViewActive && trackedTeamIdSet.size > 0 && (
-              <div className="rounded-md border border-blue-100 bg-blue-50 px-3 py-2 text-sm text-blue-700">
-                Newsletters from teams you follow appear first.
-              </div>
-            )}
-            {displayNewsletters.map((newsletter) => {
-              const isTrackedTeam = trackedTeamIdSet.size > 0 && typeof newsletter.team_id !== 'undefined' && trackedTeamIdSet.has(String(newsletter.team_id))
-              return (
-                <Card key={newsletter.id}>
-                  <CardHeader className="space-y-3">
-                    <div className="flex flex-col sm:flex-row sm:justify-between sm:items-start gap-3">
-                      <div className="min-w-0 flex-1">
-                        <CardTitle className="text-lg sm:text-xl break-words">{newsletter.title}</CardTitle>
-                        <CardDescription className="mt-1">
-                          {newsletter.team_name} • {newsletter.newsletter_type} newsletter
-                        </CardDescription>
-                      </div>
-                      <div className="flex flex-wrap items-center gap-2">
-                        {isTrackedTeam && (
-                          <Badge variant="outline" className="border-green-300 bg-green-50 text-green-700">
-                            Tracking
+          {loading ? (
+            <div className="text-center py-12">
+              <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-blue-600 mx-auto"></div>
+              <p className="mt-4 text-gray-600">Loading newsletters...</p>
+            </div>
+          ) : newsletters.length === 0 ? (
+            <div className="text-center py-12">
+              <FileText className="h-12 w-12 text-gray-400 mx-auto mb-4" />
+              <h3 className="text-lg font-medium text-gray-900 mb-2">No newsletters yet</h3>
+              <p className="text-gray-600">
+                Newsletters will appear here once they are generated and published.
+              </p>
+            </div>
+          ) : (focusedViewActive && !loading && !focusedNewsletterFound) ? (
+            <div className="text-center py-12">
+              <Alert className="max-w-lg mx-auto">
+                <AlertCircle className="h-4 w-4" />
+                <AlertDescription>
+                  We couldn't find that newsletter. It may have been unpublished or removed. Return to the full list to browse other issues.
+                </AlertDescription>
+              </Alert>
+            </div>
+          ) : (!focusedViewActive && filteredNewsletters.length === 0) ? (
+            <div className="text-center py-12">
+              <FileText className="h-12 w-12 text-gray-400 mx-auto mb-4" />
+              <h3 className="text-lg font-medium text-gray-900 mb-2">No newsletters match your filters</h3>
+              <p className="text-gray-600 mb-4">
+                Try adjusting the team filters or clearing them to see all newsletters.
+              </p>
+              <Button variant="outline" onClick={clearFilters} disabled={!filtersActive}>
+                Clear filters
+              </Button>
+            </div>
+          ) : (
+            <div className="space-y-6">
+              {!focusedViewActive && trackedTeamIdSet.size > 0 && (
+                <div className="rounded-md border border-blue-100 bg-blue-50 px-3 py-2 text-sm text-blue-700">
+                  Newsletters from teams you follow appear first.
+                </div>
+              )}
+              {displayNewsletters.map((newsletter) => {
+                const isTrackedTeam = trackedTeamIdSet.size > 0 && typeof newsletter.team_id !== 'undefined' && trackedTeamIdSet.has(String(newsletter.team_id))
+                return (
+                  <Card key={newsletter.id}>
+                    <CardHeader className="space-y-3">
+                      <div className="flex flex-col sm:flex-row sm:justify-between sm:items-start gap-3">
+                        <div className="min-w-0 flex-1">
+                          <CardTitle className="text-lg sm:text-xl break-words">{newsletter.title}</CardTitle>
+                          <CardDescription className="mt-1">
+                            {newsletter.team_name} • {newsletter.newsletter_type} newsletter
+                          </CardDescription>
+                        </div>
+                        <div className="flex flex-wrap items-center gap-2">
+                          {isTrackedTeam && (
+                            <Badge variant="outline" className="border-green-300 bg-green-50 text-green-700">
+                              Tracking
+                            </Badge>
+                          )}
+                          <Badge variant="secondary">
+                            {new Date(newsletter.published_date).toLocaleDateString()}
                           </Badge>
-                        )}
-                        <Badge variant="secondary">
-                          {new Date(newsletter.published_date).toLocaleDateString()}
-                        </Badge>
-                        <Button
-                          size="sm"
-                          variant="outline"
-                          onClick={() => {
-                            const target = buildNewsletterUrl(newsletter)
-                            if (target) navigate(target)
-                          }}
-                          disabled={focusedViewActive && expandedId === newsletter.id}
-                        >
-                          {focusedViewActive ? 'Viewing details' : 'Open detail view'}
-                        </Button>
-                        {!focusedViewActive && (
                           <Button
                             size="sm"
-                            variant="ghost"
-                            onClick={() => setExpandedId(expandedId === newsletter.id ? null : newsletter.id)}
+                            variant="outline"
+                            onClick={() => {
+                              const target = buildNewsletterUrl(newsletter)
+                              if (target) navigate(target)
+                            }}
+                            disabled={focusedViewActive && expandedId === newsletter.id}
                           >
-                            {expandedId === newsletter.id ? 'Hide preview' : 'Quick preview'}
+                            {focusedViewActive ? 'Viewing details' : 'Open detail view'}
                           </Button>
+                          {!focusedViewActive && (
+                            <Button
+                              size="sm"
+                              variant="ghost"
+                              onClick={() => setExpandedId(expandedId === newsletter.id ? null : newsletter.id)}
+                            >
+                              {expandedId === newsletter.id ? 'Hide preview' : 'Quick preview'}
+                            </Button>
+                          )}
+                        </div>
+                      </div>
+                    </CardHeader>
+                    <CardContent className="overflow-hidden">
+                      <div className="text-sm text-gray-500 mb-2">
+                        <Calendar className="h-4 w-4 inline mr-1" />
+                        {newsletter.week_start_date && newsletter.week_end_date && (
+                          `${new Date(newsletter.week_start_date).toLocaleDateString()} - ${new Date(newsletter.week_end_date).toLocaleDateString()}`
                         )}
                       </div>
-                    </div>
-                  </CardHeader>
-                  <CardContent className="overflow-hidden">
-                    <div className="text-sm text-gray-500 mb-2">
-                      <Calendar className="h-4 w-4 inline mr-1" />
-                      {newsletter.week_start_date && newsletter.week_end_date && (
-                        `${new Date(newsletter.week_start_date).toLocaleDateString()} - ${new Date(newsletter.week_end_date).toLocaleDateString()}`
-                      )}
-                    </div>
-                    {(expandedId === newsletter.id || focusedViewActive) ? (
-                      <NewsletterWriterProvider newsletterId={focusedNewsletterId || newsletter.id}>
-                      <div className="max-w-none space-y-6">
-                        {/* Writer Bar & Summary Commentaries - Always show in focused view */}
-                        {focusedViewActive && (
-                          <WriterHeaderSection />
-                        )}
-                        
-                        {/* Prefer JSON-parsed content over pre-rendered HTML so InlinePlayerWriteups can render inside player cards */}
-                        {(newsletter.enriched_content && typeof newsletter.enriched_content === 'object') || newsletter.content ? (
-                          (() => {
-                            try {
-                              const obj = (newsletter.enriched_content && typeof newsletter.enriched_content === 'object')
-                                ? newsletter.enriched_content
-                                : JSON.parse(newsletter.content)
-                              const detailedSections = Array.isArray(obj.sections)
-                                ? obj.sections.filter((section) => ((section?.title || '').trim().toLowerCase()) !== 'what the internet is saying')
-                                : []
-                              return (
-                                <div className="space-y-6 newsletter-content overflow-hidden">
-                                  {/* Newsletter Header */}
-                                  <div className="bg-gradient-to-r from-blue-50 to-gray-50 p-4 sm:p-6 rounded-lg border-l-4 border-blue-500">
-                                    <h2 className="text-xl sm:text-2xl font-bold text-gray-900 mb-3 break-words">{obj.title || newsletter.title}</h2>
-                                    {obj.range && (
-                                      <div className="text-sm text-gray-600 mb-3">
-                                        📅 Week: {obj.range[0]} - {obj.range[1]}
+                      {(expandedId === newsletter.id || focusedViewActive) ? (
+                        <NewsletterWriterProvider newsletterId={focusedNewsletterId || newsletter.id}>
+                          <div className="max-w-none space-y-6">
+                            {/* Writer Bar & Summary Commentaries - Always show in focused view */}
+                            {focusedViewActive && (
+                              <WriterHeaderSection />
+                            )}
+
+                            {/* Prefer JSON-parsed content over pre-rendered HTML so InlinePlayerWriteups can render inside player cards */}
+                            {(newsletter.enriched_content && typeof newsletter.enriched_content === 'object') || newsletter.content ? (
+                              (() => {
+                                try {
+                                  const obj = (newsletter.enriched_content && typeof newsletter.enriched_content === 'object')
+                                    ? newsletter.enriched_content
+                                    : JSON.parse(newsletter.content)
+                                  const detailedSections = Array.isArray(obj.sections)
+                                    ? obj.sections.filter((section) => ((section?.title || '').trim().toLowerCase()) !== 'what the internet is saying')
+                                    : []
+                                  return (
+                                    <div className="space-y-6 newsletter-content overflow-hidden">
+                                      {/* Newsletter Header */}
+                                      <div className="bg-gradient-to-r from-blue-50 to-gray-50 p-4 sm:p-6 rounded-lg border-l-4 border-blue-500">
+                                        <h2 className="text-xl sm:text-2xl font-bold text-gray-900 mb-3 break-words">{obj.title || newsletter.title}</h2>
+                                        {obj.range && (
+                                          <div className="text-sm text-gray-600 mb-3">
+                                            📅 Week: {obj.range[0]} - {obj.range[1]}
+                                          </div>
+                                        )}
+                                        {obj.summary && (
+                                          <div className="text-gray-700 leading-relaxed text-base sm:text-lg break-words">
+                                            {obj.summary}
+                                          </div>
+                                        )}
                                       </div>
+
+                                      {/* Key Highlights Section */}
+                                      {obj.highlights && Array.isArray(obj.highlights) && obj.highlights.length > 0 && (
+                                        <div className="bg-yellow-50 p-5 rounded-lg border-l-4 border-yellow-400">
+                                          <h3 className="text-lg font-bold text-gray-900 mb-3 flex items-center">
+                                            ⭐ Key Highlights
+                                          </h3>
+                                          <ul className="space-y-2">
+                                            {obj.highlights.map((highlight, idx) => (
+                                              <li key={idx} className="flex items-start">
+                                                <span className="bg-yellow-400 text-yellow-900 rounded-full w-6 h-6 flex items-center justify-center text-xs font-bold mr-3 mt-0.5 flex-shrink-0">
+                                                  {idx + 1}
+                                                </span>
+                                                <span className="text-gray-700">{highlight}</span>
+                                              </li>
+                                            ))}
+                                          </ul>
+                                        </div>
+                                      )}
+
+                                      {/* Performance Stats */}
+                                      {obj.by_numbers && (
+                                        <div className="bg-gray-50 p-5 rounded-lg">
+                                          <h3 className="text-lg font-bold text-gray-900 mb-4 flex items-center">
+                                            📊 By The Numbers
+                                          </h3>
+                                          <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                                            {obj.by_numbers.minutes_leaders && obj.by_numbers.minutes_leaders.length > 0 && (
+                                              <div className="bg-white p-4 rounded-lg shadow-sm border">
+                                                <h4 className="font-semibold text-gray-900 mb-3 flex items-center">
+                                                  ⏱️ Minutes Leaders
+                                                </h4>
+                                                <div className="space-y-2">
+                                                  {obj.by_numbers.minutes_leaders.map((player, idx) => (
+                                                    <div key={idx} className="flex justify-between items-center">
+                                                      <span className="font-medium text-gray-700">{player.player}</span>
+                                                      <span className="bg-blue-100 text-blue-800 px-2 py-1 rounded text-sm font-bold">
+                                                        {player.minutes}'
+                                                      </span>
+                                                    </div>
+                                                  ))}
+                                                </div>
+                                              </div>
+                                            )}
+
+                                            {obj.by_numbers.ga_leaders && obj.by_numbers.ga_leaders.length > 0 && (
+                                              <div className="bg-white p-4 rounded-lg shadow-sm border">
+                                                <h4 className="font-semibold text-gray-900 mb-3 flex items-center">
+                                                  ⚽ Goal Contributors
+                                                </h4>
+                                                <div className="space-y-2">
+                                                  {obj.by_numbers.ga_leaders.map((player, idx) => (
+                                                    <div key={idx} className="flex justify-between items-center">
+                                                      <span className="font-medium text-gray-700">{player.player}</span>
+                                                      <div className="flex space-x-1">
+                                                        <span className="bg-green-100 text-green-800 px-2 py-1 rounded text-sm font-bold">
+                                                          {player.g}G
+                                                        </span>
+                                                        <span className="bg-purple-100 text-purple-800 px-2 py-1 rounded text-sm font-bold">
+                                                          {player.a}A
+                                                        </span>
+                                                      </div>
+                                                    </div>
+                                                  ))}
+                                                </div>
+                                              </div>
+                                            )}
+                                          </div>
+                                        </div>
+                                      )}
+
+                                      {/* Detailed Sections */}
+                                      {detailedSections.length > 0 && (
+                                        <div className="space-y-4">
+                                          <h3 className="text-lg font-bold text-gray-900 flex items-center">
+                                            📋 Detailed Report
+                                          </h3>
+                                          {detailedSections.map((sec, idx) => (
+                                            <div key={idx} className="bg-white border rounded-lg overflow-hidden shadow-sm">
+                                              {sec.title && (
+                                                <div className="bg-gray-100 px-5 py-3 border-b">
+                                                  <h4 className="font-semibold text-gray-900">{sec.title}</h4>
+                                                </div>
+                                              )}
+                                              <div className="p-5">
+                                                {sec.content && (
+                                                  <div className="text-gray-700 mb-4">{sec.content}</div>
+                                                )}
+                                                {sec.items && Array.isArray(sec.items) && (
+                                                  <div className="space-y-4">
+                                                    {sec.items.map((it, j) => (
+                                                      <div key={j} className="border-l-4 border-blue-200 pl-4 py-2">
+                                                        <div className="flex items-start gap-3 mb-3">
+                                                          {/* Player Photo */}
+                                                          {it.player_photo && (
+                                                            <img
+                                                              src={it.player_photo}
+                                                              alt={it.player_name}
+                                                              className="w-14 h-14 rounded-full object-cover bg-gray-100 flex-shrink-0 border-2 border-white shadow-sm"
+                                                            />
+                                                          )}
+                                                          <div className="flex-1">
+                                                            <div className="flex flex-wrap items-center gap-2 mb-1">
+                                                              {it.player_name && (
+                                                                (it.player_api_id || it.player_id) ? (
+                                                                  <Link
+                                                                    to={`/players/${it.player_api_id || it.player_id}`}
+                                                                    className="font-semibold text-lg text-gray-900 hover:text-blue-600 hover:underline transition-colors"
+                                                                  >
+                                                                    {it.player_name}
+                                                                  </Link>
+                                                                ) : (
+                                                                  <span className="font-semibold text-lg text-gray-900">
+                                                                    {it.player_name}
+                                                                  </span>
+                                                                )
+                                                              )}
+                                                              {it.stats && (
+                                                                <div className="flex gap-1">
+                                                                  {it.stats.goals > 0 && (
+                                                                    <span className="bg-green-100 text-green-800 px-2 py-1 rounded text-xs">
+                                                                      {it.stats.goals}G
+                                                                    </span>
+                                                                  )}
+                                                                  {it.stats.assists > 0 && (
+                                                                    <span className="bg-purple-100 text-purple-800 px-2 py-1 rounded text-xs">
+                                                                      {it.stats.assists}A
+                                                                    </span>
+                                                                  )}
+                                                                  {it.stats.minutes > 0 && (
+                                                                    <span className="bg-blue-100 text-blue-800 px-2 py-1 rounded text-xs">
+                                                                      {it.stats.minutes}'
+                                                                    </span>
+                                                                  )}
+                                                                </div>
+                                                              )}
+                                                            </div>
+                                                            {/* Loan Team with Logo */}
+                                                            {(it.loan_team || it.loan_team_name) && (
+                                                              <div className="flex items-center gap-2 text-sm text-gray-600">
+                                                                {it.loan_team_logo && (
+                                                                  <img
+                                                                    src={it.loan_team_logo}
+                                                                    alt={it.loan_team || it.loan_team_name}
+                                                                    className="w-5 h-5 rounded-full object-cover bg-gray-100"
+                                                                  />
+                                                                )}
+                                                                <span>→ {it.loan_team || it.loan_team_name}</span>
+                                                              </div>
+                                                            )}
+                                                          </div>
+                                                        </div>
+                                                        {it.week_summary && (
+                                                          <p className="text-gray-700 leading-relaxed">{it.week_summary}</p>
+                                                        )}
+
+                                                        {/* This Week's Matches with Opponent Logos */}
+                                                        {it.matches && Array.isArray(it.matches) && it.matches.length > 0 && (
+                                                          <div className="mt-4 p-3 bg-gray-50 rounded-lg border border-gray-200">
+                                                            <h5 className="text-sm font-semibold text-gray-700 mb-3 flex items-center gap-1">
+                                                              ⚽ This Week's Matches
+                                                            </h5>
+                                                            <div className="space-y-2">
+                                                              {it.matches.map((match, mIdx) => (
+                                                                <div key={mIdx} className="flex items-center gap-3 p-2 bg-white rounded border border-gray-100">
+                                                                  {match.opponent_logo && (
+                                                                    <img
+                                                                      src={match.opponent_logo}
+                                                                      alt={match.opponent}
+                                                                      className="w-8 h-8 rounded-full object-cover bg-gray-100 flex-shrink-0"
+                                                                    />
+                                                                  )}
+                                                                  <div className="flex-1 min-w-0">
+                                                                    <div className="font-medium text-gray-900 text-sm">
+                                                                      {match.home ? 'vs' : '@'} {match.opponent}
+                                                                    </div>
+                                                                    <div className="text-xs text-gray-500">
+                                                                      {match.competition}{match.date && ` • ${new Date(match.date).toLocaleDateString()}`}
+                                                                    </div>
+                                                                  </div>
+                                                                  {match.score && (
+                                                                    <span className={`px-2 py-1 rounded text-sm font-bold flex-shrink-0 ${match.result === 'W' ? 'bg-green-100 text-green-800' :
+                                                                      match.result === 'D' ? 'bg-gray-100 text-gray-700' :
+                                                                        'bg-red-100 text-red-800'
+                                                                      }`}>
+                                                                      {match.score.home ?? 0}-{match.score.away ?? 0}
+                                                                    </span>
+                                                                  )}
+                                                                </div>
+                                                              ))}
+                                                            </div>
+                                                          </div>
+                                                        )}
+
+                                                        {/* Fixtures (Upcoming & Results) */}
+                                                        {it.upcoming_fixtures && Array.isArray(it.upcoming_fixtures) && it.upcoming_fixtures.length > 0 && (
+                                                          <div className="mt-4 p-3 bg-blue-50 rounded-lg border border-blue-200">
+                                                            <h5 className="text-sm font-semibold text-blue-900 mb-3 flex items-center gap-1">
+                                                              📅 Look Ahead: Fixtures
+                                                            </h5>
+                                                            <div className="space-y-2">
+                                                              {it.upcoming_fixtures.map((fixture, fIdx) => {
+                                                                const isCompleted = fixture.status === 'completed' && fixture.result
+                                                                const resultColors = {
+                                                                  W: 'bg-green-50 border-green-200',
+                                                                  L: 'bg-red-50 border-red-200',
+                                                                  D: 'bg-gray-100 border-gray-300'
+                                                                }
+                                                                const badgeColors = {
+                                                                  W: 'bg-green-500 text-white',
+                                                                  L: 'bg-red-500 text-white',
+                                                                  D: 'bg-gray-500 text-white'
+                                                                }
+                                                                const baseClass = isCompleted
+                                                                  ? resultColors[fixture.result] || 'bg-white/60 border-blue-100'
+                                                                  : 'bg-white/60 border-blue-100'
+
+                                                                return (
+                                                                  <div key={fIdx} className={`flex items-center gap-3 p-2 rounded border ${baseClass}`}>
+                                                                    {fixture.opponent_logo && (
+                                                                      <img
+                                                                        src={fixture.opponent_logo}
+                                                                        alt={fixture.opponent}
+                                                                        className="w-7 h-7 rounded-full object-cover bg-gray-100 flex-shrink-0"
+                                                                      />
+                                                                    )}
+                                                                    <div className="flex-1 min-w-0">
+                                                                      <div className="font-medium text-gray-900 text-sm flex items-center gap-2">
+                                                                        {fixture.is_home ? 'vs' : '@'} {fixture.opponent}
+                                                                        {isCompleted && (
+                                                                          <span className="text-sm font-bold">
+                                                                            {fixture.team_score}-{fixture.opponent_score}
+                                                                          </span>
+                                                                        )}
+                                                                      </div>
+                                                                      <div className="text-xs text-gray-500">
+                                                                        {fixture.competition && `${fixture.competition} • `}
+                                                                        {fixture.date && new Date(fixture.date).toLocaleDateString()}
+                                                                      </div>
+                                                                    </div>
+                                                                    {isCompleted && (
+                                                                      <span className={`text-xs font-bold px-2 py-0.5 rounded ${badgeColors[fixture.result] || 'bg-gray-400 text-white'}`}>
+                                                                        {fixture.result}
+                                                                      </span>
+                                                                    )}
+                                                                  </div>
+                                                                )
+                                                              })}
+                                                            </div>
+                                                          </div>
+                                                        )}
+                                                        {it.can_fetch_stats && (!it.upcoming_fixtures || it.upcoming_fixtures.length === 0) && (
+                                                          <div className="mt-4 p-2 bg-gray-50 border-l-4 border-gray-300 rounded">
+                                                            <p className="text-xs text-gray-500 italic">No scheduled fixtures in the coming week</p>
+                                                          </div>
+                                                        )}
+
+                                                        {it.match_notes && Array.isArray(it.match_notes) && it.match_notes.length > 0 && (
+                                                          <ul className="mt-2 list-disc space-y-1 pl-5 text-sm text-gray-600">
+                                                            {it.match_notes.map((note, noteIndex) => (
+                                                              <li key={noteIndex}>{note}</li>
+                                                            ))}
+                                                          </ul>
+                                                        )}
+                                                        {(() => {
+                                                          const embedUrl = buildSofascoreEmbedUrl(it.sofascore_player_id ?? it.sofascoreId)
+                                                          if (!embedUrl) return null
+                                                          return (
+                                                            <div className="mt-3">
+                                                              <iframe
+                                                                title={`Sofascore profile for ${it.player_name || it.player_id}`}
+                                                                src={embedUrl}
+                                                                frameBorder="0"
+                                                                scrolling="no"
+                                                                className="h-[568px] w-full max-w-xs rounded-md border"
+                                                              />
+                                                              <p className="mt-2 text-xs text-gray-500">
+                                                                Player stats provided by{' '}
+                                                                <a
+                                                                  href="https://sofascore.com/"
+                                                                  target="_blank"
+                                                                  rel="noopener"
+                                                                  className="text-blue-600 hover:underline"
+                                                                >
+                                                                  Sofascore
+                                                                </a>
+                                                              </p>
+                                                            </div>
+                                                          )
+                                                        })()}
+                                                        {it.links && Array.isArray(it.links) && it.links.length > 0 && (
+                                                          <div className="mt-3 space-y-2">
+                                                            <div className="text-xs font-semibold uppercase tracking-wide text-gray-500">Further reading</div>
+                                                            <ul className="space-y-1 text-sm text-blue-600">
+                                                              {it.links.map((link, linkIdx) => {
+                                                                const linkObj = typeof link === 'string' ? { url: link, title: null } : link
+                                                                if (!linkObj || !linkObj.url) return null
+                                                                const label = linkObj.title || linkObj.url
+                                                                return (
+                                                                  <li key={linkIdx}>
+                                                                    <a
+                                                                      href={linkObj.url}
+                                                                      target="_blank"
+                                                                      rel="noreferrer"
+                                                                      className="inline-flex items-center gap-1 hover:underline"
+                                                                    >
+                                                                      <span>{label}</span>
+                                                                      <ArrowRight className="h-3.5 w-3.5" />
+                                                                    </a>
+                                                                  </li>
+                                                                )
+                                                              })}
+                                                            </ul>
+                                                          </div>
+                                                        )}
+
+                                                        {/* Inline Writer Commentaries for this player */}
+                                                        {focusedViewActive && (
+                                                          <InlinePlayerWriteups
+                                                            playerId={it.player_id}
+                                                            playerName={it.player_name}
+                                                          />
+                                                        )}
+                                                      </div>
+                                                    ))}
+                                                  </div>
+                                                )}
+                                              </div>
+                                            </div>
+                                          ))}
+                                        </div>
+                                      )}
+                                      {/* Fan Pulse Section */}
+                                    </div>
+                                  )
+                                } catch {
+                                  return (
+                                    <div className="prose max-w-none">
+                                      <div className="bg-gray-50 p-4 rounded-lg">
+                                        <h3 className="text-lg font-medium text-gray-900 mb-2">Newsletter Content</h3>
+                                        <div className="whitespace-pre-wrap text-gray-700">{newsletter.content}</div>
+                                      </div>
+                                    </div>
+                                  )
+                                }
+                              })()
+                            ) : newsletter.rendered?.web_html ? (
+                              /* Fallback to pre-rendered HTML only when no JSON content exists */
+                              <div
+                                dangerouslySetInnerHTML={{ __html: newsletter.rendered.web_html }}
+                                className="prose max-w-none newsletter-content"
+                              />
+                            ) : null}
+
+                            <div className="mt-10 space-y-4 border-t pt-6">
+                              <div className="flex flex-wrap items-center justify-between gap-2">
+                                <div className="flex items-center gap-2">
+                                  <MessageCircle className="h-5 w-5 text-blue-600" />
+                                  <h3 className="text-lg font-semibold">Comments</h3>
+                                  {(commentsByNewsletter[newsletter.id] || []).length > 0 && (
+                                    <Badge variant="secondary">{(commentsByNewsletter[newsletter.id] || []).length}</Badge>
+                                  )}
+                                </div>
+                                <Button
+                                  size="sm"
+                                  variant="ghost"
+                                  onClick={() => loadComments(newsletter.id, { force: true })}
+                                  disabled={commentsLoading[newsletter.id]}
+                                >
+                                  {commentsLoading[newsletter.id] && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
+                                  Refresh
+                                </Button>
+                              </div>
+                              {commentsError[newsletter.id] && (
+                                <div className="text-sm text-red-600">{commentsError[newsletter.id]}</div>
+                              )}
+                              {commentsLoading[newsletter.id] ? (
+                                <div className="flex items-center gap-2 text-sm text-gray-500">
+                                  <Loader2 className="h-4 w-4 animate-spin" />
+                                  Loading comments...
+                                </div>
+                              ) : (commentsByNewsletter[newsletter.id] || []).length === 0 ? (
+                                <div className="rounded-md border border-dashed bg-gray-50 p-4 text-sm text-gray-600">
+                                  No comments yet. Be the first to share your take.
+                                </div>
+                              ) : (
+                                <div className="space-y-3">
+                                  {(commentsByNewsletter[newsletter.id] || []).map((comment) => (
+                                    <div key={comment.id} className="rounded-md border bg-white p-4 shadow-sm">
+                                      <div className="flex flex-wrap items-center justify-between gap-2 text-xs text-muted-foreground">
+                                        <span className="text-sm font-semibold text-gray-900">
+                                          {comment.author_display_name || comment.author_name || 'GOL supporter'}
+                                        </span>
+                                        <span>{formatRelativeTime(comment.created_at)}</span>
+                                      </div>
+                                      <div className="mt-2 whitespace-pre-wrap text-sm text-gray-700">
+                                        {comment.body}
+                                      </div>
+                                    </div>
+                                  ))}
+                                </div>
+                              )}
+                              <div className="rounded-lg border bg-white p-4 shadow-sm space-y-3">
+                                {canComment ? (
+                                  <>
+                                    <div className="flex flex-wrap items-center gap-2 text-sm text-gray-600">
+                                      <span>Commenting as</span>
+                                      <span className="font-semibold text-gray-900">{auth.displayName || 'GOL supporter'}</span>
+                                      {auth.isAdmin && auth.hasApiKey && (
+                                        <Badge variant="outline" className="border-blue-200 text-blue-600">Admin</Badge>
+                                      )}
+                                      {!auth.displayNameConfirmed && (
+                                        <Badge variant="outline" className="border-amber-300 text-amber-700">Name pending</Badge>
+                                      )}
+                                      <Button type="button" variant="ghost" size="xs" onClick={toggleDisplayNameEdit}>
+                                        {displayNameEditing ? 'Cancel name edit' : 'Edit display name'}
+                                      </Button>
+                                    </div>
+                                    {displayNameEditing && (
+                                      <form
+                                        className="space-y-2"
+                                        onSubmit={(event) => {
+                                          event.preventDefault()
+                                          handleDisplayNameSave()
+                                        }}
+                                      >
+                                        <Input
+                                          value={displayNameInput}
+                                          onChange={(e) => setDisplayNameInput(e.target.value)}
+                                          maxLength={40}
+                                          placeholder="Choose a display name"
+                                        />
+                                        <div className="flex flex-wrap items-center gap-2">
+                                          <Button size="sm" type="submit" disabled={displayNameBusy}>
+                                            {displayNameBusy && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
+                                            Save
+                                          </Button>
+                                          <Button
+                                            size="sm"
+                                            variant="ghost"
+                                            type="button"
+                                            onClick={() => {
+                                              setDisplayNameEditing(false)
+                                              setDisplayNameInput(auth.displayName || '')
+                                              setDisplayNameStatus(null)
+                                            }}
+                                          >
+                                            Cancel
+                                          </Button>
+                                        </div>
+                                        {displayNameStatus && (
+                                          <p className={`text-xs ${displayNameStatus.type === 'error' ? 'text-red-600' : 'text-emerald-600'}`}>
+                                            {displayNameStatus.message}
+                                          </p>
+                                        )}
+                                      </form>
                                     )}
+                                    {!displayNameEditing && displayNameStatus && (
+                                      <p className={`text-xs ${displayNameStatus.type === 'error' ? 'text-red-600' : 'text-emerald-600'}`}>
+                                        {displayNameStatus.message}
+                                      </p>
+                                    )}
+                                    <Textarea
+                                      value={commentDrafts[newsletter.id] || ''}
+                                      onChange={(e) => handleDraftChange(newsletter.id, e.target.value)}
+                                      placeholder="What stood out to you this week?"
+                                      rows={3}
+                                    />
+                                    <div className="flex flex-wrap items-center justify-between gap-2">
+                                      <Button size="sm" onClick={() => handleSubmitComment(newsletter.id)} disabled={commentBusy[newsletter.id]}>
+                                        {commentBusy[newsletter.id] ? (
+                                          <>
+                                            <Loader2 className="mr-2 h-4 w-4 animate-spin" /> Posting...
+                                          </>
+                                        ) : (
+                                          'Post Comment'
+                                        )}
+                                      </Button>
+                                      <span className="text-xs text-muted-foreground">Keep it friendly—no spam or spoilers.</span>
+                                    </div>
+                                  </>
+                                ) : (
+                                  <div className="flex flex-col items-start gap-2 text-sm text-gray-600">
+                                    <p>Sign in to share your thoughts.</p>
+                                    <Button size="sm" onClick={() => { setExpandedId(newsletter.id); openLoginModal() }}>
+                                      <LogIn className="mr-2 h-4 w-4" /> Sign in to comment
+                                    </Button>
+                                  </div>
+                                )}
+                              </div>
+                            </div>
+                          </div>
+                        </NewsletterWriterProvider>
+                      ) : (
+                        <>
+                          <div className="prose max-w-none">
+                            {(() => {
+                              try {
+                                const obj = JSON.parse(newsletter.content)
+                                return (
+                                  <div className="space-y-3">
+                                    {/* Summary */}
                                     {obj.summary && (
-                                      <div className="text-gray-700 leading-relaxed text-base sm:text-lg break-words">
+                                      <div className="text-gray-700 leading-relaxed">
                                         {obj.summary}
                                       </div>
                                     )}
-                                  </div>
 
-                                  {/* Key Highlights Section */}
-                                  {obj.highlights && Array.isArray(obj.highlights) && obj.highlights.length > 0 && (
-                                    <div className="bg-yellow-50 p-5 rounded-lg border-l-4 border-yellow-400">
-                                      <h3 className="text-lg font-bold text-gray-900 mb-3 flex items-center">
-                                        ⭐ Key Highlights
-                                      </h3>
-                                      <ul className="space-y-2">
-                                        {obj.highlights.map((highlight, idx) => (
-                                          <li key={idx} className="flex items-start">
-                                            <span className="bg-yellow-400 text-yellow-900 rounded-full w-6 h-6 flex items-center justify-center text-xs font-bold mr-3 mt-0.5 flex-shrink-0">
-                                              {idx + 1}
-                                            </span>
-                                            <span className="text-gray-700">{highlight}</span>
-                                          </li>
-                                        ))}
-                                      </ul>
-                                    </div>
-                                  )}
+                                    {/* Key Highlights */}
+                                    {obj.highlights && Array.isArray(obj.highlights) && obj.highlights.length > 0 && (
+                                      <div>
+                                        <div className="text-sm font-semibold text-gray-900 mb-2">Key Highlights:</div>
+                                        <ul className="list-disc ml-5 space-y-1">
+                                          {obj.highlights.slice(0, 3).map((highlight, idx) => (
+                                            <li key={idx} className="text-sm text-gray-700">{highlight}</li>
+                                          ))}
+                                        </ul>
+                                      </div>
+                                    )}
 
-                                  {/* Performance Stats */}
-                                  {obj.by_numbers && (
-                                    <div className="bg-gray-50 p-5 rounded-lg">
-                                      <h3 className="text-lg font-bold text-gray-900 mb-4 flex items-center">
-                                        📊 By The Numbers
-                                      </h3>
-                                      <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                                    {/* Top Performers */}
+                                    {obj.by_numbers && (
+                                      <div className="grid grid-cols-1 md:grid-cols-2 gap-4 mt-3">
                                         {obj.by_numbers.minutes_leaders && obj.by_numbers.minutes_leaders.length > 0 && (
-                                          <div className="bg-white p-4 rounded-lg shadow-sm border">
-                                            <h4 className="font-semibold text-gray-900 mb-3 flex items-center">
-                                              ⏱️ Minutes Leaders
-                                            </h4>
-                                            <div className="space-y-2">
-                                              {obj.by_numbers.minutes_leaders.map((player, idx) => (
-                                                <div key={idx} className="flex justify-between items-center">
-                                                  <span className="font-medium text-gray-700">{player.player}</span>
-                                                  <span className="bg-blue-100 text-blue-800 px-2 py-1 rounded text-sm font-bold">
-                                                    {player.minutes}'
-                                                  </span>
+                                          <div className="bg-gray-50 p-3 rounded-lg">
+                                            <div className="text-sm font-semibold text-gray-900 mb-2">Minutes Leaders:</div>
+                                            <div className="space-y-1">
+                                              {obj.by_numbers.minutes_leaders.slice(0, 2).map((player, idx) => (
+                                                <div key={idx} className="text-sm text-gray-700">
+                                                  <span className="font-medium">{player.player}</span>: {player.minutes}'
                                                 </div>
                                               ))}
                                             </div>
@@ -9547,552 +10018,78 @@ function NewslettersPage() {
                                         )}
 
                                         {obj.by_numbers.ga_leaders && obj.by_numbers.ga_leaders.length > 0 && (
-                                          <div className="bg-white p-4 rounded-lg shadow-sm border">
-                                            <h4 className="font-semibold text-gray-900 mb-3 flex items-center">
-                                              ⚽ Goal Contributors
-                                            </h4>
-                                            <div className="space-y-2">
-                                              {obj.by_numbers.ga_leaders.map((player, idx) => (
-                                                <div key={idx} className="flex justify-between items-center">
-                                                  <span className="font-medium text-gray-700">{player.player}</span>
-                                                  <div className="flex space-x-1">
-                                                    <span className="bg-green-100 text-green-800 px-2 py-1 rounded text-sm font-bold">
-                                                      {player.g}G
-                                                    </span>
-                                                    <span className="bg-purple-100 text-purple-800 px-2 py-1 rounded text-sm font-bold">
-                                                      {player.a}A
-                                                    </span>
-                                                  </div>
+                                          <div className="bg-gray-50 p-3 rounded-lg">
+                                            <div className="text-sm font-semibold text-gray-900 mb-2">Goal Contributors:</div>
+                                            <div className="space-y-1">
+                                              {obj.by_numbers.ga_leaders.slice(0, 2).map((player, idx) => (
+                                                <div key={idx} className="text-sm text-gray-700">
+                                                  <span className="font-medium">{player.player}</span>: {player.g}G {player.a}A
                                                 </div>
                                               ))}
                                             </div>
                                           </div>
                                         )}
                                       </div>
-                                    </div>
-                                  )}
+                                    )}
 
-                                  {/* Detailed Sections */}
-                                  {detailedSections.length > 0 && (
-                                    <div className="space-y-4">
-                                      <h3 className="text-lg font-bold text-gray-900 flex items-center">
-                                        📋 Detailed Report
-                                      </h3>
-                                      {detailedSections.map((sec, idx) => (
-                                        <div key={idx} className="bg-white border rounded-lg overflow-hidden shadow-sm">
-                                          {sec.title && (
-                                            <div className="bg-gray-100 px-5 py-3 border-b">
-                                              <h4 className="font-semibold text-gray-900">{sec.title}</h4>
+                                    {/* Preview of sections */}
+                                    {obj.sections && obj.sections.length > 0 && (
+                                      <div className="mt-3">
+                                        <div className="text-sm font-semibold text-gray-900 mb-2">This Week's Activity:</div>
+                                        <div className="space-y-2">
+                                          {obj.sections.slice(0, 2).map((section, idx) => (
+                                            <div key={idx} className="border-l-2 border-blue-200 pl-3">
+                                              <div className="text-sm font-medium text-gray-800">{section.title}</div>
+                                              {section.items && section.items.length > 0 && (
+                                                <div className="text-sm text-gray-600 mt-1">
+                                                  {section.items.length} player{section.items.length !== 1 ? 's' : ''} featured
+                                                </div>
+                                              )}
                                             </div>
-                                          )}
-                                          <div className="p-5">
-                                            {sec.content && (
-                                              <div className="text-gray-700 mb-4">{sec.content}</div>
-                                            )}
-                                                {sec.items && Array.isArray(sec.items) && (
-                                              <div className="space-y-4">
-                                                {sec.items.map((it, j) => (
-                                                  <div key={j} className="border-l-4 border-blue-200 pl-4 py-2">
-                                                    <div className="flex items-start gap-3 mb-3">
-                                                      {/* Player Photo */}
-                                                      {it.player_photo && (
-                                                        <img
-                                                          src={it.player_photo}
-                                                          alt={it.player_name}
-                                                          className="w-14 h-14 rounded-full object-cover bg-gray-100 flex-shrink-0 border-2 border-white shadow-sm"
-                                                        />
-                                                      )}
-                                                      <div className="flex-1">
-                                                        <div className="flex flex-wrap items-center gap-2 mb-1">
-                                                          {it.player_name && (
-                                                            (it.player_api_id || it.player_id) ? (
-                                                              <Link 
-                                                                to={`/players/${it.player_api_id || it.player_id}`}
-                                                                className="font-semibold text-lg text-gray-900 hover:text-blue-600 hover:underline transition-colors"
-                                                              >
-                                                                {it.player_name}
-                                                              </Link>
-                                                            ) : (
-                                                              <span className="font-semibold text-lg text-gray-900">
-                                                                {it.player_name}
-                                                              </span>
-                                                            )
-                                                          )}
-                                                          {it.stats && (
-                                                            <div className="flex gap-1">
-                                                              {it.stats.goals > 0 && (
-                                                                <span className="bg-green-100 text-green-800 px-2 py-1 rounded text-xs">
-                                                                  {it.stats.goals}G
-                                                                </span>
-                                                              )}
-                                                              {it.stats.assists > 0 && (
-                                                                <span className="bg-purple-100 text-purple-800 px-2 py-1 rounded text-xs">
-                                                                  {it.stats.assists}A
-                                                                </span>
-                                                              )}
-                                                              {it.stats.minutes > 0 && (
-                                                                <span className="bg-blue-100 text-blue-800 px-2 py-1 rounded text-xs">
-                                                                  {it.stats.minutes}'
-                                                                </span>
-                                                              )}
-                                                            </div>
-                                                          )}
-                                                        </div>
-                                                        {/* Loan Team with Logo */}
-                                                        {(it.loan_team || it.loan_team_name) && (
-                                                          <div className="flex items-center gap-2 text-sm text-gray-600">
-                                                            {it.loan_team_logo && (
-                                                              <img
-                                                                src={it.loan_team_logo}
-                                                                alt={it.loan_team || it.loan_team_name}
-                                                                className="w-5 h-5 rounded-full object-cover bg-gray-100"
-                                                              />
-                                                            )}
-                                                            <span>→ {it.loan_team || it.loan_team_name}</span>
-                                                          </div>
-                                                        )}
-                                                      </div>
-                                                    </div>
-                                                    {it.week_summary && (
-                                                      <p className="text-gray-700 leading-relaxed">{it.week_summary}</p>
-                                                    )}
-
-                                                    {/* This Week's Matches with Opponent Logos */}
-                                                    {it.matches && Array.isArray(it.matches) && it.matches.length > 0 && (
-                                                      <div className="mt-4 p-3 bg-gray-50 rounded-lg border border-gray-200">
-                                                        <h5 className="text-sm font-semibold text-gray-700 mb-3 flex items-center gap-1">
-                                                          ⚽ This Week's Matches
-                                                        </h5>
-                                                        <div className="space-y-2">
-                                                          {it.matches.map((match, mIdx) => (
-                                                            <div key={mIdx} className="flex items-center gap-3 p-2 bg-white rounded border border-gray-100">
-                                                              {match.opponent_logo && (
-                                                                <img
-                                                                  src={match.opponent_logo}
-                                                                  alt={match.opponent}
-                                                                  className="w-8 h-8 rounded-full object-cover bg-gray-100 flex-shrink-0"
-                                                                />
-                                                              )}
-                                                              <div className="flex-1 min-w-0">
-                                                                <div className="font-medium text-gray-900 text-sm">
-                                                                  {match.home ? 'vs' : '@'} {match.opponent}
-                                                                </div>
-                                                                <div className="text-xs text-gray-500">
-                                                                  {match.competition}{match.date && ` • ${new Date(match.date).toLocaleDateString()}`}
-                                                                </div>
-                                                              </div>
-                                                              {match.score && (
-                                                                <span className={`px-2 py-1 rounded text-sm font-bold flex-shrink-0 ${
-                                                                  match.result === 'W' ? 'bg-green-100 text-green-800' :
-                                                                  match.result === 'D' ? 'bg-gray-100 text-gray-700' :
-                                                                  'bg-red-100 text-red-800'
-                                                                }`}>
-                                                                  {match.score.home ?? 0}-{match.score.away ?? 0}
-                                                                </span>
-                                                              )}
-                                                            </div>
-                                                          ))}
-                                                        </div>
-                                                      </div>
-                                                    )}
-
-                                                    {/* Fixtures (Upcoming & Results) */}
-                                                    {it.upcoming_fixtures && Array.isArray(it.upcoming_fixtures) && it.upcoming_fixtures.length > 0 && (
-                                                      <div className="mt-4 p-3 bg-blue-50 rounded-lg border border-blue-200">
-                                                        <h5 className="text-sm font-semibold text-blue-900 mb-3 flex items-center gap-1">
-                                                          📅 Look Ahead: Fixtures
-                                                        </h5>
-                                                        <div className="space-y-2">
-                                                          {it.upcoming_fixtures.map((fixture, fIdx) => {
-                                                            const isCompleted = fixture.status === 'completed' && fixture.result
-                                                            const resultColors = {
-                                                              W: 'bg-green-50 border-green-200',
-                                                              L: 'bg-red-50 border-red-200',
-                                                              D: 'bg-gray-100 border-gray-300'
-                                                            }
-                                                            const badgeColors = {
-                                                              W: 'bg-green-500 text-white',
-                                                              L: 'bg-red-500 text-white',
-                                                              D: 'bg-gray-500 text-white'
-                                                            }
-                                                            const baseClass = isCompleted 
-                                                              ? resultColors[fixture.result] || 'bg-white/60 border-blue-100'
-                                                              : 'bg-white/60 border-blue-100'
-                                                            
-                                                            return (
-                                                              <div key={fIdx} className={`flex items-center gap-3 p-2 rounded border ${baseClass}`}>
-                                                                {fixture.opponent_logo && (
-                                                                  <img
-                                                                    src={fixture.opponent_logo}
-                                                                    alt={fixture.opponent}
-                                                                    className="w-7 h-7 rounded-full object-cover bg-gray-100 flex-shrink-0"
-                                                                  />
-                                                                )}
-                                                                <div className="flex-1 min-w-0">
-                                                                  <div className="font-medium text-gray-900 text-sm flex items-center gap-2">
-                                                                    {fixture.is_home ? 'vs' : '@'} {fixture.opponent}
-                                                                    {isCompleted && (
-                                                                      <span className="text-sm font-bold">
-                                                                        {fixture.team_score}-{fixture.opponent_score}
-                                                                      </span>
-                                                                    )}
-                                                                  </div>
-                                                                  <div className="text-xs text-gray-500">
-                                                                    {fixture.competition && `${fixture.competition} • `}
-                                                                    {fixture.date && new Date(fixture.date).toLocaleDateString()}
-                                                                  </div>
-                                                                </div>
-                                                                {isCompleted && (
-                                                                  <span className={`text-xs font-bold px-2 py-0.5 rounded ${badgeColors[fixture.result] || 'bg-gray-400 text-white'}`}>
-                                                                    {fixture.result}
-                                                                  </span>
-                                                                )}
-                                                              </div>
-                                                            )
-                                                          })}
-                                                        </div>
-                                                      </div>
-                                                    )}
-                                                    {it.can_fetch_stats && (!it.upcoming_fixtures || it.upcoming_fixtures.length === 0) && (
-                                                      <div className="mt-4 p-2 bg-gray-50 border-l-4 border-gray-300 rounded">
-                                                        <p className="text-xs text-gray-500 italic">No scheduled fixtures in the coming week</p>
-                                                      </div>
-                                                    )}
-
-                                                    {it.match_notes && Array.isArray(it.match_notes) && it.match_notes.length > 0 && (
-                                                      <ul className="mt-2 list-disc space-y-1 pl-5 text-sm text-gray-600">
-                                                        {it.match_notes.map((note, noteIndex) => (
-                                                          <li key={noteIndex}>{note}</li>
-                                                        ))}
-                                                      </ul>
-                                                    )}
-                                                    {(() => {
-                                                      const embedUrl = buildSofascoreEmbedUrl(it.sofascore_player_id ?? it.sofascoreId)
-                                                      if (!embedUrl) return null
-                                                      return (
-                                                        <div className="mt-3">
-                                                          <iframe
-                                                            title={`Sofascore profile for ${it.player_name || it.player_id}`}
-                                                            src={embedUrl}
-                                                            frameBorder="0"
-                                                            scrolling="no"
-                                                            className="h-[568px] w-full max-w-xs rounded-md border"
-                                                          />
-                                                          <p className="mt-2 text-xs text-gray-500">
-                                                            Player stats provided by{' '}
-                                                            <a
-                                                              href="https://sofascore.com/"
-                                                              target="_blank"
-                                                              rel="noopener"
-                                                              className="text-blue-600 hover:underline"
-                                                            >
-                                                              Sofascore
-                                                            </a>
-                                                          </p>
-                                                        </div>
-                                                      )
-                                                    })()}
-                                                    {it.links && Array.isArray(it.links) && it.links.length > 0 && (
-                                                      <div className="mt-3 space-y-2">
-                                                        <div className="text-xs font-semibold uppercase tracking-wide text-gray-500">Further reading</div>
-                                                        <ul className="space-y-1 text-sm text-blue-600">
-                                                          {it.links.map((link, linkIdx) => {
-                                                            const linkObj = typeof link === 'string' ? { url: link, title: null } : link
-                                                            if (!linkObj || !linkObj.url) return null
-                                                            const label = linkObj.title || linkObj.url
-                                                            return (
-                                                              <li key={linkIdx}>
-                                                                <a
-                                                                  href={linkObj.url}
-                                                                  target="_blank"
-                                                                  rel="noreferrer"
-                                                                  className="inline-flex items-center gap-1 hover:underline"
-                                                                >
-                                                                  <span>{label}</span>
-                                                                  <ArrowRight className="h-3.5 w-3.5" />
-                                                                </a>
-                                                              </li>
-                                                            )
-                                                          })}
-                                                        </ul>
-                                                      </div>
-                                                    )}
-                                                    
-                                                    {/* Inline Writer Commentaries for this player */}
-                                                    {focusedViewActive && (
-                                                      <InlinePlayerWriteups 
-                                                        playerId={it.player_id} 
-                                                        playerName={it.player_name}
-                                                      />
-                                                    )}
-                                                  </div>
-                                                ))}
-                                              </div>
-                                            )}
-                                          </div>
+                                          ))}
                                         </div>
-                                      ))}
-                                    </div>
-                                  )}
-                                  {/* Fan Pulse Section */}
-                                </div>
-                              )
-                            } catch {
-                              return (
-                                <div className="prose max-w-none">
-                                  <div className="bg-gray-50 p-4 rounded-lg">
-                                    <h3 className="text-lg font-medium text-gray-900 mb-2">Newsletter Content</h3>
-                                    <div className="whitespace-pre-wrap text-gray-700">{newsletter.content}</div>
-                                  </div>
-                                </div>
-                              )
-                            }
-                          })()
-                        ) : newsletter.rendered?.web_html ? (
-                          /* Fallback to pre-rendered HTML only when no JSON content exists */
-                          <div 
-                            dangerouslySetInnerHTML={{ __html: newsletter.rendered.web_html }} 
-                            className="prose max-w-none newsletter-content"
-                          />
-                        ) : null}
+                                      </div>
+                                    )}
 
-                        <div className="mt-10 space-y-4 border-t pt-6">
-                          <div className="flex flex-wrap items-center justify-between gap-2">
-                            <div className="flex items-center gap-2">
-                              <MessageCircle className="h-5 w-5 text-blue-600" />
-                              <h3 className="text-lg font-semibold">Comments</h3>
-                              {(commentsByNewsletter[newsletter.id] || []).length > 0 && (
-                                <Badge variant="secondary">{(commentsByNewsletter[newsletter.id] || []).length}</Badge>
-                              )}
-                            </div>
-                            <Button
-                              size="sm"
-                              variant="ghost"
-                              onClick={() => loadComments(newsletter.id, { force: true })}
-                              disabled={commentsLoading[newsletter.id]}
-                            >
-                              {commentsLoading[newsletter.id] && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
-                              Refresh
-                            </Button>
-                          </div>
-                          {commentsError[newsletter.id] && (
-                            <div className="text-sm text-red-600">{commentsError[newsletter.id]}</div>
-                          )}
-                          {commentsLoading[newsletter.id] ? (
-                            <div className="flex items-center gap-2 text-sm text-gray-500">
-                              <Loader2 className="h-4 w-4 animate-spin" />
-                              Loading comments...
-                            </div>
-                          ) : (commentsByNewsletter[newsletter.id] || []).length === 0 ? (
-                            <div className="rounded-md border border-dashed bg-gray-50 p-4 text-sm text-gray-600">
-                              No comments yet. Be the first to share your take.
-                            </div>
-                          ) : (
-                            <div className="space-y-3">
-                              {(commentsByNewsletter[newsletter.id] || []).map((comment) => (
-                                <div key={comment.id} className="rounded-md border bg-white p-4 shadow-sm">
-                                  <div className="flex flex-wrap items-center justify-between gap-2 text-xs text-muted-foreground">
-                                    <span className="text-sm font-semibold text-gray-900">
-                                      {comment.author_display_name || comment.author_name || 'GOL supporter'}
-                                    </span>
-                                    <span>{formatRelativeTime(comment.created_at)}</span>
-                                  </div>
-                                  <div className="mt-2 whitespace-pre-wrap text-sm text-gray-700">
-                                    {comment.body}
-                                  </div>
-                                </div>
-                              ))}
-                            </div>
-                          )}
-                          <div className="rounded-lg border bg-white p-4 shadow-sm space-y-3">
-                            {canComment ? (
-                              <>
-                                <div className="flex flex-wrap items-center gap-2 text-sm text-gray-600">
-                                  <span>Commenting as</span>
-                                  <span className="font-semibold text-gray-900">{auth.displayName || 'GOL supporter'}</span>
-                                  {auth.isAdmin && auth.hasApiKey && (
-                                    <Badge variant="outline" className="border-blue-200 text-blue-600">Admin</Badge>
-                                  )}
-                                  {!auth.displayNameConfirmed && (
-                                    <Badge variant="outline" className="border-amber-300 text-amber-700">Name pending</Badge>
-                                  )}
-                                  <Button type="button" variant="ghost" size="xs" onClick={toggleDisplayNameEdit}>
-                                    {displayNameEditing ? 'Cancel name edit' : 'Edit display name'}
-                                  </Button>
-                                </div>
-                                {displayNameEditing && (
-                                  <form
-                                    className="space-y-2"
-                                    onSubmit={(event) => {
-                                      event.preventDefault()
-                                      handleDisplayNameSave()
-                                    }}
-                                  >
-                                    <Input
-                                      value={displayNameInput}
-                                      onChange={(e) => setDisplayNameInput(e.target.value)}
-                                      maxLength={40}
-                                      placeholder="Choose a display name"
-                                    />
-                                    <div className="flex flex-wrap items-center gap-2">
-                                      <Button size="sm" type="submit" disabled={displayNameBusy}>
-                                        {displayNameBusy && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
-                                        Save
-                                      </Button>
+                                    {/* Read More indicator */}
+                                    <div className="mt-4 pt-3 border-t border-gray-200">
                                       <Button
+                                        variant="link"
                                         size="sm"
-                                        variant="ghost"
-                                        type="button"
-                                        onClick={() => {
-                                          setDisplayNameEditing(false)
-                                          setDisplayNameInput(auth.displayName || '')
-                                          setDisplayNameStatus(null)
-                                        }}
+                                        className="px-0"
+                                        onClick={() => setExpandedId(newsletter.id)}
                                       >
-                                        Cancel
+                                        Open quick preview
                                       </Button>
                                     </div>
-                                    {displayNameStatus && (
-                                      <p className={`text-xs ${displayNameStatus.type === 'error' ? 'text-red-600' : 'text-emerald-600'}`}>
-                                        {displayNameStatus.message}
-                                      </p>
-                                    )}
-                                  </form>
-                                )}
-                                {!displayNameEditing && displayNameStatus && (
-                                  <p className={`text-xs ${displayNameStatus.type === 'error' ? 'text-red-600' : 'text-emerald-600'}`}>
-                                    {displayNameStatus.message}
-                                  </p>
-                                )}
-                                <Textarea
-                                  value={commentDrafts[newsletter.id] || ''}
-                                  onChange={(e) => handleDraftChange(newsletter.id, e.target.value)}
-                                  placeholder="What stood out to you this week?"
-                                  rows={3}
-                                />
-                                <div className="flex flex-wrap items-center justify-between gap-2">
-                                  <Button size="sm" onClick={() => handleSubmitComment(newsletter.id)} disabled={commentBusy[newsletter.id]}>
-                                    {commentBusy[newsletter.id] ? (
-                                      <>
-                                        <Loader2 className="mr-2 h-4 w-4 animate-spin" /> Posting...
-                                      </>
-                                    ) : (
-                                      'Post Comment'
-                                    )}
-                                  </Button>
-                                  <span className="text-xs text-muted-foreground">Keep it friendly—no spam or spoilers.</span>
-                                </div>
-                              </>
-                            ) : (
-                              <div className="flex flex-col items-start gap-2 text-sm text-gray-600">
-                                <p>Sign in to share your thoughts.</p>
-                                <Button size="sm" onClick={() => { setExpandedId(newsletter.id); openLoginModal() }}>
-                                  <LogIn className="mr-2 h-4 w-4" /> Sign in to comment
-                                </Button>
-                              </div>
-                            )}
-                          </div>
-                        </div>
-                      </div>
-                      </NewsletterWriterProvider>
-                    ) : (
-                      <>
-                        <div className="prose max-w-none">
-                          {(() => {
-                            try {
-                              const obj = JSON.parse(newsletter.content)
-                              return (
-                                <div className="space-y-3">
-                                  {/* Summary */}
-                                  {obj.summary && (
-                                    <div className="text-gray-700 leading-relaxed">
-                                      {obj.summary}
-                                    </div>
-                                  )}
-
-                                  {/* Key Highlights */}
-                                  {obj.highlights && Array.isArray(obj.highlights) && obj.highlights.length > 0 && (
-                                    <div>
-                                      <div className="text-sm font-semibold text-gray-900 mb-2">Key Highlights:</div>
-                                      <ul className="list-disc ml-5 space-y-1">
-                                        {obj.highlights.slice(0, 3).map((highlight, idx) => (
-                                          <li key={idx} className="text-sm text-gray-700">{highlight}</li>
-                                        ))}
-                                      </ul>
-                                    </div>
-                                  )}
-
-                                  {/* Top Performers */}
-                                  {obj.by_numbers && (
-                                    <div className="grid grid-cols-1 md:grid-cols-2 gap-4 mt-3">
-                                      {obj.by_numbers.minutes_leaders && obj.by_numbers.minutes_leaders.length > 0 && (
-                                        <div className="bg-gray-50 p-3 rounded-lg">
-                                          <div className="text-sm font-semibold text-gray-900 mb-2">Minutes Leaders:</div>
-                                          <div className="space-y-1">
-                                            {obj.by_numbers.minutes_leaders.slice(0, 2).map((player, idx) => (
-                                              <div key={idx} className="text-sm text-gray-700">
-                                                <span className="font-medium">{player.player}</span>: {player.minutes}'
-                                              </div>
-                                            ))}
-                                          </div>
-                                        </div>
-                                      )}
-
-                                      {obj.by_numbers.ga_leaders && obj.by_numbers.ga_leaders.length > 0 && (
-                                        <div className="bg-gray-50 p-3 rounded-lg">
-                                          <div className="text-sm font-semibold text-gray-900 mb-2">Goal Contributors:</div>
-                                          <div className="space-y-1">
-                                            {obj.by_numbers.ga_leaders.slice(0, 2).map((player, idx) => (
-                                              <div key={idx} className="text-sm text-gray-700">
-                                                <span className="font-medium">{player.player}</span>: {player.g}G {player.a}A
-                                              </div>
-                                            ))}
-                                          </div>
-                                        </div>
-                                      )}
-                                    </div>
-                                  )}
-
-                                  {/* Preview of sections */}
-                                  {obj.sections && obj.sections.length > 0 && (
-                                    <div className="mt-3">
-                                      <div className="text-sm font-semibold text-gray-900 mb-2">This Week's Activity:</div>
-                                      <div className="space-y-2">
-                                        {obj.sections.slice(0, 2).map((section, idx) => (
-                                          <div key={idx} className="border-l-2 border-blue-200 pl-3">
-                                            <div className="text-sm font-medium text-gray-800">{section.title}</div>
-                                            {section.items && section.items.length > 0 && (
-                                              <div className="text-sm text-gray-600 mt-1">
-                                                {section.items.length} player{section.items.length !== 1 ? 's' : ''} featured
-                                              </div>
-                                            )}
-                                          </div>
-                                        ))}
+                                  </div>
+                                )
+                              } catch {
+                                // Fallback to showing content summary if JSON parsing fails
+                                const content = newsletter.content || newsletter.structured_content || ''
+                                if (content.length > 200) {
+                                  return (
+                                    <div className="space-y-3">
+                                      <div className="text-gray-700 leading-relaxed">
+                                        {content.substring(0, 200)}...
+                                      </div>
+                                      <div className="pt-3 border-t border-gray-200">
+                                        <Button
+                                          variant="link"
+                                          size="sm"
+                                          className="px-0"
+                                          onClick={() => setExpandedId(newsletter.id)}
+                                        >
+                                          Open quick preview
+                                        </Button>
                                       </div>
                                     </div>
-                                  )}
-
-                                  {/* Read More indicator */}
-                                  <div className="mt-4 pt-3 border-t border-gray-200">
-                                    <Button
-                                      variant="link"
-                                      size="sm"
-                                      className="px-0"
-                                      onClick={() => setExpandedId(newsletter.id)}
-                                    >
-                                      Open quick preview
-                                    </Button>
-                                  </div>
-                                </div>
-                              )
-                            } catch {
-                              // Fallback to showing content summary if JSON parsing fails
-                              const content = newsletter.content || newsletter.structured_content || ''
-                              if (content.length > 200) {
+                                  )
+                                }
                                 return (
                                   <div className="space-y-3">
                                     <div className="text-gray-700 leading-relaxed">
-                                      {content.substring(0, 200)}...
+                                      {content}
                                     </div>
                                     <div className="pt-3 border-t border-gray-200">
                                       <Button
@@ -10107,79 +10104,61 @@ function NewslettersPage() {
                                   </div>
                                 )
                               }
-                              return (
-                                <div className="space-y-3">
-                                  <div className="text-gray-700 leading-relaxed">
-                                    {content}
-                                  </div>
-                                  <div className="pt-3 border-t border-gray-200">
-                                    <Button
-                                      variant="link"
-                                      size="sm"
-                                      className="px-0"
-                                      onClick={() => setExpandedId(newsletter.id)}
-                                    >
-                                      Open quick preview
-                                    </Button>
-                                  </div>
+                            })()}
+                          </div>
+                          {(() => {
+                            const preview = (commentsByNewsletter[newsletter.id] || []).slice(0, 3)
+                            if (!preview.length) return null
+                            return (
+                              <div className="mt-6 rounded-lg border bg-white p-4 shadow-sm space-y-2">
+                                <div className="text-xs font-semibold text-gray-500 uppercase tracking-wide">Top comments</div>
+                                <div className="space-y-2">
+                                  {preview.map((comment) => (
+                                    <div key={comment.id} className="rounded border bg-gray-50 px-3 py-2">
+                                      <div className="text-xs text-gray-500">{comment.author_display_name || comment.author_name || 'GOL supporter'}</div>
+                                      <div className="mt-1 text-sm text-gray-700 line-clamp-3">{comment.body}</div>
+                                    </div>
+                                  ))}
                                 </div>
-                              )
-                            }
-                          })()}
-                        </div>
-                        {(() => {
-                          const preview = (commentsByNewsletter[newsletter.id] || []).slice(0, 3)
-                          if (!preview.length) return null
-                          return (
-                            <div className="mt-6 rounded-lg border bg-white p-4 shadow-sm space-y-2">
-                              <div className="text-xs font-semibold text-gray-500 uppercase tracking-wide">Top comments</div>
-                              <div className="space-y-2">
-                                {preview.map((comment) => (
-                                  <div key={comment.id} className="rounded border bg-gray-50 px-3 py-2">
-                                    <div className="text-xs text-gray-500">{comment.author_display_name || comment.author_name || 'GOL supporter'}</div>
-                                    <div className="mt-1 text-sm text-gray-700 line-clamp-3">{comment.body}</div>
-                                  </div>
-                                ))}
                               </div>
-                            </div>
-                          )
-                        })()}
-                      </>
-                    )}
-                  </CardContent >
-                </Card >
-              )
-            })}
-            {
-              !focusedViewActive && totalPages > 1 && (
-                <div className="flex flex-wrap items-center justify-between gap-3 border-t border-gray-200 pt-4">
-                  <span className="text-sm text-gray-600">
-                    Page {currentPage} of {totalPages}
-                    {pageStart > 0 && pageEnd >= pageStart ? ` • Showing ${pageStart}–${pageEnd} of ${filteredTotal}` : ''}
-                  </span>
-                  <div className="flex gap-2">
-                    <Button
-                      variant="outline"
-                      size="sm"
-                      onClick={() => setCurrentPage((page) => Math.max(1, page - 1))}
-                      disabled={currentPage === 1}
-                    >
-                      Previous
-                    </Button>
-                    <Button
-                      variant="outline"
-                      size="sm"
-                      onClick={() => setCurrentPage((page) => Math.min(totalPages, page + 1))}
-                      disabled={currentPage === totalPages}
-                    >
-                      Next
-                    </Button>
+                            )
+                          })()}
+                        </>
+                      )}
+                    </CardContent >
+                  </Card >
+                )
+              })}
+              {
+                !focusedViewActive && totalPages > 1 && (
+                  <div className="flex flex-wrap items-center justify-between gap-3 border-t border-gray-200 pt-4">
+                    <span className="text-sm text-gray-600">
+                      Page {currentPage} of {totalPages}
+                      {pageStart > 0 && pageEnd >= pageStart ? ` • Showing ${pageStart}–${pageEnd} of ${filteredTotal}` : ''}
+                    </span>
+                    <div className="flex gap-2">
+                      <Button
+                        variant="outline"
+                        size="sm"
+                        onClick={() => setCurrentPage((page) => Math.max(1, page - 1))}
+                        disabled={currentPage === 1}
+                      >
+                        Previous
+                      </Button>
+                      <Button
+                        variant="outline"
+                        size="sm"
+                        onClick={() => setCurrentPage((page) => Math.min(totalPages, page + 1))}
+                        disabled={currentPage === totalPages}
+                      >
+                        Next
+                      </Button>
+                    </div>
                   </div>
-                </div>
-              )
-            }
-          </div >
-        )}
+                )
+              }
+            </div >
+          )}
         </div>
 
         {/* Sponsor Sidebar - visible on larger screens */}
@@ -10279,7 +10258,9 @@ function SettingsPage() {
         if (writerData) {
           setJournalistProfile({
             bio: writerData.bio || '',
-            profile_image_url: writerData.profile_image_url || ''
+            profile_image_url: writerData.profile_image_url || '',
+            attribution_url: writerData.attribution_url || '',
+            attribution_name: writerData.attribution_name || ''
           })
         }
       } catch (error) {
@@ -10549,16 +10530,14 @@ function SettingsPage() {
               <CardContent className="space-y-4">
                 <div className="space-y-3">
                   <div
-                    className={`flex items-start gap-3 p-4 rounded-lg border-2 cursor-pointer transition-colors ${
-                      emailPreference === 'individual' 
-                        ? 'border-blue-500 bg-blue-50' 
-                        : 'border-gray-200 hover:border-gray-300'
-                    } ${emailPrefLoading ? 'opacity-50 pointer-events-none' : ''}`}
+                    className={`flex items-start gap-3 p-4 rounded-lg border-2 cursor-pointer transition-colors ${emailPreference === 'individual'
+                      ? 'border-blue-500 bg-blue-50'
+                      : 'border-gray-200 hover:border-gray-300'
+                      } ${emailPrefLoading ? 'opacity-50 pointer-events-none' : ''}`}
                     onClick={() => handleEmailPreferenceChange('individual')}
                   >
-                    <div className={`mt-0.5 w-4 h-4 rounded-full border-2 flex items-center justify-center ${
-                      emailPreference === 'individual' ? 'border-blue-500' : 'border-gray-400'
-                    }`}>
+                    <div className={`mt-0.5 w-4 h-4 rounded-full border-2 flex items-center justify-center ${emailPreference === 'individual' ? 'border-blue-500' : 'border-gray-400'
+                      }`}>
                       {emailPreference === 'individual' && (
                         <div className="w-2 h-2 rounded-full bg-blue-500" />
                       )}
@@ -10572,16 +10551,14 @@ function SettingsPage() {
                   </div>
 
                   <div
-                    className={`flex items-start gap-3 p-4 rounded-lg border-2 cursor-pointer transition-colors ${
-                      emailPreference === 'digest' 
-                        ? 'border-blue-500 bg-blue-50' 
-                        : 'border-gray-200 hover:border-gray-300'
-                    } ${emailPrefLoading ? 'opacity-50 pointer-events-none' : ''}`}
+                    className={`flex items-start gap-3 p-4 rounded-lg border-2 cursor-pointer transition-colors ${emailPreference === 'digest'
+                      ? 'border-blue-500 bg-blue-50'
+                      : 'border-gray-200 hover:border-gray-300'
+                      } ${emailPrefLoading ? 'opacity-50 pointer-events-none' : ''}`}
                     onClick={() => handleEmailPreferenceChange('digest')}
                   >
-                    <div className={`mt-0.5 w-4 h-4 rounded-full border-2 flex items-center justify-center ${
-                      emailPreference === 'digest' ? 'border-blue-500' : 'border-gray-400'
-                    }`}>
+                    <div className={`mt-0.5 w-4 h-4 rounded-full border-2 flex items-center justify-center ${emailPreference === 'digest' ? 'border-blue-500' : 'border-gray-400'
+                      }`}>
                       {emailPreference === 'digest' && (
                         <div className="w-2 h-2 rounded-full bg-blue-500" />
                       )}
@@ -10655,6 +10632,29 @@ function SettingsPage() {
                       </div>
                     </div>
 
+                    <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                      <div className="space-y-2">
+                        <Label htmlFor="attribution-name">Attribution Name (Optional)</Label>
+                        <Input
+                          id="attribution-name"
+                          value={journalistProfile.attribution_name}
+                          onChange={(e) => setJournalistProfile(prev => ({ ...prev, attribution_name: e.target.value }))}
+                          placeholder="e.g. The Athletic"
+                        />
+                        <p className="text-xs text-muted-foreground">Name of the publication or site you want to link to.</p>
+                      </div>
+                      <div className="space-y-2">
+                        <Label htmlFor="attribution-url">Attribution URL (Optional)</Label>
+                        <Input
+                          id="attribution-url"
+                          value={journalistProfile.attribution_url}
+                          onChange={(e) => setJournalistProfile(prev => ({ ...prev, attribution_url: e.target.value }))}
+                          placeholder="https://..."
+                        />
+                        <p className="text-xs text-muted-foreground">Link to your main site or author page.</p>
+                      </div>
+                    </div>
+
                     {journalistStatus && (
                       <Alert className={journalistStatus.type === 'error' ? 'border-red-500 text-red-600' : 'border-green-500 text-green-600'}>
                         <AlertDescription>{journalistStatus.message}</AlertDescription>
@@ -10708,19 +10708,19 @@ function SettingsPage() {
                             )}
                           </div>
                         </div>
-                        <Badge 
-                          variant="outline" 
-                          className={sub.cancel_at_period_end 
-                            ? 'bg-yellow-50 text-yellow-700 border-yellow-200' 
-                            : sub.status === 'active' 
-                              ? 'bg-green-50 text-green-700 border-green-200' 
+                        <Badge
+                          variant="outline"
+                          className={sub.cancel_at_period_end
+                            ? 'bg-yellow-50 text-yellow-700 border-yellow-200'
+                            : sub.status === 'active'
+                              ? 'bg-green-50 text-green-700 border-green-200'
                               : 'bg-gray-50'
                           }
                         >
                           {sub.cancel_at_period_end ? 'Canceling' : sub.status}
                         </Badge>
                       </div>
-                      
+
                       {sub.current_period_end && (
                         <div className="text-sm text-gray-600">
                           <Calendar className="h-4 w-4 inline mr-1" />
@@ -10731,7 +10731,7 @@ function SettingsPage() {
                       {sub.cancel_at_period_end && (
                         <Alert className="bg-yellow-50 border-yellow-200">
                           <AlertDescription className="text-yellow-800">
-                            This subscription will end on {new Date(sub.current_period_end).toLocaleDateString()}. 
+                            This subscription will end on {new Date(sub.current_period_end).toLocaleDateString()}.
                             You can reactivate it anytime before then.
                           </AlertDescription>
                         </Alert>
@@ -10787,8 +10787,8 @@ function SettingsPage() {
                 <CardContent>
                   <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
                     {journalistFollows.map((follow) => (
-                      <Link 
-                        key={follow.id} 
+                      <Link
+                        key={follow.id}
                         to={`/journalists/${follow.journalist_id}`}
                         className="flex items-center gap-3 p-3 border rounded-lg bg-gray-50 hover:bg-gray-100 hover:border-gray-300 transition-colors group"
                       >
@@ -11244,14 +11244,6 @@ function App() {
     syncAuth({ token: null, displayName: null, displayNameConfirmed: false })
   }, [syncAuth])
 
-  if (SITE_UNDER_CONSTRUCTION) {
-    return (
-      <StripeProvider>
-        <UnderConstructionPage />
-      </StripeProvider>
-    )
-  }
-
   return (
     <StripeProvider>
       <AuthContext.Provider value={authSnapshot}>
@@ -11291,6 +11283,7 @@ function App() {
                     <Route path="dashboard" element={<AdminDashboard />} />
                     <Route path="newsletters" element={<AdminNewsletters />} />
                     <Route path="users" element={<AdminUsers />} />
+                    <Route path="coverage-requests" element={<AdminCoverageRequests />} />
                     <Route path="loans" element={<AdminLoans />} />
                     <Route path="players" element={<AdminPlayers />} />
                     <Route path="teams" element={<AdminTeams />} />

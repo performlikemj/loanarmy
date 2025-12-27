@@ -6,6 +6,8 @@ import { fileURLToPath } from 'url'
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url))
 
+const disableHmrOverlay = process.env.E2E_DISABLE_HMR_OVERLAY === 'true'
+
 // https://vite.dev/config/
 export default defineConfig({
   plugins: [react(),tailwindcss()],
@@ -15,6 +17,10 @@ export default defineConfig({
     },
   },
   server: {
+    hmr: disableHmrOverlay ? { overlay: false } : undefined,
+    watch: {
+      ignored: ['**/playwright-report/**', '**/test-results/**'],
+    },
     proxy: {
       '/api': {
         target: 'http://localhost:5001',

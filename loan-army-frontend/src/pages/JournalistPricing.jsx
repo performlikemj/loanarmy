@@ -11,7 +11,7 @@ const API_BASE_URL = import.meta.env.VITE_API_URL || 'http://localhost:5001/api'
 const PLATFORM_FEE_PERCENT = 10;
 
 const JournalistPricing = () => {
-  const { user } = useAuth();
+  const auth = useAuth();
   const [price, setPrice] = useState('');
   const [currentPrice, setCurrentPrice] = useState(null);
   const [loading, setLoading] = useState(true);
@@ -26,8 +26,9 @@ const JournalistPricing = () => {
   const fetchCurrentPrice = async () => {
     try {
       setLoading(true);
+      const authHeaders = auth?.token ? { Authorization: `Bearer ${auth.token}` } : {};
       const response = await fetch(`${API_BASE_URL}/stripe/journalist/my-price`, {
-        credentials: 'include'
+        headers: authHeaders
       });
 
       if (response.ok) {
@@ -76,9 +77,9 @@ const JournalistPricing = () => {
 
       const response = await fetch(endpoint, {
         method,
-        credentials: 'include',
         headers: {
-          'Content-Type': 'application/json'
+          'Content-Type': 'application/json',
+          ...(auth?.token ? { Authorization: `Bearer ${auth.token}` } : {}),
         },
         body: JSON.stringify({ price: priceValue })
       });
@@ -267,4 +268,3 @@ const JournalistPricing = () => {
 };
 
 export default JournalistPricing;
-

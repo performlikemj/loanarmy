@@ -517,7 +517,13 @@ def require_user_auth(f):
         try:
             # Accept tokens up to 30 days old by default
             data = s.loads(token, max_age=60 * 60 * 24 * 30)
-            g.user_email = data.get('email')
+            email = data.get('email')
+            g.user_email = email
+            if email:
+                user = UserAccount.query.filter_by(email=email).first()
+                if user:
+                    g.user = user
+                    g.user_id = user.id
         except SignatureExpired:
             return jsonify({'error': 'auth token expired'}), 401
         except BadSignature:
@@ -3717,15 +3723,31 @@ def generate_newsletter():
             target_date = datetime.now(timezone.utc).date()
             logger.info(f"📅 Using today's date: {target_date}")
         
-        # Check if newsletter already exists for this team and date
+        # Compute week window for weekly newsletters
+        week_start = None
+        week_end = None
+        if newsletter_type == 'weekly' and target_date:
+            week_start = target_date - timedelta(days=target_date.weekday())
+            week_end = week_start + timedelta(days=6)
+            logger.info(f"📆 Computed week range: {week_start} to {week_end}")
+
+        # Check if newsletter already exists for this team and week/date
         logger.info(f"🔍 Checking for existing newsletter: team_id={team_id}, type={newsletter_type}, date={target_date}")
-        existing = Newsletter.query.filter_by(
-            team_id=team_id,
-            newsletter_type=newsletter_type,
-            issue_date=target_date
-        ).first()
-        
-        if existing:
+        if week_start and week_end:
+            existing = Newsletter.query.filter_by(
+                team_id=team_id,
+                newsletter_type=newsletter_type,
+                week_start_date=week_start,
+                week_end_date=week_end
+            ).first()
+        else:
+            existing = Newsletter.query.filter_by(
+                team_id=team_id,
+                newsletter_type=newsletter_type,
+                issue_date=target_date
+            ).first()
+
+        if existing and not force_refresh:
             logger.info(f"ℹ️  Newsletter already exists with ID: {existing.id}")
             return jsonify({
                 'message': 'Newsletter already exists for this date',
@@ -3760,16 +3782,52 @@ def generate_newsletter():
             
             try:
                 logger.info("💾 Persisting newsletter to database...")
-                # Persist using shared helper (sets generated_date/published_date)
-                row = persist_newsletter(
-                    team_db_id=team_id,
-                    content_json_str=composed['content_json'],
-                    week_start=composed['week_start'],
-                    week_end=composed['week_end'],
-                    issue_date=target_date,
-                    newsletter_type='weekly',
-                )
-                logger.info(f"✅ Newsletter persisted with ID: {row.id}")
+                if existing and force_refresh:
+                    logger.info(f"♻️  Force refresh requested; updating existing newsletter ID: {existing.id}")
+                    payload_obj = None
+                    content_json_str = composed.get('content_json') or '{}'
+                    try:
+                        payload_obj = json.loads(content_json_str) if isinstance(content_json_str, str) else content_json_str
+                    except Exception:
+                        payload_obj = None
+
+                    if isinstance(payload_obj, dict):
+                        # Render variants for preview/email
+                        try:
+                            from src.agents.weekly_newsletter_agent import _render_variants
+                            team_name = team.name if team else None
+                            variants = _render_variants(payload_obj, team_name)
+                            payload_obj['rendered'] = variants
+                            content_json_str = json.dumps(payload_obj, ensure_ascii=False)
+                        except Exception:
+                            pass
+
+                    now = datetime.now(timezone.utc)
+                    if isinstance(payload_obj, dict):
+                        title = payload_obj.get('title')
+                        if isinstance(title, str) and title.strip():
+                            existing.title = title.strip()
+                    existing.content = content_json_str
+                    existing.structured_content = content_json_str
+                    existing.issue_date = target_date
+                    existing.week_start_date = composed.get('week_start') or week_start
+                    existing.week_end_date = composed.get('week_end') or week_end
+                    existing.generated_date = now
+                    existing.updated_at = now
+                    db.session.commit()
+                    logger.info(f"✅ Newsletter refreshed for ID: {existing.id}")
+                    row = existing
+                else:
+                    # Persist using shared helper (sets generated_date/published_date)
+                    row = persist_newsletter(
+                        team_db_id=team_id,
+                        content_json_str=composed['content_json'],
+                        week_start=composed['week_start'],
+                        week_end=composed['week_end'],
+                        issue_date=target_date,
+                        newsletter_type='weekly',
+                    )
+                    logger.info(f"✅ Newsletter persisted with ID: {row.id}")
             except Exception as persist_error:
                 logger.error(f"❌ PERSISTENCE ERROR: {type(persist_error).__name__}: {persist_error}")
                 logger.exception("Full persistence traceback:")
@@ -5899,7 +5957,9 @@ def send_newsletter(newsletter_id: int):
 @require_api_key
 def delete_newsletter(newsletter_id: int):
     try:
-        newsletter = Newsletter.query.get_or_404(newsletter_id)
+        newsletter = Newsletter.query.get(newsletter_id)
+        if not newsletter:
+            return jsonify({'error': 'Newsletter not found'}), 404
 
         try:
             NewsletterComment.query.filter_by(newsletter_id=newsletter.id).delete(synchronize_session=False)
@@ -5907,7 +5967,9 @@ def delete_newsletter(newsletter_id: int):
             db.session.rollback()
             raise
 
-        db.session.delete(newsletter)
+        NewsletterDigestQueue.query.filter_by(newsletter_id=newsletter.id).delete(synchronize_session=False)
+
+        Newsletter.query.filter_by(id=newsletter_id).delete(synchronize_session=False)
         db.session.commit()
 
         return jsonify({'status': 'deleted', 'newsletter_id': newsletter_id})
@@ -10290,8 +10352,12 @@ def admin_update_newsletter(nid: int):
         n = Newsletter.query.get_or_404(nid)
         data = request.get_json() or {}
         # Update title
+        title_updated = False
         if 'title' in data:
-            n.title = (data.get('title') or '').strip() or n.title
+            new_title = (data.get('title') or '').strip()
+            if new_title:
+                title_updated = new_title != n.title
+                n.title = new_title
         # Update content
         if 'content_json' in data:
             payload = data.get('content_json')
@@ -10305,6 +10371,18 @@ def admin_update_newsletter(nid: int):
             content_str = json.dumps(obj, ensure_ascii=False)
             n.content = content_str
             n.structured_content = content_str
+        elif title_updated:
+            # Sync title into existing JSON when only title changes
+            raw = n.structured_content or n.content
+            try:
+                obj = json.loads(raw) if isinstance(raw, str) else raw
+            except Exception:
+                obj = None
+            if isinstance(obj, dict):
+                obj['title'] = n.title
+                content_str = json.dumps(obj, ensure_ascii=False)
+                n.content = content_str
+                n.structured_content = content_str
         # Update week/issue dates (optional)
         def _parse_date(s):
             try:
@@ -10742,6 +10820,7 @@ def admin_bulk_delete_newsletters():
         deleted_count = 0
         if existing_ids:
             NewsletterComment.query.filter(NewsletterComment.newsletter_id.in_(existing_ids)).delete(synchronize_session=False)
+            NewsletterDigestQueue.query.filter(NewsletterDigestQueue.newsletter_id.in_(existing_ids)).delete(synchronize_session=False)
             deleted_count = Newsletter.query.filter(Newsletter.id.in_(existing_ids)).delete(synchronize_session=False)
             db.session.commit()
         else:

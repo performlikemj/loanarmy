@@ -7,6 +7,15 @@ from src.config.stripe_config import STRIPE_SECRET_KEY
 logger = logging.getLogger(__name__)
 
 
+def _stripe_request(method: str, url: str, params: dict | None = None):
+    requestor = stripe._api_requestor._APIRequestor()
+    return requestor.request(method, url, params=params, base_address='api')
+
+
+def _meter_event_name(journalist_user_id: int) -> str:
+    return f"gol_newsletter_{journalist_user_id}"
+
+
 def record_newsletter_publication(journalist_user_id: int, newsletter_id: int, quantity: int = 1):
     """Record a newsletter publication as metered usage for all subscribers
     
@@ -36,40 +45,32 @@ def record_newsletter_publication(journalist_user_id: int, newsletter_id: int, q
         failed_count = 0
         errors = []
         
+        event_name = _meter_event_name(journalist_user_id)
+
         for subscription in active_subscriptions:
             try:
-                # Get the subscription from Stripe to find the subscription item ID
-                stripe_subscription = stripe.Subscription.retrieve(
-                    subscription.stripe_subscription_id
-                )
-                
-                # Get the first subscription item (there should only be one for journalist subscriptions)
-                if not stripe_subscription.items or len(stripe_subscription.items.data) == 0:
-                    logger.error(f"No subscription items found for subscription {subscription.stripe_subscription_id}")
+                if not subscription.stripe_customer_id:
+                    logger.error(f"Missing stripe_customer_id for subscription {subscription.id}")
                     failed_count += 1
                     continue
-                
-                subscription_item_id = stripe_subscription.items.data[0].id
-                
-                # Record usage (1 newsletter published)
-                usage_record = stripe.SubscriptionItem.create_usage_record(
-                    subscription_item_id,
-                    quantity=quantity,
-                    timestamp='now',
-                    action='increment',  # Add to existing usage in this period
-                    metadata={
-                        'newsletter_id': newsletter_id,
-                        'journalist_user_id': journalist_user_id,
-                        'subscriber_user_id': subscription.subscriber_user_id
+
+                identifier = f"newsletter_{newsletter_id}_subscriber_{subscription.subscriber_user_id}"
+
+                _stripe_request('post', '/v1/billing/meter_events', params={
+                    'event_name': event_name,
+                    'identifier': identifier,
+                    'payload': {
+                        'stripe_customer_id': subscription.stripe_customer_id,
+                        'value': quantity
                     }
-                )
-                
+                })
+
                 success_count += 1
                 logger.info(
-                    f"Recorded usage for subscriber {subscription.subscriber_user_id}: "
-                    f"newsletter {newsletter_id}, subscription_item {subscription_item_id}"
+                    f"Recorded meter event for subscriber {subscription.subscriber_user_id}: "
+                    f"newsletter {newsletter_id}"
                 )
-                
+
             except stripe.error.StripeError as e:
                 logger.error(
                     f"Stripe error recording usage for subscription {subscription.stripe_subscription_id}: {e}"
@@ -164,4 +165,3 @@ def get_subscriber_usage_for_period(subscriber_user_id: int, journalist_user_id:
     except Exception as e:
         logger.exception(f"Error getting subscriber usage: {e}")
         return {'error': str(e)}
-

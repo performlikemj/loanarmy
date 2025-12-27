@@ -1425,3 +1425,111 @@ def test_admin_bulk_delete_with_filters_and_exclusions(app, client, monkeypatch)
 
     remaining_ids = {row.id for row in Newsletter.query.all()}
     assert remaining_ids == {keep_excluded.id, outside.id}
+
+
+def test_generate_newsletter_force_refresh_regenerates(app, client, monkeypatch):
+    team = Team(team_id=101, name='Refresh FC', country='England', season=2025)
+    db.session.add(team)
+    db.session.commit()
+
+    counter = {'n': 0}
+
+    def fake_compose(_team_id, target_date, force_refresh=False):
+        counter['n'] += 1
+        week_start = target_date - timedelta(days=target_date.weekday())
+        week_end = week_start + timedelta(days=6)
+        payload = {'title': f'Weekly Update {counter["n"]}', 'summary': '', 'sections': []}
+        return {
+            'content_json': json.dumps(payload),
+            'week_start': week_start,
+            'week_end': week_end,
+        }
+
+    monkeypatch.setattr(weekly_nl_agent, '_render_variants', _stub_render_variants)
+    monkeypatch.setattr(weekly_nl_agent, 'compose_team_weekly_newsletter', fake_compose)
+
+    response = client.post(
+        '/api/newsletters/generate',
+        json={'team_id': team.id, 'target_date': '2025-01-08'},
+    )
+    assert response.status_code == 200
+    assert Newsletter.query.count() == 1
+    first = Newsletter.query.first()
+    first_content = json.loads(first.structured_content or first.content)
+    assert first_content['title'] == 'Weekly Update 1'
+
+    response = client.post(
+        '/api/newsletters/generate',
+        json={'team_id': team.id, 'target_date': '2025-01-08', 'force_refresh': True},
+    )
+    assert response.status_code == 200
+    assert Newsletter.query.count() == 1
+    refreshed = Newsletter.query.first()
+    refreshed_content = json.loads(refreshed.structured_content or refreshed.content)
+    assert refreshed_content['title'] == 'Weekly Update 2'
+
+
+def test_generate_newsletter_no_duplicates_for_same_week(app, client, monkeypatch):
+    team = Team(team_id=202, name='No Duplicates FC', country='England', season=2025)
+    db.session.add(team)
+    db.session.commit()
+
+    def fake_compose(_team_id, target_date, force_refresh=False):
+        week_start = target_date - timedelta(days=target_date.weekday())
+        week_end = week_start + timedelta(days=6)
+        payload = {'title': 'Weekly Update', 'summary': '', 'sections': []}
+        return {
+            'content_json': json.dumps(payload),
+            'week_start': week_start,
+            'week_end': week_end,
+        }
+
+    monkeypatch.setattr(weekly_nl_agent, '_render_variants', _stub_render_variants)
+    monkeypatch.setattr(weekly_nl_agent, 'compose_team_weekly_newsletter', fake_compose)
+
+    response = client.post(
+        '/api/newsletters/generate',
+        json={'team_id': team.id, 'target_date': '2025-09-15'},
+    )
+    assert response.status_code == 200
+    response = client.post(
+        '/api/newsletters/generate',
+        json={'team_id': team.id, 'target_date': '2025-09-17'},
+    )
+    assert response.status_code == 200
+    assert Newsletter.query.count() == 1
+
+
+def test_admin_update_newsletter_title_syncs_to_json(app, client, monkeypatch):
+    monkeypatch.setenv('ADMIN_API_KEY', 'test-admin-key')
+
+    team = Team(team_id=303, name='Title Sync FC', country='England', season=2025)
+    db.session.add(team)
+    db.session.commit()
+
+    original_payload = {'title': 'Original Title', 'summary': '', 'sections': []}
+    newsletter = Newsletter(
+        team_id=team.id,
+        newsletter_type='weekly',
+        title='Original Title',
+        content=json.dumps(original_payload),
+        structured_content=json.dumps(original_payload),
+        issue_date=date(2025, 1, 8),
+        week_start_date=date(2025, 1, 6),
+        week_end_date=date(2025, 1, 12),
+        public_slug=_test_slug('title-sync'),
+    )
+    db.session.add(newsletter)
+    db.session.commit()
+
+    response = client.put(
+        f'/api/admin/newsletters/{newsletter.id}',
+        headers=_auth_headers(),
+        json={'title': 'New Title'},
+    )
+    assert response.status_code == 200
+
+    updated = Newsletter.query.get(newsletter.id)
+    assert updated.title == 'New Title'
+    updated_content = json.loads(updated.structured_content or updated.content)
+    assert updated_content['title'] == 'New Title'

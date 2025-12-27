@@ -4,16 +4,17 @@ import { Button } from '@/components/ui/button'
 import { Card, CardContent } from '@/components/ui/card'
 import { Badge } from '@/components/ui/badge'
 import { Avatar, AvatarImage, AvatarFallback } from '@/components/ui/avatar'
-import { 
-  ChevronDown, 
-  ChevronUp, 
-  Sparkles, 
-  Users, 
-  Lock, 
+import {
+  ChevronDown,
+  ChevronUp,
+  Sparkles,
+  Users,
+  Lock,
   Search,
   X,
   PenLine,
-  Eye
+  Eye,
+  ExternalLink
 } from 'lucide-react'
 import { CommentaryCard } from './CommentaryCard'
 import { useAuth } from '@/context/AuthContext'
@@ -53,28 +54,28 @@ export function WriterDiscoveryBar({
 }) {
   const [isExpanded, setIsExpanded] = useState(true)
   const [searchQuery, setSearchQuery] = useState('')
-  
+
   const filteredWriters = useMemo(() => {
     if (!searchQuery.trim()) return writers
     const query = searchQuery.toLowerCase()
-    return writers.filter(w => 
+    return writers.filter(w =>
       w.display_name?.toLowerCase().includes(query) ||
       w.bio?.toLowerCase().includes(query)
     )
   }, [writers, searchQuery])
-  
-  const subscribedWriters = useMemo(() => 
+
+  const subscribedWriters = useMemo(() =>
     writers.filter(w => w.is_subscribed || activeWriterIds.has(w.id)),
     [writers, activeWriterIds]
   )
-  
+
   const unsubscribedWriters = useMemo(() =>
     filteredWriters.filter(w => !w.is_subscribed && !activeWriterIds.has(w.id)),
     [filteredWriters, activeWriterIds]
   )
-  
+
   if (!writers || writers.length === 0) return null
-  
+
   return (
     <div className={cn(
       'bg-gradient-to-r from-slate-50 to-white border rounded-xl shadow-sm overflow-hidden',
@@ -94,7 +95,7 @@ export function WriterDiscoveryBar({
               {isPreviewMode ? 'Writer Preview Mode' : 'Expert Writers'}
             </h3>
             <p className="text-xs text-gray-500">
-              {isPreviewMode 
+              {isPreviewMode
                 ? 'See how your content appears to subscribers'
                 : `${writers.length} writer${writers.length !== 1 ? 's' : ''} covering this newsletter`
               }
@@ -114,7 +115,7 @@ export function WriterDiscoveryBar({
           )}
         </div>
       </button>
-      
+
       {/* Expanded content */}
       {isExpanded && (
         <div className="px-4 pb-4 space-y-4">
@@ -139,7 +140,7 @@ export function WriterDiscoveryBar({
               )}
             </div>
           )}
-          
+
           {/* Active/subscribed writers */}
           {subscribedWriters.length > 0 && (
             <div className="space-y-2">
@@ -150,7 +151,7 @@ export function WriterDiscoveryBar({
                 {subscribedWriters.map((writer, index) => {
                   const colors = WRITER_COLORS[index % WRITER_COLORS.length]
                   const isActive = activeWriterIds.has(writer.id)
-                  
+
                   return (
                     <button
                       key={writer.id}
@@ -177,7 +178,7 @@ export function WriterDiscoveryBar({
                       <span className="text-sm font-medium truncate max-w-[120px]">
                         {writer.display_name}
                       </span>
-                      <Badge 
+                      <Badge
                         variant="secondary"
                         className={cn(
                           'text-[10px] px-1.5 py-0',
@@ -193,7 +194,7 @@ export function WriterDiscoveryBar({
               </div>
             </div>
           )}
-          
+
           {/* Discover new writers */}
           {unsubscribedWriters.length > 0 && !isPreviewMode && (
             <div className="space-y-2">
@@ -203,7 +204,7 @@ export function WriterDiscoveryBar({
               <div className="grid gap-2">
                 {unsubscribedWriters.map((writer, index) => {
                   const colors = WRITER_COLORS[(subscribedWriters.length + index) % WRITER_COLORS.length]
-                  
+
                   return (
                     <div
                       key={writer.id}
@@ -220,7 +221,7 @@ export function WriterDiscoveryBar({
                           {(writer.display_name || 'W').substring(0, 2).toUpperCase()}
                         </AvatarFallback>
                       </Avatar>
-                      
+
                       <div className="flex-1 min-w-0">
                         <div className="flex items-center gap-2">
                           <span className="font-semibold text-gray-900 truncate">
@@ -230,13 +231,31 @@ export function WriterDiscoveryBar({
                             {writer.writeup_count || 0} writeup{writer.writeup_count !== 1 ? 's' : ''}
                           </Badge>
                         </div>
+                        {(writer.attribution_url || writer.attribution_name) && (
+                          <div className="flex items-center gap-1 text-xs text-blue-600 mt-0.5">
+                            {writer.attribution_url ? (
+                              <a
+                                href={writer.attribution_url}
+                                target="_blank"
+                                rel="noopener noreferrer"
+                                className="hover:underline flex items-center gap-1"
+                                onClick={(e) => e.stopPropagation()}
+                              >
+                                {writer.attribution_name || 'Visit Site'}
+                                <ExternalLink className="h-2.5 w-2.5" />
+                              </a>
+                            ) : (
+                              <span className="text-gray-500">{writer.attribution_name}</span>
+                            )}
+                          </div>
+                        )}
                         {writer.bio && (
                           <p className="text-xs text-gray-500 line-clamp-1 mt-0.5">
                             {writer.bio}
                           </p>
                         )}
                       </div>
-                      
+
                       <div className="flex items-center gap-2 shrink-0">
                         {writer.has_public ? (
                           <Button
@@ -269,7 +288,7 @@ export function WriterDiscoveryBar({
               </div>
             </div>
           )}
-          
+
           {/* Empty state */}
           {filteredWriters.length === 0 && searchQuery && (
             <div className="text-center py-4 text-gray-500 text-sm">
@@ -292,7 +311,7 @@ export function WriterSummarySection({
   className
 }) {
   if (!commentaries || commentaries.length === 0) return null
-  
+
   return (
     <div className={cn('space-y-4', className)}>
       <div className="flex items-center gap-2">
@@ -302,7 +321,7 @@ export function WriterSummarySection({
           {commentaries.length} writer{commentaries.length !== 1 ? 's' : ''}
         </Badge>
       </div>
-      
+
       <div className="space-y-3">
         {commentaries.map(c => (
           <CommentaryCard
@@ -329,7 +348,7 @@ export function PlayerWriterCommentary({
   className
 }) {
   if (!commentaries || commentaries.length === 0) return null
-  
+
   return (
     <div className={cn(
       'mt-4 pt-4 border-t border-violet-100 space-y-3',
@@ -339,7 +358,7 @@ export function PlayerWriterCommentary({
         <PenLine className="h-3.5 w-3.5" />
         <span>Writer Analysis on {playerName}</span>
       </div>
-      
+
       {commentaries.map(c => (
         <CommentaryCard
           key={c.id}
@@ -367,25 +386,25 @@ export function useNewsletterWriters(newsletterId) {
   })
   const [activeWriterIds, setActiveWriterIds] = useState(new Set())
   const [isPreviewMode, setIsPreviewMode] = useState(false)
-  
+
   // Fetch writer data when newsletter or user changes
   const fetchData = useCallback(async (writerIds = []) => {
     if (!newsletterId) return
-    
+
     setLoading(true)
     try {
       const result = await APIService.getNewsletterJournalistView(
         newsletterId,
         writerIds
       )
-      
+
       setWriters(result.available_journalists || [])
       setCommentaries({
         intro: result.commentaries?.intro || [],
         summary: result.commentaries?.summary || [],
         player: result.commentaries?.player || {}
       })
-      
+
       // Check if current user is a writer for this newsletter (preview mode)
       // is_self flag comes from the API when the journalist matches current user
       if (auth.isJournalist && result.available_journalists) {
@@ -398,19 +417,19 @@ export function useNewsletterWriters(newsletterId) {
       setLoading(false)
     }
   }, [newsletterId, auth.isJournalist])
-  
+
   // Initial fetch - auto-enable subscribed writers and self (for preview)
   useEffect(() => {
     const init = async () => {
       if (!newsletterId) return
-      
+
       setLoading(true)
       try {
         // First fetch without any writer IDs to get the list
         const result = await APIService.getNewsletterJournalistView(newsletterId, [])
         const availableWriters = result.available_journalists || []
         setWriters(availableWriters)
-        
+
         // Auto-enable subscribed writers and self (is_self flag from API)
         const autoEnabledIds = new Set()
         let foundSelf = false
@@ -424,11 +443,11 @@ export function useNewsletterWriters(newsletterId) {
             foundSelf = true
           }
         })
-        
+
         if (foundSelf) {
           setIsPreviewMode(true)
         }
-        
+
         // If there are auto-enabled writers, fetch their content
         if (autoEnabledIds.size > 0) {
           setActiveWriterIds(autoEnabledIds)
@@ -448,10 +467,10 @@ export function useNewsletterWriters(newsletterId) {
         setLoading(false)
       }
     }
-    
+
     init()
   }, [newsletterId, auth.isJournalist])
-  
+
   // Toggle a writer on/off
   const toggleWriter = useCallback((writerId) => {
     setActiveWriterIds(prev => {
@@ -466,7 +485,7 @@ export function useNewsletterWriters(newsletterId) {
       return newSet
     })
   }, [fetchData])
-  
+
   return {
     loading,
     writers,
@@ -505,9 +524,9 @@ function PlayerCommentarySection({
     })
     return items
   }, [playerCommentaries])
-  
+
   if (allPlayerComments.length === 0) return null
-  
+
   // Group by player
   const groupedByPlayer = useMemo(() => {
     const groups = {}
@@ -526,7 +545,7 @@ function PlayerCommentarySection({
     })
     return Object.values(groups)
   }, [allPlayerComments])
-  
+
   return (
     <div className={cn('space-y-4', className)}>
       <div className="flex items-center gap-2">
@@ -536,15 +555,15 @@ function PlayerCommentarySection({
           {allPlayerComments.length} writeup{allPlayerComments.length !== 1 ? 's' : ''}
         </Badge>
       </div>
-      
+
       <div className="space-y-4">
         {groupedByPlayer.map((group, idx) => (
           <div key={idx} className="bg-white rounded-lg border shadow-sm overflow-hidden">
             {/* Player header */}
             <div className="p-3 sm:p-4 border-b bg-gradient-to-r from-gray-50 to-white flex items-center gap-3">
               {group.player_photo ? (
-                <img 
-                  src={group.player_photo} 
+                <img
+                  src={group.player_photo}
                   alt={group.player_name}
                   className="h-12 w-12 rounded-full object-cover border-2 border-white shadow"
                 />
@@ -565,7 +584,7 @@ function PlayerCommentarySection({
                 )}
               </div>
             </div>
-            
+
             {/* Commentaries */}
             <div className="p-3 sm:p-4 space-y-3 bg-violet-50/30">
               {group.commentaries.map(c => (
@@ -602,11 +621,11 @@ export function NewsletterWriterOverlay({
     isPreviewMode,
     toggleWriter
   } = useNewsletterWriters(newsletterId)
-  
+
   const handleSubscribe = useCallback((writerId) => {
     navigate(`/journalists/${writerId}`)
   }, [navigate])
-  
+
   // Show loading indicator
   if (loading && writers.length === 0) {
     return (
@@ -621,13 +640,13 @@ export function NewsletterWriterOverlay({
       </div>
     )
   }
-  
+
   // Don't render anything if no writers available
   if (writers.length === 0) return null
-  
+
   // Combine intro and summary for the header section
   const headerCommentaries = [...commentaries.intro, ...commentaries.summary]
-  
+
   return (
     <div className={cn('space-y-4', className)}>
       {/* Writer discovery/toggle bar */}
@@ -638,7 +657,7 @@ export function NewsletterWriterOverlay({
         onSubscribe={handleSubscribe}
         isPreviewMode={isPreviewMode}
       />
-      
+
       {/* Summary/Intro commentaries - shown after agent summary */}
       {headerCommentaries.length > 0 && (
         <WriterSummarySection
@@ -646,7 +665,7 @@ export function NewsletterWriterOverlay({
           onSubscribe={handleSubscribe}
         />
       )}
-      
+
       {/* Player commentaries are rendered inline within player cards, not here */}
     </div>
   )
@@ -657,7 +676,7 @@ export function NewsletterWriterOverlay({
  */
 export function getPlayerCommentaries(commentaries, playerId) {
   if (!commentaries?.player || !playerId) return []
-  
+
   const playerData = commentaries.player[playerId] || commentaries.player[String(playerId)]
   return playerData?.commentaries || []
 }
@@ -666,30 +685,30 @@ export function getPlayerCommentaries(commentaries, playerId) {
  * InlinePlayerWriteups - Renders writer commentaries inline within a player card
  * Use this inside player cards to show writeups for that specific player
  */
-export function InlinePlayerWriteups({ 
-  playerId, 
+export function InlinePlayerWriteups({
+  playerId,
   playerName,
-  className 
+  className
 }) {
   const navigate = useNavigate()
   const { commentaries, activeWriterIds } = useWriterCommentaries()
-  
+
   const handleSubscribe = useCallback((writerId) => {
     navigate(`/journalists/${writerId}`)
   }, [navigate])
-  
-// Get commentaries for this player
+
+  // Get commentaries for this player
   const playerCommentaries = useMemo(() => {
     if (!commentaries?.player || !playerId) return []
     const playerData = commentaries.player[playerId] || commentaries.player[String(playerId)]
     return playerData?.commentaries || []
   }, [commentaries, playerId])
-  
+
   // Only show if there are active writers and commentaries
   if (activeWriterIds.size === 0 || playerCommentaries.length === 0) {
     return null
   }
-  
+
   return (
     <div className={cn('mt-4 pt-4 border-t border-violet-100', className)}>
       <div className="flex items-center gap-2 mb-3 text-xs font-semibold text-violet-700 uppercase tracking-wide">
@@ -699,7 +718,7 @@ export function InlinePlayerWriteups({
           {playerCommentaries.length}
         </Badge>
       </div>
-      
+
       <div className="space-y-3">
         {playerCommentaries.map(c => (
           <CommentaryCard
@@ -718,9 +737,9 @@ export function InlinePlayerWriteups({
 /**
  * NewsletterWriterProvider - Wraps a newsletter to provide writer data context
  */
-export function NewsletterWriterProvider({ 
-  newsletterId, 
-  children 
+export function NewsletterWriterProvider({
+  newsletterId,
+  children
 }) {
   const {
     loading,
@@ -730,7 +749,7 @@ export function NewsletterWriterProvider({
     isPreviewMode,
     toggleWriter
   } = useNewsletterWriters(newsletterId)
-  
+
   const contextValue = useMemo(() => ({
     loading,
     writers,
@@ -739,7 +758,7 @@ export function NewsletterWriterProvider({
     isPreviewMode,
     toggleWriter
   }), [loading, writers, commentaries, activeWriterIds, isPreviewMode, toggleWriter])
-  
+
   return (
     <WriterCommentaryContext.Provider value={contextValue}>
       {children}
@@ -753,11 +772,11 @@ export function NewsletterWriterProvider({
 export function WriterHeaderSection({ className }) {
   const navigate = useNavigate()
   const { loading, writers, commentaries, activeWriterIds, isPreviewMode, toggleWriter } = useWriterCommentaries()
-  
+
   const handleSubscribe = useCallback((writerId) => {
     navigate(`/journalists/${writerId}`)
   }, [navigate])
-  
+
   // Show loading indicator
   if (loading && writers.length === 0) {
     return (
@@ -772,13 +791,13 @@ export function WriterHeaderSection({ className }) {
       </div>
     )
   }
-  
+
   // Don't render anything if no writers available
   if (writers.length === 0) return null
-  
+
   // Combine intro and summary for the header section
   const headerCommentaries = [...(commentaries.intro || []), ...(commentaries.summary || [])]
-  
+
   return (
     <div className={cn('space-y-4', className)}>
       {/* Writer discovery/toggle bar */}
@@ -789,7 +808,7 @@ export function WriterHeaderSection({ className }) {
         onSubscribe={handleSubscribe}
         isPreviewMode={isPreviewMode}
       />
-      
+
       {/* Summary/Intro commentaries - shown after agent summary */}
       {headerCommentaries.length > 0 && (
         <WriterSummarySection
@@ -808,21 +827,21 @@ export function WriterHeaderSection({ className }) {
 export function PlayerWriteupsSection({ className }) {
   const navigate = useNavigate()
   const { commentaries, activeWriterIds, writers } = useWriterCommentaries()
-  
+
   const handleSubscribe = useCallback((writerId) => {
     navigate(`/journalists/${writerId}`)
   }, [navigate])
-  
+
   // Get all player commentaries
   const playerCommentaryEntries = useMemo(() => {
     if (!commentaries?.player || activeWriterIds.size === 0) return []
     return Object.entries(commentaries.player)
   }, [commentaries, activeWriterIds])
-  
+
   if (playerCommentaryEntries.length === 0 || activeWriterIds.size === 0) {
     return null
   }
-  
+
   return (
     <div className={cn('mt-8 space-y-4 border-t pt-8', className)}>
       <h3 className="text-xl font-bold text-gray-900 flex items-center gap-2">
@@ -834,17 +853,17 @@ export function PlayerWriteupsSection({ className }) {
           // playerData structure: { player_info: {...}, commentaries: [...] }
           const commentaries = playerData?.commentaries || []
           const playerInfo = playerData?.player_info || {}
-          
+
           if (commentaries.length === 0) return null
-          
+
           return (
             <div key={playerId} className="space-y-3">
               {/* Player header if available */}
               {playerInfo.name && (
                 <div className="flex items-center gap-3 mb-2">
                   {playerInfo.photo && (
-                    <img 
-                      src={playerInfo.photo} 
+                    <img
+                      src={playerInfo.photo}
                       alt={playerInfo.name}
                       className="h-10 w-10 rounded-full object-cover border-2 border-white shadow"
                     />

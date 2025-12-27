@@ -497,6 +497,10 @@ export class APIService {
         })
     }
 
+    static async requestAuthCode(email) {
+        return this.requestLoginCode(email)
+    }
+
     static _recordLoginResult(payload = {}) {
         const role = payload.role || 'user'
         const token = payload.token || payload.access_token
@@ -537,6 +541,10 @@ export class APIService {
         })
         this._recordLoginResult(res || {})
         return res
+    }
+
+    static async verifyAuthCode(email, code) {
+        return this.verifyLoginCode(email, code)
     }
 
     static async refreshProfile() {
@@ -919,6 +927,29 @@ export class APIService {
         })
     }
 
+    // Writer Coverage Request API methods
+    static async getWriterCoverageRequests(status = null) {
+        const params = status ? `?status=${status}` : ''
+        return this.request(`/writer/coverage-requests${params}`)
+    }
+
+    static async submitCoverageRequest(payload) {
+        return this.request('/writer/coverage-requests', {
+            method: 'POST',
+            body: JSON.stringify(payload)
+        })
+    }
+
+    static async cancelCoverageRequest(requestId) {
+        return this.request(`/writer/coverage-requests/${requestId}`, {
+            method: 'DELETE'
+        })
+    }
+
+    static async getWriterAvailablePlayers() {
+        return this.request('/writer/available-players')
+    }
+
     static async getPlayerStats(playerId) {
         return this.request(`/journalists/players/${playerId}/stats`)
     }
@@ -968,6 +999,36 @@ export class APIService {
 
     static async adminGetJournalistStats() {
         return this.request('/admin/journalist-stats', {}, { admin: true })
+    }
+
+    // Admin Coverage Request API methods
+    static async adminListCoverageRequests(params = {}) {
+        const q = new URLSearchParams(params)
+        return this.request(`/admin/coverage-requests?${q}`, {}, { admin: true })
+    }
+
+    static async adminApproveCoverageRequest(requestId) {
+        return this.request(`/admin/coverage-requests/${requestId}/approve`, {
+            method: 'POST'
+        }, { admin: true })
+    }
+
+    static async adminDenyCoverageRequest(requestId, reason = null) {
+        return this.request(`/admin/coverage-requests/${requestId}/deny`, {
+            method: 'POST',
+            body: JSON.stringify({ reason })
+        }, { admin: true })
+    }
+
+    static async adminGetJournalistAllAssignments(journalistId) {
+        return this.request(`/admin/journalists/${journalistId}/all-assignments`, {}, { admin: true })
+    }
+
+    static async adminAssignLoanTeams(journalistId, loanTeams) {
+        return this.request(`/admin/journalists/${journalistId}/loan-team-assignments`, {
+            method: 'POST',
+            body: JSON.stringify({ loan_teams: loanTeams })
+        }, { admin: true })
     }
 
     // Team Tracking Management API methods

@@ -23,8 +23,8 @@ function PlayerCard({ player, commentaries = [], onSubscribe }) {
       <div className="p-4 sm:p-5 border-b bg-gradient-to-r from-gray-50 to-white">
         <div className="flex items-center gap-3 sm:gap-4">
           {player.player_photo ? (
-            <img 
-              src={player.player_photo} 
+            <img
+              src={player.player_photo}
               alt={player.player_name}
               className="h-14 w-14 sm:h-16 sm:w-16 rounded-full object-cover border-2 border-white shadow"
             />
@@ -39,8 +39,8 @@ function PlayerCard({ player, commentaries = [], onSubscribe }) {
             </h3>
             <div className="flex items-center gap-2 mt-1">
               {player.loan_team_logo && (
-                <img 
-                  src={player.loan_team_logo} 
+                <img
+                  src={player.loan_team_logo}
                   alt={player.loan_team}
                   className="h-4 w-4 object-contain"
                 />
@@ -126,11 +126,11 @@ function NewsletterSection({ section, playerCommentaries, onSubscribe }) {
 export function JournalistNewsletterView() {
   const { newsletterId, journalistId: initialJournalistIdParam } = useParams()
   const navigate = useNavigate()
-  
+
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState(null)
   const [data, setData] = useState(null)
-  
+
   const [activeJournalistIds, setActiveJournalistIds] = useState(() => {
     const initialId = parseInt(initialJournalistIdParam, 10)
     return initialId ? new Set([initialId]) : new Set()
@@ -143,10 +143,10 @@ export function JournalistNewsletterView() {
 
   const fetchData = useCallback(async (journalistIds) => {
     if (!newsletterId) return
-    
+
     setLoading(true)
     setError(null)
-    
+
     try {
       const result = await APIService.getNewsletterJournalistView(
         newsletterId,
@@ -183,6 +183,42 @@ export function JournalistNewsletterView() {
     })
   }, [fetchData])
 
+  // Update meta tags for social sharing
+  useEffect(() => {
+    if (!data || !data.available_journalists) return
+
+    const activeWriters = data.available_journalists.filter(j => activeJournalistIds.has(j.id))
+
+    if (activeWriters.length > 0) {
+      const updateTag = (property, content) => {
+        let tag = document.querySelector(`meta[property="${property}"]`)
+        if (!tag) {
+          tag = document.createElement('meta')
+          tag.setAttribute('property', property)
+          document.head.appendChild(tag)
+        }
+        tag.setAttribute('content', content)
+      }
+
+      // Description
+      const writerNames = activeWriters.map(w => w.display_name).join(', ')
+      const description = `Read analysis by ${writerNames} on ${data.newsletter?.team?.name || 'Loan Army'}`
+      updateTag('og:description', description)
+
+      // Author / Attribution
+      if (activeWriters.length === 1) {
+        const writer = activeWriters[0]
+        updateTag('og:author', writer.attribution_name || writer.display_name)
+        if (writer.attribution_url) {
+          updateTag('article:author', writer.attribution_url)
+        }
+      } else {
+        const attribution = activeWriters.map(w => w.attribution_name || w.display_name).join(', ')
+        updateTag('og:author', attribution)
+      }
+    }
+  }, [data, activeJournalistIds])
+
   const handleSubscribe = useCallback((journalistId) => {
     navigate(`/journalists/${journalistId}`)
   }, [navigate])
@@ -217,20 +253,20 @@ export function JournalistNewsletterView() {
       {/* Header */}
       <div className="bg-white border-b">
         <div className="max-w-3xl mx-auto px-4 py-4">
-          <Button 
-            variant="ghost" 
-            size="sm" 
+          <Button
+            variant="ghost"
+            size="sm"
             onClick={() => navigate(-1)}
             className="-ml-2 mb-3"
           >
             <ArrowLeft className="mr-2 h-4 w-4" /> Back
           </Button>
-          
+
           {/* Newsletter Title */}
           <div className="flex items-start gap-3 sm:gap-4">
             {newsletter?.team?.logo && (
-              <img 
-                src={newsletter.team.logo} 
+              <img
+                src={newsletter.team.logo}
                 alt={newsletter.team.name}
                 className="h-12 w-12 sm:h-14 sm:w-14 object-contain flex-shrink-0"
               />
@@ -255,7 +291,7 @@ export function JournalistNewsletterView() {
               </div>
             </div>
           </div>
-          
+
           <Button
             variant="outline"
             size="sm"
@@ -278,7 +314,7 @@ export function JournalistNewsletterView() {
 
       {/* Main Content */}
       <div className="max-w-3xl mx-auto px-4 py-6 space-y-6">
-        
+
         {/* Empty State */}
         {activeJournalistIds.size === 0 && (
           <Card className="border-dashed bg-white/50">
@@ -328,8 +364,8 @@ export function JournalistNewsletterView() {
                   {data.player_info && (
                     <div className="p-4 border-b bg-gray-50 flex items-center gap-3">
                       {data.player_info.photo ? (
-                        <img 
-                          src={data.player_info.photo} 
+                        <img
+                          src={data.player_info.photo}
                           alt={data.player_info.name}
                           className="h-12 w-12 rounded-full object-cover border-2 border-white shadow"
                         />

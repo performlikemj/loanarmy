@@ -1,7 +1,10 @@
 """Stripe configuration and initialization"""
 import os
 import stripe
+import dotenv
 from typing import Optional
+
+dotenv.load_dotenv(dotenv.find_dotenv())
 
 # Load Stripe API keys from environment
 STRIPE_SECRET_KEY = os.getenv('STRIPE_SECRET_KEY')
@@ -63,4 +66,3 @@ def validate_stripe_config() -> tuple[bool, Optional[str]]:
         return False, "Invalid Stripe API key"
     except Exception as e:
         return False, f"Error validating Stripe configuration: {str(e)}"
-

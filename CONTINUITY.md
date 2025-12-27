@@ -1,0 +1,23 @@
+- Goal (incl. success criteria):
+  - Add negative-case tests for journalist commentary workflows (invalid type, missing player_id, non-writer access).
+  - Success: Tests enforce correct 400/403 responses and pass.
+- Constraints/Assumptions:
+  - Follow AGENTS.md conventions; tests-first for new features/bugfixes.
+  - Keep compatibility with existing journalist assignment behavior.
+- Key decisions:
+  - Validate commentary_type and player_id early in `/writer/commentaries` to return 400 on invalid input.
+- State:
+  - Done:
+    - Added negative-case tests for invalid type, missing player_id, and non-writer access.
+    - Updated commentary creation/update validation to return 400 for invalid type/missing player_id.
+    - Ran pytest for new negative-case tests (all passing).
+  - Now:
+    - Ready to summarize changes.
+  - Next:
+    - Optional: run full `tests/test_journalist_coverage.py` suite again.
+- Open questions (UNCONFIRMED if needed):
+  - None.
+- Working set (files/ids/commands):
+  - loan-army-backend/tests/test_journalist_coverage.py
+  - loan-army-backend/src/routes/journalist.py
+  - /Users/michaeljones/Library/Mobile Documents/com~apple~CloudDocs/Documents/Projects/Web Development/loan_army/CONTINUITY.md

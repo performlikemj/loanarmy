@@ -8,7 +8,7 @@ import { CheckCircle2, XCircle, Loader2, ExternalLink } from 'lucide-react';
 const API_BASE_URL = import.meta.env.VITE_API_URL || 'http://localhost:5001/api';
 
 const JournalistStripeSetup = () => {
-  const { user } = useAuth();
+  const auth = useAuth();
   const [accountStatus, setAccountStatus] = useState(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
@@ -21,8 +21,9 @@ const JournalistStripeSetup = () => {
   const fetchAccountStatus = async () => {
     try {
       setLoading(true);
+      const authHeaders = auth?.token ? { Authorization: `Bearer ${auth.token}` } : {};
       const response = await fetch(`${API_BASE_URL}/stripe/journalist/account-status`, {
-        credentials: 'include'
+        headers: authHeaders
       });
 
       if (response.ok) {
@@ -45,9 +46,9 @@ const JournalistStripeSetup = () => {
 
       const response = await fetch(`${API_BASE_URL}/stripe/journalist/onboard`, {
         method: 'POST',
-        credentials: 'include',
         headers: {
-          'Content-Type': 'application/json'
+          'Content-Type': 'application/json',
+          ...(auth?.token ? { Authorization: `Bearer ${auth.token}` } : {}),
         },
         body: JSON.stringify({
           refresh_url: window.location.href,
@@ -76,9 +77,9 @@ const JournalistStripeSetup = () => {
 
       const response = await fetch(`${API_BASE_URL}/stripe/journalist/refresh-onboard`, {
         method: 'POST',
-        credentials: 'include',
         headers: {
-          'Content-Type': 'application/json'
+          'Content-Type': 'application/json',
+          ...(auth?.token ? { Authorization: `Bearer ${auth.token}` } : {}),
         },
         body: JSON.stringify({
           refresh_url: window.location.href,
@@ -103,7 +104,7 @@ const JournalistStripeSetup = () => {
     try {
       const response = await fetch(`${API_BASE_URL}/stripe/journalist/dashboard-link`, {
         method: 'POST',
-        credentials: 'include'
+        headers: auth?.token ? { Authorization: `Bearer ${auth.token}` } : {},
       });
 
       if (!response.ok) {
@@ -271,4 +272,3 @@ const JournalistStripeSetup = () => {
 };
 
 export default JournalistStripeSetup;
-

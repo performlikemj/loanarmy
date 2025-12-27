@@ -8,7 +8,7 @@ import { Loader2, CreditCard, CheckCircle2 } from 'lucide-react';
 const API_BASE_URL = import.meta.env.VITE_API_URL || 'http://localhost:5001/api';
 
 const SubscribeToJournalist = ({ journalistId, journalistName, onSubscribed }) => {
-  const { user } = useAuth();
+  const auth = useAuth();
   const [price, setPrice] = useState(null);
   const [loading, setLoading] = useState(true);
   const [subscribing, setSubscribing] = useState(false);
@@ -24,7 +24,7 @@ const SubscribeToJournalist = ({ journalistId, journalistName, onSubscribed }) =
     try {
       // Fetch journalist's price
       const response = await fetch(`${API_BASE_URL}/stripe/journalist/my-price?journalist_id=${journalistId}`, {
-        credentials: 'include'
+        headers: auth?.token ? { Authorization: `Bearer ${auth.token}` } : {}
       });
 
       if (response.ok) {
@@ -43,7 +43,7 @@ const SubscribeToJournalist = ({ journalistId, journalistName, onSubscribed }) =
   const checkSubscriptionStatus = async () => {
     try {
       const response = await fetch(`${API_BASE_URL}/stripe/my-subscriptions`, {
-        credentials: 'include'
+        headers: auth?.token ? { Authorization: `Bearer ${auth.token}` } : {}
       });
 
       if (response.ok) {
@@ -59,7 +59,7 @@ const SubscribeToJournalist = ({ journalistId, journalistName, onSubscribed }) =
   };
 
   const handleSubscribe = async () => {
-    if (!user) {
+    if (!auth?.token) {
       setError('Please log in to subscribe');
       return;
     }
@@ -70,12 +70,12 @@ const SubscribeToJournalist = ({ journalistId, journalistName, onSubscribed }) =
 
       const response = await fetch(`${API_BASE_URL}/stripe/subscribe/${journalistId}`, {
         method: 'POST',
-        credentials: 'include',
         headers: {
-          'Content-Type': 'application/json'
+          'Content-Type': 'application/json',
+          Authorization: `Bearer ${auth.token}`
         },
         body: JSON.stringify({
-          success_url: `${window.location.origin}/subscriptions?success=true`,
+          success_url: `${window.location.origin}/settings?success=paid`,
           cancel_url: window.location.href
         })
       });
@@ -178,7 +178,7 @@ const SubscribeToJournalist = ({ journalistId, journalistName, onSubscribed }) =
 
         <Button 
           onClick={handleSubscribe} 
-          disabled={subscribing || !user}
+          disabled={subscribing || !auth?.token}
           className="w-full"
           size="lg"
         >
@@ -195,7 +195,7 @@ const SubscribeToJournalist = ({ journalistId, journalistName, onSubscribed }) =
           )}
         </Button>
 
-        {!user && (
+        {!auth?.token && (
           <p className="text-xs text-center text-muted-foreground">
             Please log in to subscribe
           </p>
@@ -206,4 +206,3 @@ const SubscribeToJournalist = ({ journalistId, journalistName, onSubscribed }) =
 };
 
 export default SubscribeToJournalist;
-

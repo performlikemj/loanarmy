@@ -10,7 +10,8 @@ import {
     Home,
     Shield,
     Megaphone,
-    MessageCircle
+    MessageCircle,
+    UserCheck
 } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { useAuthUI } from '@/context/AuthContext'
@@ -19,6 +20,7 @@ const sidebarItems = [
     { icon: LayoutDashboard, label: 'Dashboard', href: '/admin/dashboard' },
     { icon: Mail, label: 'Newsletters', href: '/admin/newsletters' },
     { icon: Users, label: 'Users', href: '/admin/users' },
+    { icon: UserCheck, label: 'Coverage Requests', href: '/admin/coverage-requests' },
     { icon: Trophy, label: 'Loans', href: '/admin/loans' },
     { icon: Users, label: 'Players', href: '/admin/players' },
     { icon: Shield, label: 'Teams', href: '/admin/teams' },

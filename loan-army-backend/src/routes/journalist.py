@@ -1,13 +1,136 @@
 from flask import Blueprint, request, jsonify, g
-from src.models.league import db, UserAccount, JournalistSubscription, NewsletterCommentary, Newsletter, JournalistTeamAssignment, Team, LoanedPlayer, Player
+from src.models.league import (
+    db, UserAccount, JournalistSubscription, NewsletterCommentary, Newsletter, 
+    JournalistTeamAssignment, JournalistLoanTeamAssignment, WriterCoverageRequest,
+    Team, LoanedPlayer, Player
+)
 from src.routes.api import require_user_auth, _safe_error_payload, require_api_key, _ensure_user_account
 from datetime import datetime, timezone
-from sqlalchemy import func
+from sqlalchemy import func, or_
 import re
 import logging
 
 journalist_bp = Blueprint('journalist', __name__)
 logger = logging.getLogger(__name__)
+
+
+def can_writer_cover_team(user_id: int, team_id: int) -> bool:
+    """Check if writer is assigned to a parent club team.
+    
+    Used for intro/summary commentaries that are team-wide.
+    """
+    return JournalistTeamAssignment.query.filter_by(
+        user_id=user_id, 
+        team_id=team_id
+    ).first() is not None
+
+
+def can_writer_cover_player(user_id: int, player_id: int, team_id: int = None) -> bool:
+    """Check if writer can cover a specific player.
+    
+    A writer can cover a player if:
+    1. Writer is assigned to the player's parent club (via JournalistTeamAssignment), OR
+    2. Writer is assigned to the player's loan team (via JournalistLoanTeamAssignment)
+    
+    Args:
+        user_id: The writer's user ID
+        player_id: The player's API ID (from LoanedPlayer.player_id)
+        team_id: Optional parent club team_id to also check (for backwards compatibility)
+    
+    Returns:
+        True if writer can cover this player
+    """
+    # Find the player's loan record
+    loan = LoanedPlayer.query.filter_by(player_id=player_id).order_by(
+        LoanedPlayer.updated_at.desc()
+    ).first()
+    
+    if not loan:
+        # Player not found - fall back to team check if provided
+        if team_id:
+            return can_writer_cover_team(user_id, team_id)
+        return False
+    
+    # Check 1: Is writer assigned to the player's parent club?
+    if loan.primary_team_id:
+        parent_assignment = JournalistTeamAssignment.query.filter_by(
+            user_id=user_id,
+            team_id=loan.primary_team_id
+        ).first()
+        if parent_assignment:
+            return True
+    
+    # Also check if assigned to the team_id passed (handles cross-season team IDs)
+    if team_id and team_id != loan.primary_team_id:
+        team_assignment = JournalistTeamAssignment.query.filter_by(
+            user_id=user_id,
+            team_id=team_id
+        ).first()
+        if team_assignment:
+            return True
+    
+    # Check 2: Is writer assigned to the player's loan team?
+    # Check by loan_team_id if available
+    if loan.loan_team_id:
+        loan_team_assignment = JournalistLoanTeamAssignment.query.filter_by(
+            user_id=user_id,
+            loan_team_id=loan.loan_team_id
+        ).first()
+        if loan_team_assignment:
+            return True
+    
+    # Also check by loan team name (for custom teams or cross-season matching)
+    if loan.loan_team_name:
+        loan_name_assignment = JournalistLoanTeamAssignment.query.filter_by(
+            user_id=user_id,
+            loan_team_name=loan.loan_team_name
+        ).first()
+        if loan_name_assignment:
+            return True
+    
+    return False
+
+
+def get_writer_available_players(user_id: int) -> list:
+    """Get all players a writer can cover based on their assignments.
+    
+    Returns LoanedPlayer records that the writer can write about.
+    """
+    # Get all parent club assignments
+    parent_assignments = JournalistTeamAssignment.query.filter_by(user_id=user_id).all()
+    parent_team_ids = [a.team_id for a in parent_assignments]
+    
+    # Get all loan team assignments
+    loan_assignments = JournalistLoanTeamAssignment.query.filter_by(user_id=user_id).all()
+    loan_team_ids = [a.loan_team_id for a in loan_assignments if a.loan_team_id]
+    loan_team_names = [a.loan_team_name for a in loan_assignments]
+    
+    # Build query for players
+    conditions = []
+    
+    # Players from assigned parent clubs
+    if parent_team_ids:
+        conditions.append(LoanedPlayer.primary_team_id.in_(parent_team_ids))
+    
+    # Players loaned to assigned loan teams (by ID)
+    if loan_team_ids:
+        conditions.append(LoanedPlayer.loan_team_id.in_(loan_team_ids))
+    
+    # Players loaned to assigned loan teams (by name, for custom teams)
+    if loan_team_names:
+        conditions.append(LoanedPlayer.loan_team_name.in_(loan_team_names))
+    
+    if not conditions:
+        return []
+    
+    players = LoanedPlayer.query.filter(
+        LoanedPlayer.is_active == True,
+        or_(*conditions)
+    ).order_by(
+        LoanedPlayer.player_name.asc()
+    ).all()
+    
+    return players
 
 @journalist_bp.route('/journalists', methods=['GET'])
 def list_journalists():
@@ -1047,6 +1170,8 @@ def get_writer_profile():
         return jsonify({
             'bio': user.bio,
             'profile_image_url': user.profile_image_url,
+            'attribution_url': user.attribution_url,
+            'attribution_name': user.attribution_name,
         })
     except Exception as e:
         return jsonify(_safe_error_payload(e, 'Failed to fetch writer profile')), 500
@@ -1071,6 +1196,16 @@ def update_writer_profile():
             
         if 'profile_image_url' in data:
             user.profile_image_url = data.get('profile_image_url', '').strip()
+
+        if 'attribution_url' in data:
+            url = data.get('attribution_url', '').strip()
+            # Basic validation
+            if url and not (url.startswith('http://') or url.startswith('https://')):
+                url = 'https://' + url
+            user.attribution_url = url
+            
+        if 'attribution_name' in data:
+            user.attribution_name = data.get('attribution_name', '').strip()
             
         user.updated_at = datetime.now(timezone.utc)
         db.session.commit()
@@ -1086,7 +1221,7 @@ def update_writer_profile():
 @journalist_bp.route('/writer/teams', methods=['GET'])
 @require_user_auth
 def get_writer_teams():
-    """Get teams assigned to the current writer."""
+    """Get teams assigned to the current writer (both parent clubs and loan teams)."""
     try:
         email = getattr(g, 'user_email', None)
         if not email:
@@ -1095,11 +1230,79 @@ def get_writer_teams():
         user = UserAccount.query.filter_by(email=email).first()
         if not user or not user.is_journalist:
             return jsonify({'error': 'Not authorized as a writer'}), 403
-            
-        assignments = JournalistTeamAssignment.query.filter_by(user_id=user.id).all()
-        return jsonify([a.to_dict() for a in assignments])
+        
+        # Get parent club assignments (existing)
+        parent_assignments = JournalistTeamAssignment.query.filter_by(user_id=user.id).all()
+        
+        # Get loan team assignments (new)
+        loan_assignments = JournalistLoanTeamAssignment.query.filter_by(user_id=user.id).all()
+        
+        return jsonify({
+            'parent_club_assignments': [a.to_dict() for a in parent_assignments],
+            'loan_team_assignments': [a.to_dict() for a in loan_assignments],
+            # Legacy format for backwards compatibility
+            'assignments': [a.to_dict() for a in parent_assignments]
+        })
     except Exception as e:
         return jsonify(_safe_error_payload(e, 'Failed to fetch assigned teams')), 500
+
+
+@journalist_bp.route('/writer/available-players', methods=['GET'])
+@require_user_auth
+def get_writer_available_players_endpoint():
+    """Get all players the current writer can cover based on their assignments."""
+    try:
+        email = getattr(g, 'user_email', None)
+        if not email:
+            return jsonify({'error': 'User not authenticated'}), 401
+            
+        user = UserAccount.query.filter_by(email=email).first()
+        if not user or not user.is_journalist:
+            return jsonify({'error': 'Not authorized as a writer'}), 403
+        
+        players = get_writer_available_players(user.id)
+        
+        # Group players by how they're accessible
+        result = {
+            'players': [],
+            'by_parent_club': {},
+            'by_loan_team': {}
+        }
+        
+        # Get writer's assignments for grouping
+        parent_assignments = JournalistTeamAssignment.query.filter_by(user_id=user.id).all()
+        parent_team_ids = {a.team_id for a in parent_assignments}
+        
+        loan_assignments = JournalistLoanTeamAssignment.query.filter_by(user_id=user.id).all()
+        loan_team_ids = {a.loan_team_id for a in loan_assignments if a.loan_team_id}
+        loan_team_names = {a.loan_team_name for a in loan_assignments}
+        
+        for player in players:
+            player_data = player.to_dict()
+            result['players'].append(player_data)
+            
+            # Group by parent club if writer is assigned to parent
+            if player.primary_team_id in parent_team_ids:
+                team_name = player.primary_team_name
+                if team_name not in result['by_parent_club']:
+                    result['by_parent_club'][team_name] = []
+                result['by_parent_club'][team_name].append(player_data)
+            
+            # Group by loan team if writer is assigned to loan team
+            is_loan_covered = (
+                player.loan_team_id in loan_team_ids or 
+                player.loan_team_name in loan_team_names
+            )
+            if is_loan_covered:
+                team_name = player.loan_team_name
+                if team_name not in result['by_loan_team']:
+                    result['by_loan_team'][team_name] = []
+                result['by_loan_team'][team_name].append(player_data)
+        
+        return jsonify(result)
+    except Exception as e:
+        logger.exception('Failed to fetch available players')
+        return jsonify(_safe_error_payload(e, 'Failed to fetch available players')), 500
 
 @journalist_bp.route('/writer/commentaries', methods=['GET'])
 @require_user_auth
@@ -1466,7 +1669,12 @@ def create_update_commentary():
                 player_id = data['player_id']
                 commentary.player_id = int(player_id) if player_id else None
             if 'commentary_type' in data:
-                commentary.commentary_type = data['commentary_type']
+                new_type = data['commentary_type']
+                if new_type not in ('player', 'intro', 'summary'):
+                    return jsonify({'error': 'commentary_type must be "player", "intro", or "summary"'}), 400
+                if new_type == 'player' and not commentary.player_id:
+                    return jsonify({'error': 'player_id is required for player commentary'}), 400
+                commentary.commentary_type = new_type
                 # Re-validate after type change
                 commentary.validate_commentary_type()
                 commentary.validate_player_commentary()
@@ -1494,11 +1702,36 @@ def create_update_commentary():
             team_id = int(team_id)
         except (ValueError, TypeError):
             return jsonify({'error': 'Invalid team_id format'}), 400
-            
-        # Verify writer is assigned to this team
-        assignment = JournalistTeamAssignment.query.filter_by(user_id=user.id, team_id=team_id).first()
-        if not assignment:
-            return jsonify({'error': 'You are not assigned to this team'}), 403
+        
+        # Get player_id for access check
+        player_id_for_check = data.get('player_id')
+        if player_id_for_check == "":
+            player_id_for_check = None
+        try:
+            player_id_for_check = int(player_id_for_check) if player_id_for_check else None
+        except (ValueError, TypeError):
+            player_id_for_check = None
+        
+        commentary_type = data.get('commentary_type', 'summary')
+        if commentary_type not in ('player', 'intro', 'summary'):
+            return jsonify({'error': 'commentary_type must be "player", "intro", or "summary"'}), 400
+        if commentary_type == 'player' and not player_id_for_check:
+            return jsonify({'error': 'player_id is required for player commentary'}), 400
+        
+        # Access check based on commentary type
+        # For player commentaries: check if writer can cover the player (parent club OR loan team)
+        # For intro/summary: check if writer is assigned to the parent club
+        has_access = False
+        
+        if commentary_type == 'player' and player_id_for_check:
+            # Check if writer can cover this specific player
+            has_access = can_writer_cover_player(user.id, player_id_for_check, team_id)
+        else:
+            # For team-wide content (intro/summary), require parent club assignment
+            has_access = can_writer_cover_team(user.id, team_id)
+        
+        if not has_access:
+            return jsonify({'error': 'You are not authorized to write about this team/player'}), 403
 
         # Resolve to latest season team id to ensure newsletter generation finds it
         # (Writer might be assigned to an older season row)
@@ -1630,6 +1863,168 @@ def delete_writer_commentary(commentary_id):
         logger.exception("Failed to delete commentary")
         db.session.rollback()
         return jsonify(_safe_error_payload(e, 'Failed to delete commentary')), 500
+
+
+# --- Writer Coverage Request Endpoints ---
+
+@journalist_bp.route('/writer/coverage-requests', methods=['GET'])
+@require_user_auth
+def get_writer_coverage_requests():
+    """Get coverage requests submitted by the current writer."""
+    try:
+        email = getattr(g, 'user_email', None)
+        if not email:
+            return jsonify({'error': 'User not authenticated'}), 401
+            
+        user = UserAccount.query.filter_by(email=email).first()
+        if not user or not user.is_journalist:
+            return jsonify({'error': 'Not authorized as a writer'}), 403
+        
+        # Get status filter
+        status = request.args.get('status')
+        
+        query = WriterCoverageRequest.query.filter_by(user_id=user.id)
+        if status:
+            query = query.filter_by(status=status)
+        
+        requests = query.order_by(WriterCoverageRequest.requested_at.desc()).all()
+        
+        return jsonify([r.to_dict() for r in requests])
+    except Exception as e:
+        logger.exception('Failed to fetch coverage requests')
+        return jsonify(_safe_error_payload(e, 'Failed to fetch coverage requests')), 500
+
+
+@journalist_bp.route('/writer/coverage-requests', methods=['POST'])
+@require_user_auth
+def submit_coverage_request():
+    """Submit a new coverage request.
+    
+    Body:
+        coverage_type: 'parent_club' | 'loan_team'
+        team_id: Optional team database ID (if team is in our system)
+        team_name: Team name (required)
+        request_message: Optional message explaining why they want coverage
+    """
+    try:
+        email = getattr(g, 'user_email', None)
+        if not email:
+            return jsonify({'error': 'User not authenticated'}), 401
+            
+        user = UserAccount.query.filter_by(email=email).first()
+        if not user or not user.is_journalist:
+            return jsonify({'error': 'Not authorized as a writer'}), 403
+        
+        data = request.get_json() or {}
+        
+        # Validate required fields
+        coverage_type = data.get('coverage_type')
+        if coverage_type not in ('parent_club', 'loan_team'):
+            return jsonify({'error': 'coverage_type must be "parent_club" or "loan_team"'}), 400
+        
+        team_name = (data.get('team_name') or '').strip()
+        if not team_name:
+            return jsonify({'error': 'team_name is required'}), 400
+        
+        # Parse optional team_id
+        team_id = data.get('team_id')
+        if team_id:
+            try:
+                team_id = int(team_id)
+                # Verify team exists
+                team = Team.query.get(team_id)
+                if not team:
+                    team_id = None  # Invalid team ID, treat as custom
+            except (ValueError, TypeError):
+                team_id = None
+        
+        # Check for duplicate pending request
+        existing = WriterCoverageRequest.query.filter_by(
+            user_id=user.id,
+            coverage_type=coverage_type,
+            team_name=team_name,
+            status='pending'
+        ).first()
+        
+        if existing:
+            return jsonify({'error': 'You already have a pending request for this team'}), 400
+        
+        # Check if already assigned
+        if coverage_type == 'parent_club' and team_id:
+            existing_assignment = JournalistTeamAssignment.query.filter_by(
+                user_id=user.id,
+                team_id=team_id
+            ).first()
+            if existing_assignment:
+                return jsonify({'error': 'You are already assigned to this parent club'}), 400
+        elif coverage_type == 'loan_team':
+            existing_loan = JournalistLoanTeamAssignment.query.filter_by(
+                user_id=user.id,
+                loan_team_name=team_name
+            ).first()
+            if existing_loan:
+                return jsonify({'error': 'You are already assigned to this loan team'}), 400
+        
+        # Create the request
+        coverage_request = WriterCoverageRequest(
+            user_id=user.id,
+            coverage_type=coverage_type,
+            team_id=team_id,
+            team_name=team_name,
+            status='pending',
+            request_message=data.get('request_message', '').strip() or None,
+            requested_at=datetime.now(timezone.utc)
+        )
+        
+        db.session.add(coverage_request)
+        db.session.commit()
+        
+        logger.info(f"Writer {user.id} ({user.email}) submitted coverage request for {coverage_type}: {team_name}")
+        
+        return jsonify({
+            'message': 'Coverage request submitted',
+            'request': coverage_request.to_dict()
+        }), 201
+        
+    except Exception as e:
+        logger.exception('Failed to submit coverage request')
+        db.session.rollback()
+        return jsonify(_safe_error_payload(e, 'Failed to submit coverage request')), 500
+
+
+@journalist_bp.route('/writer/coverage-requests/<int:request_id>', methods=['DELETE'])
+@require_user_auth
+def cancel_coverage_request(request_id):
+    """Cancel a pending coverage request."""
+    try:
+        email = getattr(g, 'user_email', None)
+        if not email:
+            return jsonify({'error': 'User not authenticated'}), 401
+            
+        user = UserAccount.query.filter_by(email=email).first()
+        if not user or not user.is_journalist:
+            return jsonify({'error': 'Not authorized as a writer'}), 403
+        
+        coverage_request = WriterCoverageRequest.query.get(request_id)
+        if not coverage_request:
+            return jsonify({'error': 'Request not found'}), 404
+        
+        if coverage_request.user_id != user.id:
+            return jsonify({'error': 'Not authorized to cancel this request'}), 403
+        
+        if coverage_request.status != 'pending':
+            return jsonify({'error': 'Can only cancel pending requests'}), 400
+        
+        db.session.delete(coverage_request)
+        db.session.commit()
+        
+        return jsonify({'message': 'Coverage request cancelled'})
+        
+    except Exception as e:
+        logger.exception('Failed to cancel coverage request')
+        db.session.rollback()
+        return jsonify(_safe_error_payload(e, 'Failed to cancel coverage request')), 500
+
 
 @journalist_bp.route('/journalists/players/<int:player_id>/stats', methods=['GET'])
 @require_user_auth
@@ -1878,6 +2273,8 @@ def _get_journalists_with_writeups_for_newsletter(newsletter, current_user_id=No
                 'display_name': journalist.display_name,
                 'profile_image_url': journalist.profile_image_url,
                 'bio': journalist.bio,
+                'attribution_url': journalist.attribution_url,
+                'attribution_name': journalist.attribution_name,
                 'is_subscribed': author_id in subscribed_journalist_ids,
                 'is_self': author_id == current_user_id,  # For writer preview mode
                 'writeup_count': data['writeup_count'],
@@ -2218,3 +2615,232 @@ def get_admin_journalist_stats():
     except Exception as e:
         logger.exception('Failed to fetch admin journalist stats')
         return jsonify(_safe_error_payload(e, 'Failed to fetch statistics')), 500
+
+
+# --- Admin Coverage Request Management Endpoints ---
+
+@journalist_bp.route('/admin/coverage-requests', methods=['GET'])
+@require_api_key
+def admin_list_coverage_requests():
+    """(Admin) List all coverage requests with optional filters."""
+    try:
+        query = WriterCoverageRequest.query
+        
+        # Filter by status
+        status = request.args.get('status')
+        if status:
+            query = query.filter_by(status=status)
+        
+        # Filter by coverage type
+        coverage_type = request.args.get('coverage_type')
+        if coverage_type:
+            query = query.filter_by(coverage_type=coverage_type)
+        
+        # Filter by user
+        user_id = request.args.get('user_id', type=int)
+        if user_id:
+            query = query.filter_by(user_id=user_id)
+        
+        # Order by most recent first, pending first
+        requests = query.order_by(
+            WriterCoverageRequest.status.asc(),  # pending < approved < denied
+            WriterCoverageRequest.requested_at.desc()
+        ).all()
+        
+        # Count by status for summary
+        pending_count = WriterCoverageRequest.query.filter_by(status='pending').count()
+        approved_count = WriterCoverageRequest.query.filter_by(status='approved').count()
+        denied_count = WriterCoverageRequest.query.filter_by(status='denied').count()
+        
+        return jsonify({
+            'requests': [r.to_dict() for r in requests],
+            'summary': {
+                'pending': pending_count,
+                'approved': approved_count,
+                'denied': denied_count,
+                'total': pending_count + approved_count + denied_count
+            }
+        })
+        
+    except Exception as e:
+        logger.exception('Failed to list coverage requests')
+        return jsonify(_safe_error_payload(e, 'Failed to list coverage requests')), 500
+
+
+@journalist_bp.route('/admin/coverage-requests/<int:request_id>/approve', methods=['POST'])
+@require_api_key
+def admin_approve_coverage_request(request_id):
+    """(Admin) Approve a coverage request and create the assignment."""
+    try:
+        coverage_request = WriterCoverageRequest.query.get(request_id)
+        if not coverage_request:
+            return jsonify({'error': 'Request not found'}), 404
+        
+        if coverage_request.status != 'pending':
+            return jsonify({'error': 'Request is not pending'}), 400
+        
+        # Create the appropriate assignment
+        if coverage_request.coverage_type == 'parent_club':
+            if not coverage_request.team_id:
+                return jsonify({'error': 'Cannot approve parent club request without valid team_id'}), 400
+            
+            # Check if assignment already exists
+            existing = JournalistTeamAssignment.query.filter_by(
+                user_id=coverage_request.user_id,
+                team_id=coverage_request.team_id
+            ).first()
+            
+            if not existing:
+                assignment = JournalistTeamAssignment(
+                    user_id=coverage_request.user_id,
+                    team_id=coverage_request.team_id,
+                    assigned_by=None  # Could add admin user tracking
+                )
+                db.session.add(assignment)
+        
+        elif coverage_request.coverage_type == 'loan_team':
+            # Check if assignment already exists
+            existing = JournalistLoanTeamAssignment.query.filter_by(
+                user_id=coverage_request.user_id,
+                loan_team_name=coverage_request.team_name
+            ).first()
+            
+            if not existing:
+                assignment = JournalistLoanTeamAssignment(
+                    user_id=coverage_request.user_id,
+                    loan_team_id=coverage_request.team_id,  # May be None for custom teams
+                    loan_team_name=coverage_request.team_name,
+                    assigned_by=None
+                )
+                db.session.add(assignment)
+        
+        # Update request status
+        coverage_request.status = 'approved'
+        coverage_request.reviewed_at = datetime.now(timezone.utc)
+        
+        db.session.commit()
+        
+        logger.info(f"Approved coverage request {request_id} for user {coverage_request.user_id}")
+        
+        return jsonify({
+            'message': 'Coverage request approved',
+            'request': coverage_request.to_dict()
+        })
+        
+    except Exception as e:
+        logger.exception('Failed to approve coverage request')
+        db.session.rollback()
+        return jsonify(_safe_error_payload(e, 'Failed to approve coverage request')), 500
+
+
+@journalist_bp.route('/admin/coverage-requests/<int:request_id>/deny', methods=['POST'])
+@require_api_key
+def admin_deny_coverage_request(request_id):
+    """(Admin) Deny a coverage request with optional reason."""
+    try:
+        coverage_request = WriterCoverageRequest.query.get(request_id)
+        if not coverage_request:
+            return jsonify({'error': 'Request not found'}), 404
+        
+        if coverage_request.status != 'pending':
+            return jsonify({'error': 'Request is not pending'}), 400
+        
+        data = request.get_json() or {}
+        
+        # Update request status
+        coverage_request.status = 'denied'
+        coverage_request.denial_reason = data.get('reason', '').strip() or None
+        coverage_request.reviewed_at = datetime.now(timezone.utc)
+        
+        db.session.commit()
+        
+        logger.info(f"Denied coverage request {request_id} for user {coverage_request.user_id}")
+        
+        return jsonify({
+            'message': 'Coverage request denied',
+            'request': coverage_request.to_dict()
+        })
+        
+    except Exception as e:
+        logger.exception('Failed to deny coverage request')
+        db.session.rollback()
+        return jsonify(_safe_error_payload(e, 'Failed to deny coverage request')), 500
+
+
+@journalist_bp.route('/admin/journalists/<int:journalist_id>/loan-team-assignments', methods=['POST'])
+@require_api_key
+def admin_assign_loan_teams(journalist_id):
+    """(Admin) Directly assign loan teams to a journalist.
+    
+    Body:
+        loan_teams: Array of {loan_team_id: int|null, loan_team_name: str}
+    """
+    try:
+        journalist = UserAccount.query.get(journalist_id)
+        if not journalist or not journalist.is_journalist:
+            return jsonify({'error': 'Journalist not found'}), 404
+        
+        data = request.get_json() or {}
+        loan_teams = data.get('loan_teams', [])
+        
+        # Clear existing loan team assignments
+        JournalistLoanTeamAssignment.query.filter_by(user_id=journalist.id).delete()
+        
+        assignments = []
+        for lt in loan_teams:
+            team_name = (lt.get('loan_team_name') or '').strip()
+            if not team_name:
+                continue
+            
+            team_id = lt.get('loan_team_id')
+            if team_id:
+                try:
+                    team_id = int(team_id)
+                except (ValueError, TypeError):
+                    team_id = None
+            
+            assignment = JournalistLoanTeamAssignment(
+                user_id=journalist.id,
+                loan_team_id=team_id,
+                loan_team_name=team_name,
+                assigned_by=None
+            )
+            db.session.add(assignment)
+            assignments.append(assignment)
+        
+        db.session.commit()
+        
+        return jsonify({
+            'message': 'Loan team assignments updated',
+            'count': len(assignments),
+            'assignments': [a.to_dict() for a in assignments]
+        })
+        
+    except Exception as e:
+        logger.exception('Failed to assign loan teams')
+        db.session.rollback()
+        return jsonify(_safe_error_payload(e, 'Failed to assign loan teams')), 500
+
+
+@journalist_bp.route('/admin/journalists/<int:journalist_id>/all-assignments', methods=['GET'])
+@require_api_key
+def admin_get_journalist_assignments(journalist_id):
+    """(Admin) Get all assignments (parent clubs and loan teams) for a journalist."""
+    try:
+        journalist = UserAccount.query.get(journalist_id)
+        if not journalist or not journalist.is_journalist:
+            return jsonify({'error': 'Journalist not found'}), 404
+        
+        parent_assignments = JournalistTeamAssignment.query.filter_by(user_id=journalist.id).all()
+        loan_assignments = JournalistLoanTeamAssignment.query.filter_by(user_id=journalist.id).all()
+        
+        return jsonify({
+            'journalist_id': journalist.id,
+            'journalist_name': journalist.display_name,
+            'parent_club_assignments': [a.to_dict() for a in parent_assignments],
+            'loan_team_assignments': [a.to_dict() for a in loan_assignments]
+        })
+        
+    except Exception as e:
+        logger.exception('Failed to get journalist assignments')
+        return jsonify(_safe_error_payload(e, 'Failed to get assignments')), 500

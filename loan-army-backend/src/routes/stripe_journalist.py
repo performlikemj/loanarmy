@@ -16,6 +16,40 @@ stripe_journalist_bp = Blueprint('stripe_journalist', __name__)
 logger = logging.getLogger(__name__)
 
 
+def _stripe_request(method: str, url: str, params: dict | None = None):
+    requestor = stripe._api_requestor._APIRequestor()
+    return requestor.request(method, url, params=params, base_address='api')
+
+
+def _meter_event_name(journalist_user_id: int) -> str:
+    return f"gol_newsletter_{journalist_user_id}"
+
+
+def _get_or_create_meter_for_journalist(user: UserAccount):
+    event_name = _meter_event_name(user.id)
+    try:
+        meters = _stripe_request('get', '/v1/billing/meters', params={'limit': 100, 'status': 'active'})
+        for meter in getattr(meters, 'data', []) or []:
+            meter_event = getattr(meter, 'event_name', None) or meter.get('event_name')
+            if meter_event == event_name:
+                return meter
+    except Exception as e:
+        logger.warning(f"Failed to list meters for journalist {user.id}: {e}")
+
+    display_name = f"Go On Loan - {user.display_name} newsletter usage"
+    return _stripe_request('post', '/v1/billing/meters', params={
+        'display_name': display_name,
+        'event_name': event_name,
+        'default_aggregation': {'formula': 'sum'},
+        'customer_mapping': {
+            'type': 'by_id',
+            'event_payload_key': 'stripe_customer_id'
+        },
+        'value_settings': {
+            'event_payload_key': 'value'
+        }
+    })
+
 @stripe_journalist_bp.route('/stripe/journalist/onboard', methods=['POST'])
 @require_user_auth
 def create_onboarding():
@@ -296,6 +330,11 @@ def create_subscription_price():
                 )
                 product_id = product.id
             
+            meter = _get_or_create_meter_for_journalist(user)
+            meter_id = getattr(meter, 'id', None) or meter.get('id')
+            if not meter_id:
+                raise ValueError("Stripe meter creation failed")
+
             # Create price with metered billing (charge per newsletter published)
             price = stripe.Price.create(
                 product=product_id,
@@ -304,13 +343,16 @@ def create_subscription_price():
                 recurring={
                     'interval': 'month',
                     'usage_type': 'metered',  # Only charge when newsletters are published
-                    'aggregate_usage': 'sum'  # Sum up all newsletters in the billing period
+                    'aggregate_usage': 'sum',  # Sum up all newsletters in the billing period
+                    'meter': meter_id
                 },
                 billing_scheme='per_unit',  # Charge per newsletter
                 metadata={
                     'journalist_user_id': user.id,
                     'platform_fee_percent': PLATFORM_FEE_PERCENT,
-                    'billing_type': 'metered_per_newsletter'
+                    'billing_type': 'metered_per_newsletter',
+                    'meter_id': meter_id,
+                    'meter_event_name': _meter_event_name(user.id)
                 }
             )
             
@@ -415,4 +457,3 @@ def update_subscription_price():
     except Exception as e:
         logger.exception("Error in update_subscription_price")
         return jsonify(_safe_error_payload(e, 'Failed to update price')), 500
-

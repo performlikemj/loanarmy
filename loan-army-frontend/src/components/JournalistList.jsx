@@ -6,7 +6,9 @@ import { Avatar, AvatarImage, AvatarFallback } from '@/components/ui/avatar.jsx'
 import { Badge } from '@/components/ui/badge.jsx'
 import { Input } from '@/components/ui/input.jsx'
 import TeamMultiSelect from '@/components/ui/TeamMultiSelect.jsx'
-import { Loader2, UserPlus, UserCheck, Search, Users } from 'lucide-react'
+import { Loader2, UserPlus, UserCheck, Search, Users, ExternalLink } from 'lucide-react'
+
+
 import { APIService } from '@/lib/api'
 
 export function JournalistList({ apiService = APIService }) {
@@ -193,6 +195,26 @@ export function JournalistList({ apiService = APIService }) {
                                         <CardDescription className="line-clamp-2 mt-1 text-xs sm:text-sm">
                                             {journalist.bio || 'Football Scout & Analyst'}
                                         </CardDescription>
+                                        {(journalist.attribution_url || journalist.attribution_name) && (
+                                            <div className="mt-1 flex items-center gap-1">
+                                                {journalist.attribution_url ? (
+                                                    <a
+                                                        href={journalist.attribution_url}
+                                                        target="_blank"
+                                                        rel="noopener noreferrer"
+                                                        className="text-xs text-blue-600 hover:underline flex items-center gap-1"
+                                                        onClick={(e) => e.stopPropagation()}
+                                                    >
+                                                        {journalist.attribution_name || 'Visit Site'}
+                                                        <ExternalLink className="h-2.5 w-2.5" />
+                                                    </a>
+                                                ) : (
+                                                    <span className="text-xs text-muted-foreground">
+                                                        {journalist.attribution_name}
+                                                    </span>
+                                                )}
+                                            </div>
+                                        )}
                                         {stats && stats.total_subscribers > 0 && (
                                             <div className="mt-2">
                                                 <Badge variant="secondary" className="text-xs font-semibold">
