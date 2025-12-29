@@ -1,5 +1,5 @@
 from flask import Blueprint, request, jsonify, make_response, render_template, Response, current_app, g
-from src.models.league import db, League, Team, LoanedPlayer, Newsletter, UserSubscription, EmailToken, LoanFlag, AdminSetting, NewsletterComment, UserAccount, SupplementalLoan, NewsletterPlayerYoutubeLink, NewsletterCommentary, Player, JournalistTeamAssignment, CommentaryApplause, TeamTrackingRequest, StripeSubscription, NewsletterDigestQueue, JournalistSubscription, BackgroundJob, TeamSubreddit, RedditPost, _as_utc, _dedupe_loans
+from src.models.league import db, League, Team, LoanedPlayer, Newsletter, UserSubscription, EmailToken, LoanFlag, AdminSetting, NewsletterComment, UserAccount, SupplementalLoan, NewsletterPlayerYoutubeLink, NewsletterCommentary, Player, JournalistTeamAssignment, CommentaryApplause, TeamTrackingRequest, StripeSubscription, NewsletterDigestQueue, JournalistSubscription, BackgroundJob, TeamSubreddit, RedditPost, TeamAlias, ManualPlayerSubmission, _as_utc, _dedupe_loans
 from src.models.sponsor import Sponsor
 from src.api_football_client import APIFootballClient
 from src.admin.sandbox_tasks import (
@@ -23,7 +23,7 @@ import shutil
 from io import BytesIO
 from functools import wraps
 from uuid import uuid4
-from sqlalchemy import or_
+from sqlalchemy import or_, func
 import time
 from datetime import timedelta
 from typing import Any
@@ -13112,3 +13112,119 @@ def admin_reorder_sponsors():
         db.session.rollback()
         logger.exception('Failed to reorder sponsors')
         return jsonify(_safe_error_payload(e, 'Failed to reorder sponsors')), 500
+
+
+@api_bp.route('/admin/team-aliases', methods=['GET'])
+@require_api_key
+def admin_list_team_aliases():
+    """List all team aliases."""
+    try:
+        aliases = TeamAlias.query.order_by(TeamAlias.canonical_name.asc(), TeamAlias.alias.asc()).all()
+        return jsonify([a.to_dict() for a in aliases])
+    except Exception as e:
+        logger.exception('Failed to list team aliases')
+        return jsonify(_safe_error_payload(e, 'Failed to list team aliases')), 500
+
+
+@api_bp.route('/admin/team-aliases', methods=['POST'])
+@require_api_key
+def admin_create_team_alias():
+    """Create a new team alias."""
+    try:
+        data = request.get_json() or {}
+        canonical_name = (data.get('canonical_name') or '').strip()
+        alias_name = (data.get('alias') or '').strip()
+        
+        if not canonical_name or not alias_name:
+            return jsonify({'error': 'canonical_name and alias are required'}), 400
+            
+        # Check if alias already exists
+        existing = TeamAlias.query.filter(func.lower(TeamAlias.alias) == func.lower(alias_name)).first()
+        if existing:
+            return jsonify({'error': f'Alias "{alias_name}" already exists for "{existing.canonical_name}"'}), 400
+            
+        # Try to find team_id for canonical name
+        team = Team.query.filter(func.lower(Team.name) == func.lower(canonical_name)).first()
+        team_id = team.id if team else None
+        
+        alias = TeamAlias(
+            canonical_name=canonical_name,
+            alias=alias_name,
+            team_id=team_id
+        )
+        db.session.add(alias)
+        db.session.commit()
+        
+        return jsonify(alias.to_dict()), 201
+    except Exception as e:
+        db.session.rollback()
+        logger.exception('Failed to create team alias')
+        return jsonify(_safe_error_payload(e, 'Failed to create team alias')), 500
+
+
+@api_bp.route('/admin/team-aliases/<int:alias_id>', methods=['DELETE'])
+@require_api_key
+def admin_delete_team_alias(alias_id):
+    """Delete a team alias."""
+    try:
+        alias = db.session.get(TeamAlias, alias_id)
+        if not alias:
+            return jsonify({'error': 'Alias not found'}), 404
+            
+        db.session.delete(alias)
+        db.session.commit()
+        
+        return jsonify({'message': 'Alias deleted'})
+    except Exception as e:
+        db.session.rollback()
+        logger.exception('Failed to delete team alias')
+        return jsonify(_safe_error_payload(e, 'Failed to delete team alias')), 500
+
+
+@api_bp.route('/admin/manual-players', methods=['GET'])
+@require_api_key
+def admin_list_manual_players():
+    """List all manual player submissions."""
+    try:
+        status = request.args.get('status')
+        query = ManualPlayerSubmission.query
+        
+        if status:
+            query = query.filter_by(status=status)
+            
+        submissions = query.order_by(ManualPlayerSubmission.created_at.desc()).all()
+        return jsonify([s.to_dict() for s in submissions])
+    except Exception as e:
+        logger.exception('Failed to list manual players')
+        return jsonify(_safe_error_payload(e, 'Failed to list manual players')), 500
+
+
+@api_bp.route('/admin/manual-players/<int:submission_id>/review', methods=['POST'])
+@require_api_key
+def admin_review_manual_player(submission_id):
+    """Review (approve/reject) a manual player submission."""
+    try:
+        submission = db.session.get(ManualPlayerSubmission, submission_id)
+        if not submission:
+            return jsonify({'error': 'Submission not found'}), 404
+            
+        data = request.get_json() or {}
+        status = data.get('status')
+        admin_notes = data.get('admin_notes')
+        
+        if status not in ['approved', 'rejected']:
+            return jsonify({'error': 'Invalid status. Must be approved or rejected'}), 400
+            
+        submission.status = status
+        if admin_notes is not None:
+            submission.admin_notes = admin_notes
+            
+        submission.reviewed_at = datetime.now(timezone.utc)
+        
+        db.session.commit()
+        
+        return jsonify(submission.to_dict())
+    except Exception as e:
+        db.session.rollback()
+        logger.exception('Failed to review manual player')
+        return jsonify(_safe_error_payload(e, 'Failed to review manual player')), 500

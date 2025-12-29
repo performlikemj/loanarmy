@@ -12,6 +12,7 @@ import { APIService } from '@/lib/api'
 import { mapLoansToPlayerOptions } from './loanPlayerOptions'
 import { buildLoanFetchParams } from './loanFetchParams'
 import { resolveLatestTeamId } from './teamResolver'
+import { normalizeWriterTeams } from './writerTeams'
 import { PlayerStatsDrawer } from './PlayerStatsDrawer'
 import { ContentBlockBuilder } from '@/components/writer/ContentBlockBuilder'
 import { CommentaryEditor } from '@/components/CommentaryEditor'
@@ -59,7 +60,8 @@ export function WriteupEditor() {
 
                 // Fetch assigned teams
                 const teamsData = await APIService.getWriterTeams()
-                setTeams(teamsData || [])
+                const normalizedTeams = normalizeWriterTeams(teamsData)
+                setTeams(normalizedTeams)
 
                 // If editing, fetch existing commentary
                 if (editId) {
@@ -70,9 +72,13 @@ export function WriteupEditor() {
                         const hasBlocks = existing.structured_blocks && existing.structured_blocks.length > 0
                         setEditorMode(hasBlocks ? 'blocks' : 'simple')
                         
+                        const resolvedTeamKey = normalizedTeams.find(
+                            team => String(team.team_id) === String(existing.team_id)
+                        )?.key || (existing.team_id ? `parent:${existing.team_id}` : '')
+
                         setFormData({
                             id: existing.id,
-                            team_id: String(existing.team_id || ''),
+                            team_id: resolvedTeamKey,
                             commentary_type: existing.commentary_type,
                             player_id: existing.player_id ? String(existing.player_id) : '',
                             title: existing.title || '',
@@ -109,9 +115,31 @@ export function WriteupEditor() {
         init()
     }, [editId])
 
+    const selectedTeam = useMemo(() => {
+        return teams.find(team => team.key === formData.team_id)
+    }, [teams, formData.team_id])
+
+    const resolvedTeamId = useMemo(() => {
+        if (selectedTeam?.team_id) return selectedTeam.team_id
+        if (!formData.team_id) return null
+        if (typeof formData.team_id === 'string') {
+            const parts = formData.team_id.split(':')
+            const maybeId = Number(parts[parts.length - 1])
+            return Number.isFinite(maybeId) ? maybeId : null
+        }
+        const numeric = Number(formData.team_id)
+        return Number.isFinite(numeric) ? numeric : null
+    }, [selectedTeam, formData.team_id])
+
+    const resolvedDirection = selectedTeam?.direction || 'loaned_from'
+
     // Fetch players when team changes
     useEffect(() => {
         if (!formData.team_id) {
+            setPlayers([])
+            return
+        }
+        if (!resolvedTeamId) {
             setPlayers([])
             return
         }
@@ -119,10 +147,10 @@ export function WriteupEditor() {
         const fetchPlayers = async () => {
             setLoadingPlayers(true)
             try {
-                const latestTeamId = await resolveLatestTeamId(formData.team_id, APIService)
+                const latestTeamId = await resolveLatestTeamId(resolvedTeamId, APIService)
                 const loans = await APIService.getTeamLoans(
                     latestTeamId,
-                    buildLoanFetchParams()
+                    buildLoanFetchParams({ direction: resolvedDirection })
                 )
                 const playerList = mapLoansToPlayerOptions(loans)
                 setPlayers(playerList)
@@ -133,7 +161,7 @@ export function WriteupEditor() {
             }
         }
         fetchPlayers()
-    }, [formData.team_id])
+    }, [formData.team_id, resolvedTeamId, resolvedDirection])
 
     const handleChange = (field, value) => {
         setFormData(prev => ({ ...prev, [field]: value }))
@@ -176,13 +204,14 @@ export function WriteupEditor() {
 
         try {
             // Validation
-            if (!formData.team_id && !editId) throw new Error('Please select a team')
+            if (!resolvedTeamId && !editId) throw new Error('Please select a team')
             if (!hasContent) throw new Error('Content is required')
             if (formData.commentary_type === 'player' && !formData.player_id) throw new Error('Please select a player')
 
             // Prepare payload based on editor mode
             const payload = {
                 ...formData,
+                team_id: resolvedTeamId,
                 // Clear the unused content type
                 content: editorMode === 'simple' ? formData.content : '',
                 structured_blocks: editorMode === 'blocks' ? formData.structured_blocks : null,
@@ -249,9 +278,21 @@ export function WriteupEditor() {
                                             <SelectValue placeholder="Select team" />
                                         </SelectTrigger>
                                         <SelectContent>
-                                            {teams.map(t => (
-                                                <SelectItem key={t.team_id} value={String(t.team_id)}>
-                                                    {t.team_name}
+                                            {teams.map(team => (
+                                                <SelectItem
+                                                    key={team.key}
+                                                    value={team.key}
+                                                    disabled={!team.team_id}
+                                                >
+                                                    <div className="flex items-center gap-2">
+                                                        <span>{team.team_name}</span>
+                                                        <Badge variant="secondary" className="text-[10px]">
+                                                            {team.assignment_type === 'loan' ? 'Loan Team' : 'Parent Club'}
+                                                        </Badge>
+                                                        {!team.team_id && (
+                                                            <span className="text-xs text-muted-foreground">(custom)</span>
+                                                        )}
+                                                    </div>
                                                 </SelectItem>
                                             ))}
                                         </SelectContent>

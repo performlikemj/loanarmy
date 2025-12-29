@@ -1,23 +1,36 @@
 - Goal (incl. success criteria):
-  - Add negative-case tests for journalist commentary workflows (invalid type, missing player_id, non-writer access).
-  - Success: Tests enforce correct 400/403 responses and pass.
+  - Fix writer editor "New Writeup" crash (TypeError: f.map is not a function) so the dialog loads reliably.
+  - Success: writer editor opens without runtime errors; tests added and passing.
 - Constraints/Assumptions:
-  - Follow AGENTS.md conventions; tests-first for new features/bugfixes.
-  - Keep compatibility with existing journalist assignment behavior.
+  - Follow AGENTS.md conventions and Continuity Ledger rules.
+  - Write failing tests first, run them, then implement until green.
 - Key decisions:
-  - Validate commentary_type and player_id early in `/writer/commentaries` to return 400 on invalid input.
+  - None yet.
 - State:
   - Done:
-    - Added negative-case tests for invalid type, missing player_id, and non-writer access.
-    - Updated commentary creation/update validation to return 400 for invalid type/missing player_id.
-    - Ran pytest for new negative-case tests (all passing).
+    - Added normalizeWriterTeams helper to handle object/array writer team payloads.
+    - Updated WriteupEditor to normalize writer teams before rendering.
+    - Added frontend tests for normalization; `pnpm test -- --runInBand` passes.
+    - Fixed AdminTeams alias description to avoid JSX arrow warning; added tests.
+    - Implemented loan-team direction filtering in WriteupEditor; added tests for direction params.
+    - Updated writer team normalization to include parent/loan metadata and UI badges.
+    - Frontend tests pass (`pnpm test -- --runInBand`).
   - Now:
-    - Ready to summarize changes.
+    - Report loan-team direction filtering implementation and test status.
   - Next:
-    - Optional: run full `tests/test_journalist_coverage.py` suite again.
+    - (If needed) extend writer editor to support loan-team direction filtering.
 - Open questions (UNCONFIRMED if needed):
-  - None.
+  - Should loan-team assignments appear in the WriteupEditor team list (requires loaned_to direction)?
 - Working set (files/ids/commands):
-  - loan-army-backend/tests/test_journalist_coverage.py
-  - loan-army-backend/src/routes/journalist.py
   - /Users/michaeljones/Library/Mobile Documents/com~apple~CloudDocs/Documents/Projects/Web Development/loan_army/CONTINUITY.md
+  - loan-army-frontend/src/pages/writer/WriteupEditor.jsx
+  - loan-army-frontend/src/pages/writer/writerTeams.js
+  - loan-army-frontend/tests/writer-team-normalize.test.mjs
+  - loan-army-frontend/src/pages/admin/AdminUsers.jsx
+  - loan-army-frontend/tests/admin-coverage-options.test.mjs
+  - loan-army-frontend/src/pages/admin/AdminTeams.jsx
+  - loan-army-frontend/tests/admin-teams-aliases.test.mjs
+  - loan-army-frontend/src/pages/writer/loanFetchParams.js
+  - loan-army-frontend/src/pages/writer/writerTeams.js
+  - loan-army-frontend/src/pages/writer/WriteupEditor.jsx
+  - loan-army-frontend/tests/writer-loan-fetch-params.test.mjs

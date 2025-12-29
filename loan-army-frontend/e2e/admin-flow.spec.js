@@ -54,7 +54,8 @@ test.describe.serial('Admin workflows', () => {
     await page.getByRole('button', { name: /^Done$/i }).click()
 
     await page.getByRole('button', { name: /Generate for Selected/i }).click()
-    await expect(page.getByText(/Generated .*newsletter/)).toBeVisible({ timeout: 60000 })
+    const statusAlert = page.getByRole('alert')
+    await expect(statusAlert).toContainText(/Generated \d+ newsletter/i, { timeout: 60000 })
 
     const row = page.locator('tr', { hasText: `#${emptyNewsletter.id}` })
     await expect(row).toHaveCount(1, { timeout: 10000 })

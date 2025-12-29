@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react'
+import React, { useState, useEffect, useMemo } from 'react'
 import { Button } from '@/components/ui/button'
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
 import { Badge } from '@/components/ui/badge'
@@ -21,6 +21,7 @@ import TeamMultiSelect from '@/components/ui/TeamMultiSelect'
 export function AdminUsers() {
     const [users, setUsers] = useState([])
     const [allTeams, setAllTeams] = useState([])
+    const [loanDestinations, setLoanDestinations] = useState([])
     const [journalistStats, setJournalistStats] = useState(null)
     const [loading, setLoading] = useState(true)
     const [searchQuery, setSearchQuery] = useState('')
@@ -49,14 +50,16 @@ export function AdminUsers() {
     const loadData = async () => {
         try {
             setLoading(true)
-            const [usersData, teamsData, statsData] = await Promise.all([
+            const [usersData, teamsData, statsData, loanDestinationsData] = await Promise.all([
                 APIService.adminGetUsers(),
                 APIService.getTeams(),
-                APIService.adminGetJournalistStats().catch(() => null)
+                APIService.adminGetJournalistStats().catch(() => null),
+                APIService.getLoanDestinations().catch(() => ({ destinations: [] }))
             ])
             setUsers(usersData || [])
             setAllTeams(teamsData || [])
             setJournalistStats(statsData)
+            setLoanDestinations(loanDestinationsData?.destinations || [])
         } catch (error) {
             console.error('Failed to load data:', error)
         } finally {
@@ -136,6 +139,33 @@ export function AdminUsers() {
         }
     }
 
+    const loanTeamOptions = useMemo(() => {
+        const map = new Map()
+
+        loanDestinations.forEach(dest => {
+            const name = (dest?.name || '').trim()
+            if (!name) return
+            const key = name.toLowerCase()
+            map.set(key, { name, loan_team_id: dest?.team_id ?? null })
+        })
+
+        allTeams.forEach(team => {
+            const name = (team?.name || '').trim()
+            if (!name) return
+            const key = name.toLowerCase()
+            if (!map.has(key)) {
+                map.set(key, { name, loan_team_id: team?.id ?? null })
+                return
+            }
+            const existing = map.get(key)
+            if (existing && !existing.loan_team_id && team?.id) {
+                map.set(key, { ...existing, loan_team_id: team.id })
+            }
+        })
+
+        return Array.from(map.values()).sort((a, b) => a.name.localeCompare(b.name))
+    }, [allTeams, loanDestinations])
+
     const handleAddLoanTeam = () => {
         const name = newLoanTeamName.trim()
         if (!name) return
@@ -147,10 +177,10 @@ export function AdminUsers() {
         }
 
         // Check if it's a known team
-        const knownTeam = allTeams.find(t => t.name.toLowerCase() === name.toLowerCase())
+        const knownTeam = loanTeamOptions.find(t => t.name.toLowerCase() === name.toLowerCase())
 
         setSelectedLoanTeams(prev => [...prev, {
-            loan_team_id: knownTeam?.id || null,
+            loan_team_id: knownTeam?.loan_team_id || null,
             loan_team_name: knownTeam?.name || name
         }])
         setNewLoanTeamName('')
@@ -551,8 +581,8 @@ export function AdminUsers() {
                                         </Button>
                                     </div>
                                     <datalist id="teamSuggestions">
-                                        {allTeams.slice(0, 50).map(t => (
-                                            <option key={t.id} value={t.name} />
+                                        {loanTeamOptions.map(t => (
+                                            <option key={`${t.loan_team_id || 'custom'}-${t.name}`} value={t.name} />
                                         ))}
                                     </datalist>
                                     <p className="text-xs text-muted-foreground">

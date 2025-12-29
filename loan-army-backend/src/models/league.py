@@ -798,6 +798,8 @@ class NewsletterCommentary(db.Model):
     # Each block has: id, type (text|chart|divider), content, is_premium, position, chart_config
     structured_blocks = db.Column(db.JSON, nullable=True)
     
+
+    
     # Week-based association fields (for pre-newsletter creation)
     week_start_date = db.Column(db.Date, nullable=True)
     week_end_date = db.Column(db.Date, nullable=True)
@@ -1341,3 +1343,67 @@ class RedditPost(db.Model):
             'created_at': self.created_at.isoformat() if self.created_at else None,
             'updated_at': self.updated_at.isoformat() if self.updated_at else None,
         }
+
+class TeamAlias(db.Model):
+    __tablename__ = 'team_aliases'
+
+    id = db.Column(db.Integer, primary_key=True)
+    canonical_name = db.Column(db.String(100), nullable=False)
+    alias = db.Column(db.String(100), nullable=False, index=True)
+    team_id = db.Column(db.Integer, db.ForeignKey('teams.id'), nullable=True)
+    created_at = db.Column(db.DateTime, default=datetime.now(timezone.utc))
+    updated_at = db.Column(db.DateTime, default=datetime.now(timezone.utc), onupdate=datetime.now(timezone.utc))
+
+    team = db.relationship('Team', backref='aliases', lazy=True)
+
+    def to_dict(self):
+        return {
+            'id': self.id,
+            'canonical_name': self.canonical_name,
+            'alias': self.alias,
+            'team_id': self.team_id,
+            'team_name': self.team.name if self.team else None,
+            'created_at': self.created_at.isoformat() if self.created_at else None,
+            'updated_at': self.updated_at.isoformat() if self.updated_at else None,
+        }
+
+
+class ManualPlayerSubmission(db.Model):
+    __tablename__ = 'manual_player_submissions'
+
+    id = db.Column(db.Integer, primary_key=True)
+    user_id = db.Column(db.Integer, db.ForeignKey('user_accounts.id'), nullable=False)
+    player_name = db.Column(db.String(100), nullable=False)
+    team_name = db.Column(db.String(100), nullable=False)
+    league_name = db.Column(db.String(100), nullable=True)
+    position = db.Column(db.String(50), nullable=True)
+    notes = db.Column(db.Text, nullable=True)
+    status = db.Column(db.String(20), nullable=False, default='pending')  # pending, approved, rejected
+    admin_notes = db.Column(db.Text, nullable=True)
+    created_at = db.Column(db.DateTime, default=datetime.now(timezone.utc))
+    updated_at = db.Column(db.DateTime, default=datetime.now(timezone.utc), onupdate=datetime.now(timezone.utc))
+    reviewed_at = db.Column(db.DateTime, nullable=True)
+    reviewed_by = db.Column(db.Integer, db.ForeignKey('user_accounts.id'), nullable=True)
+
+    # Relationships
+    user = db.relationship('UserAccount', foreign_keys=[user_id], backref=db.backref('manual_submissions', lazy=True))
+    reviewer = db.relationship('UserAccount', foreign_keys=[reviewed_by])
+
+    def to_dict(self):
+        return {
+            'id': self.id,
+            'user_id': self.user_id,
+            'user_name': self.user.display_name if self.user else None,
+            'player_name': self.player_name,
+            'team_name': self.team_name,
+            'league_name': self.league_name,
+            'position': self.position,
+            'notes': self.notes,
+            'status': self.status,
+            'admin_notes': self.admin_notes,
+            'created_at': self.created_at.isoformat() if self.created_at else None,
+            'updated_at': self.updated_at.isoformat() if self.updated_at else None,
+            'reviewed_at': self.reviewed_at.isoformat() if self.reviewed_at else None,
+            'reviewed_by': self.reviewed_by
+        }
+

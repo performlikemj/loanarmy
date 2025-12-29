@@ -88,6 +88,7 @@ import { AdminTeams } from '@/pages/admin/AdminTeams'
 import { AdminSponsors } from '@/pages/admin/AdminSponsors'
 import { AdminReddit } from '@/pages/admin/AdminReddit'
 import { AdminCoverageRequests } from '@/pages/admin/AdminCoverageRequests'
+import { AdminManualPlayers } from '@/pages/admin/AdminManualPlayers'
 import { WriterLogin } from '@/pages/writer/WriterLogin'
 import { WriterDashboard } from '@/pages/writer/WriterDashboard'
 import { WriteupEditor } from '@/pages/writer/WriteupEditor'
@@ -11284,6 +11285,7 @@ function App() {
                     <Route path="newsletters" element={<AdminNewsletters />} />
                     <Route path="users" element={<AdminUsers />} />
                     <Route path="coverage-requests" element={<AdminCoverageRequests />} />
+                    <Route path="manual-players" element={<AdminManualPlayers />} />
                     <Route path="loans" element={<AdminLoans />} />
                     <Route path="players" element={<AdminPlayers />} />
                     <Route path="teams" element={<AdminTeams />} />

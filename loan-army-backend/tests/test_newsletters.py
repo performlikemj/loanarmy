@@ -998,6 +998,57 @@ def test_compose_weekly_handles_supplemental_player(app, monkeypatch):
     assert item["links"][0]["url"] == "https://example.com/kana-biyik"
 
 
+def test_compose_weekly_handles_no_loanees(app, monkeypatch):
+    with app.app_context():
+        team = Team(team_id=4242, name='Everton', country='England', season=2025)
+        db.session.add(team)
+        db.session.commit()
+
+        week_range = ("2025-10-13", "2025-10-19")
+        report = {
+            "season": "2025-26",
+            "range": list(week_range),
+            "parent_team": {"name": "Everton"},
+            "loanees": [],
+        }
+
+        monkeypatch.setattr(weekly_agent, "_set_latest_player_lookup", lambda *_args, **_kwargs: None)
+        monkeypatch.setattr(weekly_agent, "_apply_player_lookup", lambda payload, _lookup: (payload, False))
+        monkeypatch.setattr(weekly_agent, "lint_and_enrich", lambda payload: payload)
+        monkeypatch.setattr(weekly_nl_agent, "_apply_player_lookup", lambda payload, _lookup: (payload, False))
+        monkeypatch.setattr(weekly_nl_agent, "legacy_lint_and_enrich", lambda payload: payload)
+        monkeypatch.setattr(weekly_nl_agent, "fetch_weekly_report_tool", lambda *_args, **_kwargs: report)
+
+        def _no_brave(*_args, **_kwargs):
+            raise AssertionError("brave_context_for_team_and_loans should not run when no loanees exist")
+        monkeypatch.setattr(weekly_nl_agent, "brave_context_for_team_and_loans", _no_brave)
+
+        monkeypatch.setattr(weekly_nl_agent, "ENV_VALIDATE_FINAL_LINKS", False)
+        monkeypatch.setattr(weekly_nl_agent, "ENV_CHECK_LINKS", False)
+        monkeypatch.setattr(weekly_nl_agent, "ENV_ENABLE_GROQ_SUMMARIES", False)
+        monkeypatch.setattr(weekly_nl_agent, "ENV_ENABLE_GROQ_TEAM_SUMMARIES", False)
+        monkeypatch.setattr(
+            weekly_nl_agent,
+            "api_client",
+            type(
+                "DummyAPI",
+                (),
+                {
+                    "set_season_year": lambda self, *_a, **_k: None,
+                    "_prime_team_cache": lambda self, *_a, **_k: None,
+                    "clear_stats_cache": lambda self, *_a, **_k: None,
+                },
+            )(),
+        )
+
+        output = compose_team_weekly_newsletter(team.id, date(2025, 10, 19))
+        content = json.loads(output["content_json"])
+
+    assert content["summary"].startswith("No active loan updates for Everton")
+    assert content["sections"][0]["title"] == "Player Reports"
+    assert content["sections"][0]["items"] == []
+
+
 def _write_png(path: str) -> None:
     """Write a tiny opaque PNG for tests without Pillow dependencies."""
     tiny_png = base64.b64decode(

@@ -400,6 +400,10 @@ export class APIService {
         return this.request(`/journalists/${journalistId}/articles`)
     }
 
+    static async getLoanDestinations() {
+        return this.request('/writer/loan-destinations')
+    }
+
     static async getNewsletterJournalistView(newsletterId, journalistIds = []) {
         if (!newsletterId) throw new Error('newsletterId is required')
         const params = new URLSearchParams()
@@ -407,7 +411,7 @@ export class APIService {
             params.set('journalist_ids', journalistIds.join(','))
         }
         const query = params.toString()
-        const url = query 
+        const url = query
             ? `/newsletters/${encodeURIComponent(newsletterId)}/journalist-view?${query}`
             : `/newsletters/${encodeURIComponent(newsletterId)}/journalist-view`
         return this.request(url)
@@ -686,12 +690,12 @@ export class APIService {
     }
     static async adminNewsletterBulkPublish(selection, publish = true, options = {}) {
         const payload = { publish: !!publish }
-        
+
         // Handle post_to_reddit option
         if (options.postToReddit) {
             payload.post_to_reddit = true
         }
-        
+
         if (selection && typeof selection === 'object' && !Array.isArray(selection)) {
             const filterParams = selection.filter_params || selection.filterParams
             if (filterParams) payload.filter_params = filterParams
@@ -716,7 +720,7 @@ export class APIService {
         const body = JSON.stringify(payload)
         return this.request('/admin/newsletters/bulk-publish', { method: 'POST', body }, { admin: true })
     }
-    
+
     // Reddit Integration API methods
     static async adminRedditStatus() {
         return this.request('/admin/reddit/status', {}, { admin: true })
@@ -1163,6 +1167,48 @@ export class APIService {
         return this.request('/admin/sponsors/reorder', {
             method: 'POST',
             body: JSON.stringify({ sponsor_ids: sponsorIds })
+        }, { admin: true })
+    }
+
+    // Team Aliases
+    static async adminListTeamAliases() {
+        return this.request('/admin/team-aliases', {}, { admin: true })
+    }
+
+    static async adminCreateTeamAlias(data) {
+        return this.request('/admin/team-aliases', {
+            method: 'POST',
+            body: JSON.stringify(data)
+        }, { admin: true })
+    }
+
+    static async adminDeleteTeamAlias(aliasId) {
+        return this.request(`/admin/team-aliases/${aliasId}`, {
+            method: 'DELETE'
+        }, { admin: true })
+    }
+
+    // Manual Player Submissions
+    static async submitManualPlayer(data) {
+        return this.request('/writer/manual-players', {
+            method: 'POST',
+            body: JSON.stringify(data)
+        })
+    }
+
+    static async listManualSubmissions() {
+        return this.request('/writer/manual-players')
+    }
+
+    static async adminListManualPlayers(params = {}) {
+        const queryString = new URLSearchParams(params).toString()
+        return this.request(`/admin/manual-players?${queryString}`, {}, { admin: true })
+    }
+
+    static async adminReviewManualPlayer(submissionId, data) {
+        return this.request(`/admin/manual-players/${submissionId}/review`, {
+            method: 'POST',
+            body: JSON.stringify(data)
         }, { admin: true })
     }
 }

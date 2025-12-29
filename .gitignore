@@ -40,3 +40,5 @@ loan-army-backend/newsletter*
 .loan/
 .venv/
 .venv-test/
+loan-army-frontend/test-results
+playwright-report

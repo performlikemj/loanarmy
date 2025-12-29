@@ -18,7 +18,6 @@ except ImportError:  # pragma: no cover
     Groq = None
 from src.models.league import db, Team, LoanedPlayer, Newsletter, AdminSetting, NewsletterCommentary
 from src.api_football_client import APIFootballClient
-from src.agents.errors import NoActiveLoaneesError
 from src.agents.weekly_agent import (
     lint_and_enrich as legacy_lint_and_enrich,
     _apply_player_lookup,
@@ -2127,16 +2126,25 @@ def compose_team_weekly_newsletter(team_db_id: int, target_date: date, force_ref
         _nl_dbg("Report loanees:", len(report.get("loanees", [])))
 
     loanees = report.get("loanees") or []
-    if len(loanees) == 0:
-        raise NoActiveLoaneesError(team_db_id, week_start, week_end)
-    _llm_dbg(
-        "compose.start",
-        {
-            "team_db_id": team_db_id,
-            "loanees": len(loanees),
-            "groq_enabled": ENV_ENABLE_GROQ_SUMMARIES,
-        },
-    )
+    has_loanees = len(loanees) > 0
+    if not has_loanees:
+        _llm_dbg(
+            "compose.empty",
+            {
+                "team_db_id": team_db_id,
+                "week_start": week_start.isoformat(),
+                "week_end": week_end.isoformat(),
+            },
+        )
+    else:
+        _llm_dbg(
+            "compose.start",
+            {
+                "team_db_id": team_db_id,
+                "loanees": len(loanees),
+                "groq_enabled": ENV_ENABLE_GROQ_SUMMARIES,
+            },
+        )
 
     # Build player lookup to help post-processing attach player_id + sofascore ids later
     player_lookup: dict[str, list[dict[str, Any]]] = {}
@@ -2159,73 +2167,76 @@ def compose_team_weekly_newsletter(team_db_id: int, target_date: date, force_ref
             return
         loanee_meta_by_key[key] = meta
 
-    for loanee in loanees:
-        pid = loanee.get("player_api_id") or loanee.get("player_id")
-        entry = None
-        if pid:
-            entry = {
-                "player_id": int(pid),
-                "loan_team_api_id": loanee.get("loan_team_api_id") or loanee.get("loan_team_id"),
-                "loan_team_id": loanee.get("loan_team_db_id") or loanee.get("loan_team_id"),
-                "loan_team_name": loanee.get("loan_team_name") or loanee.get("loan_team"),
-            }
-        meta_entry = {
-            "can_fetch_stats": bool(loanee.get("can_fetch_stats", True)),
-            "sofascore_player_id": loanee.get("sofascore_player_id"),
-        }
-        if pid:
-            try:
-                loanee_meta_by_pid[int(pid)] = meta_entry
-            except Exception:
-                pass
-        primary_name = loanee.get("player_name") or loanee.get("name")
-        full_name = loanee.get("player_full_name")
-        display = to_initial_last(primary_name or full_name or "")
-        if entry:
-            _register_alias(primary_name, entry)
-            _register_alias(full_name, entry)
-            if display and display != primary_name:
-                _register_alias(display, entry)
-            if full_name:
-                alt = to_initial_last(full_name)
-                if alt and alt != display:
-                    _register_alias(alt, entry)
-        for alias in filter(None, [primary_name, full_name, display, to_initial_last(full_name or primary_name or "")]):
-            _register_meta(alias, meta_entry)
-
-    _set_latest_player_lookup(player_lookup)
-
-    # Brave context
-    brave_ctx = brave_context_for_team_and_loans(report["parent_team"]["name"], report, default_loc=LOCALIZATION_DEFAULT)
-    try:
-        total_links = sum(len(v) for v in brave_ctx.values())
-        _nl_dbg("Search contexts:", len(brave_ctx), "total links:", total_links)
-    except Exception:
-        pass
-
-    hits_by_player = _hits_by_player(brave_ctx)
     player_items: list[dict[str, Any]] = []
-    for loanee in loanees:
-        hits = _extract_hits_for_loanee(loanee, hits_by_player)
-        item = _build_player_report_item(loanee, hits, week_start=week_start, week_end=week_end)
-        player_items.append(item)
-    missing_summaries = sum(1 for item in player_items if not _strip_text(item.get("week_summary")))
-    _nl_dbg(
-        "compose.player_items",
-        {
-            "player_items": len(player_items),
+    brave_ctx: dict[str, Any] = {}
+    if has_loanees:
+        for loanee in loanees:
+            pid = loanee.get("player_api_id") or loanee.get("player_id")
+            entry = None
+            if pid:
+                entry = {
+                    "player_id": int(pid),
+                    "loan_team_api_id": loanee.get("loan_team_api_id") or loanee.get("loan_team_id"),
+                    "loan_team_id": loanee.get("loan_team_db_id") or loanee.get("loan_team_id"),
+                    "loan_team_name": loanee.get("loan_team_name") or loanee.get("loan_team"),
+                }
+            meta_entry = {
+                "can_fetch_stats": bool(loanee.get("can_fetch_stats", True)),
+                "sofascore_player_id": loanee.get("sofascore_player_id"),
+            }
+            if pid:
+                try:
+                    loanee_meta_by_pid[int(pid)] = meta_entry
+                except Exception:
+                    pass
+            primary_name = loanee.get("player_name") or loanee.get("name")
+            full_name = loanee.get("player_full_name")
+            display = to_initial_last(primary_name or full_name or "")
+            if entry:
+                _register_alias(primary_name, entry)
+                _register_alias(full_name, entry)
+                if display and display != primary_name:
+                    _register_alias(display, entry)
+                if full_name:
+                    alt = to_initial_last(full_name)
+                    if alt and alt != display:
+                        _register_alias(alt, entry)
+            for alias in filter(None, [primary_name, full_name, display, to_initial_last(full_name or primary_name or "")]):
+                _register_meta(alias, meta_entry)
 
-            "missing_summaries": missing_summaries,
-        },
-    )
-    if missing_summaries:
-        _llm_dbg(
-            "player.summary.empty_count",
+        _set_latest_player_lookup(player_lookup)
+
+        # Brave context
+        brave_ctx = brave_context_for_team_and_loans(report["parent_team"]["name"], report, default_loc=LOCALIZATION_DEFAULT)
+        try:
+            total_links = sum(len(v) for v in brave_ctx.values())
+            _nl_dbg("Search contexts:", len(brave_ctx), "total links:", total_links)
+        except Exception:
+            pass
+
+        hits_by_player = _hits_by_player(brave_ctx)
+        for loanee in loanees:
+            hits = _extract_hits_for_loanee(loanee, hits_by_player)
+            item = _build_player_report_item(loanee, hits, week_start=week_start, week_end=week_end)
+            player_items.append(item)
+        missing_summaries = sum(1 for item in player_items if not _strip_text(item.get("week_summary")))
+        _nl_dbg(
+            "compose.player_items",
             {
-                "team_db_id": team_db_id,
-                "count": missing_summaries,
+                "player_items": len(player_items),
+                "missing_summaries": missing_summaries,
             },
         )
+        if missing_summaries:
+            _llm_dbg(
+                "player.summary.empty_count",
+                {
+                    "team_db_id": team_db_id,
+                    "count": missing_summaries,
+                },
+            )
+    else:
+        _set_latest_player_lookup({})
 
     team_name = report.get("parent_team", {}).get("name") or "Loan Watch"
     range_window = report.get("range") or [week_start.isoformat(), week_end.isoformat()]
@@ -2330,7 +2341,8 @@ def compose_team_weekly_newsletter(team_db_id: int, target_date: date, force_ref
     try:
         content_payload, _ = _apply_player_lookup(content_payload, player_lookup)
         content_payload = legacy_lint_and_enrich(content_payload)
-        content_payload = _enforce_loanee_metadata(content_payload, loanee_meta_by_pid, loanee_meta_by_key)
+        if has_loanees:
+            content_payload = _enforce_loanee_metadata(content_payload, loanee_meta_by_pid, loanee_meta_by_key)
     except Exception as enrich_error:
         _nl_dbg("lint-and-enrich failed:", str(enrich_error))
 

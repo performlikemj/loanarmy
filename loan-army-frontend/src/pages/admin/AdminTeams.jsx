@@ -10,12 +10,12 @@ import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, D
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
 import { Label } from '@/components/ui/label'
-import { 
-  Loader2, 
-  Trash2, 
-  CheckCircle, 
-  XCircle, 
-  Clock, 
+import {
+  Loader2,
+  Trash2,
+  CheckCircle,
+  XCircle,
+  Clock,
   AlertCircle,
   Search,
   RefreshCw,
@@ -39,11 +39,11 @@ export function AdminTeams() {
   const [message, setMessage] = useState(null)
   const [search, setSearch] = useState('')
   const [requestFilter, setRequestFilter] = useState('pending')
-  
+
   // Selection state
   const [selectedTeamIds, setSelectedTeamIds] = useState(new Set())
   const [bulkMode, setBulkMode] = useState('delete') // 'delete' or 'keep'
-  
+
   // Delete team data dialog state
   const [deleteDialogOpen, setDeleteDialogOpen] = useState(false)
   const [deleteTarget, setDeleteTarget] = useState(null) // Single team or null for bulk
@@ -73,6 +73,61 @@ export function AdminTeams() {
   const [purgeTeamId, setPurgeTeamId] = useState('')
   const [purgePreview, setPurgePreview] = useState(null)
   const [purgeLoading, setPurgeLoading] = useState(false)
+
+  // Team Aliases state
+  const [aliases, setAliases] = useState([])
+  const [aliasesLoading, setAliasesLoading] = useState(false)
+  const [newAliasCanonical, setNewAliasCanonical] = useState('')
+  const [newAliasName, setNewAliasName] = useState('')
+  const [creatingAlias, setCreatingAlias] = useState(false)
+
+  const loadAliases = useCallback(async () => {
+    try {
+      setAliasesLoading(true)
+      const data = await APIService.adminListTeamAliases()
+      setAliases(Array.isArray(data) ? data : [])
+    } catch (error) {
+      console.error('Failed to load aliases:', error)
+      setMessage({ type: 'error', text: 'Failed to load team aliases' })
+    } finally {
+      setAliasesLoading(false)
+    }
+  }, [])
+
+  const handleCreateAlias = async (e) => {
+    e.preventDefault()
+    if (!newAliasCanonical.trim() || !newAliasName.trim()) return
+
+    try {
+      setCreatingAlias(true)
+      await APIService.adminCreateTeamAlias({
+        canonical_name: newAliasCanonical.trim(),
+        alias: newAliasName.trim()
+      })
+      setMessage({ type: 'success', text: 'Alias created successfully' })
+      setNewAliasCanonical('')
+      setNewAliasName('')
+      loadAliases()
+    } catch (error) {
+      console.error('Failed to create alias:', error)
+      setMessage({ type: 'error', text: error.message || 'Failed to create alias' })
+    } finally {
+      setCreatingAlias(false)
+    }
+  }
+
+  const handleDeleteAlias = async (id) => {
+    if (!confirm('Are you sure you want to delete this alias?')) return
+
+    try {
+      await APIService.adminDeleteTeamAlias(id)
+      setMessage({ type: 'success', text: 'Alias deleted successfully' })
+      loadAliases()
+    } catch (error) {
+      console.error('Failed to delete alias:', error)
+      setMessage({ type: 'error', text: 'Failed to delete alias' })
+    }
+  }
 
   const loadTeams = useCallback(async () => {
     try {
@@ -118,7 +173,7 @@ export function AdminTeams() {
     loadTrackingRequests()
   }, [loadTrackingRequests])
 
-  const filteredTeams = useMemo(() => teams.filter(team => 
+  const filteredTeams = useMemo(() => teams.filter(team =>
     team.name.toLowerCase().includes(search.toLowerCase()) ||
     team.league_name?.toLowerCase().includes(search.toLowerCase())
   ), [teams, search])
@@ -183,7 +238,7 @@ export function AdminTeams() {
     setDeleteDialogOpen(true)
     setDeletePreview(null)
     setPreviewLoading(true)
-    
+
     try {
       const preview = await APIService.adminDeleteTeamData(team.id, true)
       setDeletePreview(preview)
@@ -232,7 +287,7 @@ export function AdminTeams() {
 
   const confirmDelete = async () => {
     setDeleteLoading(true)
-    
+
     try {
       if (deleteTarget) {
         // Single delete
@@ -242,7 +297,7 @@ export function AdminTeams() {
         // Bulk delete
         let successCount = 0
         let errorCount = 0
-        
+
         for (const team of teamsToDelete) {
           try {
             await APIService.adminDeleteTeamData(team.id, false)
@@ -252,16 +307,16 @@ export function AdminTeams() {
             errorCount++
           }
         }
-        
+
         if (errorCount === 0) {
           setMessage({ type: 'success', text: `Successfully deleted data for ${successCount} teams` })
         } else {
           setMessage({ type: 'warning', text: `Deleted ${successCount} teams, ${errorCount} failed` })
         }
-        
+
         setSelectedTeamIds(new Set())
       }
-      
+
       setDeleteDialogOpen(false)
       setDeleteTarget(null)
       setDeletePreview(null)
@@ -279,14 +334,14 @@ export function AdminTeams() {
   const handleSyncFixtures = async (team) => {
     setSyncingTeamId(team.id)
     setSyncProgress(null)
-    
+
     try {
       const res = await APIService.adminSyncTeamFixtures(team.id, { background: true })
-      
+
       if (res.job_id) {
         setSyncJobId(res.job_id)
         setMessage({ type: 'info', text: `Syncing fixtures for ${team.name}... This runs in the background.` })
-        
+
         // Poll for job status
         const interval = setInterval(async () => {
           try {
@@ -299,9 +354,9 @@ export function AdminTeams() {
                 setSyncJobId(null)
                 if (job.status === 'completed') {
                   const results = job.results || {}
-                  setMessage({ 
-                    type: 'success', 
-                    text: `Synced ${results.total_synced || 0} fixtures for ${results.players_processed || 0} players from ${team.name}` 
+                  setMessage({
+                    type: 'success',
+                    text: `Synced ${results.total_synced || 0} fixtures for ${results.players_processed || 0} players from ${team.name}`
                   })
                   loadTeams()
                 } else {
@@ -315,9 +370,9 @@ export function AdminTeams() {
         }, 2000)
       } else {
         // Synchronous response
-        setMessage({ 
-          type: 'success', 
-          text: `Synced ${res.total_synced || 0} fixtures for ${res.players_processed || 0} players` 
+        setMessage({
+          type: 'success',
+          text: `Synced ${res.total_synced || 0} fixtures for ${res.players_processed || 0} players`
         })
         setSyncingTeamId(null)
         loadTeams()
@@ -350,7 +405,7 @@ export function AdminTeams() {
 
   const handlePurgeConfirm = async () => {
     if (!purgeTeamId || !purgePreview) return
-    
+
     setPurgeLoading(true)
     try {
       const result = await APIService.adminPurgeLoansExcept([parseInt(purgeTeamId)], { dryRun: false })
@@ -421,7 +476,7 @@ export function AdminTeams() {
       setMessage({ type: 'error', text: 'Name cannot be empty' })
       return
     }
-    
+
     try {
       setSavingName(true)
       await APIService.adminUpdateTeamName(teamId, editingName.trim())
@@ -450,10 +505,10 @@ export function AdminTeams() {
         season: parseInt(placeholderSeason),
         dry_run: bulkFixDryRun
       })
-      
+
       const updatedCount = result.updated_count || 0
       const skippedCount = result.skipped_count || 0
-      
+
       if (bulkFixDryRun) {
         setMessage({
           type: 'success',
@@ -483,11 +538,11 @@ export function AdminTeams() {
         fix_loans: true,
         fix_newsletters: true
       })
-      
+
       const loansUpdated = result.loans_updated || 0
       const newslettersUpdated = result.newsletters_updated || 0
       const detailsCount = result.details?.length || 0
-      
+
       if (propagateDryRun) {
         setMessage({
           type: 'success',
@@ -565,6 +620,10 @@ export function AdminTeams() {
             <Pencil className="h-4 w-4 mr-1 sm:mr-2" />
             Fix <span className="hidden xs:inline">Team</span> Names
           </TabsTrigger>
+          <TabsTrigger value="aliases" className="text-xs sm:text-sm" onClick={loadAliases}>
+            <ArrowLeftRight className="h-4 w-4 mr-1 sm:mr-2" />
+            <span className="hidden xs:inline">Team</span> Aliases
+          </TabsTrigger>
           <TabsTrigger value="purge" className="text-xs sm:text-sm">
             <Trash2 className="h-4 w-4 mr-1 sm:mr-2" />
             Purge <span className="hidden xs:inline">Data</span>
@@ -620,7 +679,7 @@ export function AdminTeams() {
                         Invert
                       </Button>
                     </div>
-                    
+
                     <span className="text-sm text-muted-foreground">
                       {selectedTeamIds.size} selected
                     </span>
@@ -646,16 +705,16 @@ export function AdminTeams() {
                             </SelectItem>
                           </SelectContent>
                         </Select>
-                        
-                        <Button 
-                          variant="destructive" 
+
+                        <Button
+                          variant="destructive"
                           size="sm"
                           onClick={handleBulkDeleteClick}
                           className="w-full sm:w-auto"
                         >
                           <Trash2 className="h-4 w-4 mr-1" />
-                          {bulkMode === 'delete' 
-                            ? `Delete ${teamsToDelete.length}` 
+                          {bulkMode === 'delete'
+                            ? `Delete ${teamsToDelete.length}`
                             : `Delete ${teamsToDelete.length}, keep ${teamsToKeep.length}`
                           }
                         </Button>
@@ -676,17 +735,16 @@ export function AdminTeams() {
                   {trackedTeams.map(team => {
                     const isSelected = selectedTeamIds.has(team.id)
                     const willBeDeleted = teamsToDelete.some(t => t.id === team.id)
-                    
+
                     return (
-                      <div 
-                        key={team.id} 
-                        className={`p-3 border rounded-lg transition-colors ${
-                          isSelected 
-                            ? willBeDeleted 
-                              ? 'bg-red-50 border-red-200' 
-                              : 'bg-green-50 border-green-200'
-                            : 'hover:bg-muted/50'
-                        }`}
+                      <div
+                        key={team.id}
+                        className={`p-3 border rounded-lg transition-colors ${isSelected
+                          ? willBeDeleted
+                            ? 'bg-red-50 border-red-200'
+                            : 'bg-green-50 border-green-200'
+                          : 'hover:bg-muted/50'
+                          }`}
                       >
                         <div className="flex items-start gap-3">
                           <Checkbox
@@ -715,15 +773,15 @@ export function AdminTeams() {
                               {team.league_name || team.country} • {team.current_loaned_out_count} loans
                             </p>
                             <div className="flex flex-wrap gap-2 mt-2">
-                              <Button 
-                                variant="outline" 
+                              <Button
+                                variant="outline"
                                 size="sm"
                                 onClick={() => handleToggleTracking(team)}
                               >
                                 Stop Tracking
                               </Button>
-                              <Button 
-                                variant="outline" 
+                              <Button
+                                variant="outline"
                                 size="sm"
                                 onClick={() => handleSyncFixtures(team)}
                                 disabled={syncingTeamId === team.id}
@@ -740,8 +798,8 @@ export function AdminTeams() {
                                   </>
                                 )}
                               </Button>
-                              <Button 
-                                variant="destructive" 
+                              <Button
+                                variant="destructive"
                                 size="sm"
                                 onClick={() => handleDeleteClick(team)}
                               >
@@ -784,8 +842,8 @@ export function AdminTeams() {
                         </Avatar>
                         <span className="truncate max-w-[120px]">{team.name}</span>
                       </div>
-                      <Button 
-                        variant="ghost" 
+                      <Button
+                        variant="ghost"
                         size="sm"
                         onClick={() => handleToggleTracking(team)}
                       >
@@ -857,7 +915,7 @@ export function AdminTeams() {
                         </div>
                         <Badge variant={
                           req.status === 'pending' ? 'secondary' :
-                          req.status === 'approved' ? 'default' : 'destructive'
+                            req.status === 'approved' ? 'default' : 'destructive'
                         } className="self-start shrink-0">
                           {req.status === 'pending' && <Clock className="h-3 w-3 mr-1" />}
                           {req.status === 'approved' && <CheckCircle className="h-3 w-3 mr-1" />}
@@ -946,8 +1004,8 @@ export function AdminTeams() {
                     />
                     <span>Dry run</span>
                   </label>
-                  <Button 
-                    onClick={bulkFixPlaceholderNames} 
+                  <Button
+                    onClick={bulkFixPlaceholderNames}
                     disabled={bulkFixing || !placeholderSeason}
                     variant="secondary"
                     className="flex-1 sm:flex-none"
@@ -978,8 +1036,8 @@ export function AdminTeams() {
                       />
                       <span>Dry run</span>
                     </label>
-                    <Button 
-                      onClick={propagateTeamNames} 
+                    <Button
+                      onClick={propagateTeamNames}
                       disabled={propagating}
                       className="flex-1 sm:flex-none"
                     >
@@ -1115,7 +1173,7 @@ export function AdminTeams() {
               <Alert className="border-red-500">
                 <AlertCircle className="h-4 w-4" />
                 <AlertDescription>
-                  <strong>Warning:</strong> This will permanently delete all loaned players and their fixture stats 
+                  <strong>Warning:</strong> This will permanently delete all loaned players and their fixture stats
                   from every team EXCEPT the one you select. This cannot be undone.
                 </AlertDescription>
               </Alert>
@@ -1136,8 +1194,8 @@ export function AdminTeams() {
                     </SelectContent>
                   </Select>
                 </div>
-                <Button 
-                  onClick={handlePurgePreview} 
+                <Button
+                  onClick={handlePurgePreview}
                   disabled={!purgeTeamId || purgeLoading}
                   variant="outline"
                   className="mt-auto"
@@ -1156,21 +1214,106 @@ export function AdminTeams() {
                     <li><strong>Teams affected:</strong> {purgePreview.teams_affected?.slice(0, 10).join(', ')}{purgePreview.teams_affected?.length > 10 ? `... and ${purgePreview.teams_affected.length - 10} more` : ''}</li>
                   </ul>
                   <div className="mt-4 flex gap-2">
-                    <Button 
-                      variant="destructive" 
+                    <Button
+                      variant="destructive"
                       onClick={handlePurgeConfirm}
                       disabled={purgeLoading}
                     >
                       {purgeLoading ? <Loader2 className="h-4 w-4 mr-2 animate-spin" /> : <Trash2 className="h-4 w-4 mr-2" />}
                       Confirm Purge
                     </Button>
-                    <Button 
-                      variant="outline" 
+                    <Button
+                      variant="outline"
                       onClick={() => setPurgePreview(null)}
                     >
                       Cancel
                     </Button>
                   </div>
+                </div>
+              )}
+            </CardContent>
+          </Card>
+        </TabsContent>
+
+        <TabsContent value="aliases" className="space-y-4">
+          <Card>
+            <CardHeader>
+              <CardTitle>Team Aliases</CardTitle>
+              <CardDescription>
+                Manage alternative names for teams to ensure correct mapping (e.g. "Man Utd" maps to "Manchester United")
+              </CardDescription>
+            </CardHeader>
+            <CardContent className="space-y-6">
+              {/* Create Alias Form */}
+              <form onSubmit={handleCreateAlias} className="flex flex-col sm:flex-row gap-4 items-end border-b pb-6">
+                <div className="flex-1 space-y-2 w-full">
+                  <Label>Canonical Name (Official)</Label>
+                  <Input
+                    placeholder="e.g. Manchester United"
+                    value={newAliasCanonical}
+                    onChange={(e) => setNewAliasCanonical(e.target.value)}
+                  />
+                </div>
+                <div className="flex-1 space-y-2 w-full">
+                  <Label>Alias (Alternative)</Label>
+                  <Input
+                    placeholder="e.g. Man Utd"
+                    value={newAliasName}
+                    onChange={(e) => setNewAliasName(e.target.value)}
+                  />
+                </div>
+                <Button type="submit" disabled={creatingAlias}>
+                  {creatingAlias ? <Loader2 className="h-4 w-4 animate-spin" /> : <Wand2 className="h-4 w-4 mr-2" />}
+                  Add Alias
+                </Button>
+              </form>
+
+              {/* Aliases List */}
+              {aliasesLoading ? (
+                <div className="flex justify-center py-8">
+                  <Loader2 className="h-6 w-6 animate-spin" />
+                </div>
+              ) : aliases.length === 0 ? (
+                <p className="text-center text-muted-foreground py-8">No aliases defined yet.</p>
+              ) : (
+                <div className="border rounded-md">
+                  <table className="w-full text-sm">
+                    <thead>
+                      <tr className="border-b bg-muted/50">
+                        <th className="px-4 py-3 text-left font-medium">Alias</th>
+                        <th className="px-4 py-3 text-left font-medium">Canonical Name</th>
+                        <th className="px-4 py-3 text-left font-medium">Mapped Team</th>
+                        <th className="px-4 py-3 text-right font-medium">Actions</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {aliases.map((alias) => (
+                        <tr key={alias.id} className="border-b last:border-0">
+                          <td className="px-4 py-3 font-medium">{alias.alias}</td>
+                          <td className="px-4 py-3">{alias.canonical_name}</td>
+                          <td className="px-4 py-3">
+                            {alias.team_name ? (
+                              <Badge variant="outline" className="bg-green-50 text-green-700 border-green-200">
+                                {alias.team_name}
+                              </Badge>
+                            ) : (
+                              <span className="text-muted-foreground text-xs italic">No DB Link</span>
+                            )}
+                          </td>
+                          <td className="px-4 py-3 text-right">
+                            <Button
+                              variant="ghost"
+                              size="sm"
+                              className="text-red-600 hover:text-red-700 hover:bg-red-50"
+                              onClick={() => handleDeleteAlias(alias.id)}
+                            >
+                              <Trash2 className="h-4 w-4" />
+                            </Button>
+                          </td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
                 </div>
               )}
             </CardContent>
@@ -1200,7 +1343,7 @@ export function AdminTeams() {
               {' '}This action cannot be undone.
             </DialogDescription>
           </DialogHeader>
-          
+
           {previewLoading ? (
             <div className="flex items-center justify-center py-8">
               <Loader2 className="h-6 w-6 animate-spin mr-2" />
@@ -1221,7 +1364,7 @@ export function AdminTeams() {
                   <p className="text-sm text-muted-foreground">{deleteTarget.league_name}</p>
                 </div>
               </div>
-              
+
               <div className="border rounded-lg p-4 bg-red-50">
                 <p className="font-medium text-red-800 mb-3">The following data will be deleted:</p>
                 <div className="grid grid-cols-2 gap-2 text-sm">
@@ -1326,8 +1469,8 @@ export function AdminTeams() {
             <Button variant="outline" onClick={() => setDeleteDialogOpen(false)}>
               Cancel
             </Button>
-            <Button 
-              variant="destructive" 
+            <Button
+              variant="destructive"
               onClick={confirmDelete}
               disabled={deleteLoading || previewLoading}
             >

@@ -4,6 +4,19 @@ import { waitForEmailToken } from './db.js'
 export async function loginWithCode(page, email, dbClient, { displayName = 'E2E User' } = {}) {
   await page.goto('/settings')
   const signInButton = page.getByRole('button', { name: /^Sign in$/i })
+  const isSignedOut = await signInButton.isVisible().catch(() => false)
+  if (!isSignedOut) {
+    const logOutButton = page.getByRole('button', { name: /Log Out/i })
+    if (await logOutButton.isVisible().catch(() => false)) {
+      await logOutButton.click()
+    } else {
+      await page.evaluate(() => {
+        localStorage.removeItem('loan_army_user_token')
+      })
+      await page.reload()
+    }
+    await expect(signInButton).toBeVisible()
+  }
   await signInButton.click()
 
   await page.getByLabel('Email').fill(email)

@@ -2,9 +2,10 @@ from flask import Blueprint, request, jsonify, g
 from src.models.league import (
     db, UserAccount, JournalistSubscription, NewsletterCommentary, Newsletter, 
     JournalistTeamAssignment, JournalistLoanTeamAssignment, WriterCoverageRequest,
-    Team, LoanedPlayer, Player
+    Team, LoanedPlayer, Player, ManualPlayerSubmission
 )
 from src.routes.api import require_user_auth, _safe_error_payload, require_api_key, _ensure_user_account
+from src.utils.team_utils import normalize_team_name, get_all_team_name_variations
 from datetime import datetime, timezone
 from sqlalchemy import func, or_
 import re
@@ -79,12 +80,17 @@ def can_writer_cover_player(user_id: int, player_id: int, team_id: int = None) -
         if loan_team_assignment:
             return True
     
-    # Also check by loan team name (for custom teams or cross-season matching)
+    # Also check by loan team name (using normalization)
     if loan.loan_team_name:
-        loan_name_assignment = JournalistLoanTeamAssignment.query.filter_by(
-            user_id=user_id,
-            loan_team_name=loan.loan_team_name
+        # Get all variations of the player's loan team name
+        variations = get_all_team_name_variations(loan.loan_team_name)
+        
+        # Check if writer is assigned to ANY of these variations
+        loan_name_assignment = JournalistLoanTeamAssignment.query.filter(
+            JournalistLoanTeamAssignment.user_id == user_id,
+            JournalistLoanTeamAssignment.loan_team_name.in_(variations)
         ).first()
+        
         if loan_name_assignment:
             return True
     
@@ -103,7 +109,14 @@ def get_writer_available_players(user_id: int) -> list:
     # Get all loan team assignments
     loan_assignments = JournalistLoanTeamAssignment.query.filter_by(user_id=user_id).all()
     loan_team_ids = [a.loan_team_id for a in loan_assignments if a.loan_team_id]
-    loan_team_names = [a.loan_team_name for a in loan_assignments]
+    
+    # Expand assigned names to include all aliases
+    assigned_names = [a.loan_team_name for a in loan_assignments]
+    expanded_names = set()
+    for name in assigned_names:
+        variations = get_all_team_name_variations(name)
+        expanded_names.update(variations)
+    loan_team_names = list(expanded_names)
     
     # Build query for players
     conditions = []
@@ -1153,6 +1166,43 @@ def get_my_subscriptions():
         return jsonify(_safe_error_payload(e, 'Failed to fetch subscriptions')), 500
 
 # --- Writer Platform Endpoints ---
+
+@journalist_bp.route('/writer/loan-destinations', methods=['GET'])
+@require_user_auth
+def get_loan_destinations():
+    """Get list of active loan destinations with player counts."""
+    try:
+        # Group by loan team name and ID
+        # We use loan_team_name as the primary grouping since ID might be null for some
+        results = db.session.query(
+            LoanedPlayer.loan_team_name,
+            LoanedPlayer.loan_team_id,
+            func.count(LoanedPlayer.id).label('player_count')
+        ).filter(
+            LoanedPlayer.is_active.is_(True),
+            LoanedPlayer.loan_team_name.isnot(None),
+            LoanedPlayer.loan_team_name != ''
+        ).group_by(
+            LoanedPlayer.loan_team_name,
+            LoanedPlayer.loan_team_id
+        ).order_by(
+            func.count(LoanedPlayer.id).desc()
+        ).all()
+
+        destinations = []
+        for r in results:
+            destinations.append({
+                'name': r.loan_team_name,
+                'team_id': r.loan_team_id,
+                'player_count': r.player_count
+            })
+
+        return jsonify({'destinations': destinations})
+
+    except Exception as e:
+        logger.exception('Failed to fetch loan destinations')
+        return jsonify({'error': 'Failed to fetch loan destinations'}), 500
+
 
 @journalist_bp.route('/writer/profile', methods=['GET'])
 @require_user_auth
@@ -2844,3 +2894,58 @@ def admin_get_journalist_assignments(journalist_id):
     except Exception as e:
         logger.exception('Failed to get journalist assignments')
         return jsonify(_safe_error_payload(e, 'Failed to get assignments')), 500
+
+
+@journalist_bp.route('/writer/manual-players', methods=['POST'])
+@require_user_auth
+def submit_manual_player():
+    """Submit a manual player for tracking."""
+    try:
+        user = g.user
+        if not user.is_journalist:
+            return jsonify({'error': 'Only journalists can submit manual players'}), 403
+            
+        data = request.get_json() or {}
+        player_name = (data.get('player_name') or '').strip()
+        team_name = (data.get('team_name') or '').strip()
+        
+        if not player_name or not team_name:
+            return jsonify({'error': 'Player name and team name are required'}), 400
+            
+        submission = ManualPlayerSubmission(
+            user_id=user.id,
+            player_name=player_name,
+            team_name=team_name,
+            league_name=(data.get('league_name') or '').strip() or None,
+            position=(data.get('position') or '').strip() or None,
+            notes=(data.get('notes') or '').strip() or None,
+            status='pending'
+        )
+        
+        db.session.add(submission)
+        db.session.commit()
+        
+        return jsonify(submission.to_dict()), 201
+        
+    except Exception as e:
+        logger.exception('Failed to submit manual player')
+        db.session.rollback()
+        return jsonify(_safe_error_payload(e, 'Failed to submit manual player')), 500
+
+
+@journalist_bp.route('/writer/manual-players', methods=['GET'])
+@require_user_auth
+def list_manual_submissions():
+    """List manual player submissions for the current writer."""
+    try:
+        user = g.user
+        submissions = ManualPlayerSubmission.query.filter_by(user_id=user.id).order_by(
+            ManualPlayerSubmission.created_at.desc()
+        ).all()
+        
+        return jsonify([s.to_dict() for s in submissions])
+        
+    except Exception as e:
+        logger.exception('Failed to list manual submissions')
+        return jsonify(_safe_error_payload(e, 'Failed to list manual submissions')), 500
+

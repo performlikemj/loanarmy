@@ -19,6 +19,7 @@ import { LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContai
 import { APIService } from '@/lib/api'
 import { useAuthUI } from '@/context/AuthContext'
 import { CoverageRequestModal } from '@/components/CoverageRequestModal'
+import { ManualPlayerModal } from '@/components/ManualPlayerModal'
 
 export function WriterDashboard() {
     const navigate = useNavigate()
@@ -32,6 +33,7 @@ export function WriterDashboard() {
     const [deletingId, setDeletingId] = useState(null)
     const [showDeleteConfirm, setShowDeleteConfirm] = useState(false)
     const [showCoverageModal, setShowCoverageModal] = useState(false)
+    const [showManualPlayerModal, setShowManualPlayerModal] = useState(false)
 
     const loadData = async () => {
         try {
@@ -238,9 +240,16 @@ export function WriterDashboard() {
                                 </CardTitle>
                                 <CardDescription>Teams and players you are authorized to write about</CardDescription>
                             </div>
-                            <Button variant="outline" size="sm" onClick={() => setShowCoverageModal(true)}>
-                                <Plus className="mr-2 h-4 w-4" /> Request Coverage
-                            </Button>
+                            <div className="flex items-center gap-2">
+                                <Button variant="outline" onClick={() => setShowManualPlayerModal(true)}>
+                                    <UserPlus className="h-4 w-4 mr-2" />
+                                    Suggest Player
+                                </Button>
+                                <Button variant="outline" onClick={() => setShowCoverageModal(true)}>
+                                    <Building2 className="h-4 w-4 mr-2" />
+                                    Request Coverage
+                                </Button>
+                            </div>
                         </CardHeader>
                         <CardContent className="space-y-4">
                             {/* Parent Club Assignments */}
@@ -259,7 +268,7 @@ export function WriterDashboard() {
                                     </div>
                                 </div>
                             )}
-                            
+
                             {/* Loan Team Assignments */}
                             {teams.loan_team_assignments?.length > 0 && (
                                 <div>
@@ -269,14 +278,13 @@ export function WriterDashboard() {
                                     </h4>
                                     <div className="flex flex-wrap gap-2">
                                         {teams.loan_team_assignments.map(assignment => (
-                                            <Badge 
-                                                key={assignment.loan_team_name} 
-                                                variant="secondary" 
-                                                className={`text-sm py-1 px-3 ${
-                                                    assignment.is_custom_team 
-                                                        ? 'bg-amber-50 text-amber-700 border-amber-200' 
-                                                        : 'bg-green-50 text-green-700 border-green-200'
-                                                }`}
+                                            <Badge
+                                                key={assignment.loan_team_name}
+                                                variant="secondary"
+                                                className={`text-sm py-1 px-3 ${assignment.is_custom_team
+                                                    ? 'bg-amber-50 text-amber-700 border-amber-200'
+                                                    : 'bg-green-50 text-green-700 border-green-200'
+                                                    }`}
                                             >
                                                 {assignment.loan_team_name}
                                                 {assignment.is_custom_team && <span className="ml-1 text-xs">(custom)</span>}
@@ -285,12 +293,12 @@ export function WriterDashboard() {
                                     </div>
                                 </div>
                             )}
-                            
+
                             {/* Empty State */}
                             {!teams.parent_club_assignments?.length && !teams.loan_team_assignments?.length && (
                                 <p className="text-gray-500">No teams assigned yet. Request coverage to get started!</p>
                             )}
-                            
+
                             {/* Pending Requests */}
                             {coverageRequests.filter(r => r.status === 'pending').length > 0 && (
                                 <div className="border-t pt-4 mt-4">
@@ -312,9 +320,9 @@ export function WriterDashboard() {
                                                         {req.coverage_type === 'parent_club' ? 'Parent Club' : 'Loan Team'}
                                                     </Badge>
                                                 </div>
-                                                <Button 
-                                                    variant="ghost" 
-                                                    size="sm" 
+                                                <Button
+                                                    variant="ghost"
+                                                    size="sm"
                                                     className="text-red-600 hover:text-red-700"
                                                     onClick={async () => {
                                                         try {
@@ -332,7 +340,7 @@ export function WriterDashboard() {
                                     </div>
                                 </div>
                             )}
-                            
+
                             {/* Recent Request History */}
                             {coverageRequests.filter(r => r.status !== 'pending').length > 0 && (
                                 <div className="border-t pt-4 mt-4">
@@ -388,9 +396,9 @@ export function WriterDashboard() {
                                                 <Button variant="ghost" size="sm" asChild>
                                                     <Link to={`/writer/writeup-editor?id=${item.id}`}>Edit</Link>
                                                 </Button>
-                                                <Button 
-                                                    variant="ghost" 
-                                                    size="sm" 
+                                                <Button
+                                                    variant="ghost"
+                                                    size="sm"
                                                     onClick={() => confirmDelete(item.id)}
                                                     className="text-red-600 hover:text-red-700 hover:bg-red-50"
                                                 >
@@ -421,7 +429,7 @@ export function WriterDashboard() {
                     </AlertDialogHeader>
                     <AlertDialogFooter>
                         <AlertDialogCancel onClick={() => setDeletingId(null)}>Cancel</AlertDialogCancel>
-                        <AlertDialogAction 
+                        <AlertDialogAction
                             onClick={handleDelete}
                             className="bg-red-600 hover:bg-red-700"
                         >
@@ -432,12 +440,17 @@ export function WriterDashboard() {
             </AlertDialog>
 
             {/* Coverage Request Modal */}
-            <CoverageRequestModal 
+            <CoverageRequestModal
                 open={showCoverageModal}
                 onOpenChange={setShowCoverageModal}
                 onSuccess={() => {
                     loadData()
                 }}
+            />
+
+            <ManualPlayerModal
+                open={showManualPlayerModal}
+                onOpenChange={setShowManualPlayerModal}
             />
         </div>
     )
