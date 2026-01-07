@@ -371,6 +371,12 @@ export class APIService {
         return this.request('/journalists')
     }
 
+    static async searchCommentaries(query) {
+        if (!query || query.length < 2) return []
+        const params = new URLSearchParams({ q: query })
+        return this.request(`/journalists/commentaries/search?${params}`)
+    }
+
     static async getCommentary(commentaryId) {
         if (!commentaryId) throw new Error('commentaryId is required')
         return this.request(`/journalists/commentaries/${encodeURIComponent(commentaryId)}`)
@@ -1210,5 +1216,125 @@ export class APIService {
             method: 'POST',
             body: JSON.stringify(data)
         }, { admin: true })
+    }
+
+    // ==========================================================================
+    // Editor / Managed Writers API
+    // ==========================================================================
+
+    // Toggle editor role (admin only)
+    static async adminUpdateEditorRole(userId, isEditor) {
+        return this.request(`/admin/users/${userId}/editor-role`, {
+            method: 'POST',
+            body: JSON.stringify({ is_editor: isEditor })
+        }, { admin: true })
+    }
+
+    // List managed/placeholder writers (editor sees theirs, admin sees all)
+    static async getEditorManagedWriters() {
+        return this.request('/editor/writers')
+    }
+
+    // Get a single managed writer's details
+    static async getEditorWriter(writerId) {
+        return this.request(`/editor/writers/${writerId}`)
+    }
+
+    // Create a placeholder writer account
+    static async createPlaceholderWriter(data) {
+        return this.request('/editor/writers', {
+            method: 'POST',
+            body: JSON.stringify(data)
+        })
+    }
+
+    // Update a placeholder writer's profile
+    static async updatePlaceholderWriter(writerId, data) {
+        return this.request(`/editor/writers/${writerId}`, {
+            method: 'PUT',
+            body: JSON.stringify(data)
+        })
+    }
+
+    // Delete a placeholder writer (only if no content)
+    static async deletePlaceholderWriter(writerId) {
+        return this.request(`/editor/writers/${writerId}`, {
+            method: 'DELETE'
+        })
+    }
+
+    // Assign parent club teams to a managed writer
+    static async editorAssignTeams(writerId, teamIds) {
+        return this.request(`/editor/writers/${writerId}/assign-teams`, {
+            method: 'POST',
+            body: JSON.stringify({ team_ids: teamIds })
+        })
+    }
+
+    // Assign loan teams to a managed writer
+    static async editorAssignLoanTeams(writerId, loanTeams) {
+        return this.request(`/editor/writers/${writerId}/loan-teams`, {
+            method: 'POST',
+            body: JSON.stringify({ loan_teams: loanTeams })
+        })
+    }
+
+    // Send claim invitation email to a placeholder writer
+    static async sendClaimInvite(writerId) {
+        return this.request(`/editor/writers/${writerId}/send-claim-invite`, {
+            method: 'POST'
+        })
+    }
+
+    // ==========================================================================
+    // Claim Account Flow (public endpoints)
+    // ==========================================================================
+
+    // Validate a claim token
+    static async validateClaimToken(token) {
+        return this.request('/claim/validate', {
+            method: 'POST',
+            body: JSON.stringify({ token })
+        })
+    }
+
+    // Complete account claim and get auth token
+    static async completeAccountClaim(token) {
+        return this.request('/claim/complete', {
+            method: 'POST',
+            body: JSON.stringify({ token })
+        })
+    }
+
+    // ==========================================================================
+    // Contributor Profiles
+    // ==========================================================================
+
+    // Get contributor profiles created by the current writer
+    static async getWriterContributors() {
+        return this.request('/writer/contributors')
+    }
+
+    // Create a new contributor profile
+    static async createContributor(payload) {
+        return this.request('/writer/contributors', {
+            method: 'POST',
+            body: JSON.stringify(payload)
+        })
+    }
+
+    // Update an existing contributor profile
+    static async updateContributor(contributorId, payload) {
+        return this.request(`/writer/contributors/${contributorId}`, {
+            method: 'PUT',
+            body: JSON.stringify(payload)
+        })
+    }
+
+    // Delete a contributor profile
+    static async deleteContributor(contributorId) {
+        return this.request(`/writer/contributors/${contributorId}`, {
+            method: 'DELETE'
+        })
     }
 }

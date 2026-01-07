@@ -12,7 +12,8 @@ import {
     Megaphone,
     MessageCircle,
     UserCheck,
-    UserPlus
+    UserPlus,
+    PenSquare
 } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { useAuthUI } from '@/context/AuthContext'
@@ -28,6 +29,7 @@ const sidebarItems = [
     { icon: Shield, label: 'Teams', href: '/admin/teams' },
     { icon: Megaphone, label: 'Sponsors', href: '/admin/sponsors' },
     { icon: MessageCircle, label: 'Reddit', href: '/admin/reddit' },
+    { icon: PenSquare, label: 'External Writers', href: '/admin/external-writers' },
     { icon: Settings, label: 'Settings', href: '/admin/settings' },
 ]
 

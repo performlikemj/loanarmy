@@ -20,6 +20,8 @@ import { Drawer, DrawerTrigger, DrawerContent, DrawerHeader, DrawerFooter, Drawe
 import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover.jsx'
 import { Avatar, AvatarImage, AvatarFallback } from '@/components/ui/avatar.jsx'
 import { useIsMobile } from '@/hooks/use-mobile.js'
+import { useGlobalSearch } from '@/hooks/useGlobalSearch.js'
+import { GlobalSearchDialog } from '@/components/GlobalSearchDialog.jsx'
 import {
   normalizeNewsletterIds,
   parseNewsletterId,
@@ -74,8 +76,10 @@ import {
   Search,
   CreditCard,
   XCircle,
-  RotateCcw
+  RotateCcw,
+  Clock
 } from 'lucide-react'
+import { estimateReadingTime, extractNewsletterExcerpt } from '@/lib/formatText'
 import { AdminLayout } from '@/components/layouts/AdminLayout'
 import { SponsorSidebar, SponsorStrip } from '@/components/SponsorSidebar'
 import { AdminDashboard } from '@/pages/admin/AdminDashboard'
@@ -89,9 +93,12 @@ import { AdminSponsors } from '@/pages/admin/AdminSponsors'
 import { AdminReddit } from '@/pages/admin/AdminReddit'
 import { AdminCoverageRequests } from '@/pages/admin/AdminCoverageRequests'
 import { AdminManualPlayers } from '@/pages/admin/AdminManualPlayers'
+import { AdminExternalWriters } from '@/pages/admin/AdminExternalWriters'
+import { ClaimAccount } from '@/pages/ClaimAccount'
 import { WriterLogin } from '@/pages/writer/WriterLogin'
 import { WriterDashboard } from '@/pages/writer/WriterDashboard'
 import { WriteupEditor } from '@/pages/writer/WriteupEditor'
+import { ContributorManager } from '@/pages/writer/ContributorManager'
 import { WriteupPage } from '@/pages/WriteupPage'
 import { PlayerPage } from '@/pages/PlayerPage'
 import { JournalistProfile } from '@/pages/JournalistProfile'
@@ -111,6 +118,7 @@ import { StripeProvider } from '@/context/StripeContext'
 import { APIService } from '@/lib/api'
 import { UniversalDatePicker } from '@/components/ui/UniversalDatePicker'
 import { AuthContext, AuthUIContext, useAuth, useAuthUI, buildAuthSnapshot } from '@/context/AuthContext'
+import { GlobalSearchContext, useGlobalSearchContext } from '@/context/GlobalSearchContext'
 import { AuthModal } from '@/components/auth/AuthModal'
 import './App.css'
 import { useQueryParam } from '@/hooks/useQueryParam'
@@ -7121,6 +7129,7 @@ function Navigation() {
   const isMobile = useIsMobile()
   const { token, isAdmin, hasApiKey, isJournalist } = useAuth()
   const [drawerOpen, setDrawerOpen] = useState(false)
+  const { open: openSearch } = useGlobalSearchContext()
 
   const adminUnlocked = !!token && isAdmin && hasApiKey
 
@@ -7212,6 +7221,16 @@ function Navigation() {
                 <DrawerDescription>Quick access to every page.</DrawerDescription>
               </DrawerHeader>
               <div className="flex flex-col gap-2 px-4">
+                <DrawerClose asChild>
+                  <button
+                    type="button"
+                    onClick={() => { setDrawerOpen(false); openSearch(); }}
+                    className="inline-flex items-center gap-2 rounded-full px-3 py-2 text-sm font-medium text-gray-700 hover:text-gray-900 hover:bg-gray-100 transition-colors justify-start"
+                  >
+                    <Search className="h-4 w-4" />
+                    Search
+                  </button>
+                </DrawerClose>
                 {renderNavLinks('mobile')}
               </div>
               <DrawerFooter>
@@ -7224,7 +7243,19 @@ function Navigation() {
             <div className="flex min-w-0 flex-1 items-center gap-2 sm:gap-3 md:gap-4 overflow-x-auto pr-2">
               {renderNavLinks('desktop')}
             </div>
-            <div className="flex shrink-0">
+            <div className="flex shrink-0 items-center gap-2">
+              <button
+                type="button"
+                onClick={openSearch}
+                className="inline-flex items-center gap-2 rounded-md border border-gray-200 bg-white px-3 py-1.5 text-sm text-gray-500 shadow-sm hover:bg-gray-50 hover:text-gray-700 transition-colors"
+                aria-label="Search"
+              >
+                <Search className="h-4 w-4" />
+                <span className="hidden sm:inline">Search</span>
+                <kbd className="hidden sm:inline-flex items-center gap-1 rounded border border-gray-200 bg-gray-100 px-1.5 font-mono text-xs text-gray-500">
+                  <span className="text-xs">⌘</span>K
+                </kbd>
+              </button>
               <AuthControls />
             </div>
           </div>
@@ -7383,6 +7414,7 @@ function HomePage() {
   const [stats, setStats] = useState(null)
   const [loading, setLoading] = useState(true)
   const adminUnlocked = !!auth?.token && auth?.isAdmin && auth?.hasApiKey
+  const { open: openSearch } = useGlobalSearchContext()
 
   useEffect(() => {
     const loadStats = async () => {
@@ -7417,7 +7449,7 @@ function HomePage() {
         <div className="flex-1 min-w-0 px-4 py-6 sm:px-0">
           {/* Hero Section */}
           <div className="text-center mb-12">
-            <p className="inline-flex items-center gap-2 text-sm font-medium text-blue-700 bg-blue-50 border border-blue-100 rounded-full px-3 py-1">
+            <p className="inline-flex items-center gap-2 text-sm font-medium text-blue-700 bg-blue-50 border border-blue-100 rounded-full px-3 py-1 mb-4">
               Go On Loan · <span className="font-semibold">goonloan.com</span>
             </p>
             <h1 className="text-4xl font-bold text-gray-900 mb-4">
@@ -7426,21 +7458,46 @@ function HomePage() {
             <p className="text-xl text-gray-600 mb-8">
               AI-powered newsletters and dashboards that help you follow every loan spell in Europe's top leagues.
             </p>
-            <div className="flex justify-center space-x-4">
-              <Link to="/teams">
-                <Button size="lg" variant="outline">
-                  <Users className="h-5 w-5 mr-2" />
-                  Browse Teams
-                </Button>
-              </Link>
-              {adminUnlocked && (
-                <Link to="/admin">
-                  <Button size="lg">
-                    <Settings className="h-5 w-5 mr-2" />
-                    Admin
+
+            {/* Primary CTA: Team Search */}
+            <div className="flex flex-col items-center gap-4 max-w-xl mx-auto mb-6">
+              <button
+                type="button"
+                onClick={openSearch}
+                className="w-full relative flex items-center justify-between gap-3 rounded-xl border-2 border-gray-200 bg-white px-4 py-4 text-left shadow-lg hover:border-blue-300 hover:shadow-xl transition-all cursor-text"
+              >
+                <div className="flex items-center gap-3 text-gray-400">
+                  <Search className="h-5 w-5" />
+                  <span className="text-base">Search for your club (e.g., Manchester United, Barcelona)</span>
+                </div>
+                <kbd className="hidden sm:inline-flex items-center gap-1 rounded border border-gray-200 bg-gray-100 px-2 py-1 font-mono text-xs text-gray-500">
+                  <span>⌘</span>K
+                </kbd>
+              </button>
+
+              {/* Secondary CTAs */}
+              <div className="flex flex-wrap justify-center gap-3">
+                <Link to="/teams">
+                  <Button size="lg" variant="outline">
+                    <Users className="h-5 w-5 mr-2" />
+                    Browse All Teams
                   </Button>
                 </Link>
-              )}
+                <Link to="/newsletters">
+                  <Button size="lg" variant="outline">
+                    <FileText className="h-5 w-5 mr-2" />
+                    Latest Newsletters
+                  </Button>
+                </Link>
+                {adminUnlocked && (
+                  <Link to="/admin">
+                    <Button size="lg">
+                      <Settings className="h-5 w-5 mr-2" />
+                      Admin
+                    </Button>
+                  </Link>
+                )}
+              </div>
             </div>
           </div>
 
@@ -9399,6 +9456,9 @@ function NewslettersPage() {
               )}
               {displayNewsletters.map((newsletter) => {
                 const isTrackedTeam = trackedTeamIdSet.size > 0 && typeof newsletter.team_id !== 'undefined' && trackedTeamIdSet.has(String(newsletter.team_id))
+                const readingTime = estimateReadingTime(newsletter.enriched_content || newsletter.content)
+                const excerpt = extractNewsletterExcerpt(newsletter.enriched_content || newsletter.content)
+                const isExpanded = expandedId === newsletter.id || focusedViewActive
                 return (
                   <Card key={newsletter.id}>
                     <CardHeader className="space-y-3">
@@ -9410,6 +9470,12 @@ function NewslettersPage() {
                           </CardDescription>
                         </div>
                         <div className="flex flex-wrap items-center gap-2">
+                          {readingTime && (
+                            <Badge variant="outline" className="text-gray-500 border-gray-200">
+                              <Clock className="h-3 w-3 mr-1" />
+                              {readingTime}
+                            </Badge>
+                          )}
                           {isTrackedTeam && (
                             <Badge variant="outline" className="border-green-300 bg-green-50 text-green-700">
                               Tracking
@@ -9440,6 +9506,12 @@ function NewslettersPage() {
                           )}
                         </div>
                       </div>
+                      {/* Content excerpt - shown when not expanded */}
+                      {!isExpanded && excerpt && (
+                        <p className="text-sm text-gray-600 line-clamp-2">
+                          {excerpt}
+                        </p>
+                      )}
                     </CardHeader>
                     <CardContent className="overflow-hidden">
                       <div className="text-sm text-gray-500 mb-2">
@@ -9448,7 +9520,7 @@ function NewslettersPage() {
                           `${new Date(newsletter.week_start_date).toLocaleDateString()} - ${new Date(newsletter.week_end_date).toLocaleDateString()}`
                         )}
                       </div>
-                      {(expandedId === newsletter.id || focusedViewActive) ? (
+                      {isExpanded ? (
                         <NewsletterWriterProvider newsletterId={focusedNewsletterId || newsletter.id}>
                           <div className="max-w-none space-y-6">
                             {/* Writer Bar & Summary Commentaries - Always show in focused view */}
@@ -11208,6 +11280,166 @@ function StatsPage() {
   )
 }
 
+// Inner app component with Router context (for useNavigate in GlobalSearchDialog)
+function AppWithRouter() {
+  const globalSearch = useGlobalSearch()
+
+  return (
+    <GlobalSearchContext.Provider value={globalSearch}>
+      <div className="min-h-screen bg-gray-50">
+        <Navigation />
+        <GlobalSearchDialog
+          open={globalSearch.isOpen}
+          onOpenChange={globalSearch.setIsOpen}
+          recentSearches={globalSearch.recentSearches}
+          onSelect={globalSearch.addRecentSearch}
+          onClearRecent={globalSearch.clearRecentSearches}
+        />
+        <main>
+          <AppRoutes />
+        </main>
+        <footer className="bg-gray-100 border-t border-gray-200 py-8 mt-auto">
+          <div className="max-w-6xl mx-auto px-4 text-center">
+            <BuyMeCoffeeButton />
+            <p className="text-sm text-gray-500 mt-4">&copy; {new Date().getFullYear()} Go On Loan. All rights reserved.</p>
+          </div>
+        </footer>
+        <LoginModal />
+      </div>
+    </GlobalSearchContext.Provider>
+  )
+}
+
+// App routes extracted for cleaner structure
+function AppRoutes() {
+  return (
+    <Routes>
+      <Route path="/" element={<HomePage />} />
+      <Route path="/teams" element={<TeamsPage />} />
+      <Route path="/newsletters" element={<NewslettersPage />} />
+      <Route path="/newsletters/:newsletterId" element={<NewslettersPage />} />
+      <Route path="/newsletters/historical" element={<HistoricalNewslettersPage />} />
+      <Route path="/writeups/:commentaryId" element={<WriteupPage />} />
+      <Route path="/players/:playerId" element={<PlayerPage />} />
+      <Route path="/journalists" element={<JournalistList apiService={APIService} />} />
+      <Route
+        path="/settings"
+        element={(
+          <RequireAuth>
+            <SettingsPage />
+          </RequireAuth>
+        )}
+      />
+      {/* Hidden in nav, used only via email links */}
+      <Route path="/manage" element={<ManagePage />} />
+      <Route path="/unsubscribe" element={<UnsubscribePage />} />
+      <Route path="/verify" element={<VerifyPage />} />
+      <Route path="/claim-account" element={<ClaimAccount />} />
+      <Route path="/admin" element={<AdminLayout />}>
+        <Route index element={<Navigate to="/admin/dashboard" replace />} />
+        <Route path="dashboard" element={<AdminDashboard />} />
+        <Route path="newsletters" element={<AdminNewsletters />} />
+        <Route path="users" element={<AdminUsers />} />
+        <Route path="coverage-requests" element={<AdminCoverageRequests />} />
+        <Route path="manual-players" element={<AdminManualPlayers />} />
+        <Route path="loans" element={<AdminLoans />} />
+        <Route path="players" element={<AdminPlayers />} />
+        <Route path="teams" element={<AdminTeams />} />
+        <Route path="sponsors" element={<AdminSponsors />} />
+        <Route path="reddit" element={<AdminReddit />} />
+        <Route path="external-writers" element={<AdminExternalWriters />} />
+        <Route path="settings" element={<AdminSettings />} />
+        <Route path="revenue" element={<AdminRevenueDashboard />} />
+      </Route>
+      <Route
+        path="/admin/old"
+        element={(
+          <RequireAdmin>
+            <AdminPage includeSandbox />
+          </RequireAdmin>
+        )}
+      />
+      <Route
+        path="/admin/newsletters/:newsletterId"
+        element={(
+          <RequireAdmin>
+            <AdminNewsletterDetailPage />
+          </RequireAdmin>
+        )}
+      />
+      <Route path="/journalists/:id" element={<JournalistProfile />} />
+      <Route path="/newsletters/:newsletterId/writer/:journalistId" element={<JournalistNewsletterView />} />
+
+      {/* Writer Portal Routes */}
+      <Route path="/writer/login" element={<WriterLogin />} />
+      <Route
+        path="/writer/dashboard"
+        element={
+          <RequireAuth>
+            <WriterDashboard />
+          </RequireAuth>
+        }
+      />
+      <Route
+        path="/writer/writeup-editor"
+        element={
+          <RequireAuth>
+            <WriteupEditor />
+          </RequireAuth>
+        }
+      />
+      <Route
+        path="/writer/editor/:id"
+        element={(
+          <RequireAuth requireJournalist>
+            <WriteupEditor />
+          </RequireAuth>
+        )}
+      />
+      <Route
+        path="/writer/contributors"
+        element={
+          <RequireAuth>
+            <ContributorManager />
+          </RequireAuth>
+        }
+      />
+
+      {/* Stripe Subscription Routes */}
+      <Route
+        path="/journalist/stripe-setup"
+        element={
+          <RequireAuth>
+            <JournalistStripeSetup />
+          </RequireAuth>
+        }
+      />
+      <Route
+        path="/journalist/pricing"
+        element={
+          <RequireAuth>
+            <JournalistPricing />
+          </RequireAuth>
+        }
+      />
+      <Route path="/journalists/:id/pricing" element={<JournalistPricing />} />
+      <Route path="/journalists/:id/stripe-setup" element={<JournalistStripeSetup />} />
+      <Route path="*" element={<Navigate to="/" replace />} />
+    </Routes>
+  )
+}
+
+// Login modal component extracted
+function LoginModal() {
+  const { isLoginModalOpen, closeLoginModal } = useAuthUI()
+  return (
+    <AuthModal
+      open={isLoginModalOpen}
+      onOpenChange={(open) => { if (!open) closeLoginModal() }}
+    />
+  )
+}
+
 // Main App component
 function App() {
   const [authSnapshot, setAuthSnapshot] = useState(() => buildAuthSnapshot())
@@ -11255,112 +11487,8 @@ function App() {
           isLoginModalOpen: loginModalOpen,
         }}>
           <Router>
-            <div className="min-h-screen bg-gray-50">
-              <Navigation />
-              <main>
-                <Routes>
-                  <Route path="/" element={<HomePage />} />
-                  <Route path="/teams" element={<TeamsPage />} />
-                  <Route path="/newsletters" element={<NewslettersPage />} />
-                  <Route path="/newsletters/:newsletterId" element={<NewslettersPage />} />
-                  <Route path="/newsletters/historical" element={<HistoricalNewslettersPage />} />
-                  <Route path="/writeups/:commentaryId" element={<WriteupPage />} />
-                  <Route path="/players/:playerId" element={<PlayerPage />} />
-                  <Route path="/journalists" element={<JournalistList apiService={APIService} />} />
-                  <Route
-                    path="/settings"
-                    element={(
-                      <RequireAuth>
-                        <SettingsPage />
-                      </RequireAuth>
-                    )}
-                  />
-                  {/* Hidden in nav, used only via email links */}
-                  <Route path="/manage" element={<ManagePage />} />
-                  <Route path="/unsubscribe" element={<UnsubscribePage />} />
-                  <Route path="/verify" element={<VerifyPage />} />
-                  <Route path="/admin" element={<AdminLayout />}>
-                    <Route index element={<Navigate to="/admin/dashboard" replace />} />
-                    <Route path="dashboard" element={<AdminDashboard />} />
-                    <Route path="newsletters" element={<AdminNewsletters />} />
-                    <Route path="users" element={<AdminUsers />} />
-                    <Route path="coverage-requests" element={<AdminCoverageRequests />} />
-                    <Route path="manual-players" element={<AdminManualPlayers />} />
-                    <Route path="loans" element={<AdminLoans />} />
-                    <Route path="players" element={<AdminPlayers />} />
-                    <Route path="teams" element={<AdminTeams />} />
-                    <Route path="sponsors" element={<AdminSponsors />} />
-                    <Route path="reddit" element={<AdminReddit />} />
-                    <Route path="settings" element={<AdminSettings />} />
-                    <Route path="revenue" element={<AdminRevenueDashboard />} />
-                  </Route>
-                  <Route
-                    path="/admin/old"
-                    element={(
-                      <RequireAdmin>
-                        <AdminPage includeSandbox />
-                      </RequireAdmin>
-                    )}
-                  />
-                  <Route
-                    path="/admin/newsletters/:newsletterId"
-                    element={(
-                      <RequireAdmin>
-                        <AdminNewsletterDetailPage />
-                      </RequireAdmin>
-                    )}
-                  />
-                  <Route path="/journalists/:id" element={<JournalistProfile />} />
-                  <Route path="/newsletters/:newsletterId/writer/:journalistId" element={<JournalistNewsletterView />} />
-
-                  {/* Writer Portal Routes */}
-                  <Route path="/writer/login" element={<WriterLogin />} />
-                  <Route
-                    path="/writer/dashboard"
-                    element={
-                      <RequireAuth>
-                        <WriterDashboard />
-                      </RequireAuth>
-                    }
-                  />
-                  <Route
-                    path="/writer/writeup-editor"
-                    element={
-                      <RequireAuth>
-                        <WriteupEditor />
-                      </RequireAuth>
-                    }
-                  />
-
-                  {/* Stripe Subscription Routes */}
-                  <Route
-                    path="/journalist/stripe-setup"
-                    element={
-                      <RequireAuth>
-                        <JournalistStripeSetup />
-                      </RequireAuth>
-                    }
-                  />
-                  <Route
-                    path="/journalist/pricing"
-                    element={
-                      <RequireAuth>
-                        <JournalistPricing />
-                      </RequireAuth>
-                    }
-                  />
-
-                </Routes>
-              </main>
-              <footer className="bg-gray-100 border-t border-gray-200 py-8 mt-auto">
-                <div className="max-w-6xl mx-auto px-4 text-center">
-                  <BuyMeCoffeeButton />
-                  <p className="text-sm text-gray-500 mt-4">© {new Date().getFullYear()} Go On Loan. All rights reserved.</p>
-                </div>
-              </footer>
-            </div>
+            <AppWithRouter />
           </Router>
-          <AuthModal />
         </AuthUIContext.Provider>
       </AuthContext.Provider>
     </StripeProvider>

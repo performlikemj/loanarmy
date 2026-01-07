@@ -1,18 +1,68 @@
-from flask import Blueprint, request, jsonify, g
+from flask import Blueprint, request, jsonify, g, current_app
 from src.models.league import (
-    db, UserAccount, JournalistSubscription, NewsletterCommentary, Newsletter, 
+    db, UserAccount, JournalistSubscription, NewsletterCommentary, Newsletter,
     JournalistTeamAssignment, JournalistLoanTeamAssignment, WriterCoverageRequest,
-    Team, LoanedPlayer, Player, ManualPlayerSubmission
+    Team, LoanedPlayer, Player, ManualPlayerSubmission, ContributorProfile
 )
-from src.routes.api import require_user_auth, _safe_error_payload, require_api_key, _ensure_user_account
+from src.routes.api import require_user_auth, _safe_error_payload, require_api_key, _ensure_user_account, issue_user_token
 from src.utils.team_utils import normalize_team_name, get_all_team_name_variations
-from datetime import datetime, timezone
+from datetime import datetime, timezone, timedelta
+from itsdangerous import URLSafeTimedSerializer
+from functools import wraps
 from sqlalchemy import func, or_
+import secrets
 import re
 import logging
+import os
 
 journalist_bp = Blueprint('journalist', __name__)
 logger = logging.getLogger(__name__)
+
+
+def _user_serializer() -> URLSafeTimedSerializer:
+    """Get the serializer for user tokens (shared logic with api.py)."""
+    secret = current_app.config.get('SECRET_KEY') or os.getenv('SECRET_KEY')
+    return URLSafeTimedSerializer(secret)
+
+
+def _is_admin_request() -> bool:
+    """Check if current request has admin role in the Bearer token."""
+    auth = request.headers.get('Authorization', '')
+    if auth.startswith('Bearer '):
+        token = auth.split(' ', 1)[1]
+        try:
+            data = _user_serializer().loads(token, max_age=60 * 60 * 24 * 30)
+            return (data or {}).get('role') == 'admin'
+        except Exception:
+            pass
+    return False
+
+
+def require_editor_or_admin(f):
+    """Decorator requiring user to be an editor or admin.
+
+    Sets g.user, g.is_admin for use in the handler.
+    Must be used after @require_user_auth.
+    """
+    @wraps(f)
+    def decorated(*args, **kwargs):
+        email = getattr(g, 'user_email', None)
+        if not email:
+            return jsonify({'error': 'User not authenticated'}), 401
+
+        user = UserAccount.query.filter_by(email=email).first()
+        if not user:
+            return jsonify({'error': 'User not found'}), 404
+
+        is_admin = _is_admin_request()
+
+        if not (user.is_editor or is_admin):
+            return jsonify({'error': 'Editor or admin access required'}), 403
+
+        g.user = user
+        g.is_admin = is_admin
+        return f(*args, **kwargs)
+    return decorated
 
 
 def can_writer_cover_team(user_id: int, team_id: int) -> bool:
@@ -377,6 +427,62 @@ def get_journalist_articles(journalist_id):
 
     except Exception as e:
         return jsonify(_safe_error_payload(e, 'Failed to fetch articles')), 500
+
+
+@journalist_bp.route('/commentaries/search', methods=['GET'])
+def search_commentaries():
+    """Search commentaries by title, author name, player name, or team name.
+
+    Returns minimal metadata for search results (not full content).
+    Access control is NOT applied here - all users can discover all writeups.
+    Access control is enforced when viewing the full writeup.
+    """
+    try:
+        search = request.args.get('q', '').strip()
+        if not search or len(search) < 2:
+            return jsonify([])
+
+        search_pattern = f'%{search}%'
+
+        # Build query for active commentaries with title
+        query = NewsletterCommentary.query.filter(
+            NewsletterCommentary.is_active == True,
+            NewsletterCommentary.title.isnot(None),
+            NewsletterCommentary.title != ''
+        )
+
+        # Join with author, player, and team for comprehensive search
+        query = query.outerjoin(
+            UserAccount, NewsletterCommentary.author_id == UserAccount.id
+        ).outerjoin(
+            Team, NewsletterCommentary.team_id == Team.id
+        )
+
+        # Search in title, author display name, or team name
+        search_filter = or_(
+            NewsletterCommentary.title.ilike(search_pattern),
+            UserAccount.display_name.ilike(search_pattern),
+            Team.name.ilike(search_pattern),
+        )
+
+        results = query.filter(search_filter).order_by(
+            NewsletterCommentary.created_at.desc()
+        ).limit(10).all()
+
+        # Return minimal metadata (not full content)
+        return jsonify([{
+            'id': c.id,
+            'title': c.title,
+            'commentary_type': c.commentary_type,
+            'is_premium': c.is_premium,
+            'author_name': c.author.display_name if c.author else c.author_name,
+            'team_name': c.team.name if c.team else None,
+            'created_at': c.created_at.isoformat() if c.created_at else None,
+        } for c in results])
+
+    except Exception as e:
+        logger.error(f"Commentary search error: {e}")
+        return jsonify(_safe_error_payload(e, 'Search failed')), 500
 
 
 def _get_player_week_stats(player_id: int, week_start, week_end) -> list:
@@ -1660,21 +1766,52 @@ def _fetch_chart_data_for_rendering(player_id: int, chart_type: str, stat_keys: 
 @require_user_auth
 def create_update_commentary():
     """Create or update a commentary.
-    
+
     Supports both legacy single-content format and new structured_blocks format.
     If structured_blocks is provided, it takes precedence and the rendered HTML
     is stored in the content field for backwards compatibility.
+
+    Editors can specify author_id to create commentary on behalf of managed writers.
     """
     try:
         email = getattr(g, 'user_email', None)
         if not email:
             return jsonify({'error': 'User not authenticated'}), 401
-            
+
         user = UserAccount.query.filter_by(email=email).first()
-        if not user or not user.is_journalist:
-            return jsonify({'error': 'Not authorized as a writer'}), 403
-            
+        if not user:
+            return jsonify({'error': 'User not found'}), 404
+
         data = request.get_json() or {}
+
+        # Determine the actual author (supports on-behalf-of authoring for editors)
+        author = user
+        on_behalf_of = None
+        author_id = data.get('author_id')
+
+        if author_id and author_id != user.id:
+            # User is trying to create content on behalf of another writer
+            # Check that user is an editor or admin
+            is_admin = _is_admin_request()
+            if not user.is_editor and not is_admin:
+                return jsonify({'error': 'Only editors can create content on behalf of others'}), 403
+
+            target_writer = UserAccount.query.get(author_id)
+            if not target_writer:
+                return jsonify({'error': 'Target author not found'}), 404
+
+            # Check that the writer is managed by this editor (unless admin)
+            if not is_admin and target_writer.managed_by_user_id != user.id:
+                return jsonify({'error': 'You can only create content for writers you manage'}), 403
+
+            if not target_writer.is_journalist:
+                return jsonify({'error': 'Target author is not a journalist'}), 403
+
+            author = target_writer
+            on_behalf_of = user
+            logger.info(f"Editor {user.id} creating commentary on behalf of writer {author.id}")
+        elif not user.is_journalist:
+            return jsonify({'error': 'Not authorized as a writer'}), 403
         
         # If ID provided, update
         commentary_id = data.get('id')
@@ -1682,7 +1819,16 @@ def create_update_commentary():
             commentary = NewsletterCommentary.query.filter_by(id=commentary_id).first()
             if not commentary:
                 return jsonify({'error': 'Commentary not found'}), 404
-            if commentary.author_id != user.id:
+            # Allow edit if: 1) user is the author, or 2) editor managing the author
+            can_edit = commentary.author_id == user.id
+            if not can_edit and (user.is_editor or _is_admin_request()):
+                # Check if user manages the author
+                commentary_author = UserAccount.query.get(commentary.author_id)
+                if commentary_author and commentary_author.managed_by_user_id == user.id:
+                    can_edit = True
+                elif _is_admin_request():
+                    can_edit = True
+            if not can_edit:
                 return jsonify({'error': 'Not authorized to edit this commentary'}), 403
             
             # Handle structured_blocks if provided
@@ -1738,7 +1884,30 @@ def create_update_commentary():
             if 'week_end_date' in data:
                 from datetime import date
                 commentary.week_end_date = date.fromisoformat(data['week_end_date']) if data['week_end_date'] else None
-                
+
+            # Handle contributor_id update
+            if 'contributor_id' in data:
+                contributor_id = data.get('contributor_id')
+                if contributor_id == '' or contributor_id is None:
+                    # Clear contributor attribution
+                    commentary.contributor_id = None
+                    commentary.contributor_name = None
+                else:
+                    try:
+                        contributor_id = int(contributor_id)
+                    except (ValueError, TypeError):
+                        return jsonify({'error': 'Invalid contributor_id format'}), 400
+
+                    contributor = ContributorProfile.query.filter_by(
+                        id=contributor_id,
+                        created_by_id=user.id,
+                        is_active=True
+                    ).first()
+                    if not contributor:
+                        return jsonify({'error': 'Contributor not found or not owned by you'}), 404
+                    commentary.contributor_id = contributor.id
+                    commentary.contributor_name = contributor.name
+
             commentary.updated_at = datetime.now(timezone.utc)
             db.session.commit()
             return jsonify(commentary.to_dict())
@@ -1775,10 +1944,10 @@ def create_update_commentary():
         
         if commentary_type == 'player' and player_id_for_check:
             # Check if writer can cover this specific player
-            has_access = can_writer_cover_player(user.id, player_id_for_check, team_id)
+            has_access = can_writer_cover_player(author.id, player_id_for_check, team_id)
         else:
             # For team-wide content (intro/summary), require parent club assignment
-            has_access = can_writer_cover_team(user.id, team_id)
+            has_access = can_writer_cover_team(author.id, team_id)
         
         if not has_access:
             return jsonify({'error': 'You are not authorized to write about this team/player'}), 403
@@ -1855,12 +2024,35 @@ def create_update_commentary():
         print(f"  title: {data.get('title')}")
         print(f"  has_structured_blocks: {structured_blocks is not None}")
         print(f"{'='*60}\n")
-            
+
+        # Handle contributor attribution
+        contributor_id = data.get('contributor_id')
+        contributor_name = None
+        if contributor_id:
+            try:
+                contributor_id = int(contributor_id)
+            except (ValueError, TypeError):
+                return jsonify({'error': 'Invalid contributor_id format'}), 400
+
+            contributor = ContributorProfile.query.filter_by(
+                id=contributor_id,
+                created_by_id=author.id,
+                is_active=True
+            ).first()
+            if not contributor:
+                return jsonify({'error': 'Contributor not found or not owned by you'}), 404
+            contributor_name = contributor.name
+        elif contributor_id == '':
+            # Empty string means explicitly no contributor
+            contributor_id = None
+
         commentary = NewsletterCommentary(
             newsletter_id=newsletter_id,  # Can be None
             team_id=team_id,
-            author_id=user.id,
-            author_name=user.display_name,
+            author_id=author.id,
+            author_name=author.display_name,
+            contributor_id=contributor_id,
+            contributor_name=contributor_name,
             commentary_type=data.get('commentary_type', 'summary'),
             content=sanitized_content,
             structured_blocks=structured_blocks,
@@ -2079,7 +2271,7 @@ def cancel_coverage_request(request_id):
 @journalist_bp.route('/journalists/players/<int:player_id>/stats', methods=['GET'])
 @require_user_auth
 def get_player_stats(player_id):
-    """Get historical stats for a player."""
+    """Get historical stats for a player with auto-sync from API-Football."""
     try:
         # Verify user is a journalist
         email = getattr(g, 'user_email', None)
@@ -2092,7 +2284,49 @@ def get_player_stats(player_id):
 
         # Import models here to avoid circular imports if any
         from src.models.weekly import FixturePlayerStats, Fixture
-        from src.models.league import Team
+        from src.models.league import Team, LoanedPlayer
+        from src.api_football_client import APIFootballClient
+        from src.routes.api import resolve_team_name_and_logo, _sync_player_club_fixtures
+        from datetime import datetime, timezone
+        
+        # Get current season
+        now_utc = datetime.now(timezone.utc)
+        current_year = now_utc.year
+        current_month = now_utc.month
+        season = current_year if current_month >= 8 else current_year - 1
+        
+        # Auto-sync: Check if we're missing fixtures compared to API-Football
+        loaned = LoanedPlayer.query.filter_by(player_id=player_id, is_active=True).first()
+        if not loaned:
+            loaned = LoanedPlayer.query.filter_by(player_id=player_id).order_by(LoanedPlayer.updated_at.desc()).first()
+        
+        if loaned and loaned.loan_team_id:
+            loan_team = Team.query.get(loaned.loan_team_id)
+            if loan_team and loan_team.team_id:
+                try:
+                    # Count local fixtures for this player at their loan team
+                    local_count = db.session.query(FixturePlayerStats).filter(
+                        FixturePlayerStats.player_api_id == player_id,
+                        FixturePlayerStats.team_api_id == loan_team.team_id
+                    ).count()
+                    
+                    # Check API for total appearances
+                    api_client = APIFootballClient()
+                    api_totals = api_client._fetch_player_team_season_totals_api(
+                        player_id=player_id,
+                        team_id=loan_team.team_id,
+                        season=season,
+                    )
+                    api_appearances = api_totals.get('games_played', 0)
+                    
+                    # Sync if API has more games than we have locally
+                    if api_appearances > local_count:
+                        logger.info(f"Writer stats sync: Player {player_id} at team {loan_team.team_id}: "
+                                    f"API={api_appearances}, local={local_count}. Syncing...")
+                        _sync_player_club_fixtures(player_id, loan_team.team_id, season, player_name=loaned.player_name)
+                except Exception as sync_err:
+                    # Don't fail the request if sync fails - just log and continue with local data
+                    logger.warning(f"Auto-sync failed for player {player_id}: {sync_err}")
 
         # Query stats joined with fixture to get date
         stats_query = db.session.query(
@@ -2104,20 +2338,26 @@ def get_player_stats(player_id):
         ).order_by(
             Fixture.date_utc.asc()
         ).all()
-
+        
         result = []
         for stats, fixture in stats_query:
-            # Get opponent name
-            opponent_name = "Unknown"
             is_home = (stats.team_api_id == fixture.home_team_api_id)
             opponent_api_id = fixture.away_team_api_id if is_home else fixture.home_team_api_id
             
-            # Try to resolve opponent name from DB or just use ID
-            # Ideally we'd join Team table but opponent might not be in our Team table if it's obscure
-            # Let's try a quick lookup if we have it
-            opponent = Team.query.filter_by(team_id=opponent_api_id).first()
-            if opponent:
-                opponent_name = opponent.name
+            # Use robust team name resolution (Team table -> TeamProfile -> raw_json -> API)
+            opponent_name, _ = resolve_team_name_and_logo(opponent_api_id)
+            
+            # Additional fallback: try raw_json if resolve returned generic name
+            if opponent_name.startswith("Team ") and fixture.raw_json:
+                try:
+                    import json
+                    raw_data = json.loads(fixture.raw_json)
+                    teams = raw_data.get('teams', {})
+                    json_name = teams.get('away' if is_home else 'home', {}).get('name')
+                    if json_name:
+                        opponent_name = json_name
+                except (json.JSONDecodeError, KeyError, TypeError):
+                    pass
             
             stats_dict = stats.to_dict()
             stats_dict['fixture_date'] = fixture.date_utc.isoformat() if fixture.date_utc else None
@@ -2942,10 +3182,744 @@ def list_manual_submissions():
         submissions = ManualPlayerSubmission.query.filter_by(user_id=user.id).order_by(
             ManualPlayerSubmission.created_at.desc()
         ).all()
-        
+
         return jsonify([s.to_dict() for s in submissions])
-        
+
     except Exception as e:
         logger.exception('Failed to list manual submissions')
         return jsonify(_safe_error_payload(e, 'Failed to list manual submissions')), 500
 
+
+# =============================================================================
+# EDITOR ENDPOINTS - Managing External/Placeholder Writers
+# =============================================================================
+
+@journalist_bp.route('/editor/writers', methods=['GET'])
+@require_user_auth
+@require_editor_or_admin
+def list_managed_writers():
+    """List writers managed by the current editor (or all if admin)."""
+    try:
+        editor = g.user
+        is_admin = getattr(g, 'is_admin', False)
+
+        if is_admin:
+            # Admin sees all placeholder accounts
+            writers = UserAccount.query.filter(
+                UserAccount.managed_by_user_id.isnot(None)
+            ).order_by(UserAccount.created_at.desc()).all()
+        else:
+            # Editor sees only their managed writers
+            writers = UserAccount.query.filter_by(
+                managed_by_user_id=editor.id
+            ).order_by(UserAccount.created_at.desc()).all()
+
+        result = []
+        for w in writers:
+            data = w.to_dict()
+            # Include manager info for admin view
+            if w.managed_by:
+                data['managed_by'] = {
+                    'id': w.managed_by.id,
+                    'display_name': w.managed_by.display_name,
+                    'email': w.managed_by.email
+                }
+            # Include team assignments
+            parent_teams = []
+            for assignment in JournalistTeamAssignment.query.filter_by(user_id=w.id).all():
+                if assignment.team:
+                    parent_teams.append({
+                        'id': assignment.team.id,
+                        'team_id': assignment.team.team_id,
+                        'name': assignment.team.name,
+                        'logo': assignment.team.logo
+                    })
+            data['assigned_teams'] = parent_teams
+
+            loan_teams = []
+            for assignment in JournalistLoanTeamAssignment.query.filter_by(user_id=w.id).all():
+                loan_teams.append({
+                    'id': assignment.id,
+                    'loan_team_name': assignment.loan_team_name,
+                    'loan_team_id': assignment.loan_team_id
+                })
+            data['loan_team_assignments'] = loan_teams
+
+            result.append(data)
+
+        return jsonify({
+            'writers': result,
+            'count': len(result)
+        })
+
+    except Exception as e:
+        logger.exception('Failed to list managed writers')
+        return jsonify(_safe_error_payload(e, 'Failed to list managed writers')), 500
+
+
+@journalist_bp.route('/editor/writers', methods=['POST'])
+@require_user_auth
+@require_editor_or_admin
+def create_placeholder_writer():
+    """Create a placeholder account for an external writer.
+
+    Body:
+        email: Writer's email (required)
+        display_name: Display name (required)
+        attribution_name: Attribution name (e.g., "The Leyton Orienter")
+        attribution_url: Link to their publication
+        bio: Optional bio text
+    """
+    try:
+        editor = g.user
+        data = request.get_json() or {}
+
+        email = (data.get('email') or '').strip().lower()
+        display_name = (data.get('display_name') or '').strip()
+
+        if not email:
+            return jsonify({'error': 'email is required'}), 400
+        if not display_name:
+            return jsonify({'error': 'display_name is required'}), 400
+
+        # Check if email already exists
+        existing = UserAccount.query.filter_by(email=email).first()
+        if existing:
+            return jsonify({'error': 'An account with this email already exists'}), 409
+
+        # Check display_name uniqueness
+        existing_name = UserAccount.query.filter_by(display_name_lower=display_name.lower()).first()
+        if existing_name:
+            return jsonify({'error': 'This display name is already taken'}), 409
+
+        # Prepare attribution URL
+        attribution_url = (data.get('attribution_url') or '').strip()
+        if attribution_url and not attribution_url.startswith(('http://', 'https://')):
+            attribution_url = 'https://' + attribution_url
+
+        # Create placeholder account
+        now = datetime.now(timezone.utc)
+        writer = UserAccount(
+            email=email,
+            display_name=display_name,
+            display_name_lower=display_name.lower(),
+            display_name_confirmed=True,  # Editor confirms the name
+            is_journalist=True,
+            can_author_commentary=True,
+            managed_by_user_id=editor.id,
+            attribution_name=(data.get('attribution_name') or '').strip() or None,
+            attribution_url=attribution_url or None,
+            bio=(data.get('bio') or '').strip() or None,
+            created_at=now,
+            updated_at=now,
+        )
+
+        db.session.add(writer)
+        db.session.commit()
+
+        logger.info(f"Editor {editor.id} created placeholder writer {writer.id} ({writer.email})")
+
+        return jsonify({
+            'message': 'Placeholder writer created',
+            'writer': writer.to_dict()
+        }), 201
+
+    except Exception as e:
+        logger.exception('Failed to create placeholder writer')
+        db.session.rollback()
+        return jsonify(_safe_error_payload(e, 'Failed to create placeholder writer')), 500
+
+
+@journalist_bp.route('/editor/writers/<int:writer_id>', methods=['GET'])
+@require_user_auth
+@require_editor_or_admin
+def get_placeholder_writer(writer_id):
+    """Get a single placeholder writer's details."""
+    try:
+        editor = g.user
+        is_admin = getattr(g, 'is_admin', False)
+
+        writer = UserAccount.query.get(writer_id)
+        if not writer:
+            return jsonify({'error': 'Writer not found'}), 404
+
+        # Check permission: admin can view any, editor can only view their own
+        if not is_admin and writer.managed_by_user_id != editor.id:
+            return jsonify({'error': 'Not authorized to view this writer'}), 403
+
+        data = writer.to_dict()
+
+        # Include manager info
+        if writer.managed_by:
+            data['managed_by'] = {
+                'id': writer.managed_by.id,
+                'display_name': writer.managed_by.display_name,
+                'email': writer.managed_by.email
+            }
+
+        # Include team assignments
+        parent_teams = []
+        for assignment in JournalistTeamAssignment.query.filter_by(user_id=writer.id).all():
+            if assignment.team:
+                parent_teams.append({
+                    'id': assignment.team.id,
+                    'team_id': assignment.team.team_id,
+                    'name': assignment.team.name,
+                    'logo': assignment.team.logo
+                })
+        data['assigned_teams'] = parent_teams
+
+        loan_teams = []
+        for assignment in JournalistLoanTeamAssignment.query.filter_by(user_id=writer.id).all():
+            loan_teams.append({
+                'id': assignment.id,
+                'loan_team_name': assignment.loan_team_name,
+                'loan_team_id': assignment.loan_team_id
+            })
+        data['loan_team_assignments'] = loan_teams
+
+        return jsonify(data)
+
+    except Exception as e:
+        logger.exception('Failed to get placeholder writer')
+        return jsonify(_safe_error_payload(e, 'Failed to get placeholder writer')), 500
+
+
+@journalist_bp.route('/editor/writers/<int:writer_id>', methods=['PUT'])
+@require_user_auth
+@require_editor_or_admin
+def update_placeholder_writer(writer_id):
+    """Update a placeholder writer's profile."""
+    try:
+        editor = g.user
+        is_admin = getattr(g, 'is_admin', False)
+
+        writer = UserAccount.query.get(writer_id)
+        if not writer:
+            return jsonify({'error': 'Writer not found'}), 404
+
+        # Check permission: admin can edit any, editor can only edit their own
+        if not is_admin and writer.managed_by_user_id != editor.id:
+            return jsonify({'error': 'Not authorized to edit this writer'}), 403
+
+        data = request.get_json() or {}
+
+        if 'display_name' in data:
+            new_name = (data['display_name'] or '').strip()
+            if new_name and new_name.lower() != writer.display_name_lower:
+                existing = UserAccount.query.filter_by(display_name_lower=new_name.lower()).first()
+                if existing and existing.id != writer.id:
+                    return jsonify({'error': 'This display name is already taken'}), 409
+                writer.display_name = new_name
+                writer.display_name_lower = new_name.lower()
+
+        if 'attribution_name' in data:
+            writer.attribution_name = (data['attribution_name'] or '').strip() or None
+
+        if 'attribution_url' in data:
+            url = (data['attribution_url'] or '').strip()
+            if url and not url.startswith(('http://', 'https://')):
+                url = 'https://' + url
+            writer.attribution_url = url or None
+
+        if 'bio' in data:
+            writer.bio = (data['bio'] or '').strip() or None
+
+        if 'profile_image_url' in data:
+            writer.profile_image_url = (data['profile_image_url'] or '').strip() or None
+
+        writer.updated_at = datetime.now(timezone.utc)
+        db.session.commit()
+
+        return jsonify({
+            'message': 'Writer updated',
+            'writer': writer.to_dict()
+        })
+
+    except Exception as e:
+        logger.exception('Failed to update placeholder writer')
+        db.session.rollback()
+        return jsonify(_safe_error_payload(e, 'Failed to update placeholder writer')), 500
+
+
+@journalist_bp.route('/editor/writers/<int:writer_id>', methods=['DELETE'])
+@require_user_auth
+@require_editor_or_admin
+def delete_placeholder_writer(writer_id):
+    """Delete a placeholder writer (only if they have no content)."""
+    try:
+        editor = g.user
+        is_admin = getattr(g, 'is_admin', False)
+
+        writer = UserAccount.query.get(writer_id)
+        if not writer:
+            return jsonify({'error': 'Writer not found'}), 404
+
+        # Check permission
+        if not is_admin and writer.managed_by_user_id != editor.id:
+            return jsonify({'error': 'Not authorized to delete this writer'}), 403
+
+        # Only allow deletion of unclaimed placeholder accounts
+        if not writer.is_placeholder():
+            return jsonify({'error': 'Can only delete unclaimed placeholder accounts'}), 400
+
+        # Check if writer has any content
+        commentary_count = NewsletterCommentary.query.filter_by(author_id=writer.id).count()
+        if commentary_count > 0:
+            return jsonify({
+                'error': f'Cannot delete writer with existing content ({commentary_count} commentaries)'
+            }), 400
+
+        # Delete team assignments first
+        JournalistTeamAssignment.query.filter_by(user_id=writer.id).delete()
+        JournalistLoanTeamAssignment.query.filter_by(user_id=writer.id).delete()
+
+        db.session.delete(writer)
+        db.session.commit()
+
+        logger.info(f"Editor {editor.id} deleted placeholder writer {writer_id}")
+
+        return jsonify({'message': 'Writer deleted'})
+
+    except Exception as e:
+        logger.exception('Failed to delete placeholder writer')
+        db.session.rollback()
+        return jsonify(_safe_error_payload(e, 'Failed to delete placeholder writer')), 500
+
+
+@journalist_bp.route('/editor/writers/<int:writer_id>/assign-teams', methods=['POST'])
+@require_user_auth
+@require_editor_or_admin
+def editor_assign_teams(writer_id):
+    """Assign parent club teams to a managed writer."""
+    try:
+        editor = g.user
+        is_admin = getattr(g, 'is_admin', False)
+
+        writer = UserAccount.query.get(writer_id)
+        if not writer:
+            return jsonify({'error': 'Writer not found'}), 404
+
+        # Check permission
+        if not is_admin and writer.managed_by_user_id != editor.id:
+            return jsonify({'error': 'Not authorized to manage this writer'}), 403
+
+        data = request.get_json() or {}
+        team_ids = data.get('team_ids', [])
+
+        # Clear existing assignments
+        JournalistTeamAssignment.query.filter_by(user_id=writer.id).delete()
+
+        from src.utils.team_resolver import resolve_latest_team_id
+
+        assignments = []
+        for tid in team_ids:
+            try:
+                tid_int = int(tid)
+            except (TypeError, ValueError):
+                continue
+
+            latest_team_id = resolve_latest_team_id(tid_int, assume_api_id=True)
+
+            if latest_team_id:
+                assign = JournalistTeamAssignment(
+                    user_id=writer.id,
+                    team_id=latest_team_id,
+                    assigned_by=editor.id
+                )
+                db.session.add(assign)
+                assignments.append(assign)
+
+        db.session.commit()
+        return jsonify({'message': 'Teams assigned', 'count': len(assignments)})
+
+    except Exception as e:
+        logger.exception('Failed to assign teams to managed writer')
+        db.session.rollback()
+        return jsonify(_safe_error_payload(e, 'Failed to assign teams')), 500
+
+
+@journalist_bp.route('/editor/writers/<int:writer_id>/loan-teams', methods=['POST'])
+@require_user_auth
+@require_editor_or_admin
+def editor_assign_loan_teams(writer_id):
+    """Assign loan teams to a managed writer."""
+    try:
+        editor = g.user
+        is_admin = getattr(g, 'is_admin', False)
+
+        writer = UserAccount.query.get(writer_id)
+        if not writer:
+            return jsonify({'error': 'Writer not found'}), 404
+
+        # Check permission
+        if not is_admin and writer.managed_by_user_id != editor.id:
+            return jsonify({'error': 'Not authorized to manage this writer'}), 403
+
+        data = request.get_json() or {}
+        loan_teams = data.get('loan_teams', [])
+
+        # Clear existing loan team assignments
+        JournalistLoanTeamAssignment.query.filter_by(user_id=writer.id).delete()
+
+        assignments = []
+        now = datetime.now(timezone.utc)
+
+        for lt in loan_teams:
+            loan_team_name = (lt.get('loan_team_name') or '').strip()
+            if not loan_team_name:
+                continue
+
+            loan_team_id = lt.get('loan_team_id')
+            if loan_team_id:
+                try:
+                    loan_team_id = int(loan_team_id)
+                except (TypeError, ValueError):
+                    loan_team_id = None
+
+            assign = JournalistLoanTeamAssignment(
+                user_id=writer.id,
+                loan_team_name=loan_team_name,
+                loan_team_id=loan_team_id,
+                assigned_at=now,
+                assigned_by=editor.id
+            )
+            db.session.add(assign)
+            assignments.append(assign)
+
+        db.session.commit()
+        return jsonify({'message': 'Loan teams assigned', 'count': len(assignments)})
+
+    except Exception as e:
+        logger.exception('Failed to assign loan teams to managed writer')
+        db.session.rollback()
+        return jsonify(_safe_error_payload(e, 'Failed to assign loan teams')), 500
+
+
+# =============================================================================
+# CLAIM FLOW ENDPOINTS - For external writers to claim their accounts
+# =============================================================================
+
+@journalist_bp.route('/editor/writers/<int:writer_id>/send-claim-invite', methods=['POST'])
+@require_user_auth
+@require_editor_or_admin
+def send_claim_invite(writer_id):
+    """Send a claim invitation email to a placeholder writer."""
+    try:
+        editor = g.user
+        is_admin = getattr(g, 'is_admin', False)
+
+        writer = UserAccount.query.get(writer_id)
+        if not writer:
+            return jsonify({'error': 'Writer not found'}), 404
+
+        if not writer.is_placeholder():
+            return jsonify({'error': 'This account is not a placeholder or already claimed'}), 400
+
+        # Check permission
+        if not is_admin and writer.managed_by_user_id != editor.id:
+            return jsonify({'error': 'Not authorized'}), 403
+
+        # Generate claim token (24-hour expiry)
+        claim_token = secrets.token_urlsafe(32)
+        writer.claim_token = claim_token
+        writer.claim_token_expires_at = datetime.now(timezone.utc) + timedelta(hours=24)
+
+        db.session.commit()
+
+        # Send email with claim link
+        frontend_url = os.getenv('FRONTEND_URL', 'https://goonloan.com')
+        claim_url = f"{frontend_url}/claim-account?token={claim_token}"
+
+        try:
+            from src.services.email_service import email_service
+            email_service.send_claim_invitation(
+                to_email=writer.email,
+                writer_name=writer.display_name,
+                claim_url=claim_url,
+                inviter_name=editor.display_name
+            )
+            logger.info(f"Sent claim invite to {writer.email} for writer {writer_id}")
+        except Exception as email_err:
+            logger.warning(f"Failed to send claim email: {email_err}")
+            # Still return success - token was generated
+            return jsonify({
+                'message': 'Claim token generated but email delivery failed',
+                'email': writer.email,
+                'claim_url': claim_url,  # Return URL so admin can share manually
+                'warning': 'Email delivery failed - share the link manually'
+            })
+
+        return jsonify({
+            'message': 'Claim invitation sent',
+            'email': writer.email
+        })
+
+    except Exception as e:
+        logger.exception('Failed to send claim invite')
+        db.session.rollback()
+        return jsonify(_safe_error_payload(e, 'Failed to send claim invitation')), 500
+
+
+@journalist_bp.route('/claim/validate', methods=['POST'])
+def validate_claim_token():
+    """Validate a claim token and return account info (public endpoint)."""
+    try:
+        data = request.get_json() or {}
+        token = (data.get('token') or '').strip()
+
+        if not token:
+            return jsonify({'error': 'Token is required'}), 400
+
+        writer = UserAccount.query.filter_by(claim_token=token).first()
+        if not writer:
+            return jsonify({'error': 'Invalid token'}), 400
+
+        now = datetime.now(timezone.utc)
+        if writer.claim_token_expires_at and writer.claim_token_expires_at < now:
+            return jsonify({'error': 'Token has expired'}), 400
+
+        if writer.claimed_at:
+            return jsonify({'error': 'Account already claimed'}), 400
+
+        return jsonify({
+            'valid': True,
+            'email': writer.email,
+            'display_name': writer.display_name,
+            'attribution_name': writer.attribution_name
+        })
+
+    except Exception as e:
+        logger.exception('Failed to validate claim token')
+        return jsonify(_safe_error_payload(e, 'Failed to validate token')), 500
+
+
+@journalist_bp.route('/claim/complete', methods=['POST'])
+def complete_claim():
+    """Complete the claim process - verify token and issue auth token (public endpoint)."""
+    try:
+        data = request.get_json() or {}
+        token = (data.get('token') or '').strip()
+
+        if not token:
+            return jsonify({'error': 'Token is required'}), 400
+
+        writer = UserAccount.query.filter_by(claim_token=token).first()
+        if not writer:
+            return jsonify({'error': 'Invalid token'}), 400
+
+        now = datetime.now(timezone.utc)
+        if writer.claim_token_expires_at and writer.claim_token_expires_at < now:
+            return jsonify({'error': 'Token has expired'}), 400
+
+        if writer.claimed_at:
+            return jsonify({'error': 'Account already claimed'}), 400
+
+        # Mark as claimed
+        writer.claimed_at = now
+        writer.claim_token = None  # Clear token
+        writer.claim_token_expires_at = None
+        writer.last_login_at = now
+
+        db.session.commit()
+
+        # Issue auth token for the writer
+        auth_data = issue_user_token(writer.email, role='user')
+
+        logger.info(f"Writer {writer.id} ({writer.email}) claimed their account")
+
+        return jsonify({
+            'message': 'Account claimed successfully',
+            'user': writer.to_dict(),
+            **auth_data
+        })
+
+    except Exception as e:
+        logger.exception('Failed to complete claim')
+        db.session.rollback()
+        return jsonify(_safe_error_payload(e, 'Failed to claim account')), 500
+
+
+# ============================================================================
+# Contributor Profile Endpoints
+# ============================================================================
+
+@journalist_bp.route('/writer/contributors', methods=['GET'])
+@require_user_auth
+def get_writer_contributors():
+    """Get contributor profiles created by the current journalist."""
+    try:
+        email = g.user_email
+        user = UserAccount.query.filter_by(email=email).first()
+        if not user:
+            return jsonify({'error': 'User not found'}), 404
+
+        if not user.is_journalist:
+            return jsonify({'error': 'User is not a journalist'}), 403
+
+        contributors = ContributorProfile.query.filter_by(
+            created_by_id=user.id,
+            is_active=True
+        ).order_by(ContributorProfile.name).all()
+
+        return jsonify([c.to_dict() for c in contributors])
+
+    except Exception as e:
+        logger.exception('Failed to get contributors')
+        return jsonify(_safe_error_payload(e, 'Failed to get contributors')), 500
+
+
+@journalist_bp.route('/writer/contributors', methods=['POST'])
+@require_user_auth
+def create_contributor():
+    """Create a new contributor profile."""
+    try:
+        email = g.user_email
+        user = UserAccount.query.filter_by(email=email).first()
+        if not user:
+            return jsonify({'error': 'User not found'}), 404
+
+        if not user.is_journalist:
+            return jsonify({'error': 'User is not a journalist'}), 403
+
+        data = request.get_json() or {}
+        name = (data.get('name') or '').strip()
+
+        if not name:
+            return jsonify({'error': 'Name is required'}), 400
+
+        if len(name) > 120:
+            return jsonify({'error': 'Name must be 120 characters or less'}), 400
+
+        # Validate URLs if provided
+        photo_url = (data.get('photo_url') or '').strip() or None
+        attribution_url = (data.get('attribution_url') or '').strip() or None
+
+        if photo_url and not (photo_url.startswith('http://') or photo_url.startswith('https://')):
+            return jsonify({'error': 'Photo URL must start with http:// or https://'}), 400
+
+        if attribution_url and not (attribution_url.startswith('http://') or attribution_url.startswith('https://')):
+            return jsonify({'error': 'Attribution URL must start with http:// or https://'}), 400
+
+        contributor = ContributorProfile(
+            name=name,
+            bio=(data.get('bio') or '').strip() or None,
+            photo_url=photo_url,
+            attribution_url=attribution_url,
+            attribution_name=(data.get('attribution_name') or '').strip() or None,
+            created_by_id=user.id
+        )
+
+        db.session.add(contributor)
+        db.session.commit()
+
+        logger.info(f"Contributor {contributor.id} created by user {user.id}")
+
+        return jsonify(contributor.to_dict()), 201
+
+    except Exception as e:
+        logger.exception('Failed to create contributor')
+        db.session.rollback()
+        return jsonify(_safe_error_payload(e, 'Failed to create contributor')), 500
+
+
+@journalist_bp.route('/writer/contributors/<int:contributor_id>', methods=['PUT'])
+@require_user_auth
+def update_contributor(contributor_id):
+    """Update an existing contributor profile."""
+    try:
+        email = g.user_email
+        user = UserAccount.query.filter_by(email=email).first()
+        if not user:
+            return jsonify({'error': 'User not found'}), 404
+
+        if not user.is_journalist:
+            return jsonify({'error': 'User is not a journalist'}), 403
+
+        contributor = ContributorProfile.query.filter_by(
+            id=contributor_id,
+            created_by_id=user.id,
+            is_active=True
+        ).first()
+
+        if not contributor:
+            return jsonify({'error': 'Contributor not found'}), 404
+
+        data = request.get_json() or {}
+
+        # Update name if provided
+        if 'name' in data:
+            name = (data.get('name') or '').strip()
+            if not name:
+                return jsonify({'error': 'Name cannot be empty'}), 400
+            if len(name) > 120:
+                return jsonify({'error': 'Name must be 120 characters or less'}), 400
+            contributor.name = name
+
+        # Update bio if provided
+        if 'bio' in data:
+            contributor.bio = (data.get('bio') or '').strip() or None
+
+        # Update photo_url if provided
+        if 'photo_url' in data:
+            photo_url = (data.get('photo_url') or '').strip() or None
+            if photo_url and not (photo_url.startswith('http://') or photo_url.startswith('https://')):
+                return jsonify({'error': 'Photo URL must start with http:// or https://'}), 400
+            contributor.photo_url = photo_url
+
+        # Update attribution_url if provided
+        if 'attribution_url' in data:
+            attribution_url = (data.get('attribution_url') or '').strip() or None
+            if attribution_url and not (attribution_url.startswith('http://') or attribution_url.startswith('https://')):
+                return jsonify({'error': 'Attribution URL must start with http:// or https://'}), 400
+            contributor.attribution_url = attribution_url
+
+        # Update attribution_name if provided
+        if 'attribution_name' in data:
+            contributor.attribution_name = (data.get('attribution_name') or '').strip() or None
+
+        db.session.commit()
+
+        logger.info(f"Contributor {contributor.id} updated by user {user.id}")
+
+        return jsonify(contributor.to_dict())
+
+    except Exception as e:
+        logger.exception('Failed to update contributor')
+        db.session.rollback()
+        return jsonify(_safe_error_payload(e, 'Failed to update contributor')), 500
+
+
+@journalist_bp.route('/writer/contributors/<int:contributor_id>', methods=['DELETE'])
+@require_user_auth
+def delete_contributor(contributor_id):
+    """Soft delete a contributor profile."""
+    try:
+        email = g.user_email
+        user = UserAccount.query.filter_by(email=email).first()
+        if not user:
+            return jsonify({'error': 'User not found'}), 404
+
+        if not user.is_journalist:
+            return jsonify({'error': 'User is not a journalist'}), 403
+
+        contributor = ContributorProfile.query.filter_by(
+            id=contributor_id,
+            created_by_id=user.id,
+            is_active=True
+        ).first()
+
+        if not contributor:
+            return jsonify({'error': 'Contributor not found'}), 404
+
+        contributor.is_active = False
+        db.session.commit()
+
+        logger.info(f"Contributor {contributor.id} deleted by user {user.id}")
+
+        return jsonify({'message': 'Contributor deleted successfully'})
+
+    except Exception as e:
+        logger.exception('Failed to delete contributor')
+        db.session.rollback()
+        return jsonify(_safe_error_payload(e, 'Failed to delete contributor')), 500

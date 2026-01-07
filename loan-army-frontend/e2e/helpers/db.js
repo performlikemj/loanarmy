@@ -216,3 +216,120 @@ export async function addLoanTeamAssignment(client, userId, teamName, teamId = n
   return result.rows[0]
 }
 
+// --- External Writers / Editor Role helpers ---
+
+export async function ensureEditorUser(client, email, { displayName = 'E2E Editor' } = {}) {
+  // Check if user exists
+  let result = await client.query(
+    `SELECT id, email, display_name, is_journalist, is_editor FROM user_accounts WHERE email = $1`,
+    [email]
+  )
+
+  if (result.rows.length) {
+    const user = result.rows[0]
+    // Ensure user is an editor and journalist
+    if (!user.is_editor || !user.is_journalist) {
+      await client.query(
+        `UPDATE user_accounts SET is_editor = true, is_journalist = true, updated_at = NOW() WHERE id = $1`,
+        [user.id]
+      )
+    }
+    return { ...user, is_editor: true, is_journalist: true }
+  }
+
+  // Create new editor user
+  result = await client.query(
+    `INSERT INTO user_accounts (email, display_name, display_name_lower, is_journalist, is_editor, created_at, updated_at)
+     VALUES ($1, $2, $3, true, true, NOW(), NOW())
+     RETURNING id, email, display_name, is_journalist, is_editor`,
+    [email, displayName, displayName.toLowerCase()]
+  )
+  return result.rows[0]
+}
+
+export async function createPlaceholderWriter(client, managedByUserId, {
+  email,
+  displayName,
+  attributionName = null,
+  attributionUrl = null,
+  profileImageUrl = null,
+  bio = null
+}) {
+  const result = await client.query(
+    `INSERT INTO user_accounts
+      (email, display_name, display_name_lower, is_journalist, managed_by_user_id,
+       attribution_name, attribution_url, profile_image_url, bio, created_at, updated_at)
+     VALUES ($1, $2, $3, true, $4, $5, $6, $7, $8, NOW(), NOW())
+     RETURNING id, email, display_name, is_journalist, managed_by_user_id`,
+    [email, displayName, displayName.toLowerCase(), managedByUserId, attributionName, attributionUrl, profileImageUrl, bio]
+  )
+  return result.rows[0]
+}
+
+export async function getPlaceholderWriter(client, writerId) {
+  const result = await client.query(
+    `SELECT id, email, display_name, is_journalist, managed_by_user_id, claimed_at,
+            claim_token, claim_token_expires_at, attribution_name, attribution_url, profile_image_url
+     FROM user_accounts WHERE id = $1`,
+    [writerId]
+  )
+  return result.rows[0] || null
+}
+
+export async function getManagedWriters(client, editorUserId) {
+  const result = await client.query(
+    `SELECT id, email, display_name, is_journalist, managed_by_user_id, claimed_at,
+            attribution_name, attribution_url, profile_image_url
+     FROM user_accounts
+     WHERE managed_by_user_id = $1
+     ORDER BY id DESC`,
+    [editorUserId]
+  )
+  return result.rows
+}
+
+export async function deletePlaceholderWriter(client, writerId) {
+  // First delete any assignments
+  await client.query(`DELETE FROM journalist_team_assignments WHERE user_id = $1`, [writerId])
+  await client.query(`DELETE FROM journalist_loan_team_assignments WHERE user_id = $1`, [writerId])
+  // Then delete the user
+  await client.query(`DELETE FROM user_accounts WHERE id = $1`, [writerId])
+}
+
+export async function cleanupTestExternalWriters(client, emailPattern = 'e2e.external%') {
+  // Get IDs of test external writers
+  const result = await client.query(
+    `SELECT id FROM user_accounts WHERE email LIKE $1`,
+    [emailPattern]
+  )
+  const ids = result.rows.map(r => r.id)
+
+  if (ids.length > 0) {
+    // Delete assignments
+    await client.query(`DELETE FROM journalist_team_assignments WHERE user_id = ANY($1)`, [ids])
+    await client.query(`DELETE FROM journalist_loan_team_assignments WHERE user_id = ANY($1)`, [ids])
+    // Delete commentaries if any
+    await client.query(`DELETE FROM newsletter_commentary WHERE author_id = ANY($1)`, [ids])
+    // Delete users
+    await client.query(`DELETE FROM user_accounts WHERE id = ANY($1)`, [ids])
+  }
+
+  return ids.length
+}
+
+export async function setUserEditorRole(client, userId, isEditor) {
+  await client.query(
+    `UPDATE user_accounts SET is_editor = $1, updated_at = NOW() WHERE id = $2`,
+    [isEditor, userId]
+  )
+}
+
+export async function getUserById(client, userId) {
+  const result = await client.query(
+    `SELECT id, email, display_name, is_journalist, is_editor, managed_by_user_id, claimed_at
+     FROM user_accounts WHERE id = $1`,
+    [userId]
+  )
+  return result.rows[0] || null
+}
+

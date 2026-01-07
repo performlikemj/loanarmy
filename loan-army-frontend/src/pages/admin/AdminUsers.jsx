@@ -43,6 +43,10 @@ export function AdminUsers() {
     const [confirmRoleChangeUser, setConfirmRoleChangeUser] = useState(null)
     const [togglingRole, setTogglingRole] = useState(false)
 
+    // Editor role toggle
+    const [confirmEditorChangeUser, setConfirmEditorChangeUser] = useState(null)
+    const [togglingEditor, setTogglingEditor] = useState(false)
+
     useEffect(() => {
         loadData()
     }, [])
@@ -101,6 +105,26 @@ export function AdminUsers() {
             alert(error.message || 'Failed to update user role')
         } finally {
             setTogglingRole(false)
+        }
+    }
+
+    const handleToggleEditor = (user) => {
+        setConfirmEditorChangeUser(user)
+    }
+
+    const confirmToggleEditor = async () => {
+        if (!confirmEditorChangeUser) return
+
+        try {
+            setTogglingEditor(true)
+            await APIService.adminUpdateEditorRole(confirmEditorChangeUser.id, !confirmEditorChangeUser.is_editor)
+            setConfirmEditorChangeUser(null)
+            loadData()
+        } catch (error) {
+            console.error('Failed to update editor role:', error)
+            alert(error.message || 'Failed to update editor role')
+        } finally {
+            setTogglingEditor(false)
         }
     }
 
@@ -347,6 +371,11 @@ export function AdminUsers() {
                                                 <ShieldCheck className="h-3 w-3 mr-1" /> Journalist
                                             </Badge>
                                         )}
+                                        {user.is_editor && (
+                                            <Badge variant="default" className="bg-purple-600 hover:bg-purple-700">
+                                                <Edit className="h-3 w-3 mr-1" /> Editor
+                                            </Badge>
+                                        )}
                                     </div>
                                     <div className="flex items-center gap-2 flex-wrap sm:justify-end">
                                         <span className="text-sm text-muted-foreground break-all sm:mr-2">{user.email}</span>
@@ -372,6 +401,9 @@ export function AdminUsers() {
                                                 <DropdownMenuLabel>Actions</DropdownMenuLabel>
                                                 <DropdownMenuItem onClick={() => handleToggleJournalist(user)}>
                                                     {user.is_journalist ? 'Revoke Journalist' : 'Make Journalist'}
+                                                </DropdownMenuItem>
+                                                <DropdownMenuItem onClick={() => handleToggleEditor(user)}>
+                                                    {user.is_editor ? 'Revoke Editor' : 'Make Editor'}
                                                 </DropdownMenuItem>
                                             </DropdownMenuContent>
                                         </DropdownMenu>
@@ -626,6 +658,32 @@ export function AdminUsers() {
                         </Button>
                         <Button onClick={confirmToggleJournalist} disabled={togglingRole}>
                             {togglingRole && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
+                            Confirm
+                        </Button>
+                    </DialogFooter>
+                </DialogContent>
+            </Dialog>
+
+            {/* Confirm Editor Role Change Dialog */}
+            <Dialog open={!!confirmEditorChangeUser} onOpenChange={() => setConfirmEditorChangeUser(null)}>
+                <DialogContent>
+                    <DialogHeader>
+                        <DialogTitle>
+                            {confirmEditorChangeUser?.is_editor ? 'Revoke Editor Status' : 'Grant Editor Status'}
+                        </DialogTitle>
+                        <DialogDescription>
+                            {confirmEditorChangeUser?.is_editor
+                                ? `Are you sure you want to revoke editor status from ${confirmEditorChangeUser?.display_name}? They will no longer be able to manage external writers.`
+                                : `Are you sure you want to make ${confirmEditorChangeUser?.display_name} an editor? They will be able to create and manage external writers.`
+                            }
+                        </DialogDescription>
+                    </DialogHeader>
+                    <DialogFooter>
+                        <Button variant="outline" onClick={() => setConfirmEditorChangeUser(null)} disabled={togglingEditor}>
+                            Cancel
+                        </Button>
+                        <Button onClick={confirmToggleEditor} disabled={togglingEditor}>
+                            {togglingEditor && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
                             Confirm
                         </Button>
                     </DialogFooter>

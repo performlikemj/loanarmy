@@ -13,6 +13,7 @@ import { mapLoansToPlayerOptions } from './loanPlayerOptions'
 import { buildLoanFetchParams } from './loanFetchParams'
 import { resolveLatestTeamId } from './teamResolver'
 import { normalizeWriterTeams } from './writerTeams'
+import { getDefaultWriteupWeek } from './gameweekDefaults'
 import { PlayerStatsDrawer } from './PlayerStatsDrawer'
 import { ContentBlockBuilder } from '@/components/writer/ContentBlockBuilder'
 import { CommentaryEditor } from '@/components/CommentaryEditor'
@@ -30,6 +31,15 @@ export function WriteupEditor() {
     const [players, setPlayers] = useState([])
     const [gameweeks, setGameweeks] = useState([])
     const [loadingPlayers, setLoadingPlayers] = useState(false)
+
+    // Editor role: allows creating content on behalf of managed writers
+    const [isEditor, setIsEditor] = useState(false)
+    const [managedWriters, setManagedWriters] = useState([])
+    const [selectedAuthorId, setSelectedAuthorId] = useState(null) // null = write as self
+
+    // Contributor attribution
+    const [contributors, setContributors] = useState([])
+    const [selectedContributorId, setSelectedContributorId] = useState(null) // null = attribute to self
 
     // Stats Drawer State
     const [isStatsOpen, setIsStatsOpen] = useState(false)
@@ -63,6 +73,26 @@ export function WriteupEditor() {
                 const normalizedTeams = normalizeWriterTeams(teamsData)
                 setTeams(normalizedTeams)
 
+                // Check if user is an editor and load managed writers
+                try {
+                    const writersResponse = await APIService.getEditorManagedWriters()
+                    if (writersResponse?.writers && writersResponse.writers.length > 0) {
+                        setIsEditor(true)
+                        setManagedWriters(writersResponse.writers)
+                    }
+                } catch (editorErr) {
+                    // User is not an editor, this is fine
+                    console.debug('Not an editor or no managed writers')
+                }
+
+                // Load contributor profiles
+                try {
+                    const contributorsData = await APIService.getWriterContributors()
+                    setContributors(contributorsData || [])
+                } catch (contribErr) {
+                    console.debug('Failed to load contributors', contribErr)
+                }
+
                 // If editing, fetch existing commentary
                 if (editId) {
                     const allCommentaries = await APIService.getWriterCommentaries()
@@ -89,18 +119,23 @@ export function WriteupEditor() {
                             week_start_date: existing.week_start_date || '',
                             week_end_date: existing.week_end_date || ''
                         })
+
+                        // Load contributor attribution if present
+                        if (existing.contributor_id) {
+                            setSelectedContributorId(existing.contributor_id)
+                        }
                     } else {
                         setError('Writeup not found')
                     }
                 } else {
-                    // New writeup: Auto-select current week
+                    // New writeup: Auto-select previous week
                     if (gwData && gwData.length > 0) {
-                        const current = gwData.find(g => g.is_current)
-                        if (current) {
+                        const defaultWeek = getDefaultWriteupWeek(gwData)
+                        if (defaultWeek) {
                             setFormData(prev => ({
                                 ...prev,
-                                week_start_date: current.start_date,
-                                week_end_date: current.end_date
+                                week_start_date: defaultWeek.start_date,
+                                week_end_date: defaultWeek.end_date
                             }))
                         }
                     }
@@ -139,20 +174,35 @@ export function WriteupEditor() {
             setPlayers([])
             return
         }
-        if (!resolvedTeamId) {
-            setPlayers([])
-            return
-        }
 
         const fetchPlayers = async () => {
             setLoadingPlayers(true)
             try {
-                const latestTeamId = await resolveLatestTeamId(resolvedTeamId, APIService)
-                const loans = await APIService.getTeamLoans(
-                    latestTeamId,
-                    buildLoanFetchParams({ direction: resolvedDirection })
-                )
-                const playerList = mapLoansToPlayerOptions(loans)
+                let playerList = []
+
+                if (resolvedTeamId) {
+                    // Tracked team - use existing team-based fetch
+                    const latestTeamId = await resolveLatestTeamId(resolvedTeamId, APIService)
+                    const loans = await APIService.getTeamLoans(
+                        latestTeamId,
+                        buildLoanFetchParams({ direction: resolvedDirection })
+                    )
+                    playerList = mapLoansToPlayerOptions(loans)
+                } else if (selectedTeam?.assignment_type === 'loan' && selectedTeam?.team_name) {
+                    // Custom loan team (no DB ID) - fetch from available-players by name
+                    const available = await APIService.getWriterAvailablePlayers()
+                    const teamPlayers = available?.by_loan_team?.[selectedTeam.team_name] || []
+                    playerList = teamPlayers
+                        .map(p => ({
+                            id: p.player_id,
+                            name: p.player_name,
+                            // Store parent team ID for submission (custom loan teams need this)
+                            primary_team_id: p.primary_team_id
+                        }))
+                        .filter(opt => opt.id != null && !!opt.name)
+                        .sort((a, b) => a.name.localeCompare(b.name))
+                }
+
                 setPlayers(playerList)
             } catch (err) {
                 console.error('Failed to fetch players', err)
@@ -161,7 +211,7 @@ export function WriteupEditor() {
             }
         }
         fetchPlayers()
-    }, [formData.team_id, resolvedTeamId, resolvedDirection])
+    }, [formData.team_id, resolvedTeamId, resolvedDirection, selectedTeam])
 
     const handleChange = (field, value) => {
         setFormData(prev => ({ ...prev, [field]: value }))
@@ -204,17 +254,44 @@ export function WriteupEditor() {
 
         try {
             // Validation
-            if (!resolvedTeamId && !editId) throw new Error('Please select a team')
+            const isCustomLoanTeam = selectedTeam?.assignment_type === 'loan' && !resolvedTeamId
+            
+            if (!resolvedTeamId && !isCustomLoanTeam && !editId) {
+                throw new Error('Please select a team')
+            }
             if (!hasContent) throw new Error('Content is required')
-            if (formData.commentary_type === 'player' && !formData.player_id) throw new Error('Please select a player')
+            if (formData.commentary_type === 'player' && !formData.player_id) {
+                throw new Error('Please select a player')
+            }
+            
+            // For custom loan teams, player selection is required to get the parent team ID
+            if (isCustomLoanTeam && !formData.player_id) {
+                throw new Error('Please select a player (required for custom loan teams)')
+            }
+
+            // Determine the team_id to use
+            let teamIdForPayload = resolvedTeamId
+            if (isCustomLoanTeam && formData.player_id) {
+                // For custom loan teams, use the selected player's parent team ID
+                const selectedPlayer = players.find(p => String(p.id) === String(formData.player_id))
+                if (selectedPlayer?.primary_team_id) {
+                    teamIdForPayload = selectedPlayer.primary_team_id
+                } else {
+                    throw new Error('Unable to determine team for this player')
+                }
+            }
 
             // Prepare payload based on editor mode
             const payload = {
                 ...formData,
-                team_id: resolvedTeamId,
+                team_id: teamIdForPayload,
                 // Clear the unused content type
                 content: editorMode === 'simple' ? formData.content : '',
                 structured_blocks: editorMode === 'blocks' ? formData.structured_blocks : null,
+                // Include author_id if writing on behalf of a managed writer
+                ...(selectedAuthorId ? { author_id: selectedAuthorId } : {}),
+                // Include contributor_id for attribution (null or '' clears it)
+                contributor_id: selectedContributorId || null,
             }
 
             await APIService.saveWriterCommentary(payload)
@@ -265,6 +342,76 @@ export function WriteupEditor() {
                                 </div>
                             )}
 
+                            {/* Author selector for editors */}
+                            {isEditor && managedWriters.length > 0 && !editId && (
+                                <div className="space-y-2 p-4 bg-purple-50 rounded-lg border border-purple-200">
+                                    <Label htmlFor="author" className="text-purple-700">Write as</Label>
+                                    <Select
+                                        value={selectedAuthorId ? String(selectedAuthorId) : "self"}
+                                        onValueChange={(val) => setSelectedAuthorId(val === "self" ? null : parseInt(val, 10))}
+                                    >
+                                        <SelectTrigger>
+                                            <SelectValue placeholder="Select author" />
+                                        </SelectTrigger>
+                                        <SelectContent>
+                                            <SelectItem value="self">
+                                                <span className="font-medium">Myself</span>
+                                            </SelectItem>
+                                            {managedWriters.map(writer => (
+                                                <SelectItem key={writer.id} value={String(writer.id)}>
+                                                    <div className="flex items-center gap-2">
+                                                        <span>{writer.display_name}</span>
+                                                        {writer.attribution_name && (
+                                                            <span className="text-xs text-muted-foreground">
+                                                                ({writer.attribution_name})
+                                                            </span>
+                                                        )}
+                                                    </div>
+                                                </SelectItem>
+                                            ))}
+                                        </SelectContent>
+                                    </Select>
+                                    <p className="text-xs text-purple-600">
+                                        As an editor, you can create content on behalf of external writers you manage.
+                                    </p>
+                                </div>
+                            )}
+
+                            {/* Contributor attribution selector */}
+                            {contributors.length > 0 && (
+                                <div className="space-y-2 p-4 bg-blue-50 rounded-lg border border-blue-200">
+                                    <Label htmlFor="contributor" className="text-blue-700">Attribute to contributor</Label>
+                                    <Select
+                                        value={selectedContributorId ? String(selectedContributorId) : "self"}
+                                        onValueChange={(val) => setSelectedContributorId(val === "self" ? null : parseInt(val, 10))}
+                                    >
+                                        <SelectTrigger>
+                                            <SelectValue placeholder="Select attribution" />
+                                        </SelectTrigger>
+                                        <SelectContent>
+                                            <SelectItem value="self">
+                                                <span className="font-medium">Attribute to myself</span>
+                                            </SelectItem>
+                                            {contributors.map(contributor => (
+                                                <SelectItem key={contributor.id} value={String(contributor.id)}>
+                                                    <div className="flex items-center gap-2">
+                                                        <span>{contributor.name}</span>
+                                                        {contributor.attribution_name && (
+                                                            <span className="text-xs text-muted-foreground">
+                                                                ({contributor.attribution_name})
+                                                            </span>
+                                                        )}
+                                                    </div>
+                                                </SelectItem>
+                                            ))}
+                                        </SelectContent>
+                                    </Select>
+                                    <p className="text-xs text-blue-600">
+                                        Optionally credit a scout or guest contributor for this content.
+                                    </p>
+                                </div>
+                            )}
+
                             <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                                 {/* Team Selection */}
                                 <div className="space-y-2">
@@ -282,7 +429,7 @@ export function WriteupEditor() {
                                                 <SelectItem
                                                     key={team.key}
                                                     value={team.key}
-                                                    disabled={!team.team_id}
+                                                    disabled={team.assignment_type === 'parent' && !team.team_id}
                                                 >
                                                     <div className="flex items-center gap-2">
                                                         <span>{team.team_name}</span>

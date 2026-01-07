@@ -658,6 +658,23 @@ class UserAccount(db.Model):
     # Email preferences
     email_delivery_preference = db.Column(db.String(20), default='individual', nullable=False)  # 'individual' | 'digest'
 
+    # Editor role - can manage external writers
+    is_editor = db.Column(db.Boolean, default=False, nullable=False)
+
+    # Placeholder account fields - for external writers managed by editors
+    managed_by_user_id = db.Column(db.Integer, db.ForeignKey('user_accounts.id'), nullable=True)
+    claimed_at = db.Column(db.DateTime, nullable=True)  # null = unclaimed placeholder
+    claim_token = db.Column(db.String(100), unique=True, nullable=True, index=True)
+    claim_token_expires_at = db.Column(db.DateTime, nullable=True)
+
+    # Self-referential relationship for editor -> managed writers
+    managed_by = db.relationship(
+        'UserAccount',
+        remote_side='UserAccount.id',
+        backref=db.backref('managed_writers', lazy='dynamic'),
+        foreign_keys=[managed_by_user_id]
+    )
+
     comments = db.relationship('NewsletterComment', back_populates='user', lazy=True)
     commentaries = db.relationship('NewsletterCommentary', back_populates='author', lazy=True)
     
@@ -668,6 +685,14 @@ class UserAccount(db.Model):
     subscribed_to = db.relationship('JournalistSubscription',
                                   foreign_keys='JournalistSubscription.subscriber_user_id',
                                   backref='subscriber', lazy=True)
+
+    def is_placeholder(self) -> bool:
+        """Return True if this is an unclaimed placeholder account (created by an editor)."""
+        return self.managed_by_user_id is not None and self.claimed_at is None
+
+    def is_claimed(self) -> bool:
+        """Return True if this placeholder account has been claimed by the writer."""
+        return self.managed_by_user_id is not None and self.claimed_at is not None
 
     def to_dict(self):
         return {
@@ -686,6 +711,11 @@ class UserAccount(db.Model):
             'attribution_url': self.attribution_url,
             'attribution_name': self.attribution_name,
             'email_delivery_preference': self.email_delivery_preference or 'individual',
+            'is_editor': self.is_editor,
+            'is_placeholder': self.is_placeholder(),
+            'is_claimed': self.is_claimed(),
+            'managed_by_user_id': self.managed_by_user_id,
+            'claimed_at': self.claimed_at.isoformat() if self.claimed_at else None,
         }
 
 
@@ -787,6 +817,8 @@ class NewsletterCommentary(db.Model):
     content = db.Column(db.Text, nullable=False)  # Sanitized HTML content
     author_id = db.Column(db.Integer, db.ForeignKey('user_accounts.id', ondelete='CASCADE'), nullable=False)
     author_name = db.Column(db.String(120), nullable=False)  # Cached display name
+    contributor_id = db.Column(db.Integer, db.ForeignKey('contributor_profiles.id', ondelete='SET NULL'), nullable=True)
+    contributor_name = db.Column(db.String(120), nullable=True)  # Cached contributor display name
     position = db.Column(db.Integer, default=0, nullable=False)  # For ordering multiple commentaries
     is_active = db.Column(db.Boolean, default=True, nullable=False)
     
@@ -810,6 +842,7 @@ class NewsletterCommentary(db.Model):
     # Relationships
     newsletter = db.relationship('Newsletter', backref='commentaries', lazy=True)
     author = db.relationship('UserAccount', back_populates='commentaries', lazy=True)
+    contributor = db.relationship('ContributorProfile', lazy=True)
     team = db.relationship('Team', lazy=True)
     applause = db.relationship('CommentaryApplause', backref='commentary', lazy='dynamic', cascade='all, delete-orphan')
     
@@ -823,7 +856,16 @@ class NewsletterCommentary(db.Model):
         author_profile_image = None
         if self.author:
             author_profile_image = self.author.profile_image_url
-        
+
+        # Get contributor info if contributor relationship exists
+        contributor_photo_url = None
+        contributor_attribution_url = None
+        contributor_attribution_name = None
+        if self.contributor:
+            contributor_photo_url = self.contributor.photo_url
+            contributor_attribution_url = self.contributor.attribution_url
+            contributor_attribution_name = self.contributor.attribution_name
+
         return {
             'id': self.id,
             'newsletter_id': self.newsletter_id,
@@ -836,6 +878,11 @@ class NewsletterCommentary(db.Model):
             'author_id': self.author_id,
             'author_name': sanitize_plain_text(self.author_name) if self.author_name else None,
             'author_profile_image': author_profile_image,
+            'contributor_id': self.contributor_id,
+            'contributor_name': sanitize_plain_text(self.contributor_name) if self.contributor_name else None,
+            'contributor_photo_url': contributor_photo_url,
+            'contributor_attribution_url': contributor_attribution_url,
+            'contributor_attribution_name': contributor_attribution_name,
             'position': self.position,
             'is_active': self.is_active,
             'title': sanitize_plain_text(self.title) if self.title else None,
@@ -1407,3 +1454,40 @@ class ManualPlayerSubmission(db.Model):
             'reviewed_by': self.reviewed_by
         }
 
+
+class ContributorProfile(db.Model):
+    """Profile for external contributors (scouts, guest analysts) who can be credited on commentaries.
+
+    Allows journalists to create profiles for contributors who don't want to register
+    as full users but still need attribution on content.
+    """
+    __tablename__ = 'contributor_profiles'
+
+    id = db.Column(db.Integer, primary_key=True)
+    name = db.Column(db.String(120), nullable=False)
+    bio = db.Column(db.Text, nullable=True)
+    photo_url = db.Column(db.Text, nullable=True)
+    attribution_url = db.Column(db.String(500), nullable=True)
+    attribution_name = db.Column(db.String(120), nullable=True)
+    created_by_id = db.Column(db.Integer, db.ForeignKey('user_accounts.id'), nullable=False)
+    is_active = db.Column(db.Boolean, default=True, nullable=False)
+    created_at = db.Column(db.DateTime, default=datetime.now(timezone.utc))
+    updated_at = db.Column(db.DateTime, default=datetime.now(timezone.utc), onupdate=datetime.now(timezone.utc))
+
+    # Relationships
+    created_by = db.relationship('UserAccount', foreign_keys=[created_by_id],
+                                  backref=db.backref('contributor_profiles', lazy=True))
+
+    def to_dict(self):
+        return {
+            'id': self.id,
+            'name': self.name,
+            'bio': self.bio,
+            'photo_url': self.photo_url,
+            'attribution_url': self.attribution_url,
+            'attribution_name': self.attribution_name,
+            'created_by_id': self.created_by_id,
+            'is_active': self.is_active,
+            'created_at': self.created_at.isoformat() if self.created_at else None,
+            'updated_at': self.updated_at.isoformat() if self.updated_at else None,
+        }

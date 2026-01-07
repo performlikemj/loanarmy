@@ -612,9 +612,89 @@ class EmailService:
             return f'*@{domain}'
         return f'{local[0]}***@{domain}'
 
+    def send_claim_invitation(
+        self,
+        to_email: str,
+        writer_name: str,
+        claim_url: str,
+        inviter_name: str,
+    ) -> EmailResult:
+        """Send a claim invitation email to an external writer.
+
+        Args:
+            to_email: The writer's email address
+            writer_name: The writer's display name
+            claim_url: The URL to claim the account
+            inviter_name: Name of the editor/admin who created the account
+        """
+        subject = "Claim your Go On Loan writer account"
+
+        html_content = f"""
+<!DOCTYPE html>
+<html>
+<head>
+    <meta charset="utf-8">
+    <style>
+        body {{ font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Oxygen, Ubuntu, sans-serif; line-height: 1.6; color: #333; }}
+        .container {{ max-width: 600px; margin: 0 auto; padding: 20px; }}
+        h2 {{ color: #1a1a1a; }}
+        .button {{ display: inline-block; background-color: #2563eb; color: white !important; padding: 12px 24px; text-decoration: none; border-radius: 6px; font-weight: bold; margin: 20px 0; }}
+        .button:hover {{ background-color: #1d4ed8; }}
+        .footer {{ margin-top: 30px; font-size: 0.875rem; color: #666; }}
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h2>Welcome to Go On Loan, {writer_name}!</h2>
+
+        <p>{inviter_name} has created a writer account for you on Go On Loan,
+        the football loan tracking platform.</p>
+
+        <p>Click the button below to claim your account and start writing directly on the platform:</p>
+
+        <p style="text-align: center;">
+            <a href="{claim_url}" class="button">Claim Your Account</a>
+        </p>
+
+        <p>Or copy and paste this link into your browser:</p>
+        <p style="word-break: break-all; color: #2563eb;">{claim_url}</p>
+
+        <div class="footer">
+            <p><strong>This link expires in 24 hours.</strong></p>
+            <p>If you didn't expect this email, you can safely ignore it.</p>
+            <p>&mdash; The Go On Loan Team</p>
+        </div>
+    </div>
+</body>
+</html>
+"""
+
+        text_content = f"""Welcome to Go On Loan, {writer_name}!
+
+{inviter_name} has created a writer account for you on Go On Loan, the football loan tracking platform.
+
+Claim your account here:
+{claim_url}
+
+This link expires in 24 hours.
+
+If you didn't expect this email, you can safely ignore it.
+
+-- The Go On Loan Team
+"""
+
+        return self.send_email(
+            to=to_email,
+            subject=subject,
+            html=html_content,
+            text=text_content,
+            tags=['claim-invitation', 'writer-onboarding'],
+        )
+
 
 # Singleton instance
 email_service = EmailService()
+
 
 
 

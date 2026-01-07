@@ -421,6 +421,35 @@ def admin_toggle_user_role(user_id):
         db.session.rollback()
         return jsonify(_safe_error_payload(e, 'Failed to update user role')), 500
 
+
+@api_bp.route('/admin/users/<int:user_id>/editor-role', methods=['POST'])
+@require_api_key
+def admin_toggle_editor_role(user_id):
+    """Toggle user's editor status (can manage external writers)."""
+    try:
+        data = request.get_json() or {}
+        is_editor = data.get('is_editor')
+
+        if is_editor is None:
+            return jsonify({'error': 'is_editor boolean is required'}), 400
+
+        user = UserAccount.query.get(user_id)
+        if not user:
+            return jsonify({'error': 'User not found'}), 404
+
+        user.is_editor = bool(is_editor)
+        user.updated_at = datetime.now(timezone.utc)
+        db.session.commit()
+
+        return jsonify({
+            'message': f"Editor status {'granted' if is_editor else 'revoked'}",
+            'user': user.to_dict()
+        })
+    except Exception as e:
+        db.session.rollback()
+        return jsonify(_safe_error_payload(e, 'Failed to update editor role')), 500
+
+
 # --- Lightweight user token auth (for comments/login) ---
 def _user_serializer() -> URLSafeTimedSerializer:
     secret = current_app.config.get('SECRET_KEY') or os.getenv('SECRET_KEY')
@@ -1286,7 +1315,13 @@ def get_teams():
             query = query.join(LoanedPlayer, Team.id == LoanedPlayer.primary_team_id)\
                         .filter(LoanedPlayer.is_active == True)\
                         .distinct()
-        
+
+        # Handle search filter (for global search)
+        search = request.args.get('search', '').strip()
+        if search:
+            logger.info(f"🔍 Searching teams for: {search}")
+            query = query.filter(Team.name.ilike(f'%{search}%'))
+
         teams = query.all()
         active_teams_count = len(teams)
         logger.info(f"✅ Filtered teams found: {active_teams_count}")
@@ -1720,7 +1755,7 @@ def resolve_team_name_and_logo(team_api_id: int, season: int = None) -> tuple[st
     Fallback order:
     1. Team table (any season, prefer current)
     2. TeamProfile table (stores canonical team info)
-    3. API Football client (fetch from API)
+    3. API Football client (fetch from API) - also caches to TeamProfile
     4. Final fallback: "Team {id}"
     """
     from src.models.league import Team, TeamProfile
@@ -1752,6 +1787,40 @@ def resolve_team_name_and_logo(team_api_id: int, season: int = None) -> tuple[st
             # Also get team info for logo
             team_info = api_client._team_profile_cache.get(team_api_id) or {}
             team_logo = team_info.get('team', {}).get('logo')
+            
+            # Cache to TeamProfile for future lookups (avoids repeated API calls)
+            try:
+                existing_profile = TeamProfile.query.filter_by(team_id=team_api_id).first()
+                if not existing_profile:
+                    team_data = team_info.get('team', {})
+                    venue_data = team_info.get('venue', {})
+                    new_profile = TeamProfile(
+                        team_id=team_api_id,
+                        name=team_name,
+                        code=team_data.get('code'),
+                        country=team_data.get('country'),
+                        founded=team_data.get('founded'),
+                        is_national=team_data.get('national'),
+                        logo_url=team_logo,
+                        venue_id=venue_data.get('id'),
+                        venue_name=venue_data.get('name'),
+                        venue_address=venue_data.get('address'),
+                        venue_city=venue_data.get('city'),
+                        venue_capacity=venue_data.get('capacity'),
+                        venue_surface=venue_data.get('surface'),
+                        venue_image=venue_data.get('image'),
+                    )
+                    db.session.add(new_profile)
+                    db.session.commit()
+                    logger.info(f"Cached team profile for {team_name} (id={team_api_id})")
+            except Exception as cache_err:
+                # Don't fail the lookup if caching fails
+                logger.warning(f"Failed to cache team profile for {team_api_id}: {cache_err}")
+                try:
+                    db.session.rollback()
+                except Exception:
+                    pass
+            
             return team_name, team_logo
     except Exception as e:
         logger.warning(f"Failed to resolve team name from API for team_id={team_api_id}: {e}")
@@ -2306,6 +2375,18 @@ def get_newsletters():
             except ValueError:
                 pass
 
+        # Handle search filter (for global search)
+        search = request.args.get('search', '').strip()
+        if search:
+            # Search in newsletter title or team name
+            # Need to join with Team if not already joined
+            query = query.outerjoin(Team, Newsletter.team_id == Team.id).filter(
+                db.or_(
+                    Newsletter.title.ilike(f'%{search}%'),
+                    Team.name.ilike(f'%{search}%')
+                )
+            )
+
         # Exclude current week (server-side)
         exclude_current_week = request.args.get('exclude_current_week', 'false').lower() in ('true', '1', 'yes', 'y')
         if exclude_current_week:
@@ -2779,11 +2860,17 @@ def get_public_player_stats(player_id: int):
     Get historical stats for a player (public endpoint).
     Fetches directly from API-Football if local data is incomplete.
     Only returns CLUB games (not international).
+    
+    Query params:
+    - force_sync: If 'true', force sync from API-Football even if local count matches
     """
     try:
         from src.models.weekly import FixturePlayerStats, Fixture
         from src.models.league import LoanedPlayer
         from src.api_football_client import APIFootballClient
+        
+        # Check for force sync flag
+        force_sync = request.args.get('force_sync', '').lower() == 'true'
         
         # Get current season
         now_utc = datetime.now(timezone.utc)
@@ -2855,8 +2942,9 @@ def get_public_player_stats(player_id: int):
                 )
                 api_appearances = api_totals.get('games_played', 0)
                 
-                if api_appearances > local_count:
-                    logger.info(f"Player {player_id} at team {loan_team_api_id}: API={api_appearances}, local={local_count}. Syncing...")
+                # Sync if API has more games OR force_sync is requested
+                if api_appearances > local_count or force_sync:
+                    logger.info(f"Player {player_id} at team {loan_team_api_id}: API={api_appearances}, local={local_count}, force={force_sync}. Syncing...")
                     _sync_player_club_fixtures(player_id, loan_team_api_id, season, player_name=player_name_for_sync)
             except Exception as e:
                 logger.warning(f"Failed to sync for player {player_id} at team {loan_team_api_id}: {e}")
@@ -9118,6 +9206,108 @@ def admin_sync_team_fixtures(team_id: int):
     except Exception as e:
         logger.exception(f"admin_sync_team_fixtures failed for team {team_id}")
         return jsonify(_safe_error_payload(e, 'Failed to sync team fixtures')), 500
+
+
+@api_bp.route('/admin/fixtures/backfill-raw-json', methods=['POST'])
+@require_api_key
+def admin_backfill_fixture_raw_json():
+    """
+    Backfill raw_json for fixtures that are missing it.
+    
+    This fetches the full fixture data from API-Football and stores it,
+    which enables team name extraction for older fixtures.
+    
+    Body:
+    - player_id: (optional) Only backfill fixtures for this player
+    - team_api_id: (optional) Only backfill fixtures involving this team
+    - limit: (optional) Max fixtures to process (default 50)
+    - dry_run: (optional) If true, don't actually update DB
+    """
+    try:
+        from src.api_football_client import APIFootballClient
+        from src.models.weekly import Fixture, FixturePlayerStats
+        import json
+        
+        data = request.get_json() or {}
+        player_id = data.get('player_id')
+        team_api_id = data.get('team_api_id')
+        limit = min(data.get('limit', 50), 200)  # Cap at 200 to avoid API abuse
+        dry_run = data.get('dry_run', False)
+        
+        # Build query for fixtures missing raw_json
+        query = Fixture.query.filter(Fixture.raw_json.is_(None))
+        
+        # Filter by player if specified
+        if player_id:
+            fixture_ids_subq = db.session.query(FixturePlayerStats.fixture_id).filter(
+                FixturePlayerStats.player_api_id == player_id
+            ).subquery()
+            query = query.filter(Fixture.id.in_(fixture_ids_subq))
+        
+        # Filter by team if specified
+        if team_api_id:
+            query = query.filter(
+                db.or_(
+                    Fixture.home_team_api_id == team_api_id,
+                    Fixture.away_team_api_id == team_api_id
+                )
+            )
+        
+        # Order by most recent first, limit results
+        fixtures_to_update = query.order_by(Fixture.date_utc.desc()).limit(limit).all()
+        
+        if not fixtures_to_update:
+            return jsonify({
+                'message': 'No fixtures found with missing raw_json',
+                'updated': 0
+            })
+        
+        api_client = APIFootballClient()
+        updated = 0
+        errors = []
+        
+        for fixture in fixtures_to_update:
+            try:
+                # Fetch fixture data from API
+                resp = api_client._make_request('fixtures', {'id': fixture.fixture_id_api})
+                api_fixtures = resp.get('response', [])
+                
+                if api_fixtures:
+                    # Store the full fixture object as raw_json
+                    raw_json_str = json.dumps(api_fixtures[0])
+                    
+                    if not dry_run:
+                        fixture.raw_json = raw_json_str
+                        db.session.add(fixture)
+                    
+                    updated += 1
+                    logger.info(f"Backfilled raw_json for fixture {fixture.fixture_id_api}")
+                else:
+                    errors.append({
+                        'fixture_id_api': fixture.fixture_id_api,
+                        'error': 'No data returned from API'
+                    })
+            except Exception as e:
+                errors.append({
+                    'fixture_id_api': fixture.fixture_id_api,
+                    'error': str(e)
+                })
+        
+        if not dry_run:
+            db.session.commit()
+        
+        return jsonify({
+            'message': f"{'Would update' if dry_run else 'Updated'} {updated} fixtures",
+            'updated': updated,
+            'total_found': len(fixtures_to_update),
+            'errors': errors[:10] if errors else [],
+            'dry_run': dry_run
+        })
+        
+    except Exception as e:
+        logger.exception("admin_backfill_fixture_raw_json failed")
+        db.session.rollback()
+        return jsonify(_safe_error_payload(e, 'Failed to backfill fixture raw_json')), 500
 
 
 def _run_team_fixtures_sync(team_id: int, data: dict, job_id: str = None) -> dict:
