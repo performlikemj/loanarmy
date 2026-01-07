@@ -1,36 +1,29 @@
 - Goal (incl. success criteria):
-  - Fix writer editor "New Writeup" crash (TypeError: f.map is not a function) so the dialog loads reliably.
-  - Success: writer editor opens without runtime errors; tests added and passing.
+  - Fix lower-league team support for writers: auto-sync fixtures, backfill raw_json, cache team names
+  - Success: Writers see up-to-date stats with proper team names, same as public endpoint
 - Constraints/Assumptions:
   - Follow AGENTS.md conventions and Continuity Ledger rules.
-  - Write failing tests first, run them, then implement until green.
 - Key decisions:
-  - None yet.
+  - Writer stats endpoint now auto-syncs missing fixtures from API-Football
+  - New admin endpoint to backfill raw_json for fixtures missing it
+  - resolve_team_name_and_logo now caches to TeamProfile after API lookups
+  - Added force_sync parameter to public player stats endpoint
 - State:
   - Done:
-    - Added normalizeWriterTeams helper to handle object/array writer team payloads.
-    - Updated WriteupEditor to normalize writer teams before rendering.
-    - Added frontend tests for normalization; `pnpm test -- --runInBand` passes.
-    - Fixed AdminTeams alias description to avoid JSX arrow warning; added tests.
-    - Implemented loan-team direction filtering in WriteupEditor; added tests for direction params.
-    - Updated writer team normalization to include parent/loan metadata and UI badges.
-    - Frontend tests pass (`pnpm test -- --runInBand`).
+    - Added auto-sync logic to journalist stats endpoint (journalist.py)
+    - Created admin endpoint /admin/fixtures/backfill-raw-json (api.py)
+    - Enhanced resolve_team_name_and_logo to cache team names in TeamProfile
+    - Added force_sync query param to /players/<id>/stats endpoint
+    - Deployed to production (2x deploys)
+    - Verified: J. Moorhouse now shows 22 fixtures including Dec 26 vs Peterborough
+    - Verified: All team names resolved (Burton Albion, Aston Villa U21, Cardiff, etc.)
   - Now:
-    - Report loan-team direction filtering implementation and test status.
+    - Complete
   - Next:
-    - (If needed) extend writer editor to support loan-team direction filtering.
+    - Monitor writer interface for any remaining issues
 - Open questions (UNCONFIRMED if needed):
-  - Should loan-team assignments appear in the WriteupEditor team list (requires loaned_to direction)?
+  - None
 - Working set (files/ids/commands):
-  - /Users/michaeljones/Library/Mobile Documents/com~apple~CloudDocs/Documents/Projects/Web Development/loan_army/CONTINUITY.md
-  - loan-army-frontend/src/pages/writer/WriteupEditor.jsx
-  - loan-army-frontend/src/pages/writer/writerTeams.js
-  - loan-army-frontend/tests/writer-team-normalize.test.mjs
-  - loan-army-frontend/src/pages/admin/AdminUsers.jsx
-  - loan-army-frontend/tests/admin-coverage-options.test.mjs
-  - loan-army-frontend/src/pages/admin/AdminTeams.jsx
-  - loan-army-frontend/tests/admin-teams-aliases.test.mjs
-  - loan-army-frontend/src/pages/writer/loanFetchParams.js
-  - loan-army-frontend/src/pages/writer/writerTeams.js
-  - loan-army-frontend/src/pages/writer/WriteupEditor.jsx
-  - loan-army-frontend/tests/writer-loan-fetch-params.test.mjs
+  - loan-army-backend/src/routes/journalist.py (auto-sync)
+  - loan-army-backend/src/routes/api.py (backfill endpoint + team caching + force_sync)
+  - Force sync command: GET /api/players/344229/stats?force_sync=true

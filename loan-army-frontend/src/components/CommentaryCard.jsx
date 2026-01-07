@@ -45,6 +45,11 @@ export function CommentaryCard({
   const typeLabel = TYPE_LABELS[commentary.commentary_type] || 'Analysis'
   const isCompact = variant === 'compact'
 
+  // Determine display name and photo (contributor takes precedence if present)
+  const hasContributor = !!commentary.contributor_id
+  const displayName = hasContributor ? commentary.contributor_name : commentary.author_name
+  const displayPhoto = hasContributor ? commentary.contributor_photo_url : commentary.author_profile_image
+
   const handleApplause = async () => {
     if (applauding || hasApplauded) return
     setApplauding(true)
@@ -85,22 +90,27 @@ export function CommentaryCard({
           'border-2 border-white shadow-sm flex-shrink-0',
           isCompact ? 'h-8 w-8' : 'h-9 w-9 sm:h-10 sm:w-10'
         )}>
-          {commentary.author_profile_image ? (
-            <AvatarImage src={commentary.author_profile_image} alt={commentary.author_name} />
+          {displayPhoto ? (
+            <AvatarImage src={displayPhoto} alt={displayName} />
           ) : null}
           <AvatarFallback className={cn('font-medium text-xs', colors.accent, 'bg-white')}>
-            {(commentary.author_name || 'A').substring(0, 2).toUpperCase()}
+            {(displayName || 'A').substring(0, 2).toUpperCase()}
           </AvatarFallback>
         </Avatar>
-        
+
         <div className="flex-1 min-w-0">
           <div className="flex items-center flex-wrap gap-x-2 gap-y-1">
             <span className={cn(
               'font-semibold text-gray-900 truncate',
               isCompact ? 'text-sm' : 'text-sm sm:text-base'
             )}>
-              {commentary.author_name}
+              {displayName}
             </span>
+            {hasContributor && commentary.author_name && (
+              <span className="text-xs text-gray-500">
+                via {commentary.author_name}
+              </span>
+            )}
             {commentary.is_premium && (
               <Badge variant="outline" className="text-[10px] border-amber-300 text-amber-700 bg-amber-50/50 px-1.5 py-0">
                 <Sparkles className="h-2.5 w-2.5 mr-0.5" />

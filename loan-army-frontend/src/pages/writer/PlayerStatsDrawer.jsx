@@ -421,7 +421,12 @@ export function PlayerStatsDrawer({ playerId, isOpen, onClose, playerName }) {
                                                 </tr>
                                             </thead>
                                             <tbody className="divide-y">
-                                                {stats.map((s, i) => (
+                                                {stats.slice().sort((a, b) => {
+                                                    // Sort by fixture_date descending (newest first)
+                                                    const dateA = a.fixture_date ? new Date(a.fixture_date) : new Date(0)
+                                                    const dateB = b.fixture_date ? new Date(b.fixture_date) : new Date(0)
+                                                    return dateB - dateA
+                                                }).map((s, i) => (
                                                     <tr key={i} className="hover:bg-gray-50 cursor-pointer transition-colors" onClick={() => handleRowClick(s)}>
                                                         <td className="p-3 whitespace-nowrap">
                                                             {s.fixture_date ? format(new Date(s.fixture_date), 'MMM d, yyyy') : '-'}

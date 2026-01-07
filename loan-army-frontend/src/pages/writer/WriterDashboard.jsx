@@ -101,9 +101,14 @@ export function WriterDashboard() {
             <header className="bg-white shadow">
                 <div className="max-w-7xl mx-auto py-6 px-4 sm:px-6 lg:px-8 flex justify-between items-center">
                     <h1 className="text-3xl font-bold text-gray-900">Writer Dashboard</h1>
-                    <Button variant="outline" onClick={handleLogout}>
-                        <LogOut className="mr-2 h-4 w-4" /> Logout
-                    </Button>
+                    <div className="flex items-center gap-2">
+                        <Button variant="outline" onClick={() => navigate('/writer/contributors')}>
+                            <Users className="mr-2 h-4 w-4" /> Contributors
+                        </Button>
+                        <Button variant="outline" onClick={handleLogout}>
+                            <LogOut className="mr-2 h-4 w-4" /> Logout
+                        </Button>
+                    </div>
                 </div>
             </header>
             <main className="max-w-7xl mx-auto py-6 sm:px-6 lg:px-8">

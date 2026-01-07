@@ -378,55 +378,70 @@ export function WriteupPage() {
 
           {/* Author & Article Info */}
           <CardContent className="p-4 sm:p-6">
-            {/* Author Row */}
-            <div className="flex items-center gap-3 mb-4 pb-4 border-b">
-              <Avatar className="h-10 w-10">
-                {author?.profile_image_url ? (
-                  <AvatarImage src={author.profile_image_url} alt={author?.display_name} />
-                ) : null}
-                <AvatarFallback className="bg-violet-100 text-violet-700">
-                  {(author?.display_name || data.author_name || 'A').substring(0, 2).toUpperCase()}
-                </AvatarFallback>
-              </Avatar>
-              <div className="flex-1">
-                <div className="font-semibold text-gray-900 flex items-center gap-2">
-                  {author?.display_name || data.author_name}
-                  {(author?.attribution_url || author?.attribution_name) && (
-                    <>
-                      <span className="text-gray-300">•</span>
-                      {author.attribution_url ? (
-                        <a
-                          href={author.attribution_url}
-                          target="_blank"
-                          rel="noopener noreferrer"
-                          className="text-sm font-normal text-gray-500 hover:text-blue-600 hover:underline flex items-center gap-1"
-                        >
-                          {author.attribution_name || 'Visit Site'}
-                          <ExternalLink className="h-3 w-3" />
-                        </a>
-                      ) : (
+            {/* Author Row - shows contributor as primary if present */}
+            {(() => {
+              const hasContributor = !!data.contributor_id
+              const primaryName = hasContributor ? data.contributor_name : (author?.display_name || data.author_name)
+              const primaryPhoto = hasContributor ? data.contributor_photo_url : author?.profile_image_url
+              const primaryAttribUrl = hasContributor ? data.contributor_attribution_url : author?.attribution_url
+              const primaryAttribName = hasContributor ? data.contributor_attribution_name : author?.attribution_name
+
+              return (
+                <div className="flex items-center gap-3 mb-4 pb-4 border-b">
+                  <Avatar className="h-10 w-10">
+                    {primaryPhoto ? (
+                      <AvatarImage src={primaryPhoto} alt={primaryName} />
+                    ) : null}
+                    <AvatarFallback className="bg-violet-100 text-violet-700">
+                      {(primaryName || 'A').substring(0, 2).toUpperCase()}
+                    </AvatarFallback>
+                  </Avatar>
+                  <div className="flex-1">
+                    <div className="font-semibold text-gray-900 flex items-center gap-2 flex-wrap">
+                      {primaryName}
+                      {hasContributor && (author?.display_name || data.author_name) && (
                         <span className="text-sm font-normal text-gray-500">
-                          {author.attribution_name}
+                          via {author?.display_name || data.author_name}
                         </span>
                       )}
-                    </>
+                      {(primaryAttribUrl || primaryAttribName) && (
+                        <>
+                          <span className="text-gray-300">•</span>
+                          {primaryAttribUrl ? (
+                            <a
+                              href={primaryAttribUrl}
+                              target="_blank"
+                              rel="noopener noreferrer"
+                              className="text-sm font-normal text-gray-500 hover:text-blue-600 hover:underline flex items-center gap-1"
+                            >
+                              {primaryAttribName || 'Visit Site'}
+                              <ExternalLink className="h-3 w-3" />
+                            </a>
+                          ) : (
+                            <span className="text-sm font-normal text-gray-500">
+                              {primaryAttribName}
+                            </span>
+                          )}
+                        </>
+                      )}
+                    </div>
+                    <div className="text-sm text-gray-500">
+                      {data.created_at && new Date(data.created_at).toLocaleDateString(undefined, {
+                        year: 'numeric',
+                        month: 'long',
+                        day: 'numeric'
+                      })}
+                    </div>
+                  </div>
+                  {data.is_premium && (
+                    <Badge variant="outline" className="border-amber-300 text-amber-700 bg-amber-50">
+                      <Sparkles className="h-3 w-3 mr-1" />
+                      Premium
+                    </Badge>
                   )}
                 </div>
-                <div className="text-sm text-gray-500">
-                  {data.created_at && new Date(data.created_at).toLocaleDateString(undefined, {
-                    year: 'numeric',
-                    month: 'long',
-                    day: 'numeric'
-                  })}
-                </div>
-              </div>
-              {data.is_premium && (
-                <Badge variant="outline" className="border-amber-300 text-amber-700 bg-amber-50">
-                  <Sparkles className="h-3 w-3 mr-1" />
-                  Premium
-                </Badge>
-              )}
-            </div>
+              )
+            })()}
 
             {/* Title */}
             {data.title && (

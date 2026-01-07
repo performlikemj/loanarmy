@@ -40,6 +40,10 @@ export function AdminTeams() {
   const [search, setSearch] = useState('')
   const [requestFilter, setRequestFilter] = useState('pending')
 
+  // Pagination state
+  const [trackedPage, setTrackedPage] = useState(1)
+  const [untrackedPage, setUntrackedPage] = useState(1)
+
   // Selection state
   const [selectedTeamIds, setSelectedTeamIds] = useState(new Set())
   const [bulkMode, setBulkMode] = useState('delete') // 'delete' or 'keep'
@@ -180,6 +184,44 @@ export function AdminTeams() {
 
   const trackedTeams = useMemo(() => filteredTeams.filter(t => t.is_tracked), [filteredTeams])
   const untrackedTeams = useMemo(() => filteredTeams.filter(t => !t.is_tracked), [filteredTeams])
+
+  const trackedPageSize = 25
+  const untrackedPageSize = 30
+
+  const trackedTotalPages = Math.max(1, Math.ceil(trackedTeams.length / trackedPageSize))
+  const untrackedTotalPages = Math.max(1, Math.ceil(untrackedTeams.length / untrackedPageSize))
+
+  const trackedTeamsPage = useMemo(() => {
+    const start = (trackedPage - 1) * trackedPageSize
+    return trackedTeams.slice(start, start + trackedPageSize)
+  }, [trackedTeams, trackedPage, trackedPageSize])
+
+  const untrackedTeamsPage = useMemo(() => {
+    const start = (untrackedPage - 1) * untrackedPageSize
+    return untrackedTeams.slice(start, start + untrackedPageSize)
+  }, [untrackedTeams, untrackedPage, untrackedPageSize])
+
+  const trackedRangeStart = trackedTeams.length === 0 ? 0 : (trackedPage - 1) * trackedPageSize + 1
+  const trackedRangeEnd = Math.min(trackedTeams.length, trackedPage * trackedPageSize)
+  const untrackedRangeStart = untrackedTeams.length === 0 ? 0 : (untrackedPage - 1) * untrackedPageSize + 1
+  const untrackedRangeEnd = Math.min(untrackedTeams.length, untrackedPage * untrackedPageSize)
+
+  useEffect(() => {
+    setTrackedPage(1)
+    setUntrackedPage(1)
+  }, [search])
+
+  useEffect(() => {
+    if (trackedPage > trackedTotalPages) {
+      setTrackedPage(trackedTotalPages)
+    }
+  }, [trackedPage, trackedTotalPages])
+
+  useEffect(() => {
+    if (untrackedPage > untrackedTotalPages) {
+      setUntrackedPage(untrackedTotalPages)
+    }
+  }, [untrackedPage, untrackedTotalPages])
 
   // Teams that will be deleted based on current selection and mode
   const teamsToDelete = useMemo(() => {
@@ -631,18 +673,22 @@ export function AdminTeams() {
         </TabsList>
 
         <TabsContent value="teams" className="space-y-4">
-          <Card>
-            <CardHeader>
-              <div className="flex items-center justify-between">
+          <div className="grid gap-4 lg:grid-cols-2">
+            <Card>
+              <CardHeader>
+              <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
                 <div>
                   <CardTitle>Tracked Teams</CardTitle>
                   <CardDescription>
                     Teams currently being tracked for loan player data
                   </CardDescription>
                 </div>
+                <Button variant="outline" size="sm" asChild>
+                  <a href="#untracked-teams">View Untracked</a>
+                </Button>
               </div>
-            </CardHeader>
-            <CardContent>
+              </CardHeader>
+              <CardContent>
               {/* Search and controls */}
               <div className="flex flex-col gap-4 mb-4">
                 <div className="flex flex-col sm:flex-row items-stretch sm:items-center gap-2 sm:gap-4">
@@ -732,7 +778,7 @@ export function AdminTeams() {
                 <p className="text-center text-muted-foreground py-8">No tracked teams found</p>
               ) : (
                 <div className="space-y-2">
-                  {trackedTeams.map(team => {
+                  {trackedTeamsPage.map(team => {
                     const isSelected = selectedTeamIds.has(team.id)
                     const willBeDeleted = teamsToDelete.some(t => t.id === team.id)
 
@@ -814,52 +860,112 @@ export function AdminTeams() {
                   })}
                 </div>
               )}
-            </CardContent>
-          </Card>
-
-          <Card>
-            <CardHeader>
-              <CardTitle>Untracked Teams</CardTitle>
-              <CardDescription>
-                Teams available but not currently being tracked
-              </CardDescription>
-            </CardHeader>
-            <CardContent>
-              {loading ? (
-                <div className="flex items-center justify-center py-8">
-                  <Loader2 className="h-6 w-6 animate-spin" />
-                </div>
-              ) : untrackedTeams.length === 0 ? (
-                <p className="text-center text-muted-foreground py-8">All teams are being tracked</p>
-              ) : (
-                <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-2">
-                  {untrackedTeams.slice(0, 50).map(team => (
-                    <div key={team.id} className="flex items-center justify-between p-2 border rounded-lg text-sm">
+              {!loading && trackedTeams.length > 0 && (
+                <div className="flex flex-col gap-2 pt-4 border-t">
+                  <span className="text-xs text-muted-foreground">
+                    Showing {trackedRangeStart}-{trackedRangeEnd} of {trackedTeams.length} tracked teams
+                  </span>
+                  {trackedTotalPages > 1 && (
+                    <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-2">
+                      <span className="text-xs text-muted-foreground">
+                        Page {trackedPage} of {trackedTotalPages}
+                      </span>
                       <div className="flex items-center gap-2">
-                        <Avatar className="h-8 w-8">
-                          <AvatarImage src={team.logo} alt={team.name} />
-                          <AvatarFallback className="text-xs">{team.name.slice(0, 2).toUpperCase()}</AvatarFallback>
-                        </Avatar>
-                        <span className="truncate max-w-[120px]">{team.name}</span>
+                        <Button
+                          variant="outline"
+                          size="sm"
+                          disabled={trackedPage === 1}
+                          onClick={() => setTrackedPage(page => Math.max(1, page - 1))}
+                        >
+                          Previous
+                        </Button>
+                        <Button
+                          variant="outline"
+                          size="sm"
+                          disabled={trackedPage === trackedTotalPages}
+                          onClick={() => setTrackedPage(page => Math.min(trackedTotalPages, page + 1))}
+                        >
+                          Next
+                        </Button>
                       </div>
-                      <Button
-                        variant="ghost"
-                        size="sm"
-                        onClick={() => handleToggleTracking(team)}
-                      >
-                        Track
-                      </Button>
                     </div>
-                  ))}
+                  )}
                 </div>
               )}
-              {untrackedTeams.length > 50 && (
-                <p className="text-center text-muted-foreground mt-4">
-                  Showing 50 of {untrackedTeams.length} untracked teams. Use search to find specific teams.
-                </p>
-              )}
-            </CardContent>
-          </Card>
+              </CardContent>
+            </Card>
+
+            <Card id="untracked-teams">
+              <CardHeader>
+                <CardTitle>Untracked Teams</CardTitle>
+                <CardDescription>
+                  Teams available but not currently being tracked
+                </CardDescription>
+              </CardHeader>
+              <CardContent>
+                {loading ? (
+                  <div className="flex items-center justify-center py-8">
+                    <Loader2 className="h-6 w-6 animate-spin" />
+                  </div>
+                ) : untrackedTeams.length === 0 ? (
+                  <p className="text-center text-muted-foreground py-8">All teams are being tracked</p>
+                ) : (
+                  <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-2">
+                    {untrackedTeamsPage.map(team => (
+                      <div key={team.id} className="flex items-center justify-between p-2 border rounded-lg text-sm">
+                        <div className="flex items-center gap-2">
+                          <Avatar className="h-8 w-8">
+                            <AvatarImage src={team.logo} alt={team.name} />
+                            <AvatarFallback className="text-xs">{team.name.slice(0, 2).toUpperCase()}</AvatarFallback>
+                          </Avatar>
+                          <span className="truncate max-w-[120px]">{team.name}</span>
+                        </div>
+                        <Button
+                          variant="ghost"
+                          size="sm"
+                          onClick={() => handleToggleTracking(team)}
+                        >
+                          Track
+                        </Button>
+                      </div>
+                    ))}
+                  </div>
+                )}
+                {!loading && untrackedTeams.length > 0 && (
+                  <div className="flex flex-col gap-2 pt-4 border-t">
+                    <span className="text-xs text-muted-foreground">
+                      Showing {untrackedRangeStart}-{untrackedRangeEnd} of {untrackedTeams.length} untracked teams
+                    </span>
+                    {untrackedTotalPages > 1 && (
+                      <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-2">
+                        <span className="text-xs text-muted-foreground">
+                          Page {untrackedPage} of {untrackedTotalPages}
+                        </span>
+                        <div className="flex items-center gap-2">
+                          <Button
+                            variant="outline"
+                            size="sm"
+                            disabled={untrackedPage === 1}
+                            onClick={() => setUntrackedPage(page => Math.max(1, page - 1))}
+                          >
+                            Previous
+                          </Button>
+                          <Button
+                            variant="outline"
+                            size="sm"
+                            disabled={untrackedPage === untrackedTotalPages}
+                            onClick={() => setUntrackedPage(page => Math.min(untrackedTotalPages, page + 1))}
+                          >
+                            Next
+                          </Button>
+                        </div>
+                      </div>
+                    )}
+                  </div>
+                )}
+              </CardContent>
+            </Card>
+          </div>
         </TabsContent>
 
         <TabsContent value="requests" className="space-y-4">

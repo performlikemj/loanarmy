@@ -167,6 +167,156 @@ export function simpleLineBreaks(text) {
 
 export default formatTextToHtml
 
+/**
+ * Extract all text content from newsletter JSON structure
+ * @param {object} content - Parsed newsletter content object
+ * @returns {string} - All text content concatenated
+ */
+function extractTextFromNewsletterContent(content) {
+  if (!content || typeof content !== 'object') return ''
+
+  let text = ''
+
+  // Extract title
+  if (content.title) text += content.title + ' '
+
+  // Extract summary
+  if (content.summary) text += content.summary + ' '
+
+  // Extract highlights
+  if (Array.isArray(content.highlights)) {
+    text += content.highlights.join(' ') + ' '
+  }
+
+  // Extract by_numbers section
+  if (content.by_numbers) {
+    if (Array.isArray(content.by_numbers.minutes_leaders)) {
+      text += content.by_numbers.minutes_leaders.map(l => l.name || '').join(' ') + ' '
+    }
+    if (Array.isArray(content.by_numbers.ga_leaders)) {
+      text += content.by_numbers.ga_leaders.map(l => l.name || '').join(' ') + ' '
+    }
+  }
+
+  // Extract sections and items
+  if (Array.isArray(content.sections)) {
+    for (const section of content.sections) {
+      if (section.title) text += section.title + ' '
+      if (section.content) text += section.content + ' '
+
+      if (Array.isArray(section.items)) {
+        for (const item of section.items) {
+          if (item.name) text += item.name + ' '
+          if (item.week_summary) text += item.week_summary + ' '
+          if (Array.isArray(item.match_notes)) {
+            text += item.match_notes.join(' ') + ' '
+          }
+        }
+      }
+    }
+  }
+
+  return text
+}
+
+/**
+ * Estimate reading time from newsletter content
+ * @param {string|object} content - Newsletter content (JSON string or parsed object)
+ * @returns {string} - Human-readable reading time (e.g., "3 min read")
+ */
+export function estimateReadingTime(content) {
+  const WORDS_PER_MINUTE = 200
+
+  if (!content) return ''
+
+  let text = ''
+
+  if (typeof content === 'string') {
+    try {
+      const parsed = JSON.parse(content)
+      text = extractTextFromNewsletterContent(parsed)
+    } catch {
+      // If not JSON, treat as plain text
+      text = content
+    }
+  } else if (typeof content === 'object') {
+    text = extractTextFromNewsletterContent(content)
+  }
+
+  const wordCount = text.split(/\s+/).filter(Boolean).length
+  const minutes = Math.ceil(wordCount / WORDS_PER_MINUTE)
+
+  if (minutes < 1) return '< 1 min read'
+  if (minutes === 1) return '1 min read'
+  return `${minutes} min read`
+}
+
+/**
+ * Truncate text at word boundary with ellipsis
+ * @param {string} text - Text to truncate
+ * @param {number} maxLength - Maximum length
+ * @returns {string} - Truncated text
+ */
+function truncateAtWord(text, maxLength) {
+  if (!text || text.length <= maxLength) return text || ''
+
+  // Find the last space before maxLength
+  const truncated = text.substring(0, maxLength)
+  const lastSpace = truncated.lastIndexOf(' ')
+
+  if (lastSpace > maxLength * 0.7) {
+    return truncated.substring(0, lastSpace) + '...'
+  }
+  return truncated + '...'
+}
+
+/**
+ * Extract a preview excerpt from newsletter content
+ * @param {string|object} content - Newsletter content (JSON string or parsed object)
+ * @param {number} maxLength - Maximum excerpt length (default 150)
+ * @returns {string} - Content excerpt
+ */
+export function extractNewsletterExcerpt(content, maxLength = 150) {
+  if (!content) return ''
+
+  let parsed = content
+
+  if (typeof content === 'string') {
+    try {
+      parsed = JSON.parse(content)
+    } catch {
+      // If not JSON, return truncated plain text
+      return truncateAtWord(content, maxLength)
+    }
+  }
+
+  if (!parsed || typeof parsed !== 'object') return ''
+
+  // Priority 1: Summary
+  if (parsed.summary && typeof parsed.summary === 'string') {
+    return truncateAtWord(parsed.summary, maxLength)
+  }
+
+  // Priority 2: First highlight
+  if (Array.isArray(parsed.highlights) && parsed.highlights[0]) {
+    return truncateAtWord(parsed.highlights[0], maxLength)
+  }
+
+  // Priority 3: First section's first item week_summary
+  if (Array.isArray(parsed.sections) && parsed.sections[0]) {
+    const section = parsed.sections[0]
+    if (section.content) {
+      return truncateAtWord(section.content, maxLength)
+    }
+    if (Array.isArray(section.items) && section.items[0]?.week_summary) {
+      return truncateAtWord(section.items[0].week_summary, maxLength)
+    }
+  }
+
+  return ''
+}
+
+
 
 
 

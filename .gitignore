@@ -42,3 +42,5 @@ loan-army-backend/newsletter*
 .venv-test/
 loan-army-frontend/test-results
 playwright-report
+settings.local.json
+CONTINUITY*.md
