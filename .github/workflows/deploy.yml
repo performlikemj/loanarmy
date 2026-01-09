@@ -45,10 +45,14 @@ jobs:
     if: ${{ !inputs.skip_security_checks }}
     steps:
       - name: Check RLS on all tables
-        if: ${{ secrets.SUPA_DB_PASSWORD != '' }}
         env:
           PGPASSWORD: ${{ secrets.SUPA_DB_PASSWORD }}
         run: |
+          if [ -z "$PGPASSWORD" ]; then
+            echo "::warning::SUPA_DB_PASSWORD not set - skipping database security checks"
+            exit 0
+          fi
+
           echo "Running pre-deployment security checks..."
 
           TABLES_WITHOUT_RLS=$(psql \
@@ -84,11 +88,6 @@ jobs:
           fi
 
           echo "Security checks passed - all tables have RLS enabled"
-
-      - name: Skip notice
-        if: ${{ secrets.SUPA_DB_PASSWORD == '' }}
-        run: |
-          echo "::warning::SUPA_DB_PASSWORD not set - skipping database security checks"
 
   deploy-backend:
     name: Deploy Backend
