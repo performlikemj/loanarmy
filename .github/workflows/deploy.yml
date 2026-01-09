@@ -1,0 +1,262 @@
+# Full deployment workflow for Go On Loan
+#
+# Deploys backend to Azure Container Apps and frontend to Azure Static Web App
+# Mirrors the functionality of deploy_aca.sh
+#
+# Required secrets:
+#   AZURE_CREDENTIALS     - Service principal JSON (already configured for scaling workflow)
+#   SWA_DEPLOYMENT_TOKEN  - Static Web App deployment token
+#                           Get with: az staticwebapp secrets list --name swa-goonloan -g rg-loan-army-westus2 --query 'properties.apiKey' -o tsv
+#
+# Optional secrets (for security checks):
+#   SUPA_DB_PASSWORD      - Supabase database password for RLS verification
+
+name: Deploy
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+    inputs:
+      skip_security_checks:
+        description: 'Skip RLS security checks'
+        required: false
+        default: false
+        type: boolean
+
+env:
+  SUBSCRIPTION_ID: 63ceeeac-fe3f-4bcb-b6d2-b7aa7fd6bf52
+  RESOURCE_GROUP: rg-loan-army-westus2
+  ACR_NAME: acrloanarmy
+  APP_BACKEND: ca-loan-army-backend
+  SWA_NAME: swa-goonloan
+  JOB_WEEKLY_NAME: job-weekly-newsletters
+  TAG: prod
+  # Supabase connection for security checks
+  SUPA_DB_HOST: db.snqwamzutbcbjgusubsa.supabase.co
+  SUPA_DB_NAME: postgres
+  SUPA_DB_USER: postgres
+  SUPA_DB_PORT: 5432
+
+jobs:
+  security-checks:
+    name: Security Checks
+    runs-on: ubuntu-latest
+    if: ${{ !inputs.skip_security_checks }}
+    steps:
+      - name: Check RLS on all tables
+        if: ${{ secrets.SUPA_DB_PASSWORD != '' }}
+        env:
+          PGPASSWORD: ${{ secrets.SUPA_DB_PASSWORD }}
+        run: |
+          echo "Running pre-deployment security checks..."
+
+          TABLES_WITHOUT_RLS=$(psql \
+            -h "${{ env.SUPA_DB_HOST }}" \
+            -p "${{ env.SUPA_DB_PORT }}" \
+            -U "${{ env.SUPA_DB_USER }}" \
+            -d "${{ env.SUPA_DB_NAME }}" \
+            -t -A \
+            -c "
+              SELECT schemaname || '.' || tablename as table_name
+              FROM pg_tables t
+              LEFT JOIN pg_class c ON c.relname = t.tablename
+              LEFT JOIN pg_namespace n ON n.oid = c.relnamespace AND n.nspname = t.schemaname
+              WHERE t.schemaname = 'public'
+                AND c.relrowsecurity = false
+                AND t.tablename NOT LIKE 'pg_%'
+                AND t.tablename NOT IN ('alembic_version', 'schema_migrations')
+              ORDER BY t.tablename;
+            " 2>/dev/null) || {
+            echo "::warning::Could not connect to Supabase database for security checks"
+            exit 0
+          }
+
+          if [ -n "$TABLES_WITHOUT_RLS" ]; then
+            echo "::error::SECURITY CHECK FAILED: Tables without Row Level Security enabled:"
+            echo "$TABLES_WITHOUT_RLS" | while read -r table; do
+              echo "  - $table"
+            done
+            echo ""
+            echo "All tables in public schema must have RLS enabled."
+            echo "Run: ALTER TABLE <table_name> ENABLE ROW LEVEL SECURITY;"
+            exit 1
+          fi
+
+          echo "Security checks passed - all tables have RLS enabled"
+
+      - name: Skip notice
+        if: ${{ secrets.SUPA_DB_PASSWORD == '' }}
+        run: |
+          echo "::warning::SUPA_DB_PASSWORD not set - skipping database security checks"
+
+  deploy-backend:
+    name: Deploy Backend
+    runs-on: ubuntu-latest
+    needs: [security-checks]
+    if: ${{ always() && (needs.security-checks.result == 'success' || needs.security-checks.result == 'skipped') }}
+    outputs:
+      backend_fqdn: ${{ steps.get-fqdn.outputs.fqdn }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Azure Login
+        uses: azure/login@v2
+        with:
+          creds: ${{ secrets.AZURE_CREDENTIALS }}
+
+      - name: Set subscription
+        run: az account set --subscription "${{ env.SUBSCRIPTION_ID }}"
+
+      - name: Build backend image in ACR
+        run: |
+          echo "Building backend image in ACR (${{ env.TAG }})"
+          az acr build \
+            --registry "${{ env.ACR_NAME }}" \
+            --image "loanarmy/backend:${{ env.TAG }}" \
+            --file loan-army-backend/Dockerfile \
+            loan-army-backend
+
+      - name: Get ACR server
+        id: acr
+        run: |
+          ACR_SERVER=$(az acr show -g "${{ env.RESOURCE_GROUP }}" -n "${{ env.ACR_NAME }}" --query loginServer -o tsv)
+          echo "server=$ACR_SERVER" >> $GITHUB_OUTPUT
+
+      - name: Configure identity and ACR pull
+        run: |
+          ACR_SCOPE=$(az acr show -g "${{ env.RESOURCE_GROUP }}" -n "${{ env.ACR_NAME }}" --query id -o tsv)
+
+          echo "Assigning system identity to backend"
+          az containerapp identity assign \
+            -g "${{ env.RESOURCE_GROUP }}" \
+            -n "${{ env.APP_BACKEND }}" \
+            --system-assigned > /dev/null
+
+          PRINCIPAL_ID=$(az containerapp show \
+            -g "${{ env.RESOURCE_GROUP }}" \
+            -n "${{ env.APP_BACKEND }}" \
+            --query identity.principalId -o tsv)
+
+          echo "Granting AcrPull to backend ($PRINCIPAL_ID)"
+          az role assignment create \
+            --assignee "$PRINCIPAL_ID" \
+            --role "AcrPull" \
+            --scope "$ACR_SCOPE" > /dev/null 2>&1 || true
+
+          echo "Setting container registry for backend"
+          az containerapp registry set \
+            -g "${{ env.RESOURCE_GROUP }}" \
+            -n "${{ env.APP_BACKEND }}" \
+            --server "${{ steps.acr.outputs.server }}" \
+            --identity system > /dev/null
+
+      - name: Update backend container app
+        run: |
+          REVISION_SUFFIX="r${{ github.run_number }}-${{ github.run_attempt }}"
+
+          echo "Updating backend image + ingress (revision: $REVISION_SUFFIX)"
+          az containerapp revision set-mode \
+            -g "${{ env.RESOURCE_GROUP }}" \
+            -n "${{ env.APP_BACKEND }}" \
+            --mode single > /dev/null 2>&1 || true
+
+          az containerapp update \
+            -g "${{ env.RESOURCE_GROUP }}" \
+            -n "${{ env.APP_BACKEND }}" \
+            --image "${{ steps.acr.outputs.server }}/loanarmy/backend:${{ env.TAG }}" \
+            --revision-suffix "$REVISION_SUFFIX" > /dev/null
+
+          az containerapp ingress enable \
+            -g "${{ env.RESOURCE_GROUP }}" \
+            -n "${{ env.APP_BACKEND }}" \
+            --type external \
+            --target-port 5001 > /dev/null 2>&1 || true
+
+      - name: Update scheduled job
+        run: |
+          if az containerapp job show -g "${{ env.RESOURCE_GROUP }}" -n "${{ env.JOB_WEEKLY_NAME }}" > /dev/null 2>&1; then
+            echo "Updating scheduled job image"
+            az containerapp job update \
+              -g "${{ env.RESOURCE_GROUP }}" \
+              -n "${{ env.JOB_WEEKLY_NAME }}" \
+              --image "${{ steps.acr.outputs.server }}/loanarmy/backend:${{ env.TAG }}" > /dev/null
+          else
+            echo "Scheduled job not found, skipping"
+          fi
+
+      - name: Get backend FQDN
+        id: get-fqdn
+        run: |
+          FQDN=$(az containerapp show \
+            -g "${{ env.RESOURCE_GROUP }}" \
+            -n "${{ env.APP_BACKEND }}" \
+            --query properties.configuration.ingress.fqdn -o tsv)
+          echo "fqdn=$FQDN" >> $GITHUB_OUTPUT
+          echo "Backend FQDN: $FQDN"
+
+  deploy-frontend:
+    name: Deploy Frontend
+    runs-on: ubuntu-latest
+    needs: [deploy-backend]
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup pnpm
+        uses: pnpm/action-setup@v4
+        with:
+          version: 9
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: 'pnpm'
+          cache-dependency-path: loan-army-frontend/pnpm-lock.yaml
+
+      - name: Install dependencies
+        working-directory: loan-army-frontend
+        run: pnpm install --frozen-lockfile
+
+      - name: Build frontend
+        working-directory: loan-army-frontend
+        env:
+          VITE_API_BASE: https://${{ needs.deploy-backend.outputs.backend_fqdn }}/api
+        run: |
+          echo "Building with VITE_API_BASE=$VITE_API_BASE"
+          pnpm run build
+
+      - name: Deploy to Azure Static Web App
+        uses: Azure/static-web-apps-deploy@v1
+        with:
+          azure_static_web_apps_api_token: ${{ secrets.SWA_DEPLOYMENT_TOKEN }}
+          repo_token: ${{ secrets.GITHUB_TOKEN }}
+          action: 'upload'
+          app_location: 'loan-army-frontend/dist'
+          skip_app_build: true
+          skip_api_build: true
+
+  summary:
+    name: Deployment Summary
+    runs-on: ubuntu-latest
+    needs: [deploy-backend, deploy-frontend]
+    if: always()
+    steps:
+      - name: Print summary
+        run: |
+          echo "## Deployment Summary" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+
+          if [ "${{ needs.deploy-backend.result }}" == "success" ]; then
+            echo "- Backend: https://${{ needs.deploy-backend.outputs.backend_fqdn }}/api" >> $GITHUB_STEP_SUMMARY
+          else
+            echo "- Backend: FAILED" >> $GITHUB_STEP_SUMMARY
+          fi
+
+          if [ "${{ needs.deploy-frontend.result }}" == "success" ]; then
+            echo "- Frontend: Deployed to Azure Static Web App" >> $GITHUB_STEP_SUMMARY
+          else
+            echo "- Frontend: FAILED" >> $GITHUB_STEP_SUMMARY
+          fi
