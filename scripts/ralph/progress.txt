@@ -1,0 +1,20 @@
+# Ralph Progress Log
+
+**Started:** $(date +%Y-%m-%d)
+**Planning Ledger:** (set when first planning ledger created)
+
+---
+
+## Codebase Patterns
+
+> Discovered patterns persist here. Also update AGENTS.md.
+
+- (none yet)
+
+---
+
+## Session Log
+
+> Ralph appends after each iteration.
+
+(awaiting first Ralph run)

@@ -6760,6 +6760,11 @@ def _run_seed_top5_logic(data: dict, job_id: str = None) -> dict:
         api_client.set_season_year(season)
         api_client._prime_team_cache(season)
 
+        # Clear stale transfer cache to ensure fresh API data (critical for mid-window seeding)
+        if hasattr(api_client._resolve(), '_cached_transfers'):
+            api_client._resolve()._cached_transfers.cache_clear()
+            logger.info("🗑️ Cleared _cached_transfers LRU cache for fresh data")
+
         if job_id:
             _update_job(job_id, current_player='Fetching loan candidates...')
 
@@ -7063,6 +7068,11 @@ def admin_seed_team_loans():
         _sync_season(season=season)
         api_client.set_season_year(season)
         api_client._prime_team_cache(season)
+
+        # Clear stale transfer cache to ensure fresh API data (critical for mid-window seeding)
+        if hasattr(api_client._resolve(), '_cached_transfers'):
+            api_client._resolve()._cached_transfers.cache_clear()
+            logger.info("🗑️ Cleared _cached_transfers LRU cache for fresh data")
 
         # Default to Top-5 leagues; results will be filtered to parent_api_id
         league_ids = data.get('league_ids') or [39, 140, 78, 135, 61]

@@ -121,6 +121,28 @@ Key variables (see `loan-army-backend/env.template` for full list):
 - `MAILGUN_API_KEY`, `MAILGUN_DOMAIN` - Email delivery
 - `ADMIN_API_KEY` - Admin endpoint authentication
 
-## Session Continuity
+## Agent Protocol (MANDATORY)
 
-This project uses `CONTINUITY.md` as a session ledger (see `AGENTS.md` for conventions). Update it when goals, decisions, or state changes to survive context compaction.
+**CRITICAL: Before starting ANY work, you MUST:**
+
+1. **Read `AGENTS.md`** - Contains operating principles, ledger protocol, and task flow rules
+2. **Read `CONTINUITY.md`** - Master ledger with current project state and active tasks
+3. **Check for active planning ledgers** in `ledgers/` directory
+
+**This is not optional.** These files are the single source of truth for project state.
+
+### Key Rules from AGENTS.md
+
+- **Ledger-first:** Update CONTINUITY.md when state changes (goals, decisions, blockers)
+- **Task statuses:** `pending` → `ready` → `in-progress` → `complete`
+- **Quality bar:** Lint/typecheck must pass before marking work complete
+- **Trivial tasks** (<15 min, single file): Log one-liner in CONTINUITY.md's Trivial Log
+
+### Ralph Autonomous Mode
+
+When running via `./scripts/ralph/ralph.sh`:
+- Pick ONLY `ready` tasks from the active planning ledger
+- Complete ONE task per iteration
+- Update ledger status and commit after each task
+- Output `<ralph>COMPLETE</ralph>` when all tasks done
+- Output `<ralph>STOP</ralph>` when blocked
