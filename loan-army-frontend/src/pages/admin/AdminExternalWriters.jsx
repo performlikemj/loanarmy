@@ -4,7 +4,7 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/com
 import { Badge } from '@/components/ui/badge'
 import { Input } from '@/components/ui/input'
 import { Textarea } from '@/components/ui/textarea'
-import { Loader2, Users, Search, UserPlus, Edit, MoreVertical, Building2, MapPin, Plus, X, Mail, ExternalLink, Trash2, CheckCircle, Clock } from 'lucide-react'
+import { Loader2, Users, Search, UserPlus, Edit, MoreVertical, Building2, MapPin, Mail, ExternalLink, Trash2, CheckCircle, Clock } from 'lucide-react'
 import {
     DropdownMenu,
     DropdownMenuContent,
@@ -22,7 +22,6 @@ import TeamMultiSelect from '@/components/ui/TeamMultiSelect'
 export function AdminExternalWriters() {
     const [writers, setWriters] = useState([])
     const [allTeams, setAllTeams] = useState([])
-    const [loanDestinations, setLoanDestinations] = useState([])
     const [loading, setLoading] = useState(true)
     const [searchQuery, setSearchQuery] = useState('')
 
@@ -46,8 +45,7 @@ export function AdminExternalWriters() {
     // Coverage editing state
     const [editingCoverageWriter, setEditingCoverageWriter] = useState(null)
     const [selectedParentClubs, setSelectedParentClubs] = useState([])
-    const [selectedLoanTeams, setSelectedLoanTeams] = useState([])
-    const [newLoanTeamName, setNewLoanTeamName] = useState('')
+    const [selectedLoanTeamIds, setSelectedLoanTeamIds] = useState([])
     const [loadingAssignments, setLoadingAssignments] = useState(false)
     const [assigning, setAssigning] = useState(false)
     const [coverageTab, setCoverageTab] = useState('parent')
@@ -66,14 +64,12 @@ export function AdminExternalWriters() {
     const loadData = async () => {
         try {
             setLoading(true)
-            const [writersData, teamsData, loanDestinationsData] = await Promise.all([
+            const [writersData, teamsData] = await Promise.all([
                 APIService.getEditorManagedWriters(),
-                APIService.getTeams(),
-                APIService.getLoanDestinations().catch(() => ({ destinations: [] }))
+                APIService.getTeams()
             ])
             setWriters(writersData?.writers || [])
             setAllTeams(teamsData || [])
-            setLoanDestinations(loanDestinationsData?.destinations || [])
         } catch (error) {
             console.error('Failed to load data:', error)
         } finally {
@@ -100,10 +96,20 @@ export function AdminExternalWriters() {
         )
     }, [writers, searchQuery])
 
+    // Merged loan team options from allTeams (uses allTeams as the source of truth)
+    const loanTeamOptions = useMemo(() => {
+        // Use allTeams directly - same pool of teams for both parent clubs and loan destinations
+        return allTeams.map(team => ({
+            id: team.id,
+            name: team.name,
+            league_name: team.league_name
+        }))
+    }, [allTeams])
+
     // Create writer
     const handleCreate = async () => {
-        if (!createForm.email.trim() || !createForm.display_name.trim()) {
-            alert('Email and display name are required')
+        if (!createForm.display_name.trim()) {
+            alert('Display name is required')
             return
         }
 
@@ -125,6 +131,7 @@ export function AdminExternalWriters() {
     const handleOpenEdit = (writer) => {
         setEditingWriter(writer)
         setEditForm({
+            email: writer.email || '',
             display_name: writer.display_name || '',
             attribution_name: writer.attribution_name || '',
             attribution_url: writer.attribution_url || '',
@@ -161,11 +168,11 @@ export function AdminExternalWriters() {
             const parentTeamIds = (writer.assigned_teams || []).map(t => t.team_id)
             setSelectedParentClubs(parentTeamIds)
 
-            const loanTeams = (writer.loan_team_assignments || []).map(lt => ({
-                loan_team_id: lt.loan_team_id,
-                loan_team_name: lt.loan_team_name
-            }))
-            setSelectedLoanTeams(loanTeams)
+            // Convert loan team assignments to IDs for TeamMultiSelect
+            const loanTeamIds = (writer.loan_team_assignments || [])
+                .map(lt => lt.loan_team_id)
+                .filter(id => id != null)
+            setSelectedLoanTeamIds(loanTeamIds)
         } finally {
             setLoadingAssignments(false)
         }
@@ -178,10 +185,19 @@ export function AdminExternalWriters() {
         try {
             setAssigning(true)
 
+            // Convert loan team IDs back to objects for API
+            const loanTeamsToSave = selectedLoanTeamIds.map(id => {
+                const team = loanTeamOptions.find(t => t.id === id)
+                return {
+                    loan_team_id: id,
+                    loan_team_name: team?.name ?? ''
+                }
+            }).filter(lt => lt.loan_team_name)
+
             // Save both parent clubs and loan teams
             await Promise.all([
                 APIService.editorAssignTeams(editingCoverageWriter.id, selectedParentClubs),
-                APIService.editorAssignLoanTeams(editingCoverageWriter.id, selectedLoanTeams)
+                APIService.editorAssignLoanTeams(editingCoverageWriter.id, loanTeamsToSave)
             ])
 
             setEditingCoverageWriter(null)
@@ -192,36 +208,6 @@ export function AdminExternalWriters() {
         } finally {
             setAssigning(false)
         }
-    }
-
-    // Add loan team
-    const handleAddLoanTeam = () => {
-        const name = newLoanTeamName.trim()
-        if (!name) return
-
-        // Check for duplicate
-        if (selectedLoanTeams.some(lt => lt.loan_team_name.toLowerCase() === name.toLowerCase())) {
-            return
-        }
-
-        // Check if it matches a known destination
-        const match = loanDestinations.find(d =>
-            d.loan_team_name?.toLowerCase() === name.toLowerCase()
-        )
-
-        setSelectedLoanTeams([
-            ...selectedLoanTeams,
-            {
-                loan_team_id: match?.loan_team_id || null,
-                loan_team_name: match?.loan_team_name || name
-            }
-        ])
-        setNewLoanTeamName('')
-    }
-
-    // Remove loan team
-    const handleRemoveLoanTeam = (index) => {
-        setSelectedLoanTeams(selectedLoanTeams.filter((_, i) => i !== index))
     }
 
     // Delete writer
@@ -420,10 +406,10 @@ export function AdminExternalWriters() {
                                                     <DropdownMenuSeparator />
                                                     <DropdownMenuItem
                                                         onClick={() => handleSendClaimInvite(writer)}
-                                                        disabled={sendingClaimInvite === writer.id}
+                                                        disabled={sendingClaimInvite === writer.id || !writer.email}
                                                     >
                                                         <Mail className="h-4 w-4 mr-2" />
-                                                        {sendingClaimInvite === writer.id ? 'Sending...' : 'Send Claim Invite'}
+                                                        {sendingClaimInvite === writer.id ? 'Sending...' : !writer.email ? 'No email for invite' : 'Send Claim Invite'}
                                                     </DropdownMenuItem>
                                                     <DropdownMenuSeparator />
                                                     <DropdownMenuItem
@@ -456,14 +442,17 @@ export function AdminExternalWriters() {
                     </DialogHeader>
                     <div className="space-y-4 py-4">
                         <div className="space-y-2">
-                            <Label htmlFor="email">Email *</Label>
+                            <Label htmlFor="email">Email</Label>
                             <Input
                                 id="email"
                                 type="email"
-                                placeholder="writer@example.com"
+                                placeholder="writer@example.com (optional)"
                                 value={createForm.email}
                                 onChange={(e) => setCreateForm({ ...createForm, email: e.target.value })}
                             />
+                            <p className="text-xs text-muted-foreground">
+                                Required only if you want to send a claim invitation
+                            </p>
                         </div>
                         <div className="space-y-2">
                             <Label htmlFor="display_name">Display Name *</Label>
@@ -533,6 +522,19 @@ export function AdminExternalWriters() {
                         <DialogTitle>Edit Writer Profile</DialogTitle>
                     </DialogHeader>
                     <div className="space-y-4 py-4">
+                        <div className="space-y-2">
+                            <Label htmlFor="edit_email">Email</Label>
+                            <Input
+                                id="edit_email"
+                                type="email"
+                                placeholder="writer@example.com (optional)"
+                                value={editForm.email || ''}
+                                onChange={(e) => setEditForm({ ...editForm, email: e.target.value })}
+                            />
+                            <p className="text-xs text-muted-foreground">
+                                Required for sending claim invitations
+                            </p>
+                        </div>
                         <div className="space-y-2">
                             <Label htmlFor="edit_display_name">Display Name</Label>
                             <Input
@@ -626,46 +628,14 @@ export function AdminExternalWriters() {
 
                             <TabsContent value="loan" className="py-4">
                                 <p className="text-sm text-muted-foreground mb-4">
-                                    Add loan destination teams this writer watches and covers.
+                                    Select loan destination teams this writer watches and covers.
                                 </p>
-                                <div className="space-y-4">
-                                    <div className="flex gap-2">
-                                        <Input
-                                            placeholder="Add team name..."
-                                            value={newLoanTeamName}
-                                            onChange={(e) => setNewLoanTeamName(e.target.value)}
-                                            onKeyDown={(e) => e.key === 'Enter' && handleAddLoanTeam()}
-                                            list="loan-destinations"
-                                        />
-                                        <datalist id="loan-destinations">
-                                            {loanDestinations.map((d) => (
-                                                <option key={d.loan_team_name} value={d.loan_team_name} />
-                                            ))}
-                                        </datalist>
-                                        <Button onClick={handleAddLoanTeam} size="icon">
-                                            <Plus className="h-4 w-4" />
-                                        </Button>
-                                    </div>
-
-                                    <div className="flex flex-wrap gap-2">
-                                        {selectedLoanTeams.map((lt, index) => (
-                                            <Badge key={index} variant="secondary" className="pr-1">
-                                                {lt.loan_team_name}
-                                                <Button
-                                                    variant="ghost"
-                                                    size="icon"
-                                                    className="h-4 w-4 ml-1 hover:bg-transparent"
-                                                    onClick={() => handleRemoveLoanTeam(index)}
-                                                >
-                                                    <X className="h-3 w-3" />
-                                                </Button>
-                                            </Badge>
-                                        ))}
-                                        {selectedLoanTeams.length === 0 && (
-                                            <p className="text-sm text-muted-foreground">No loan teams assigned</p>
-                                        )}
-                                    </div>
-                                </div>
+                                <TeamMultiSelect
+                                    teams={loanTeamOptions}
+                                    selectedIds={selectedLoanTeamIds}
+                                    onChange={setSelectedLoanTeamIds}
+                                    placeholder="Select loan teams..."
+                                />
                             </TabsContent>
                         </Tabs>
                     )}

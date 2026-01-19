@@ -640,7 +640,7 @@ class UserAccount(db.Model):
     __tablename__ = 'user_accounts'
 
     id = db.Column(db.Integer, primary_key=True)
-    email = db.Column(db.String(255), unique=True, nullable=False)
+    email = db.Column(db.String(255), unique=True, nullable=True)
     display_name = db.Column(db.String(80), nullable=False)
     display_name_lower = db.Column(db.String(80), unique=True, nullable=False)
     display_name_confirmed = db.Column(db.Boolean, default=False)

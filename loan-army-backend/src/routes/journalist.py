@@ -3338,7 +3338,7 @@ def create_placeholder_writer():
     """Create a placeholder account for an external writer.
 
     Body:
-        email: Writer's email (required)
+        email: Writer's email (optional)
         display_name: Display name (required)
         attribution_name: Attribution name (e.g., "The Leyton Orienter")
         attribution_url: Link to their publication
@@ -3348,18 +3348,17 @@ def create_placeholder_writer():
         editor = g.user
         data = request.get_json() or {}
 
-        email = (data.get('email') or '').strip().lower()
+        email = (data.get('email') or '').strip().lower() or None
         display_name = (data.get('display_name') or '').strip()
 
-        if not email:
-            return jsonify({'error': 'email is required'}), 400
         if not display_name:
             return jsonify({'error': 'display_name is required'}), 400
 
-        # Check if email already exists
-        existing = UserAccount.query.filter_by(email=email).first()
-        if existing:
-            return jsonify({'error': 'An account with this email already exists'}), 409
+        # Check if email already exists (only if email provided)
+        if email:
+            existing = UserAccount.query.filter_by(email=email).first()
+            if existing:
+                return jsonify({'error': 'An account with this email already exists'}), 409
 
         # Check display_name uniqueness
         existing_name = UserAccount.query.filter_by(display_name_lower=display_name.lower()).first()
@@ -3391,7 +3390,7 @@ def create_placeholder_writer():
         db.session.add(writer)
         db.session.commit()
 
-        logger.info(f"Editor {editor.id} created placeholder writer {writer.id} ({writer.email})")
+        logger.info(f"Editor {editor.id} created placeholder writer {writer.id} ({writer.email or writer.display_name})")
 
         return jsonify({
             'message': 'Placeholder writer created',
@@ -3477,6 +3476,16 @@ def update_placeholder_writer(writer_id):
             return jsonify({'error': 'Not authorized to edit this writer'}), 403
 
         data = request.get_json() or {}
+
+        if 'email' in data:
+            new_email = (data['email'] or '').strip().lower() or None
+            if new_email != writer.email:
+                # Check uniqueness if new email is provided
+                if new_email:
+                    existing = UserAccount.query.filter_by(email=new_email).first()
+                    if existing and existing.id != writer.id:
+                        return jsonify({'error': 'An account with this email already exists'}), 409
+                writer.email = new_email
 
         if 'display_name' in data:
             new_name = (data['display_name'] or '').strip()
@@ -3689,6 +3698,9 @@ def send_claim_invite(writer_id):
 
         if not writer.is_placeholder():
             return jsonify({'error': 'This account is not a placeholder or already claimed'}), 400
+
+        if not writer.email:
+            return jsonify({'error': 'Cannot send claim invite - writer has no email address'}), 400
 
         # Check permission
         if not is_admin and writer.managed_by_user_id != editor.id:
