@@ -17,17 +17,20 @@ import {
   Minus,
   Eye,
   EyeOff,
+  Quote,
 } from 'lucide-react'
 import { cn } from '@/lib/utils'
 
 const BLOCK_TYPE_ICONS = {
   text: Type,
+  quote: Quote,
   chart: BarChart3,
   divider: Minus,
 }
 
 const BLOCK_TYPE_LABELS = {
   text: 'Text',
+  quote: 'Quote',
   chart: 'Chart',
   divider: 'Divider',
 }
@@ -38,6 +41,7 @@ export function BlockWrapper({
   onTogglePremium,
   onUpdate,
   onEditChart,
+  onEditQuote,
   playerId,
   weekRange,
 }) {
@@ -63,10 +67,13 @@ export function BlockWrapper({
     if (isCollapsed) {
       return (
         <div className="text-sm text-gray-500 italic">
-          {block.type === 'text' && (block.content?.replace(/<[^>]*>/g, '').slice(0, 100) || 'Empty text block')}
+          {block.type === 'text' &&
+            (block.content?.replace(/<[^>]*>/g, '').slice(0, 100) || 'Empty text block')}
+          {block.type === 'quote' &&
+            (block.quote_text?.slice(0, 80) || 'Empty quote')}
           {block.type === 'chart' && `${block.chart_type?.replace('_', ' ')} chart`}
           {block.type === 'divider' && 'Section divider'}
-          {block.content?.length > 100 && '...'}
+          {(block.content?.length > 100 || block.quote_text?.length > 80) && '...'}
         </div>
       )
     }
@@ -81,14 +88,39 @@ export function BlockWrapper({
           />
         )
 
+      case 'quote':
+        return (
+          <div className="space-y-3">
+            {/* Quote preview */}
+            <blockquote className="border-l-4 border-amber-400 pl-4 py-2 bg-amber-50/50 rounded-r">
+              <p className="text-gray-700 italic">
+                {block.quote_text ? `"${block.quote_text}"` : 'Click to add quote...'}
+              </p>
+              {block.source_name && (
+                <footer className="mt-1 text-sm text-gray-500">
+                  — {block.source_name}
+                  {block.source_type === 'direct_message' &&
+                    block.source_platform &&
+                    `, via ${block.source_platform} DM`}
+                  {block.source_type === 'email' && ', via email'}
+                  {block.source_type === 'personal' && ', speaking to Go On Loan'}
+                  {block.quote_date && ` (${block.quote_date})`}
+                </footer>
+              )}
+              {block.source_type === 'anonymous' && !block.source_name && (
+                <footer className="mt-1 text-sm text-gray-500">— according to sources</footer>
+              )}
+            </blockquote>
+            <Button type="button" variant="outline" size="sm" onClick={onEditQuote} className="w-full">
+              <Settings className="h-4 w-4 mr-2" /> Edit Quote
+            </Button>
+          </div>
+        )
+
       case 'chart':
         return (
           <div className="space-y-3">
-            <ChartPreview
-              block={block}
-              playerId={playerId}
-              weekRange={weekRange}
-            />
+            <ChartPreview block={block} playerId={playerId} weekRange={weekRange} />
             <Button
               type="button"
               variant="outline"
@@ -195,6 +227,20 @@ export function BlockWrapper({
               className="h-7 w-7 p-0"
               onClick={onEditChart}
               title="Configure chart"
+            >
+              <Settings className="h-4 w-4 text-gray-500" />
+            </Button>
+          )}
+
+          {/* Quote settings (only for quote blocks) */}
+          {block.type === 'quote' && (
+            <Button
+              type="button"
+              variant="ghost"
+              size="sm"
+              className="h-7 w-7 p-0"
+              onClick={onEditQuote}
+              title="Edit quote"
             >
               <Settings className="h-4 w-4 text-gray-500" />
             </Button>

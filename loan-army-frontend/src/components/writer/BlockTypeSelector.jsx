@@ -18,6 +18,7 @@ import {
   Table2,
   Minus,
   Sparkles,
+  Quote,
 } from 'lucide-react'
 import { cn } from '@/lib/utils'
 
@@ -28,6 +29,13 @@ const BLOCK_TYPES = [
     description: 'Rich text with formatting',
     icon: Type,
     color: 'bg-blue-50 text-blue-700 border-blue-200 hover:bg-blue-100',
+  },
+  {
+    type: 'quote',
+    label: 'Quote',
+    description: 'Attributed quote from a source',
+    icon: Quote,
+    color: 'bg-amber-50 text-amber-700 border-amber-200 hover:bg-amber-100',
   },
   {
     type: 'divider',

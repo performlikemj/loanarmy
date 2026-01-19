@@ -2,7 +2,7 @@ import React, { useState, useEffect } from 'react'
 import { Card, CardContent } from '@/components/ui/card'
 import { Button } from '@/components/ui/button'
 import { Badge } from '@/components/ui/badge'
-import { Lock, Loader2 } from 'lucide-react'
+import { Lock, Loader2, ExternalLink } from 'lucide-react'
 import { APIService } from '@/lib/api'
 import { 
   MatchPerformanceCards, 
@@ -87,6 +87,90 @@ function ChartBlock({ block, playerId, weekRange }) {
     default:
       return <div className="text-gray-500">Unknown chart type</div>
   }
+}
+
+// Quote attribution helper
+function QuoteAttribution({ block }) {
+  const { source_name, source_type, source_platform, source_url, quote_date } = block
+
+  // Format date
+  let dateStr = ''
+  if (quote_date) {
+    try {
+      const [year, month] = quote_date.split('-')
+      const monthNames = [
+        'Jan',
+        'Feb',
+        'Mar',
+        'Apr',
+        'May',
+        'Jun',
+        'Jul',
+        'Aug',
+        'Sep',
+        'Oct',
+        'Nov',
+        'Dec',
+      ]
+      dateStr = ` (${monthNames[parseInt(month) - 1]} ${year})`
+    } catch {
+      dateStr = ` (${quote_date})`
+    }
+  }
+
+  if (source_type === 'public_link' && source_url) {
+    return (
+      <>
+        <a
+          href={source_url}
+          target="_blank"
+          rel="noopener noreferrer"
+          className="text-blue-600 hover:underline inline-flex items-center gap-1"
+        >
+          {source_name}
+          <ExternalLink className="h-3 w-3" />
+        </a>
+        {dateStr}
+      </>
+    )
+  }
+
+  if (source_type === 'direct_message') {
+    const platform = source_platform ? `${source_platform} DM` : 'DM'
+    return (
+      <span>
+        {source_name}, via {platform}
+        {dateStr}
+      </span>
+    )
+  }
+
+  if (source_type === 'email') {
+    return (
+      <span>
+        {source_name}, via email{dateStr}
+      </span>
+    )
+  }
+
+  if (source_type === 'personal') {
+    return (
+      <span>
+        {source_name}, speaking to Go On Loan{dateStr}
+      </span>
+    )
+  }
+
+  if (source_type === 'anonymous') {
+    return <span>according to sources{dateStr}</span>
+  }
+
+  return (
+    <span>
+      {source_name}
+      {dateStr}
+    </span>
+  )
 }
 
 // Locked premium block placeholder
@@ -176,10 +260,24 @@ export function BlockRenderer({
 
           case 'divider':
             return (
-              <hr 
-                key={block.id || index} 
-                className="border-t-2 border-gray-200 my-6" 
+              <hr
+                key={block.id || index}
+                className="border-t-2 border-gray-200 my-6"
               />
+            )
+
+          case 'quote':
+            return (
+              <blockquote
+                key={block.id || index}
+                className="border-l-4 border-blue-400 pl-4 py-3 my-4 bg-blue-50/50 rounded-r"
+              >
+                <p className="text-gray-800 italic text-lg">"{block.quote_text}"</p>
+                <footer className="mt-2 text-sm text-gray-600 flex items-center gap-1">
+                  <span>—</span>
+                  <QuoteAttribution block={block} />
+                </footer>
+              </blockquote>
             )
 
           default:

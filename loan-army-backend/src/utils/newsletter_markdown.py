@@ -278,6 +278,53 @@ def format_links(links: Optional[list]) -> str:
     return '\n'.join(lines)
 
 
+def render_quote_block(block: dict) -> str:
+    """Render a quote block as Reddit-compatible markdown.
+
+    Args:
+        block: Quote block dict containing quote_text, source_name, source_type, etc.
+
+    Returns:
+        Reddit-formatted markdown quote string
+    """
+    quote_text = block.get('quote_text', '')
+    source_name = block.get('source_name', '')
+    source_type = block.get('source_type', 'public_link')
+    source_platform = block.get('source_platform', '')
+    source_url = block.get('source_url')
+    quote_date = block.get('quote_date')
+
+    # Format date if present (e.g., "2024-01" -> "(Jan 2024)")
+    date_str = ''
+    if quote_date:
+        try:
+            if len(quote_date) == 7:  # "2024-01"
+                dt = datetime.strptime(quote_date, '%Y-%m')
+                date_str = f" ({dt.strftime('%b %Y')})"
+            elif len(quote_date) == 10:  # "2024-01-15"
+                dt = datetime.strptime(quote_date, '%Y-%m-%d')
+                date_str = f" ({dt.strftime('%b %d, %Y')})"
+        except ValueError:
+            date_str = f" ({quote_date})"
+
+    # Build attribution based on source type
+    if source_type == 'public_link' and source_url:
+        attribution = f"[{source_name}]({source_url})"
+    elif source_type == 'direct_message':
+        platform_label = f"{source_platform} DM" if source_platform else "DM"
+        attribution = f"{source_name}, via {platform_label}"
+    elif source_type == 'email':
+        attribution = f"{source_name}, via email"
+    elif source_type == 'personal':
+        attribution = f"{source_name}, speaking to Go On Loan"
+    elif source_type == 'anonymous':
+        attribution = "according to sources"
+    else:
+        attribution = source_name
+
+    return f'> "{quote_text}"\n> — {attribution}{date_str}\n'
+
+
 def convert_newsletter_to_markdown(
     newsletter: dict,
     include_expanded_stats: bool = True,

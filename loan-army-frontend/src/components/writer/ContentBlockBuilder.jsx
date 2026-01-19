@@ -17,6 +17,7 @@ import {
 import { BlockWrapper } from './BlockWrapper'
 import { BlockTypeSelector } from './BlockTypeSelector'
 import { ChartBlockEditor } from './ChartBlockEditor'
+import { QuoteBlockEditor } from './QuoteBlockEditor'
 import { CommentaryEditor } from '../CommentaryEditor'
 import { Button } from '@/components/ui/button'
 import { Card, CardContent } from '@/components/ui/card'
@@ -33,6 +34,18 @@ const BLOCK_TEMPLATES = {
     id: generateBlockId(),
     type: 'text',
     content: '',
+    is_premium: false,
+    position: 0,
+  }),
+  quote: () => ({
+    id: generateBlockId(),
+    type: 'quote',
+    quote_text: '',
+    source_name: '',
+    source_type: 'direct_message',
+    source_platform: '',
+    source_url: '',
+    quote_date: '',
     is_premium: false,
     position: 0,
   }),
@@ -64,6 +77,7 @@ export function ContentBlockBuilder({
 }) {
   const [activeId, setActiveId] = useState(null)
   const [editingChartBlockId, setEditingChartBlockId] = useState(null)
+  const [editingQuoteBlockId, setEditingQuoteBlockId] = useState(null)
   const [showBlockSelector, setShowBlockSelector] = useState(false)
   const [insertPosition, setInsertPosition] = useState(null)
 
@@ -134,6 +148,11 @@ export function ContentBlockBuilder({
     if (type === 'chart') {
       setEditingChartBlockId(newBlock.id)
     }
+
+    // Open quote editor for new quote blocks
+    if (type === 'quote') {
+      setEditingQuoteBlockId(newBlock.id)
+    }
   }, [normalizedBlocks, onChange, insertPosition])
 
   const handleRemoveBlock = useCallback((blockId) => {
@@ -163,8 +182,11 @@ export function ContentBlockBuilder({
   }, [])
 
   const activeBlock = activeId ? normalizedBlocks.find((b) => b.id === activeId) : null
-  const editingChartBlock = editingChartBlockId 
+  const editingChartBlock = editingChartBlockId
     ? normalizedBlocks.find((b) => b.id === editingChartBlockId)
+    : null
+  const editingQuoteBlock = editingQuoteBlockId
+    ? normalizedBlocks.find((b) => b.id === editingQuoteBlockId)
     : null
 
   return (
@@ -203,6 +225,7 @@ export function ContentBlockBuilder({
                   onTogglePremium={() => handleTogglePremium(block.id)}
                   onUpdate={(updates) => handleUpdateBlock(block.id, updates)}
                   onEditChart={() => setEditingChartBlockId(block.id)}
+                  onEditQuote={() => setEditingQuoteBlockId(block.id)}
                   playerId={playerId}
                   weekRange={weekRange}
                 />
@@ -277,6 +300,19 @@ export function ContentBlockBuilder({
           }}
           playerId={playerId}
           weekRange={weekRange}
+        />
+      )}
+
+      {/* Quote editor modal */}
+      {editingQuoteBlock && (
+        <QuoteBlockEditor
+          open={!!editingQuoteBlock}
+          onOpenChange={(open) => !open && setEditingQuoteBlockId(null)}
+          block={editingQuoteBlock}
+          onSave={(updates) => {
+            handleUpdateBlock(editingQuoteBlockId, updates)
+            setEditingQuoteBlockId(null)
+          }}
         />
       )}
 

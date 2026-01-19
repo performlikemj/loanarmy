@@ -615,6 +615,21 @@ export class APIService {
     static async adminLoanDeactivate(loanId) {
         return this.request(`/admin/loans/${loanId}/deactivate`, { method: 'POST' }, { admin: true })
     }
+    static async adminLoanTransition(loanId, payload) {
+        return this.request(`/admin/loans/${loanId}/transition`, { method: 'POST', body: JSON.stringify(payload) }, { admin: true })
+    }
+    static async adminLoansBulkDeactivate(loanIds, note = null) {
+        return this.request('/admin/loans/bulk-deactivate', { method: 'POST', body: JSON.stringify({ loan_ids: loanIds, note }) }, { admin: true })
+    }
+    static async adminLoansBulkTransition(transitions) {
+        return this.request('/admin/loans/bulk-transition', { method: 'POST', body: JSON.stringify({ transitions }) }, { admin: true })
+    }
+    static async adminLoansPreviewSync(params) {
+        return this.request('/admin/loans/preview-sync', { method: 'POST', body: JSON.stringify(params) }, { admin: true })
+    }
+    static async adminSeedTeam(params) {
+        return this.request('/admin/loans/seed-team', { method: 'POST', body: JSON.stringify(params) }, { admin: true })
+    }
     static async adminFlags(params = {}) {
         const q = new URLSearchParams(params)
         return this.request(`/admin/flags?${q}`, {}, { admin: true })

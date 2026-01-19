@@ -1486,30 +1486,41 @@ def _validate_structured_blocks(blocks: list) -> tuple[bool, str]:
     if not isinstance(blocks, list):
         return False, "structured_blocks must be an array"
     
-    valid_types = {'text', 'chart', 'divider'}
+    valid_types = {'text', 'chart', 'divider', 'quote'}
     valid_chart_types = {'match_card', 'radar', 'bar', 'line', 'stat_table'}
-    
+    valid_source_types = {'public_link', 'direct_message', 'email', 'personal', 'anonymous'}
+
     for i, block in enumerate(blocks):
         if not isinstance(block, dict):
             return False, f"Block {i} must be an object"
-        
+
         block_type = block.get('type')
         if block_type not in valid_types:
             return False, f"Block {i} has invalid type '{block_type}'"
-        
+
         if 'id' not in block:
             return False, f"Block {i} missing required 'id' field"
-        
+
         if block_type == 'text' and 'content' not in block:
             return False, f"Text block {i} missing 'content' field"
-        
+
         if block_type == 'chart':
             chart_type = block.get('chart_type')
             if chart_type not in valid_chart_types:
                 return False, f"Block {i} has invalid chart_type '{chart_type}'"
             if 'chart_config' not in block:
                 return False, f"Chart block {i} missing 'chart_config' field"
-    
+
+        if block_type == 'quote':
+            if 'quote_text' not in block or not block.get('quote_text'):
+                return False, f"Quote block {i} missing required 'quote_text' field"
+            source_type = block.get('source_type', 'public_link')
+            if source_type not in valid_source_types:
+                return False, f"Quote block {i} has invalid source_type '{source_type}'"
+            # source_name required except for anonymous quotes
+            if source_type != 'anonymous' and not block.get('source_name'):
+                return False, f"Quote block {i} missing required 'source_name' field"
+
     return True, ""
 
 
@@ -1542,7 +1553,11 @@ def _render_blocks_to_html(blocks: list, player_id: int = None, week_start: str 
         
         elif block_type == 'divider':
             html_parts.append('<hr class="content-divider" />')
-    
+
+        elif block_type == 'quote':
+            quote_html = _render_quote_block_to_html(block)
+            html_parts.append(quote_html)
+
     return '\n'.join(html_parts)
 
 
@@ -1617,6 +1632,65 @@ def _get_chart_placeholder_html(chart_type: str, message: str = None) -> str:
         <div style="font-weight: 600; color: #475569; margin-bottom: 4px;">{display_name}</div>
         <div style="font-size: 13px; color: #94a3b8;">{msg}</div>
     </div>
+    '''
+
+
+def _render_quote_block_to_html(block: dict) -> str:
+    """Render a quote block as styled HTML for emails.
+
+    Args:
+        block: Quote block containing quote_text, source_name, source_type, etc.
+
+    Returns:
+        HTML string with styled blockquote
+    """
+    from datetime import datetime as dt
+
+    quote_text = block.get('quote_text', '')
+    source_name = block.get('source_name', '')
+    source_type = block.get('source_type', 'public_link')
+    source_platform = block.get('source_platform', '')
+    source_url = block.get('source_url')
+    quote_date = block.get('quote_date')
+
+    # Format date if present
+    date_str = ''
+    if quote_date:
+        try:
+            if len(quote_date) == 7:  # "2024-01"
+                parsed = dt.strptime(quote_date, '%Y-%m')
+                date_str = f" ({parsed.strftime('%b %Y')})"
+            elif len(quote_date) == 10:  # "2024-01-15"
+                parsed = dt.strptime(quote_date, '%Y-%m-%d')
+                date_str = f" ({parsed.strftime('%b %d, %Y')})"
+        except ValueError:
+            date_str = f" ({quote_date})"
+
+    # Build attribution based on source type
+    if source_type == 'public_link' and source_url:
+        attribution = f'<a href="{source_url}" style="color: #2563eb; text-decoration: none;">{source_name}</a>'
+    elif source_type == 'direct_message':
+        platform_label = f"{source_platform} DM" if source_platform else "DM"
+        attribution = f"{source_name}, via {platform_label}"
+    elif source_type == 'email':
+        attribution = f"{source_name}, via email"
+    elif source_type == 'personal':
+        attribution = f"{source_name}, speaking to Go On Loan"
+    elif source_type == 'anonymous':
+        attribution = "according to sources"
+    else:
+        attribution = source_name
+
+    return f'''
+    <blockquote style="border-left: 4px solid #60a5fa; padding: 12px 16px; margin: 16px 0;
+         background: linear-gradient(135deg, #eff6ff 0%, #dbeafe 100%); border-radius: 0 8px 8px 0;">
+        <p style="color: #1e40af; font-style: italic; font-size: 16px; margin: 0 0 8px 0; line-height: 1.5;">
+            "{quote_text}"
+        </p>
+        <footer style="color: #6b7280; font-size: 14px;">
+            — {attribution}{date_str}
+        </footer>
+    </blockquote>
     '''
 
 

@@ -6673,6 +6673,430 @@ def admin_deactivate_loan(loan_id: int):
         db.session.rollback()
         return jsonify(_safe_error_payload(e, 'An unexpected error occurred. Please try again later.')), 500
 
+
+@api_bp.route('/admin/loans/<int:loan_id>/transition', methods=['POST'])
+@require_api_key
+def admin_transition_loan(loan_id: int):
+    """End current loan and optionally create a new loan for the same player.
+
+    Body: {
+        new_loan_team_db_id?: int,      # DB ID of new loan club
+        new_loan_team_api_id?: int,     # API ID of new loan club (will create/find Team)
+        new_loan_team_name?: str,       # Custom team name if not in DB
+        new_primary_team_db_id?: int,   # Optionally change parent club
+        window_key?: str,               # Window for new loan (defaults to current loan's window)
+        deactivate_only?: bool          # If true, just deactivate without creating new
+    }
+    """
+    try:
+        data = request.get_json() or {}
+
+        # Get existing loan
+        old_loan = LoanedPlayer.query.get_or_404(loan_id)
+
+        deactivate_only = bool(data.get('deactivate_only', False))
+
+        # Deactivate the old loan
+        old_loan.is_active = False
+        old_loan.updated_at = datetime.now(timezone.utc)
+
+        result = {
+            'old_loan_id': old_loan.id,
+            'old_loan_deactivated': True,
+            'player_name': old_loan.player_name,
+            'player_id': old_loan.player_id
+        }
+
+        if not deactivate_only:
+            # Resolve new loan team
+            new_loan_team = None
+            new_loan_team_name = data.get('new_loan_team_name', '').strip()
+
+            if data.get('new_loan_team_db_id'):
+                new_loan_team = Team.query.get(int(data['new_loan_team_db_id']))
+            elif data.get('new_loan_team_api_id'):
+                # Try to find or create team
+                api_id = int(data['new_loan_team_api_id'])
+                new_loan_team = Team.query.filter_by(team_id=api_id).first()
+                if not new_loan_team:
+                    # Create team from API data
+                    try:
+                        season = int(old_loan.window_key.split('-')[0]) if old_loan.window_key else 2025
+                        new_loan_team = _ensure_team_admin(api_id, season)
+                    except Exception:
+                        pass
+
+            if not new_loan_team and not new_loan_team_name:
+                db.session.rollback()
+                return jsonify({'error': 'new_loan_team_db_id, new_loan_team_api_id, or new_loan_team_name required when not deactivate_only'}), 400
+
+            # Resolve parent team (default to same as old loan)
+            parent_team = Team.query.get(old_loan.primary_team_id) if old_loan.primary_team_id else None
+            if data.get('new_primary_team_db_id'):
+                parent_team = Team.query.get(int(data['new_primary_team_db_id']))
+
+            # Use window_key from request or default to old loan's window
+            window_key = data.get('window_key', '').strip() or old_loan.window_key
+
+            # Create new loan
+            new_loan = LoanedPlayer(
+                player_id=old_loan.player_id,
+                player_name=old_loan.player_name,
+                age=old_loan.age,
+                nationality=old_loan.nationality,
+                primary_team_id=parent_team.id if parent_team else None,
+                primary_team_name=parent_team.name if parent_team else old_loan.primary_team_name,
+                loan_team_id=new_loan_team.id if new_loan_team else None,
+                loan_team_name=new_loan_team.name if new_loan_team else new_loan_team_name,
+                window_key=window_key,
+                is_active=True,
+                data_source='manual',  # Mark as manual to protect from API seeding
+                can_fetch_stats=old_loan.can_fetch_stats,
+                stats_coverage=old_loan.stats_coverage,
+                reviewer_notes=f'Transitioned from loan #{old_loan.id}',
+                created_at=datetime.now(timezone.utc)
+            )
+            db.session.add(new_loan)
+            db.session.flush()  # Get ID before commit
+
+            result['new_loan_id'] = new_loan.id
+            result['new_loan_team'] = new_loan.loan_team_name
+            result['new_loan_created'] = True
+
+        db.session.commit()
+        return jsonify(result)
+
+    except Exception as e:
+        logger.exception('admin_transition_loan failed')
+        db.session.rollback()
+        return jsonify(_safe_error_payload(e, 'An unexpected error occurred. Please try again later.')), 500
+
+
+@api_bp.route('/admin/loans/bulk-deactivate', methods=['POST'])
+@require_api_key
+def admin_bulk_deactivate_loans():
+    """Deactivate multiple loans at once.
+
+    Body: {
+        loan_ids: [int],    # List of loan IDs to deactivate
+        note?: str          # Optional note to append to reviewer_notes
+    }
+    """
+    try:
+        data = request.get_json() or {}
+        loan_ids = data.get('loan_ids', [])
+        note = data.get('note', '').strip()
+
+        if not loan_ids:
+            return jsonify({'error': 'loan_ids is required'}), 400
+
+        deactivated = 0
+        skipped = 0
+        details = []
+
+        for loan_id in loan_ids:
+            try:
+                loan = LoanedPlayer.query.get(int(loan_id))
+                if not loan:
+                    skipped += 1
+                    details.append({'loan_id': loan_id, 'status': 'not_found'})
+                    continue
+                if not loan.is_active:
+                    skipped += 1
+                    details.append({'loan_id': loan_id, 'status': 'already_inactive'})
+                    continue
+
+                loan.is_active = False
+                loan.updated_at = datetime.now(timezone.utc)
+                if note:
+                    loan.reviewer_notes = f"{loan.reviewer_notes or ''}\n[Bulk deactivated] {note}".strip()
+
+                deactivated += 1
+                details.append({'loan_id': loan_id, 'status': 'deactivated', 'player_name': loan.player_name})
+            except Exception as ex:
+                skipped += 1
+                details.append({'loan_id': loan_id, 'status': f'error: {ex}'})
+
+        db.session.commit()
+
+        return jsonify({
+            'message': 'bulk_deactivate_complete',
+            'deactivated': deactivated,
+            'skipped': skipped,
+            'details': details
+        })
+
+    except Exception as e:
+        logger.exception('admin_bulk_deactivate_loans failed')
+        db.session.rollback()
+        return jsonify(_safe_error_payload(e, 'An unexpected error occurred. Please try again later.')), 500
+
+
+@api_bp.route('/admin/loans/bulk-transition', methods=['POST'])
+@require_api_key
+def admin_bulk_transition_loans():
+    """Transition multiple loans to new clubs.
+
+    Body: {
+        transitions: [
+            {
+                loan_id: int,
+                new_loan_team_db_id?: int,
+                new_loan_team_name?: str,
+                deactivate_only?: bool
+            }
+        ]
+    }
+    """
+    try:
+        data = request.get_json() or {}
+        transitions = data.get('transitions', [])
+
+        if not transitions:
+            return jsonify({'error': 'transitions is required'}), 400
+
+        transitioned = 0
+        deactivated_only = 0
+        skipped = 0
+        details = []
+
+        for t in transitions:
+            try:
+                loan_id = t.get('loan_id')
+                if not loan_id:
+                    skipped += 1
+                    details.append({'status': 'missing_loan_id'})
+                    continue
+
+                old_loan = LoanedPlayer.query.get(int(loan_id))
+                if not old_loan:
+                    skipped += 1
+                    details.append({'loan_id': loan_id, 'status': 'not_found'})
+                    continue
+
+                # Deactivate old loan
+                old_loan.is_active = False
+                old_loan.updated_at = datetime.now(timezone.utc)
+
+                deactivate_only = bool(t.get('deactivate_only', False))
+
+                if deactivate_only:
+                    deactivated_only += 1
+                    details.append({
+                        'loan_id': loan_id,
+                        'status': 'deactivated_only',
+                        'player_name': old_loan.player_name
+                    })
+                    continue
+
+                # Resolve new loan team
+                new_loan_team = None
+                new_loan_team_name = t.get('new_loan_team_name', '').strip()
+
+                if t.get('new_loan_team_db_id'):
+                    new_loan_team = Team.query.get(int(t['new_loan_team_db_id']))
+
+                if not new_loan_team and not new_loan_team_name:
+                    skipped += 1
+                    details.append({
+                        'loan_id': loan_id,
+                        'status': 'missing_new_team',
+                        'player_name': old_loan.player_name
+                    })
+                    continue
+
+                # Create new loan
+                new_loan = LoanedPlayer(
+                    player_id=old_loan.player_id,
+                    player_name=old_loan.player_name,
+                    age=old_loan.age,
+                    nationality=old_loan.nationality,
+                    primary_team_id=old_loan.primary_team_id,
+                    primary_team_name=old_loan.primary_team_name,
+                    loan_team_id=new_loan_team.id if new_loan_team else None,
+                    loan_team_name=new_loan_team.name if new_loan_team else new_loan_team_name,
+                    window_key=old_loan.window_key,
+                    is_active=True,
+                    data_source='manual',
+                    can_fetch_stats=old_loan.can_fetch_stats,
+                    stats_coverage=old_loan.stats_coverage,
+                    reviewer_notes=f'Bulk transitioned from loan #{old_loan.id}',
+                    created_at=datetime.now(timezone.utc)
+                )
+                db.session.add(new_loan)
+                db.session.flush()  # Get ID before commit
+
+                transitioned += 1
+                details.append({
+                    'loan_id': loan_id,
+                    'status': 'transitioned',
+                    'player_name': old_loan.player_name,
+                    'new_loan_id': new_loan.id,
+                    'new_loan_team': new_loan.loan_team_name,
+                    'primary_team_id': old_loan.primary_team_id,
+                    'primary_team_name': old_loan.primary_team_name,
+                    'player_id': old_loan.player_id,
+                    'window_key': old_loan.window_key
+                })
+
+            except Exception as ex:
+                skipped += 1
+                details.append({'loan_id': t.get('loan_id'), 'status': f'error: {ex}'})
+
+        db.session.commit()
+
+        return jsonify({
+            'message': 'bulk_transition_complete',
+            'transitioned': transitioned,
+            'deactivated_only': deactivated_only,
+            'skipped': skipped,
+            'details': details
+        })
+
+    except Exception as e:
+        logger.exception('admin_bulk_transition_loans failed')
+        db.session.rollback()
+        return jsonify(_safe_error_payload(e, 'An unexpected error occurred. Please try again later.')), 500
+
+
+@api_bp.route('/admin/loans/preview-sync', methods=['POST'])
+@require_api_key
+def admin_preview_sync_loans():
+    """Preview what API has vs what we have in the database.
+
+    Returns a diff showing:
+    - new: Loans API has that we don't
+    - matches_manual: Manual loans that API now has (confirmed)
+    - already_tracked: Loans we already have from API
+
+    Body: {
+        season: int,
+        team_db_id?: int,       # Filter to specific parent team
+        team_api_id?: int,      # Or use API team ID
+        window_key?: str        # Window to check (defaults to FULL)
+    }
+    """
+    try:
+        data = request.get_json() or {}
+        season = int(data.get('season') or 0)
+        if not season:
+            return jsonify({'error': 'season is required'}), 400
+
+        # Compute window_key
+        window_key = (data.get('window_key') or '').strip()
+        if not window_key:
+            end_two = str((season + 1) % 100).zfill(2)
+            window_key = f"{season}-{end_two}::FULL"
+
+        # Initialize API client
+        api_client.set_season_year(season)
+
+        # Clear transfer cache to get fresh data
+        if hasattr(api_client._resolve(), '_cached_transfers'):
+            api_client._resolve()._cached_transfers.cache_clear()
+
+        # Resolve team filter
+        parent_api_id = None
+        if data.get('team_db_id'):
+            team = Team.query.get(int(data['team_db_id']))
+            if team:
+                parent_api_id = team.team_id
+        elif data.get('team_api_id'):
+            parent_api_id = int(data['team_api_id'])
+
+        # Get API loan candidates
+        league_ids = [39, 140, 78, 135, 61]  # Top-5 leagues
+
+        if parent_api_id:
+            # Single team mode
+            direct = api_client.get_direct_loan_candidates(window_key, league_ids, season=season) or {}
+            # Filter to parent team
+            direct = {pid: info for pid, info in direct.items() if info.get('primary_team_id') == parent_api_id}
+        else:
+            # All teams mode
+            direct = api_client.get_direct_loan_candidates(window_key, league_ids, season=season) or {}
+
+        # Get existing loans from DB - filter by season using window_key prefix
+        season_prefix = f"{season}-"
+        existing_query = LoanedPlayer.query.filter(
+            LoanedPlayer.is_active.is_(True),
+            LoanedPlayer.window_key.like(f"{season_prefix}%")
+        )
+        if parent_api_id:
+            parent_team = Team.query.filter_by(team_id=parent_api_id).first()
+            if parent_team:
+                existing_query = existing_query.filter(LoanedPlayer.primary_team_id == parent_team.id)
+
+        existing_loans = existing_query.all()
+        existing_by_player_id = {loan.player_id: loan for loan in existing_loans}
+
+        # Categorize results
+        new_loans = []
+        matches_manual = []
+        already_tracked = []
+
+        for player_id, api_data in direct.items():
+            existing = existing_by_player_id.get(int(player_id))
+
+            if not existing:
+                # Fetch player name from API
+                player_name = 'Unknown'
+                try:
+                    player_info = api_client.get_player_by_id(int(player_id))
+                    if player_info and player_info.get('player'):
+                        player_name = player_info['player'].get('name', 'Unknown')
+                except Exception:
+                    pass
+
+                # New loan from API
+                new_loans.append({
+                    'player_id': player_id,
+                    'player_name': player_name,
+                    'primary_team_name': api_data.get('primary_team_name'),
+                    'primary_team_id': api_data.get('primary_team_id'),
+                    'loan_team_name': api_data.get('loan_team_name'),
+                    'loan_team_id': api_data.get('loan_team_id'),
+                    'transfer_date': api_data.get('transfer_date')
+                })
+            elif existing.data_source == 'manual':
+                # Manual loan now confirmed by API
+                matches_manual.append({
+                    'loan_id': existing.id,
+                    'player_id': player_id,
+                    'player_name': existing.player_name,
+                    'loan_team_name': existing.loan_team_name,
+                    'api_loan_team_name': api_data.get('loan_team_name'),
+                    'api_transfer_date': api_data.get('transfer_date'),
+                    'already_confirmed': existing.api_confirmed_at is not None
+                })
+            else:
+                # Already tracked from API
+                already_tracked.append({
+                    'loan_id': existing.id,
+                    'player_id': player_id,
+                    'player_name': existing.player_name,
+                    'loan_team_name': existing.loan_team_name
+                })
+
+        return jsonify({
+            'season': season,
+            'window_key': window_key,
+            'parent_team_api_id': parent_api_id,
+            'summary': {
+                'new': len(new_loans),
+                'matches_manual': len(matches_manual),
+                'already_tracked': len(already_tracked)
+            },
+            'new': new_loans,
+            'matches_manual': matches_manual,
+            'already_tracked': already_tracked
+        })
+
+    except Exception as e:
+        logger.exception('admin_preview_sync_loans failed')
+        return jsonify(_safe_error_payload(e, 'An unexpected error occurred. Please try again later.')), 500
+
+
 @api_bp.route('/admin/loans/seed-top5', methods=['POST'])
 @require_api_key
 def admin_seed_top5_loans():
@@ -6816,6 +7240,25 @@ def _run_seed_top5_logic(data: dict, job_id: str = None) -> dict:
                     details.append({'player_id': player_id, 'status': 'skip_unresolved_team'})
                     continue
 
+                # 🛡️ MANUAL OVERRIDE: Skip players who already have a manual loan
+                # This ensures manually-managed loans are never overwritten by API seeding
+                existing_manual = LoanedPlayer.query.filter(
+                    LoanedPlayer.player_id == int(player_id),
+                    LoanedPlayer.is_active.is_(True),
+                    LoanedPlayer.data_source == 'manual'
+                ).first()
+                if existing_manual:
+                    # Update api_confirmed_at to show API now has this data
+                    existing_manual.api_confirmed_at = datetime.now(timezone.utc)
+                    skipped += 1
+                    details.append({
+                        'player_id': player_id,
+                        'status': 'skip_manual_override',
+                        'manual_loan_id': existing_manual.id,
+                        'message': f'Manual loan exists: {existing_manual.player_name} at {existing_manual.loan_team_name}'
+                    })
+                    continue
+
                 # 🔄 VERIFY player ID via fixtures to avoid ID mismatch issues
                 # API-Football sometimes uses different IDs in squad vs fixture APIs
                 verified_player_id, verification_method = api_client.verify_player_id_via_fixtures(
@@ -6927,6 +7370,9 @@ def _run_seed_top5_logic(data: dict, job_id: str = None) -> dict:
                 for row in existing_rows:
                     try:
                         if not row.window_key or not str(row.window_key).startswith(str(season)):
+                            continue
+                        # 🛡️ NEVER prune manual entries - they are protected from auto-management
+                        if row.data_source == 'manual':
                             continue
                         # Only prune rows created by top5 seeding to avoid touching hand-entered or team‑seeded items
                         if not row.reviewer_notes or 'seed-top5' not in row.reviewer_notes:
@@ -7112,6 +7558,25 @@ def admin_seed_team_loans():
                     details.append({'player_id': player_id, 'status': 'skip_unresolved_team'})
                     continue
 
+                # 🛡️ MANUAL OVERRIDE: Skip players who already have a manual loan
+                # This ensures manually-managed loans are never overwritten by API seeding
+                existing_manual = LoanedPlayer.query.filter(
+                    LoanedPlayer.player_id == int(player_id),
+                    LoanedPlayer.is_active.is_(True),
+                    LoanedPlayer.data_source == 'manual'
+                ).first()
+                if existing_manual:
+                    # Update api_confirmed_at to show API now has this data
+                    existing_manual.api_confirmed_at = datetime.now(timezone.utc)
+                    skipped += 1
+                    details.append({
+                        'player_id': player_id,
+                        'status': 'skip_manual_override',
+                        'manual_loan_id': existing_manual.id,
+                        'message': f'Manual loan exists: {existing_manual.player_name} at {existing_manual.loan_team_name}'
+                    })
+                    continue
+
                 # 🔄 VERIFY player ID via fixtures to avoid ID mismatch issues
                 # API-Football sometimes uses different IDs in squad vs fixture APIs
                 verified_player_id, verification_method = api_client.verify_player_id_via_fixtures(
@@ -7121,11 +7586,11 @@ def admin_seed_team_loans():
                     season=season,
                     max_fixtures=3  # Check last 3 fixtures
                 )
-                
+
                 if verified_player_id != player_id:
                     logger.info(f"🔄 Using fixture-verified ID {verified_player_id} instead of {player_id} for {player_name}")
                     player_id = verified_player_id
-                
+
                 # 📊 Check stats coverage for the loan team's league
                 coverage_info = api_client.check_team_stats_coverage(int(loan_team_api_id), season)
                 stats_coverage = coverage_info.get('coverage_level', 'full')

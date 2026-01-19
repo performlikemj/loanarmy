@@ -197,6 +197,8 @@ class LoanedPlayer(db.Model):
     can_fetch_stats = db.Column(db.Boolean, nullable=False, default=True)
     # Stats coverage level: 'full' (all stats), 'limited' (appearances/goals from lineups/events), 'none'
     stats_coverage = db.Column(db.String(20), nullable=False, default='full')
+    # Timestamp when API data confirmed this manual entry (for manual loans that API later matches)
+    api_confirmed_at = db.Column(db.DateTime, nullable=True)
     created_at = db.Column(db.DateTime, default=datetime.now(timezone.utc))
     updated_at = db.Column(db.DateTime, default=datetime.now(timezone.utc), onupdate=datetime.now(timezone.utc))
     
