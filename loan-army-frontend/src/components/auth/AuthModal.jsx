@@ -45,7 +45,7 @@ export function AuthModal() {
         event.preventDefault()
         const trimmed = (email || '').trim().toLowerCase()
         if (!trimmed) {
-            setStatus({ type: 'error', message: 'Enter the email you use for Go On Loan.' })
+            setStatus({ type: 'error', message: 'Enter the email you use for The Academy Watch.' })
             return
         }
         setBusy(true)
@@ -113,7 +113,7 @@ export function AuthModal() {
         <Dialog open={isLoginModalOpen} onOpenChange={(open) => { if (!open) closeLoginModal() }}>
             <DialogContent className="sm:max-w-md">
                 <DialogHeader>
-                    <DialogTitle>{auth.token ? 'Account' : 'Sign in to Go On Loan'}</DialogTitle>
+                    <DialogTitle>{auth.token ? 'Account' : 'Sign in to The Academy Watch'}</DialogTitle>
                     <DialogDescription>
                         {auth.token
                             ? 'Update your display name or sign out of your session.'

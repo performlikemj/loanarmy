@@ -333,3 +333,121 @@ export async function getUserById(client, userId) {
   return result.rows[0] || null
 }
 
+// --- Community Takes / Quick Submissions helpers ---
+
+export async function createQuickTakeSubmission(client, {
+  playerName,
+  content,
+  submitterName = null,
+  submitterEmail = null,
+  playerId = null,
+  teamId = null,
+  status = 'pending'
+}) {
+  const result = await client.query(
+    `INSERT INTO quick_take_submissions
+      (player_name, player_id, team_id, content, submitter_name, submitter_email, status, created_at)
+     VALUES ($1, $2, $3, $4, $5, $6, $7, NOW())
+     RETURNING id, player_name, content, status`,
+    [playerName, playerId, teamId, content, submitterName, submitterEmail, status]
+  )
+  return result.rows[0]
+}
+
+export async function getQuickTakeSubmission(client, submissionId) {
+  const result = await client.query(
+    `SELECT id, player_name, player_id, team_id, content, submitter_name, submitter_email, status, reviewed_at
+     FROM quick_take_submissions WHERE id = $1`,
+    [submissionId]
+  )
+  return result.rows[0] || null
+}
+
+export async function cleanupTestSubmissions(client, contentPattern = 'E2E%') {
+  const result = await client.query(
+    `DELETE FROM quick_take_submissions WHERE content LIKE $1 RETURNING id`,
+    [contentPattern]
+  )
+  return result.rowCount
+}
+
+export async function cleanupTestCommunityTakes(client, contentPattern = 'E2E%') {
+  const result = await client.query(
+    `DELETE FROM community_takes WHERE content LIKE $1 RETURNING id`,
+    [contentPattern]
+  )
+  return result.rowCount
+}
+
+// --- Academy League helpers ---
+
+export async function createAcademyLeague(client, {
+  apiLeagueId,
+  name,
+  country = 'England',
+  logoUrl = null,
+  isActive = true
+}) {
+  const result = await client.query(
+    `INSERT INTO academy_leagues
+      (api_league_id, name, country, logo_url, is_active, created_at, updated_at)
+     VALUES ($1, $2, $3, $4, $5, NOW(), NOW())
+     RETURNING id, api_league_id, name, country, is_active`,
+    [apiLeagueId, name, country, logoUrl, isActive]
+  )
+  return result.rows[0]
+}
+
+export async function getAcademyLeague(client, leagueId) {
+  const result = await client.query(
+    `SELECT id, api_league_id, name, country, logo_url, is_active, last_synced_at
+     FROM academy_leagues WHERE id = $1`,
+    [leagueId]
+  )
+  return result.rows[0] || null
+}
+
+export async function cleanupTestAcademyLeagues(client, namePattern = 'E2E%') {
+  // First delete related appearances
+  const leagues = await client.query(
+    `SELECT id FROM academy_leagues WHERE name LIKE $1`,
+    [namePattern]
+  )
+  const leagueIds = leagues.rows.map(r => r.id)
+
+  if (leagueIds.length > 0) {
+    await client.query(
+      `DELETE FROM academy_appearances WHERE league_id = ANY($1)`,
+      [leagueIds]
+    )
+  }
+
+  const result = await client.query(
+    `DELETE FROM academy_leagues WHERE name LIKE $1 RETURNING id`,
+    [namePattern]
+  )
+  return result.rowCount
+}
+
+// --- Loaned Player Pathway helpers ---
+
+export async function getLoanedPlayerById(client, loanId) {
+  const result = await client.query(
+    `SELECT id, player_id, player_name, pathway_status, current_level, is_active
+     FROM loaned_players WHERE id = $1`,
+    [loanId]
+  )
+  return result.rows[0] || null
+}
+
+export async function getFirstActiveLoan(client) {
+  const result = await client.query(
+    `SELECT id, player_id, player_name, pathway_status, current_level, is_active,
+            primary_team_name, loan_team_name
+     FROM loaned_players
+     WHERE is_active = true
+     ORDER BY id ASC LIMIT 1`
+  )
+  return result.rows[0] || null
+}
+

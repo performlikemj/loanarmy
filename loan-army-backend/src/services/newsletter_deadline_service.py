@@ -242,7 +242,7 @@ def _send_single_digest(user_id: int, week_key: str) -> dict:
         
         # Build plain text version
         text_lines = [
-            "Your Weekly Go On Loan Digest",
+            "Your Weekly The Academy Watch Digest",
             f"Week: {week_range}",
             "",
             f"This digest contains {len(newsletter_data)} newsletter(s):",

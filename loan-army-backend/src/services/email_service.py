@@ -127,7 +127,7 @@ class MailgunProvider(EmailProvider):
             )
         
         # Build from address
-        default_from_name = os.getenv('EMAIL_FROM_NAME', 'Go On Loan')
+        default_from_name = os.getenv('EMAIL_FROM_NAME', 'The Academy Watch')
         default_from_email = os.getenv('EMAIL_FROM_ADDRESS', f'no-reply@{domain}')
         from_name = from_name or default_from_name
         from_email = from_email or default_from_email
@@ -238,7 +238,7 @@ class SMTPProvider(EmailProvider):
             )
         
         # Build from address
-        default_from_name = os.getenv('EMAIL_FROM_NAME', 'Go On Loan')
+        default_from_name = os.getenv('EMAIL_FROM_NAME', 'The Academy Watch')
         default_from_email = os.getenv('EMAIL_FROM_ADDRESS', f'no-reply@loan.army')
         from_name = from_name or default_from_name
         from_email = from_email or default_from_email
@@ -627,7 +627,7 @@ class EmailService:
             claim_url: The URL to claim the account
             inviter_name: Name of the editor/admin who created the account
         """
-        subject = "Claim your Go On Loan writer account"
+        subject = "Claim your The Academy Watch writer account"
 
         html_content = f"""
 <!DOCTYPE html>
@@ -645,9 +645,9 @@ class EmailService:
 </head>
 <body>
     <div class="container">
-        <h2>Welcome to Go On Loan, {writer_name}!</h2>
+        <h2>Welcome to The Academy Watch, {writer_name}!</h2>
 
-        <p>{inviter_name} has created a writer account for you on Go On Loan,
+        <p>{inviter_name} has created a writer account for you on The Academy Watch,
         the football loan tracking platform.</p>
 
         <p>Click the button below to claim your account and start writing directly on the platform:</p>
@@ -662,16 +662,16 @@ class EmailService:
         <div class="footer">
             <p><strong>This link expires in 24 hours.</strong></p>
             <p>If you didn't expect this email, you can safely ignore it.</p>
-            <p>&mdash; The Go On Loan Team</p>
+            <p>&mdash; The The Academy Watch Team</p>
         </div>
     </div>
 </body>
 </html>
 """
 
-        text_content = f"""Welcome to Go On Loan, {writer_name}!
+        text_content = f"""Welcome to The Academy Watch, {writer_name}!
 
-{inviter_name} has created a writer account for you on Go On Loan, the football loan tracking platform.
+{inviter_name} has created a writer account for you on The Academy Watch, the football loan tracking platform.
 
 Claim your account here:
 {claim_url}
@@ -680,7 +680,7 @@ This link expires in 24 hours.
 
 If you didn't expect this email, you can safely ignore it.
 
--- The Go On Loan Team
+-- The The Academy Watch Team
 """
 
         return self.send_email(

@@ -156,7 +156,7 @@ function QuoteAttribution({ block }) {
   if (source_type === 'personal') {
     return (
       <span>
-        {source_name}, speaking to Go On Loan{dateStr}
+        {source_name}, speaking to The Academy Watch{dateStr}
       </span>
     )
   }

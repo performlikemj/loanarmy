@@ -7,12 +7,10 @@ from src.models.league import db, League, Team, LoanedPlayer, Newsletter, UserSu
 import src.models.weekly  # Ensure weekly models are registered with SQLAlchemy
 from src.routes.api import api_bp, require_api_key
 from src.routes.journalist import journalist_bp
-from src.routes.stripe_journalist import stripe_journalist_bp
-from src.routes.stripe_subscriber import stripe_subscriber_bp
-from src.routes.stripe_webhooks import stripe_webhooks_bp
-from src.routes.admin_revenue import admin_revenue_bp
 from src.routes.newsletter_usage import newsletter_usage_bp
 from src.routes.newsletter_deadline import newsletter_deadline_bp
+from src.routes.community_takes import community_takes_bp
+from src.routes.academy import academy_bp
 import logging
 from sqlalchemy.engine.url import make_url, URL
 from flask_migrate import Migrate
@@ -78,12 +76,10 @@ for name in ("mcp", "agents.mcp", "mcp.shared.session", "mcp.client"):
 
 app.register_blueprint(api_bp, url_prefix='/api')
 app.register_blueprint(journalist_bp, url_prefix='/api')
-app.register_blueprint(stripe_journalist_bp, url_prefix='/api')
-app.register_blueprint(stripe_subscriber_bp, url_prefix='/api')
-app.register_blueprint(stripe_webhooks_bp, url_prefix='/api')
-app.register_blueprint(admin_revenue_bp, url_prefix='/api')
 app.register_blueprint(newsletter_usage_bp, url_prefix='/api')
 app.register_blueprint(newsletter_deadline_bp, url_prefix='/api')
+app.register_blueprint(community_takes_bp, url_prefix='/api')
+app.register_blueprint(academy_bp, url_prefix='/api')
 
 csp = {
     'default-src': ["'self'"],

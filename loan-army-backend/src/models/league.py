@@ -201,7 +201,17 @@ class LoanedPlayer(db.Model):
     api_confirmed_at = db.Column(db.DateTime, nullable=True)
     created_at = db.Column(db.DateTime, default=datetime.now(timezone.utc))
     updated_at = db.Column(db.DateTime, default=datetime.now(timezone.utc), onupdate=datetime.now(timezone.utc))
-    
+
+    # Pathway tracking columns for Academy Watch
+    pathway_status = db.Column(db.String(20), nullable=False, default='on_loan')
+    # Values: 'academy' | 'on_loan' | 'first_team' | 'released'
+
+    current_level = db.Column(db.String(20), nullable=True)
+    # Values: 'U18' | 'U21' | 'U23' | 'Reserve' | 'Senior'
+
+    data_depth = db.Column(db.String(20), nullable=False, default='full_stats')
+    # Values: 'full_stats' | 'events_only' | 'profile_only'
+
     __table_args__ = (
         # Ensure one row per player/parent/loan/window
         db.UniqueConstraint('player_id', 'primary_team_id', 'loan_team_id', 'window_key', name='uq_loans_player_parent_loan_window'),
@@ -313,6 +323,10 @@ class LoanedPlayer(db.Model):
             'data_source': self.data_source,
             'can_fetch_stats': self.can_fetch_stats,
             'stats_coverage': self.stats_coverage,  # 'full', 'limited', or 'none'
+            # Pathway tracking fields (Academy Watch)
+            'pathway_status': self.pathway_status,  # 'academy', 'on_loan', 'first_team', 'released'
+            'current_level': self.current_level,    # 'U18', 'U21', 'U23', 'Reserve', 'Senior'
+            'data_depth': self.data_depth,          # 'full_stats', 'events_only', 'profile_only'
             'created_at': self.created_at.isoformat() if self.created_at else None,
             'updated_at': self.updated_at.isoformat() if self.updated_at else None
         }
@@ -1100,8 +1114,14 @@ class WriterCoverageRequest(db.Model):
         }
 
 
+# =============================================================================
+# DEPRECATED: Stripe models below are kept for data preservation only.
+# The Academy Watch refactor removed Stripe payment integration.
+# Do not use these models in new code. Tables may be dropped in future migration.
+# =============================================================================
+
 class StripeConnectedAccount(db.Model):
-    """Stores journalist Stripe Connect account info"""
+    """DEPRECATED: Stores journalist Stripe Connect account info"""
     __tablename__ = 'stripe_connected_accounts'
 
     id = db.Column(db.Integer, primary_key=True)
@@ -1132,7 +1152,7 @@ class StripeConnectedAccount(db.Model):
 
 
 class StripeSubscriptionPlan(db.Model):
-    """Journalist-defined subscription pricing"""
+    """DEPRECATED: Journalist-defined subscription pricing"""
     __tablename__ = 'stripe_subscription_plans'
 
     id = db.Column(db.Integer, primary_key=True)
@@ -1164,7 +1184,7 @@ class StripeSubscriptionPlan(db.Model):
 
 
 class StripeSubscription(db.Model):
-    """Tracks active Stripe subscriptions"""
+    """DEPRECATED: Tracks active Stripe subscriptions"""
     __tablename__ = 'stripe_subscriptions'
 
     id = db.Column(db.Integer, primary_key=True)
@@ -1204,7 +1224,7 @@ class StripeSubscription(db.Model):
 
 
 class StripePlatformRevenue(db.Model):
-    """Tracks platform fees for admin dashboard"""
+    """DEPRECATED: Tracks platform fees for admin dashboard"""
     __tablename__ = 'stripe_platform_revenue'
 
     id = db.Column(db.Integer, primary_key=True)
@@ -1454,6 +1474,276 @@ class ManualPlayerSubmission(db.Model):
             'updated_at': self.updated_at.isoformat() if self.updated_at else None,
             'reviewed_at': self.reviewed_at.isoformat() if self.reviewed_at else None,
             'reviewed_by': self.reviewed_by
+        }
+
+
+class AcademyLeague(db.Model):
+    """Configuration for academy/youth leagues to track.
+
+    Stores which youth leagues (U18, U21, U23, Reserves) should be synced
+    from API-Football for tracking academy player appearances.
+    """
+    __tablename__ = 'academy_leagues'
+
+    id = db.Column(db.Integer, primary_key=True)
+    api_league_id = db.Column(db.Integer, nullable=False, unique=True)  # API-Football league ID
+    name = db.Column(db.String(200), nullable=False)
+    country = db.Column(db.String(100), nullable=True)
+    level = db.Column(db.String(20), nullable=False)  # 'U18' | 'U21' | 'U23' | 'Reserve'
+    season = db.Column(db.Integer, nullable=True)  # Current season year
+    is_active = db.Column(db.Boolean, default=True)
+
+    # Optional: Link to parent club team for filtering
+    parent_team_id = db.Column(db.Integer, db.ForeignKey('teams.id'), nullable=True)
+
+    # Sync tracking
+    last_synced_at = db.Column(db.DateTime, nullable=True)
+    sync_enabled = db.Column(db.Boolean, default=True)
+
+    created_at = db.Column(db.DateTime, default=datetime.now(timezone.utc))
+    updated_at = db.Column(db.DateTime, default=datetime.now(timezone.utc), onupdate=datetime.now(timezone.utc))
+
+    # Relationships
+    parent_team = db.relationship('Team', backref=db.backref('academy_leagues', lazy=True))
+
+    def to_dict(self):
+        return {
+            'id': self.id,
+            'api_league_id': self.api_league_id,
+            'name': self.name,
+            'country': self.country,
+            'level': self.level,
+            'season': self.season,
+            'is_active': self.is_active,
+            'parent_team_id': self.parent_team_id,
+            'parent_team_name': self.parent_team.name if self.parent_team else None,
+            'last_synced_at': self.last_synced_at.isoformat() if self.last_synced_at else None,
+            'sync_enabled': self.sync_enabled,
+            'created_at': self.created_at.isoformat() if self.created_at else None,
+        }
+
+
+class AcademyAppearance(db.Model):
+    """Tracks a player's appearance in an academy/youth match.
+
+    Since youth leagues often have limited stats coverage, this model
+    focuses on what's reliably available: appearance, minutes, goals, assists.
+    """
+    __tablename__ = 'academy_appearances'
+
+    id = db.Column(db.Integer, primary_key=True)
+
+    # Player reference
+    player_id = db.Column(db.Integer, nullable=False)  # API-Football player ID
+    player_name = db.Column(db.String(100), nullable=False)  # Cached for display
+
+    # Match reference
+    fixture_id = db.Column(db.Integer, nullable=False)  # API-Football fixture ID
+    fixture_date = db.Column(db.Date, nullable=False)
+    home_team = db.Column(db.String(100), nullable=True)
+    away_team = db.Column(db.String(100), nullable=True)
+    competition = db.Column(db.String(100), nullable=True)
+
+    # League reference
+    academy_league_id = db.Column(db.Integer, db.ForeignKey('academy_leagues.id'), nullable=True)
+
+    # Tracked player reference (if linked)
+    loaned_player_id = db.Column(db.Integer, db.ForeignKey('loaned_players.id'), nullable=True)
+
+    # Appearance data (what we can reliably get from lineups/events)
+    started = db.Column(db.Boolean, default=False)  # In starting XI
+    minutes_played = db.Column(db.Integer, nullable=True)  # If available
+    goals = db.Column(db.Integer, default=0)
+    assists = db.Column(db.Integer, default=0)
+    yellow_cards = db.Column(db.Integer, default=0)
+    red_cards = db.Column(db.Integer, default=0)
+
+    # Raw data for debugging
+    lineup_data = db.Column(db.JSON, nullable=True)
+    events_data = db.Column(db.JSON, nullable=True)
+
+    created_at = db.Column(db.DateTime, default=datetime.now(timezone.utc))
+
+    # Relationships
+    academy_league = db.relationship('AcademyLeague', backref=db.backref('appearances', lazy=True))
+    loaned_player = db.relationship('LoanedPlayer', backref=db.backref('academy_appearances', lazy=True))
+
+    __table_args__ = (
+        db.UniqueConstraint('player_id', 'fixture_id', name='uq_academy_appearance_player_fixture'),
+        db.Index('ix_academy_appearances_player', 'player_id'),
+        db.Index('ix_academy_appearances_fixture_date', 'fixture_date'),
+        db.Index('ix_academy_appearances_loaned_player', 'loaned_player_id'),
+    )
+
+    def to_dict(self):
+        return {
+            'id': self.id,
+            'player_id': self.player_id,
+            'player_name': self.player_name,
+            'fixture_id': self.fixture_id,
+            'fixture_date': self.fixture_date.isoformat() if self.fixture_date else None,
+            'home_team': self.home_team,
+            'away_team': self.away_team,
+            'competition': self.competition,
+            'academy_league_id': self.academy_league_id,
+            'loaned_player_id': self.loaned_player_id,
+            'started': self.started,
+            'minutes_played': self.minutes_played,
+            'goals': self.goals,
+            'assists': self.assists,
+            'yellow_cards': self.yellow_cards,
+            'red_cards': self.red_cards,
+            'created_at': self.created_at.isoformat() if self.created_at else None,
+        }
+
+
+class CommunityTake(db.Model):
+    """Community-sourced commentary about players.
+
+    Takes can come from multiple sources:
+    - 'reddit': Scraped from subreddits
+    - 'twitter': Scraped from Twitter/X
+    - 'submission': User-submitted via QuickTakeSubmission
+    - 'editor': Written by the editor directly
+
+    Takes go through a curation workflow where they are approved/rejected
+    before being included in newsletters.
+    """
+    __tablename__ = 'community_takes'
+
+    id = db.Column(db.Integer, primary_key=True)
+
+    # Source information
+    source_type = db.Column(db.String(20), nullable=False)  # 'reddit' | 'twitter' | 'submission' | 'editor'
+    source_url = db.Column(db.String(500), nullable=True)  # Original URL if from external source
+    source_author = db.Column(db.String(100), nullable=False)  # Reddit username, Twitter handle, or display name
+    source_platform = db.Column(db.String(50), nullable=True)  # 'r/reddevils', '@handle', etc.
+
+    # Content
+    content = db.Column(db.Text, nullable=False)  # The actual take (1-3 sentences)
+
+    # Association - can be linked to player, team, and/or newsletter
+    player_id = db.Column(db.Integer, nullable=True)  # API-Football player ID
+    player_name = db.Column(db.String(100), nullable=True)  # Cached for display
+    team_id = db.Column(db.Integer, db.ForeignKey('teams.id'), nullable=True)
+    newsletter_id = db.Column(db.Integer, db.ForeignKey('newsletters.id'), nullable=True)
+
+    # Curation workflow
+    status = db.Column(db.String(20), nullable=False, default='pending')  # 'pending' | 'approved' | 'rejected'
+    curated_by = db.Column(db.Integer, db.ForeignKey('user_accounts.id'), nullable=True)
+    curated_at = db.Column(db.DateTime, nullable=True)
+    rejection_reason = db.Column(db.String(255), nullable=True)
+
+    # Metadata from source
+    scraped_at = db.Column(db.DateTime, nullable=True)  # When we scraped it (if external)
+    original_posted_at = db.Column(db.DateTime, nullable=True)  # When it was originally posted
+    upvotes = db.Column(db.Integer, default=0)  # From Reddit/Twitter engagement
+
+    created_at = db.Column(db.DateTime, default=datetime.now(timezone.utc))
+    updated_at = db.Column(db.DateTime, default=datetime.now(timezone.utc), onupdate=datetime.now(timezone.utc))
+
+    # Relationships
+    team = db.relationship('Team', backref=db.backref('community_takes', lazy=True))
+    newsletter = db.relationship('Newsletter', backref=db.backref('community_takes', lazy=True))
+    curator = db.relationship('UserAccount', foreign_keys=[curated_by])
+
+    __table_args__ = (
+        db.Index('ix_community_takes_status', 'status'),
+        db.Index('ix_community_takes_player', 'player_id'),
+        db.Index('ix_community_takes_team', 'team_id'),
+    )
+
+    def to_dict(self):
+        return {
+            'id': self.id,
+            'source_type': self.source_type,
+            'source_url': self.source_url,
+            'source_author': self.source_author,
+            'source_platform': self.source_platform,
+            'content': self.content,
+            'player_id': self.player_id,
+            'player_name': self.player_name,
+            'team_id': self.team_id,
+            'team_name': self.team.name if self.team else None,
+            'newsletter_id': self.newsletter_id,
+            'status': self.status,
+            'curated_by': self.curated_by,
+            'curated_at': self.curated_at.isoformat() if self.curated_at else None,
+            'rejection_reason': self.rejection_reason,
+            'scraped_at': self.scraped_at.isoformat() if self.scraped_at else None,
+            'original_posted_at': self.original_posted_at.isoformat() if self.original_posted_at else None,
+            'upvotes': self.upvotes,
+            'created_at': self.created_at.isoformat() if self.created_at else None,
+            'updated_at': self.updated_at.isoformat() if self.updated_at else None,
+        }
+
+
+class QuickTakeSubmission(db.Model):
+    """User-submitted quick takes pending moderation.
+
+    This is the intake table for community submissions. When approved,
+    a CommunityTake record is created and linked via community_take_id.
+
+    Supports anonymous submissions (submitter_name/email optional) with
+    IP hashing for spam prevention.
+    """
+    __tablename__ = 'quick_take_submissions'
+
+    id = db.Column(db.Integer, primary_key=True)
+
+    # Submitter info (can be anonymous)
+    submitter_name = db.Column(db.String(100), nullable=True)
+    submitter_email = db.Column(db.String(255), nullable=True)
+
+    # Content
+    player_id = db.Column(db.Integer, nullable=True)  # API-Football player ID
+    player_name = db.Column(db.String(100), nullable=False)  # Always required for display
+    team_id = db.Column(db.Integer, db.ForeignKey('teams.id'), nullable=True)
+    content = db.Column(db.Text, nullable=False)  # Max ~280 chars enforced at API level
+
+    # Moderation workflow
+    status = db.Column(db.String(20), nullable=False, default='pending')  # 'pending' | 'approved' | 'rejected'
+    reviewed_by = db.Column(db.Integer, db.ForeignKey('user_accounts.id'), nullable=True)
+    reviewed_at = db.Column(db.DateTime, nullable=True)
+    rejection_reason = db.Column(db.String(255), nullable=True)
+
+    # Link to approved CommunityTake (set when approved)
+    community_take_id = db.Column(db.Integer, db.ForeignKey('community_takes.id'), nullable=True)
+
+    # Spam prevention
+    ip_hash = db.Column(db.String(64), nullable=True)  # SHA-256 hash of IP
+    user_agent = db.Column(db.String(512), nullable=True)
+
+    created_at = db.Column(db.DateTime, default=datetime.now(timezone.utc))
+    updated_at = db.Column(db.DateTime, default=datetime.now(timezone.utc), onupdate=datetime.now(timezone.utc))
+
+    # Relationships
+    team = db.relationship('Team', backref=db.backref('quick_take_submissions', lazy=True))
+    reviewer = db.relationship('UserAccount', foreign_keys=[reviewed_by])
+    community_take = db.relationship('CommunityTake', backref=db.backref('submission', uselist=False))
+
+    __table_args__ = (
+        db.Index('ix_quick_take_submissions_status', 'status'),
+        db.Index('ix_quick_take_submissions_ip', 'ip_hash'),
+    )
+
+    def to_dict(self):
+        return {
+            'id': self.id,
+            'submitter_name': self.submitter_name,
+            'submitter_email': self.submitter_email,
+            'player_id': self.player_id,
+            'player_name': self.player_name,
+            'team_id': self.team_id,
+            'team_name': self.team.name if self.team else None,
+            'content': self.content,
+            'status': self.status,
+            'reviewed_by': self.reviewed_by,
+            'reviewed_at': self.reviewed_at.isoformat() if self.reviewed_at else None,
+            'rejection_reason': self.rejection_reason,
+            'community_take_id': self.community_take_id,
+            'created_at': self.created_at.isoformat() if self.created_at else None,
+            'updated_at': self.updated_at.isoformat() if self.updated_at else None,
         }
 
 

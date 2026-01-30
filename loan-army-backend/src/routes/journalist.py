@@ -1675,7 +1675,7 @@ def _render_quote_block_to_html(block: dict) -> str:
     elif source_type == 'email':
         attribution = f"{source_name}, via email"
     elif source_type == 'personal':
-        attribution = f"{source_name}, speaking to Go On Loan"
+        attribution = f"{source_name}, speaking to The Academy Watch"
     elif source_type == 'anonymous':
         attribution = "according to sources"
     else:

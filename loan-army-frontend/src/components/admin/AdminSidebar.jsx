@@ -11,9 +11,9 @@ import {
     Shield,
     Megaphone,
     MessageCircle,
-    UserCheck,
-    UserPlus,
-    PenSquare
+    MessageSquarePlus,
+    GraduationCap,
+    UserPlus
 } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { useAuthUI } from '@/context/AuthContext'
@@ -21,15 +21,15 @@ import { useAuthUI } from '@/context/AuthContext'
 const sidebarItems = [
     { icon: LayoutDashboard, label: 'Dashboard', href: '/admin/dashboard' },
     { icon: Mail, label: 'Newsletters', href: '/admin/newsletters' },
+    { icon: MessageSquarePlus, label: 'Curation', href: '/admin/curation' },
+    { icon: GraduationCap, label: 'Academy', href: '/admin/academy' },
     { icon: Users, label: 'Users', href: '/admin/users' },
-    { icon: UserCheck, label: 'Coverage Requests', href: '/admin/coverage-requests' },
     { icon: UserPlus, label: 'Manual Players', href: '/admin/manual-players' },
     { icon: Trophy, label: 'Loans', href: '/admin/loans' },
     { icon: Users, label: 'Players', href: '/admin/players' },
     { icon: Shield, label: 'Teams', href: '/admin/teams' },
     { icon: Megaphone, label: 'Sponsors', href: '/admin/sponsors' },
     { icon: MessageCircle, label: 'Reddit', href: '/admin/reddit' },
-    { icon: PenSquare, label: 'External Writers', href: '/admin/external-writers' },
     { icon: Settings, label: 'Settings', href: '/admin/settings' },
 ]
 
@@ -58,7 +58,7 @@ export function AdminSidebar({ className, collapsed = false, onNavigate }) {
                         <div className="h-9 w-9 rounded-lg bg-blue-600 flex items-center justify-center">
                             <Trophy className="h-5 w-5 text-white" />
                         </div>
-                        {!collapsed && <h2 className="text-lg font-bold tracking-tight">Go On Loan</h2>}
+                        {!collapsed && <h2 className="text-lg font-bold tracking-tight">The Academy Watch</h2>}
                     </div>
                     <div className="space-y-1">
                         {sidebarItems.map((item) => (

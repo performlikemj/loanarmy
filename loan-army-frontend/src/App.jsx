@@ -91,10 +91,11 @@ import { AdminUsers } from '@/pages/admin/AdminUsers'
 import { AdminTeams } from '@/pages/admin/AdminTeams'
 import { AdminSponsors } from '@/pages/admin/AdminSponsors'
 import { AdminReddit } from '@/pages/admin/AdminReddit'
-import { AdminCoverageRequests } from '@/pages/admin/AdminCoverageRequests'
+import { AdminCuration } from '@/pages/admin/AdminCuration'
+import { AdminAcademy } from '@/pages/admin/AdminAcademy'
 import { AdminManualPlayers } from '@/pages/admin/AdminManualPlayers'
-import { AdminExternalWriters } from '@/pages/admin/AdminExternalWriters'
 import { ClaimAccount } from '@/pages/ClaimAccount'
+import { SubmitTake } from '@/pages/SubmitTake'
 import { WriterLogin } from '@/pages/writer/WriterLogin'
 import { WriterDashboard } from '@/pages/writer/WriterDashboard'
 import { WriteupEditor } from '@/pages/writer/WriteupEditor'
@@ -110,10 +111,6 @@ import {
   InlinePlayerWriteups,
   useWriterCommentaries
 } from '@/components/NewsletterWriterOverlay'
-import JournalistStripeSetup from '@/pages/JournalistStripeSetup'
-import JournalistPricing from '@/pages/JournalistPricing'
-import AdminRevenueDashboard from '@/pages/admin/AdminRevenueDashboard'
-import { StripeProvider } from '@/context/StripeContext'
 
 import { APIService } from '@/lib/api'
 import { UniversalDatePicker } from '@/components/ui/UniversalDatePicker'
@@ -7195,10 +7192,10 @@ function Navigation() {
       <div className="mx-auto flex h-16 max-w-7xl items-center justify-between px-4 sm:px-6 lg:px-8 gap-4">
         <Link to="/" className="flex items-center gap-2 text-gray-900 no-underline hover:no-underline sm:gap-3 shrink-0">
           <span className="inline-flex h-10 w-10 items-center justify-center rounded bg-slate-900 shadow">
-            <img src={BRAND_LOGO_SRC} alt="Go On Loan logo" className="h-7 w-7" />
+            <img src={BRAND_LOGO_SRC} alt="The Academy Watch logo" className="h-7 w-7" />
           </span>
           <div className="flex flex-col leading-tight">
-            <span className="text-lg font-semibold">Go On Loan</span>
+            <span className="text-lg font-semibold">The Academy Watch</span>
             <span className="hidden text-xs text-gray-500 sm:block">European loans tracker</span>
           </div>
         </Link>
@@ -7217,7 +7214,7 @@ function Navigation() {
             </DrawerTrigger>
             <DrawerContent className="pb-6">
               <DrawerHeader>
-                <DrawerTitle className="text-base font-semibold">Go On Loan</DrawerTitle>
+                <DrawerTitle className="text-base font-semibold">The Academy Watch</DrawerTitle>
                 <DrawerDescription>Quick access to every page.</DrawerDescription>
               </DrawerHeader>
               <div className="flex flex-col gap-2 px-4">
@@ -7450,10 +7447,10 @@ function HomePage() {
           {/* Hero Section */}
           <div className="text-center mb-12">
             <p className="inline-flex items-center gap-2 text-sm font-medium text-blue-700 bg-blue-50 border border-blue-100 rounded-full px-3 py-1 mb-4">
-              Go On Loan · <span className="font-semibold">goonloan.com</span>
+              The Academy Watch · <span className="font-semibold">goonloan.com</span>
             </p>
             <h1 className="text-4xl font-bold text-gray-900 mb-4">
-              Go On Loan — Track European Football Loans
+              The Academy Watch — Track European Football Loans
             </h1>
             <p className="text-xl text-gray-600 mb-8">
               AI-powered newsletters and dashboards that help you follow every loan spell in Europe's top leagues.
@@ -11176,7 +11173,7 @@ function StatsPage() {
             System Statistics
           </h1>
           <p className="text-lg text-gray-600">
-            Overview of the Go On Loan platform
+            Overview of the The Academy Watch platform
           </p>
         </div>
 
@@ -11301,7 +11298,7 @@ function AppWithRouter() {
         <footer className="bg-gray-100 border-t border-gray-200 py-8 mt-auto">
           <div className="max-w-6xl mx-auto px-4 text-center">
             <BuyMeCoffeeButton />
-            <p className="text-sm text-gray-500 mt-4">&copy; {new Date().getFullYear()} Go On Loan. All rights reserved.</p>
+            <p className="text-sm text-gray-500 mt-4">&copy; {new Date().getFullYear()} The Academy Watch. All rights reserved.</p>
           </div>
         </footer>
         <LoginModal />
@@ -11335,21 +11332,21 @@ function AppRoutes() {
       <Route path="/unsubscribe" element={<UnsubscribePage />} />
       <Route path="/verify" element={<VerifyPage />} />
       <Route path="/claim-account" element={<ClaimAccount />} />
+      <Route path="/submit-take" element={<SubmitTake />} />
       <Route path="/admin" element={<AdminLayout />}>
         <Route index element={<Navigate to="/admin/dashboard" replace />} />
         <Route path="dashboard" element={<AdminDashboard />} />
         <Route path="newsletters" element={<AdminNewsletters />} />
         <Route path="users" element={<AdminUsers />} />
-        <Route path="coverage-requests" element={<AdminCoverageRequests />} />
         <Route path="manual-players" element={<AdminManualPlayers />} />
         <Route path="loans" element={<AdminLoans />} />
         <Route path="players" element={<AdminPlayers />} />
         <Route path="teams" element={<AdminTeams />} />
         <Route path="sponsors" element={<AdminSponsors />} />
         <Route path="reddit" element={<AdminReddit />} />
-        <Route path="external-writers" element={<AdminExternalWriters />} />
+        <Route path="curation" element={<AdminCuration />} />
+        <Route path="academy" element={<AdminAcademy />} />
         <Route path="settings" element={<AdminSettings />} />
-        <Route path="revenue" element={<AdminRevenueDashboard />} />
       </Route>
       <Route
         path="/admin/old"
@@ -11405,25 +11402,6 @@ function AppRoutes() {
         }
       />
 
-      {/* Stripe Subscription Routes */}
-      <Route
-        path="/journalist/stripe-setup"
-        element={
-          <RequireAuth>
-            <JournalistStripeSetup />
-          </RequireAuth>
-        }
-      />
-      <Route
-        path="/journalist/pricing"
-        element={
-          <RequireAuth>
-            <JournalistPricing />
-          </RequireAuth>
-        }
-      />
-      <Route path="/journalists/:id/pricing" element={<JournalistPricing />} />
-      <Route path="/journalists/:id/stripe-setup" element={<JournalistStripeSetup />} />
       <Route path="*" element={<Navigate to="/" replace />} />
     </Routes>
   )
@@ -11478,20 +11456,18 @@ function App() {
   }, [syncAuth])
 
   return (
-    <StripeProvider>
-      <AuthContext.Provider value={authSnapshot}>
-        <AuthUIContext.Provider value={{
-          openLoginModal,
-          closeLoginModal,
-          logout: handleLogout,
-          isLoginModalOpen: loginModalOpen,
-        }}>
-          <Router>
-            <AppWithRouter />
-          </Router>
-        </AuthUIContext.Provider>
-      </AuthContext.Provider>
-    </StripeProvider>
+    <AuthContext.Provider value={authSnapshot}>
+      <AuthUIContext.Provider value={{
+        openLoginModal,
+        closeLoginModal,
+        logout: handleLogout,
+        isLoginModalOpen: loginModalOpen,
+      }}>
+        <Router>
+          <AppWithRouter />
+        </Router>
+      </AuthUIContext.Provider>
+    </AuthContext.Provider>
   )
 }
 

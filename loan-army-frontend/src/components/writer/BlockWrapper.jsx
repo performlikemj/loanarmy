@@ -103,7 +103,7 @@ export function BlockWrapper({
                     block.source_platform &&
                     `, via ${block.source_platform} DM`}
                   {block.source_type === 'email' && ', via email'}
-                  {block.source_type === 'personal' && ', speaking to Go On Loan'}
+                  {block.source_type === 'personal' && ', speaking to The Academy Watch'}
                   {block.quote_date && ` (${block.quote_date})`}
                 </footer>
               )}

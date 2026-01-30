@@ -318,7 +318,7 @@
         <table role="presentation" class="main" cellspacing="0" cellpadding="0" border="0">
           <tr>
             <td class="content">
-              <div class="brand">GO ON LOAN</div>
+              <div class="brand">THE ACADEMY WATCH</div>
               <div class="title-row">
                 {% if team_logo %}
                 <img class="title-logo" src="{{ team_logo }}" alt="{{ team_name or 'Team' }} crest" />
@@ -861,6 +861,79 @@
               {% endfor %}
               {% endif %}
 
+              {# Academy Update Section #}
+              {% if academy_appearances %}
+              <div style="margin-top:24px;">
+                <div style="font-size:19px;margin-bottom:12px;text-transform:uppercase;letter-spacing:1.5px;color:#f8f8f8;font-weight:700;border-bottom:1px solid #333;padding-bottom:8px;">
+                  <span style="margin-right:8px;">🎓</span>Academy Update
+                </div>
+                <div style="background:#0a0a0a;border:1px solid #262626;border-radius:8px;padding:16px;">
+                  <p style="color:#9ca3af;font-size:13px;margin:0 0 12px;">Youth team activity this week:</p>
+                  {% for app in academy_appearances %}
+                  <div style="display:flex;align-items:center;gap:12px;padding:10px 0;border-bottom:1px solid #1f1f1f;{% if loop.last %}border-bottom:none;{% endif %}">
+                    <div style="flex:1;">
+                      <div style="font-weight:600;color:#ffffff;font-size:14px;">{{ app.player_name }}</div>
+                      <div style="color:#9ca3af;font-size:12px;margin-top:2px;">
+                        {{ app.home_team }} vs {{ app.away_team }}
+                        {% if app.competition %} · {{ app.competition }}{% endif %}
+                      </div>
+                    </div>
+                    <div style="text-align:right;">
+                      {% if app.started %}
+                      <span style="background:#166534;color:#86efac;font-size:11px;padding:2px 6px;border-radius:3px;font-weight:600;">Started</span>
+                      {% else %}
+                      <span style="background:#4b5563;color:#d1d5db;font-size:11px;padding:2px 6px;border-radius:3px;font-weight:600;">Sub</span>
+                      {% endif %}
+                      {% if app.goals > 0 or app.assists > 0 %}
+                      <div style="color:#fbbf24;font-size:13px;font-weight:700;margin-top:4px;">
+                        {% if app.goals > 0 %}{{ app.goals }}G{% endif %}
+                        {% if app.goals > 0 and app.assists > 0 %} {% endif %}
+                        {% if app.assists > 0 %}{{ app.assists }}A{% endif %}
+                      </div>
+                      {% endif %}
+                    </div>
+                  </div>
+                  {% endfor %}
+                  <div style="color:#6b7280;font-size:11px;margin-top:12px;font-style:italic;">
+                    Youth league coverage may have limited stats availability.
+                  </div>
+                </div>
+              </div>
+              {% endif %}
+
+              {# Community Takes Section #}
+              {% if community_takes %}
+              <div style="margin-top:24px;">
+                <div style="font-size:19px;margin-bottom:12px;text-transform:uppercase;letter-spacing:1.5px;color:#f8f8f8;font-weight:700;border-bottom:1px solid #333;padding-bottom:8px;">
+                  Community Takes
+                </div>
+                {% for take in community_takes %}
+                <div style="background:#0a0a0a;border:1px solid #262626;border-radius:8px;padding:14px 16px;margin-bottom:10px;">
+                  <div style="display:flex;align-items:flex-start;gap:10px;">
+                    <div style="font-size:20px;flex-shrink:0;">💬</div>
+                    <div style="flex:1;">
+                      <p style="color:#e5e7eb;font-size:14px;line-height:1.5;margin:0 0 8px;">
+                        "{{ take.content }}"
+                      </p>
+                      <div style="font-size:12px;color:#9ca3af;">
+                        — {{ take.source_author }}
+                        {% if take.source_platform %} on {{ take.source_platform }}{% endif %}
+                        {% if take.player_name %}
+                        <span style="margin-left:8px;padding:2px 6px;background:#1f2937;border-radius:3px;font-size:11px;color:#d1d5db;">
+                          {{ take.player_name }}
+                        </span>
+                        {% endif %}
+                        {% if take.source_url %}
+                        <a href="{{ take.source_url }}" target="_blank" rel="noopener" style="margin-left:6px;color:#60a5fa;text-decoration:none;">↗</a>
+                        {% endif %}
+                      </div>
+                    </div>
+                  </div>
+                </div>
+                {% endfor %}
+              </div>
+              {% endif %}
+
               {% if fan_pulse %}
               <div class="highlights" style="margin-top:24px;">
                 <strong>Fan pulse</strong>
@@ -886,6 +959,19 @@
                   </a>
                 </div>
                 {% endif %}
+
+                {# Share Your Take CTA #}
+                {% if submit_take_url %}
+                <div style="text-align:center;margin:0 0 24px;padding:16px;background:#1e1b4b;border:1px solid #4338ca;border-radius:8px;">
+                  <p style="margin:0 0 8px;color:#c4b5fd;font-weight:600;font-size:15px;">Got an opinion on a player?</p>
+                  <a href="{{ submit_take_url }}" target="_blank" rel="noopener"
+                    style="display:inline-block;padding:10px 20px;background:#7c3aed;color:#ffffff;text-decoration:none;border-radius:6px;font-weight:600;font-size:14px;font-family:'Segoe UI',Roboto,Helvetica,Arial,sans-serif;">
+                    💬 Share Your Take
+                  </a>
+                  <p style="margin:8px 0 0;font-size:12px;color:#a78bfa;">Your take could be featured in our next newsletter!</p>
+                </div>
+                {% endif %}
+
                 <div class="support-cta" style="text-align:center;margin:0 0 18px;">
                   <a href="https://www.buymeacoffee.com/GoOnLoan" target="_blank" rel="noopener">
                     <img src="{{ bmc_button_url or 'https://cdn.buymeacoffee.com/buttons/v2/default-yellow.png' }}" 
@@ -910,7 +996,7 @@
                   at <a href="{{ manage_url }}" target="_blank" rel="noopener">your subscription settings</a>.
                 </p>
                 {% endif %}
-                <p style="text-align:center;">You are receiving this email because you subscribed to Go On Loan
+                <p style="text-align:center;">You are receiving this email because you subscribed to The Academy Watch
                   newsletters.</p>
 
             </td>

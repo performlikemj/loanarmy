@@ -952,25 +952,6 @@ export class APIService {
         })
     }
 
-    // Writer Coverage Request API methods
-    static async getWriterCoverageRequests(status = null) {
-        const params = status ? `?status=${status}` : ''
-        return this.request(`/writer/coverage-requests${params}`)
-    }
-
-    static async submitCoverageRequest(payload) {
-        return this.request('/writer/coverage-requests', {
-            method: 'POST',
-            body: JSON.stringify(payload)
-        })
-    }
-
-    static async cancelCoverageRequest(requestId) {
-        return this.request(`/writer/coverage-requests/${requestId}`, {
-            method: 'DELETE'
-        })
-    }
-
     static async getWriterAvailablePlayers() {
         return this.request('/writer/available-players')
     }
@@ -982,20 +963,6 @@ export class APIService {
     // Admin Journalist Management API methods
     static async adminGetJournalists() {
         return this.request('/journalists')
-    }
-
-    static async adminInviteJournalist(email) {
-        return this.request('/journalists/invite', {
-            method: 'POST',
-            body: JSON.stringify({ email })
-        }, { admin: true })
-    }
-
-    static async adminUpdateJournalistTeams(journalistId, teamIds) {
-        return this.request(`/journalists/${journalistId}/assign-teams`, {
-            method: 'POST',
-            body: JSON.stringify({ team_ids: teamIds })
-        }, { admin: true })
     }
 
     static async adminGetJournalistDetails(journalistId) {
@@ -1024,25 +991,6 @@ export class APIService {
 
     static async adminGetJournalistStats() {
         return this.request('/admin/journalist-stats', {}, { admin: true })
-    }
-
-    // Admin Coverage Request API methods
-    static async adminListCoverageRequests(params = {}) {
-        const q = new URLSearchParams(params)
-        return this.request(`/admin/coverage-requests?${q}`, {}, { admin: true })
-    }
-
-    static async adminApproveCoverageRequest(requestId) {
-        return this.request(`/admin/coverage-requests/${requestId}/approve`, {
-            method: 'POST'
-        }, { admin: true })
-    }
-
-    static async adminDenyCoverageRequest(requestId, reason = null) {
-        return this.request(`/admin/coverage-requests/${requestId}/deny`, {
-            method: 'POST',
-            body: JSON.stringify({ reason })
-        }, { admin: true })
     }
 
     static async adminGetJournalistAllAssignments(journalistId) {
@@ -1351,5 +1299,151 @@ export class APIService {
         return this.request(`/writer/contributors/${contributorId}`, {
             method: 'DELETE'
         })
+    }
+
+    // ==========================================================================
+    // Community Takes
+    // ==========================================================================
+
+    // Public: List approved community takes
+    static async getCommunityTakes(params = {}) {
+        const query = new URLSearchParams(params).toString()
+        return this.request(`/community-takes${query ? '?' + query : ''}`)
+    }
+
+    // Public: Submit a quick take for moderation
+    static async submitQuickTake(data) {
+        return this.request('/community-takes/submit', {
+            method: 'POST',
+            body: JSON.stringify(data)
+        })
+    }
+
+    // Admin: List community takes (with status filter)
+    static async adminListCommunityTakes(params = {}) {
+        const query = new URLSearchParams(params).toString()
+        return this.request(`/admin/community-takes${query ? '?' + query : ''}`, {}, { admin: true })
+    }
+
+    // Admin: List pending submissions
+    static async adminListSubmissions(params = {}) {
+        const query = new URLSearchParams(params).toString()
+        return this.request(`/admin/community-takes/submissions${query ? '?' + query : ''}`, {}, { admin: true })
+    }
+
+    // Admin: Approve a community take
+    static async adminApproveTake(takeId, data = {}) {
+        return this.request(`/admin/community-takes/${takeId}/approve`, {
+            method: 'POST',
+            body: JSON.stringify(data)
+        }, { admin: true })
+    }
+
+    // Admin: Reject a community take
+    static async adminRejectTake(takeId, data = {}) {
+        return this.request(`/admin/community-takes/${takeId}/reject`, {
+            method: 'POST',
+            body: JSON.stringify(data)
+        }, { admin: true })
+    }
+
+    // Admin: Approve a quick take submission
+    static async adminApproveSubmission(submissionId) {
+        return this.request(`/admin/community-takes/submissions/${submissionId}/approve`, {
+            method: 'POST'
+        }, { admin: true })
+    }
+
+    // Admin: Reject a quick take submission
+    static async adminRejectSubmission(submissionId, data = {}) {
+        return this.request(`/admin/community-takes/submissions/${submissionId}/reject`, {
+            method: 'POST',
+            body: JSON.stringify(data)
+        }, { admin: true })
+    }
+
+    // Admin: Create a community take directly
+    static async adminCreateTake(data) {
+        return this.request('/admin/community-takes', {
+            method: 'POST',
+            body: JSON.stringify(data)
+        }, { admin: true })
+    }
+
+    // Admin: Delete a community take
+    static async adminDeleteTake(takeId) {
+        return this.request(`/admin/community-takes/${takeId}`, {
+            method: 'DELETE'
+        }, { admin: true })
+    }
+
+    // Admin: Get community takes statistics
+    static async adminTakesStats() {
+        return this.request('/admin/community-takes/stats', {}, { admin: true })
+    }
+
+    // ==========================================================================
+    // Academy Tracking
+    // ==========================================================================
+
+    // Admin: List academy leagues
+    static async adminListAcademyLeagues() {
+        return this.request('/admin/academy-leagues', {}, { admin: true })
+    }
+
+    // Admin: Create academy league
+    static async adminCreateAcademyLeague(data) {
+        return this.request('/admin/academy-leagues', {
+            method: 'POST',
+            body: JSON.stringify(data)
+        }, { admin: true })
+    }
+
+    // Admin: Update academy league
+    static async adminUpdateAcademyLeague(leagueId, data) {
+        return this.request(`/admin/academy-leagues/${leagueId}`, {
+            method: 'PUT',
+            body: JSON.stringify(data)
+        }, { admin: true })
+    }
+
+    // Admin: Delete academy league
+    static async adminDeleteAcademyLeague(leagueId) {
+        return this.request(`/admin/academy-leagues/${leagueId}`, {
+            method: 'DELETE'
+        }, { admin: true })
+    }
+
+    // Admin: Sync academy league
+    static async adminSyncAcademyLeague(leagueId, data = {}) {
+        return this.request(`/admin/academy-leagues/${leagueId}/sync`, {
+            method: 'POST',
+            body: JSON.stringify(data)
+        }, { admin: true })
+    }
+
+    // Admin: Sync all academy leagues
+    static async adminSyncAllAcademyLeagues(data = {}) {
+        return this.request('/admin/academy-leagues/sync-all', {
+            method: 'POST',
+            body: JSON.stringify(data)
+        }, { admin: true })
+    }
+
+    // Admin: List academy appearances
+    static async adminListAcademyAppearances(params = {}) {
+        const query = new URLSearchParams(params).toString()
+        return this.request(`/admin/academy-appearances${query ? '?' + query : ''}`, {}, { admin: true })
+    }
+
+    // Admin: Get academy stats summary
+    static async adminAcademyStatsSummary() {
+        return this.request('/admin/academy-stats/summary', {}, { admin: true })
+    }
+
+    // Public: Get player academy stats
+    static async getPlayerAcademyStats(playerId, params = {}) {
+        const query = new URLSearchParams(params).toString()
+        return this.request(`/players/${playerId}/academy-stats${query ? '?' + query : ''}`)
     }
 }

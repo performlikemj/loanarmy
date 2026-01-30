@@ -1,5 +1,5 @@
 from flask import Blueprint, request, jsonify, make_response, render_template, Response, current_app, g
-from src.models.league import db, League, Team, LoanedPlayer, Newsletter, UserSubscription, EmailToken, LoanFlag, AdminSetting, NewsletterComment, UserAccount, SupplementalLoan, NewsletterPlayerYoutubeLink, NewsletterCommentary, Player, JournalistTeamAssignment, CommentaryApplause, TeamTrackingRequest, StripeSubscription, NewsletterDigestQueue, JournalistSubscription, BackgroundJob, TeamSubreddit, RedditPost, TeamAlias, ManualPlayerSubmission, _as_utc, _dedupe_loans
+from src.models.league import db, League, Team, LoanedPlayer, Newsletter, UserSubscription, EmailToken, LoanFlag, AdminSetting, NewsletterComment, UserAccount, SupplementalLoan, NewsletterPlayerYoutubeLink, NewsletterCommentary, Player, JournalistTeamAssignment, CommentaryApplause, TeamTrackingRequest, StripeSubscription, NewsletterDigestQueue, JournalistSubscription, BackgroundJob, TeamSubreddit, RedditPost, TeamAlias, ManualPlayerSubmission, CommunityTake, AcademyAppearance, _as_utc, _dedupe_loans
 from src.models.sponsor import Sponsor
 from src.api_football_client import APIFootballClient
 from src.admin.sandbox_tasks import (
@@ -614,7 +614,7 @@ def _send_login_code(email: str, code: str):
         expires_in=expires_minutes,
     )
     text_body = (
-        f"Your Go On Loan login code is {code}. "
+        f"Your The Academy Watch login code is {code}. "
         f"It expires in {expires_minutes} minutes. "
         "If you did not request it, you can ignore this email."
     )
@@ -698,7 +698,7 @@ def _send_subscription_verification_email(email: str, team_names: list[str], tok
     team_lines_text = '\n'.join(f" • {name}" for name in team_names)
 
     html = f"""
-    <p>Thanks for subscribing to Go On Loan newsletters.</p>
+    <p>Thanks for subscribing to The Academy Watch newsletters.</p>
     <p>Please confirm your email address to start receiving weekly updates.</p>
     <p><a href="{confirm_url}">Confirm subscription</a></p>
     <p>You requested updates for:</p>
@@ -706,7 +706,7 @@ def _send_subscription_verification_email(email: str, team_names: list[str], tok
     <p>If you did not make this request, you can ignore this message.</p>
     """
     text = (
-        "Thanks for subscribing to Go On Loan newsletters.\n\n"
+        "Thanks for subscribing to The Academy Watch newsletters.\n\n"
         "Confirm your email address to start receiving updates:\n"
         f"{confirm_url}\n\n"
         "You requested updates for:\n"
@@ -723,13 +723,13 @@ def _send_subscription_verification_email(email: str, team_names: list[str], tok
 
 def _send_waitlist_welcome_email(email: str, team_names: list[str]) -> dict:
     """Send a welcome email for teams that don't have active newsletters yet."""
-    subject = "Thanks for your interest in Go On Loan newsletters"
+    subject = "Thanks for your interest in The Academy Watch newsletters"
     
     team_lines_html = ''.join(f'<li>{name}</li>' for name in team_names)
     team_lines_text = '\n'.join(f" • {name}" for name in team_names)
     
     html = f"""
-    <p>Thanks for subscribing to Go On Loan newsletters!</p>
+    <p>Thanks for subscribing to The Academy Watch newsletters!</p>
     <p>You've subscribed to the following team(s):</p>
     <ul>{team_lines_html}</ul>
     <p><strong>Important:</strong> We're not currently generating newsletters for {'this team' if len(team_names) == 1 else 'these teams'} yet. 
@@ -740,7 +740,7 @@ def _send_waitlist_welcome_email(email: str, team_names: list[str]) -> dict:
     """
     
     text = (
-        "Thanks for subscribing to Go On Loan newsletters!\n\n"
+        "Thanks for subscribing to The Academy Watch newsletters!\n\n"
         "You've subscribed to:\n"
         f"{team_lines_text}\n\n"
         f"Important: We're not currently generating newsletters for {'this team' if len(team_names) == 1 else 'these teams'} yet. "
@@ -5409,8 +5409,8 @@ def _compute_newsletter_social_meta(n: Newsletter, context: dict[str, Any]) -> d
     description = context.get('summary') or ''
     description = _truncate_plain(description)
     if not description:
-        team_name = context.get('team_name') or (n.team.name if n.team else 'Go On Loan')
-        description = f'{team_name} weekly loan watch from Go On Loan.'
+        team_name = context.get('team_name') or (n.team.name if n.team else 'The Academy Watch')
+        description = f'{team_name} weekly loan watch from The Academy Watch.'
 
     canonical_slug = _newsletter_issue_slug(n)
     canonical_url = _absolute_url(f'/newsletters/{canonical_slug}')
@@ -5427,7 +5427,7 @@ def _compute_newsletter_social_meta(n: Newsletter, context: dict[str, Any]) -> d
     else:
         published = None
 
-    site_name = (os.getenv('SITE_NAME') or os.getenv('PUBLIC_SITE_NAME') or 'Go On Loan').strip() or 'Go On Loan'
+    site_name = (os.getenv('SITE_NAME') or os.getenv('PUBLIC_SITE_NAME') or 'The Academy Watch').strip() or 'The Academy Watch'
     author = (os.getenv('ARTICLE_AUTHOR_NAME') or site_name).strip() or site_name
     twitter_handle = (os.getenv('TWITTER_HANDLE') or '@goonloan').strip()
 
@@ -5554,9 +5554,47 @@ def _newsletter_render_context(n: Newsletter) -> dict[str, Any]:
 
     # Buy Me a Coffee button URL - use official CDN image
     bmc_button_url = 'https://cdn.buymeacoffee.com/buttons/v2/default-yellow.png'
-    
+
     # Public base URL for player links in emails
     public_base_url = os.getenv('PUBLIC_BASE_URL', '').rstrip('/')
+
+    # Fetch approved community takes for this newsletter
+    community_takes = []
+    takes_query = CommunityTake.query.filter_by(status='approved')
+    if n.id:
+        # First, get takes explicitly linked to this newsletter
+        newsletter_takes = takes_query.filter_by(newsletter_id=n.id).all()
+        community_takes.extend([t.to_dict() for t in newsletter_takes])
+
+    # Also get takes linked to the team (if any) that aren't newsletter-specific
+    if n.team_id and not community_takes:
+        team_takes = takes_query.filter_by(team_id=n.team_id, newsletter_id=None).order_by(
+            CommunityTake.created_at.desc()
+        ).limit(5).all()
+        community_takes.extend([t.to_dict() for t in team_takes])
+
+    # Submit take URL for footer
+    submit_take_url = f"{public_base_url}/submit-take" if public_base_url else None
+
+    # Fetch academy appearances for players in this newsletter's date range
+    academy_appearances = []
+    if n.week_start_date and n.week_end_date:
+        # Get players tracked for this team
+        tracked_players = LoanedPlayer.query.filter(
+            LoanedPlayer.is_active == True,
+            LoanedPlayer.parent_team_id == n.team_id,
+            LoanedPlayer.pathway_status == 'academy',
+        ).all()
+
+        if tracked_players:
+            player_api_ids = [p.player_api_id for p in tracked_players if p.player_api_id]
+            if player_api_ids:
+                appearances = AcademyAppearance.query.filter(
+                    AcademyAppearance.player_id.in_(player_api_ids),
+                    AcademyAppearance.fixture_date >= n.week_start_date,
+                    AcademyAppearance.fixture_date <= n.week_end_date,
+                ).order_by(AcademyAppearance.fixture_date.desc()).all()
+                academy_appearances = [a.to_dict() for a in appearances]
 
     context: dict[str, Any] = {
         'embed_image': _embed_image,
@@ -5577,6 +5615,9 @@ def _newsletter_render_context(n: Newsletter) -> dict[str, Any]:
         'summary_commentary': summary_commentary,
         'player_commentary_map': player_commentary_map,
         'bmc_button_url': bmc_button_url,
+        'community_takes': community_takes,
+        'submit_take_url': submit_take_url,
+        'academy_appearances': academy_appearances,
     }
     context['social_meta'] = _compute_newsletter_social_meta(n, context)
     return context
@@ -5678,7 +5719,7 @@ def _deliver_newsletter_via_webhook(
     subject = subject_override or (ctx['title'] or 'Weekly Loan Update')
 
     from_addr = {
-        'name': os.getenv('EMAIL_FROM_NAME', 'Go On Loan'),
+        'name': os.getenv('EMAIL_FROM_NAME', 'The Academy Watch'),
         'email': os.getenv('EMAIL_FROM_ADDRESS', 'no-reply@loan.army'),
     }
 
@@ -6525,6 +6566,31 @@ def admin_update_loan(loan_id: int):
             loan.reviewer_notes = (data.get('reviewer_notes') or '').strip() or None
         if 'youtube_link' in data:
             loan.youtube_link = data.get('youtube_link')
+
+        # Pathway tracking fields (Academy Watch)
+        if 'pathway_status' in data:
+            valid_statuses = ['academy', 'on_loan', 'first_team', 'released']
+            status = data.get('pathway_status')
+            if status in valid_statuses:
+                loan.pathway_status = status
+            elif status:
+                raise ValueError(f"Invalid pathway_status: {status}. Must be one of: {valid_statuses}")
+
+        if 'current_level' in data:
+            valid_levels = ['U18', 'U21', 'U23', 'Reserve', 'Senior', None, '']
+            level = data.get('current_level')
+            if level in valid_levels or level is None:
+                loan.current_level = level if level else None
+            else:
+                raise ValueError(f"Invalid current_level: {level}. Must be one of: U18, U21, U23, Reserve, Senior")
+
+        if 'data_depth' in data:
+            valid_depths = ['full_stats', 'events_only', 'profile_only']
+            depth = data.get('data_depth')
+            if depth in valid_depths:
+                loan.data_depth = depth
+            elif depth:
+                raise ValueError(f"Invalid data_depth: {depth}. Must be one of: {valid_depths}")
 
         db.session.commit()
         return jsonify({'message': 'updated', 'loan': loan.to_dict()})

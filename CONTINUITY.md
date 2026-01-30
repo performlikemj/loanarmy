@@ -22,12 +22,42 @@ Go On Loan — Football loan tracking platform with AI-powered newsletters and j
 
 ### Done
 - Agent workflow setup (AGENTS.md, Ralph scripts, ledger structure)
+- Agent protocol integration into CLAUDE.md
+- "The Academy Watch" refactor planning and analysis
+- Phase 1: Foundation (Stripe removal, branding, pathway columns)
+- Phase 2: Community Takes (complete)
+  - CommunityTake and QuickTakeSubmission models + migration
+  - Public submission API with rate limiting
+  - Admin curation endpoints (approve/reject/create/stats)
+  - AdminCuration dashboard page
+  - QuickTakeForm component and /submit-take page
+  - Newsletter template integration (shows approved takes)
+  - Submit take CTA in newsletter footer
+- Phase 3: Reddit Integration (skipped - no API access)
+- Phase 4: Academy Tracking (complete)
+  - AcademyLeague and AcademyAppearance models + migration
+  - Academy sync service (fetches fixtures, lineups, events)
+  - Admin API endpoints for league management and sync
+  - AdminAcademy dashboard page
+  - Academy section in newsletter template
+  - Limited data handling (Started/Sub badges, G+A when available)
+  - 4.8: Pathway progression UI in AdminLoans (status/level editing, badges, filters)
+- Phase 5: Polish & Launch (in progress)
+  - 5.1: E2E tests for Academy Watch features (complete)
+    - `e2e/academy-watch.spec.js` - tests for SubmitTake, AdminCuration, AdminAcademy, pathway status
+    - Database helpers in `e2e/helpers/db.js` for test cleanup
+  - 5.4: Security review for `/community-takes/submit` (complete)
+    - Flask-Limiter decorators (10/min, 30/hour)
+    - Input sanitization via bleach
+    - Email format validation
+    - Duplicate content detection (24h window)
 
 ### Now
-- Agent protocol integration into CLAUDE.md
+- Ready for Phase 5: Polish & Launch, or testing current features
+- **See `ledgers/DEVELOPER_DIRECTIVE.md` for detailed handoff notes**
 
 ### Next
-- Create actual planning ledger when ready for autonomous work
+- Phase 5: Polish & Launch (E2E tests, performance, deployment)
 
 ## Task Map
 
@@ -40,7 +70,8 @@ CONTINUITY.md
 
 | Ledger | Status | Owner | Blockers |
 |--------|--------|-------|----------|
-| CONTINUITY_plan-example.md | template | — | Rename and populate for actual tasks |
+| ACADEMY_WATCH_REFACTOR_PLAN.md | ready | — | Awaiting review before implementation |
+| ACADEMY_WATCH_AGENT_DIRECTIVE.md | ready | — | Agent implementation guide |
 
 ## Trivial Log
 

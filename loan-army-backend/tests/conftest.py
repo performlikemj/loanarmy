@@ -82,8 +82,6 @@ def app():
     app.register_blueprint(api_bp, url_prefix='/api')
     from src.routes.journalist import journalist_bp
     app.register_blueprint(journalist_bp, url_prefix='/api')
-    from src.routes.stripe_journalist import stripe_journalist_bp
-    app.register_blueprint(stripe_journalist_bp, url_prefix='/api')
 
     ctx = app.app_context()
     ctx.push()

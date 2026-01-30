@@ -118,7 +118,7 @@ export function ClaimAccount() {
                     </CardHeader>
                     <CardContent>
                         <p className="text-muted-foreground">
-                            Welcome to Go On Loan! Your writer account is now active.
+                            Welcome to The Academy Watch! Your writer account is now active.
                         </p>
                         <p className="text-sm text-muted-foreground mt-4">
                             Redirecting you to your writer dashboard...
@@ -140,7 +140,7 @@ export function ClaimAccount() {
                         </div>
                         <div>
                             <CardTitle>Claim Your Account</CardTitle>
-                            <CardDescription>Go On Loan Writer Account</CardDescription>
+                            <CardDescription>The Academy Watch Writer Account</CardDescription>
                         </div>
                     </div>
                 </CardHeader>
@@ -163,7 +163,7 @@ export function ClaimAccount() {
                     </div>
 
                     <p className="text-sm text-muted-foreground">
-                        Click below to claim this account and start writing directly on Go On Loan.
+                        Click below to claim this account and start writing directly on The Academy Watch.
                         You'll be able to create and manage your own content.
                     </p>
                 </CardContent>

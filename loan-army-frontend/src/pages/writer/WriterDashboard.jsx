@@ -14,11 +14,10 @@ import {
     AlertDialogHeader,
     AlertDialogTitle,
 } from '@/components/ui/alert-dialog'
-import { Loader2, Plus, FileText, Users, LogOut, TrendingUp, UserPlus, Trash2, MapPin, Building2, Clock, CheckCircle, XCircle } from 'lucide-react'
+import { Loader2, Plus, FileText, Users, LogOut, TrendingUp, UserPlus, Trash2, MapPin, Building2 } from 'lucide-react'
 import { LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer } from 'recharts'
 import { APIService } from '@/lib/api'
 import { useAuthUI } from '@/context/AuthContext'
-import { CoverageRequestModal } from '@/components/CoverageRequestModal'
 import { ManualPlayerModal } from '@/components/ManualPlayerModal'
 
 export function WriterDashboard() {
@@ -26,20 +25,17 @@ export function WriterDashboard() {
     const { logout } = useAuthUI()
     const [loading, setLoading] = useState(true)
     const [teams, setTeams] = useState({ parent_club_assignments: [], loan_team_assignments: [], assignments: [] })
-    const [coverageRequests, setCoverageRequests] = useState([])
     const [commentaries, setCommentaries] = useState([])
     const [stats, setStats] = useState(null)
     const [error, setError] = useState('')
     const [deletingId, setDeletingId] = useState(null)
     const [showDeleteConfirm, setShowDeleteConfirm] = useState(false)
-    const [showCoverageModal, setShowCoverageModal] = useState(false)
     const [showManualPlayerModal, setShowManualPlayerModal] = useState(false)
 
     const loadData = async () => {
         try {
-            const [teamsData, requestsData, commentariesData, statsData] = await Promise.all([
+            const [teamsData, commentariesData, statsData] = await Promise.all([
                 APIService.getWriterTeams(),
-                APIService.getWriterCoverageRequests().catch(() => []),
                 APIService.getWriterCommentaries(),
                 APIService.getJournalistOwnStats().catch(() => null)
             ])
@@ -49,7 +45,6 @@ export function WriterDashboard() {
             } else {
                 setTeams(teamsData || { parent_club_assignments: [], loan_team_assignments: [], assignments: [] })
             }
-            setCoverageRequests(requestsData || [])
             setCommentaries(commentariesData || [])
             setStats(statsData)
         } catch (err) {
@@ -250,10 +245,6 @@ export function WriterDashboard() {
                                     <UserPlus className="h-4 w-4 mr-2" />
                                     Suggest Player
                                 </Button>
-                                <Button variant="outline" onClick={() => setShowCoverageModal(true)}>
-                                    <Building2 className="h-4 w-4 mr-2" />
-                                    Request Coverage
-                                </Button>
                             </div>
                         </CardHeader>
                         <CardContent className="space-y-4">
@@ -301,71 +292,7 @@ export function WriterDashboard() {
 
                             {/* Empty State */}
                             {!teams.parent_club_assignments?.length && !teams.loan_team_assignments?.length && (
-                                <p className="text-gray-500">No teams assigned yet. Request coverage to get started!</p>
-                            )}
-
-                            {/* Pending Requests */}
-                            {coverageRequests.filter(r => r.status === 'pending').length > 0 && (
-                                <div className="border-t pt-4 mt-4">
-                                    <h4 className="text-sm font-medium text-gray-700 mb-2 flex items-center">
-                                        <Clock className="h-4 w-4 mr-1 text-amber-600" />
-                                        Pending Requests
-                                    </h4>
-                                    <div className="space-y-2">
-                                        {coverageRequests.filter(r => r.status === 'pending').map(req => (
-                                            <div key={req.id} className="flex items-center justify-between p-2 bg-amber-50 rounded-lg text-sm">
-                                                <div className="flex items-center gap-2">
-                                                    {req.coverage_type === 'parent_club' ? (
-                                                        <Building2 className="h-4 w-4 text-amber-600" />
-                                                    ) : (
-                                                        <MapPin className="h-4 w-4 text-amber-600" />
-                                                    )}
-                                                    <span>{req.team_name}</span>
-                                                    <Badge variant="outline" className="text-xs">
-                                                        {req.coverage_type === 'parent_club' ? 'Parent Club' : 'Loan Team'}
-                                                    </Badge>
-                                                </div>
-                                                <Button
-                                                    variant="ghost"
-                                                    size="sm"
-                                                    className="text-red-600 hover:text-red-700"
-                                                    onClick={async () => {
-                                                        try {
-                                                            await APIService.cancelCoverageRequest(req.id)
-                                                            setCoverageRequests(prev => prev.filter(r => r.id !== req.id))
-                                                        } catch (err) {
-                                                            console.error('Failed to cancel request', err)
-                                                        }
-                                                    }}
-                                                >
-                                                    Cancel
-                                                </Button>
-                                            </div>
-                                        ))}
-                                    </div>
-                                </div>
-                            )}
-
-                            {/* Recent Request History */}
-                            {coverageRequests.filter(r => r.status !== 'pending').length > 0 && (
-                                <div className="border-t pt-4 mt-4">
-                                    <h4 className="text-sm font-medium text-gray-700 mb-2">Recent Requests</h4>
-                                    <div className="space-y-1">
-                                        {coverageRequests.filter(r => r.status !== 'pending').slice(0, 5).map(req => (
-                                            <div key={req.id} className="flex items-center gap-2 text-sm text-gray-500">
-                                                {req.status === 'approved' ? (
-                                                    <CheckCircle className="h-4 w-4 text-green-500" />
-                                                ) : (
-                                                    <XCircle className="h-4 w-4 text-red-500" />
-                                                )}
-                                                <span>{req.team_name}</span>
-                                                <span className="text-xs">
-                                                    ({req.status === 'approved' ? 'Approved' : 'Denied'})
-                                                </span>
-                                            </div>
-                                        ))}
-                                    </div>
-                                </div>
+                                <p className="text-gray-500">No teams assigned yet.</p>
                             )}
                         </CardContent>
                     </Card>
@@ -443,15 +370,6 @@ export function WriterDashboard() {
                     </AlertDialogFooter>
                 </AlertDialogContent>
             </AlertDialog>
-
-            {/* Coverage Request Modal */}
-            <CoverageRequestModal
-                open={showCoverageModal}
-                onOpenChange={setShowCoverageModal}
-                onSuccess={() => {
-                    loadData()
-                }}
-            />
 
             <ManualPlayerModal
                 open={showManualPlayerModal}

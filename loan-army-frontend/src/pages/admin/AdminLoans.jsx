@@ -21,7 +21,9 @@ export function AdminLoans() {
     const [editForm, setEditForm] = useState({
         primary_team_db_id: '',
         loan_team_db_id: '',
-        is_active: true
+        is_active: true,
+        pathway_status: 'on_loan',
+        current_level: ''
     })
     const [saving, setSaving] = useState(false)
 
@@ -54,7 +56,8 @@ export function AdminLoans() {
         active_only: 'true',
         primary_team_db_id: '',
         player_name: '',
-        data_source: '' // '', 'manual', 'api-football'
+        data_source: '', // '', 'manual', 'api-football'
+        pathway_status: '' // '', 'academy', 'on_loan', 'first_team', 'released'
     })
 
     // Load teams
@@ -99,7 +102,8 @@ export function AdminLoans() {
             active_only: 'true',
             primary_team_db_id: '',
             player_name: '',
-            data_source: ''
+            data_source: '',
+            pathway_status: ''
         })
     }
 
@@ -109,7 +113,9 @@ export function AdminLoans() {
         setEditForm({
             primary_team_db_id: loan.primary_team_id || '',
             loan_team_db_id: loan.loan_team_id || '',
-            is_active: loan.is_active
+            is_active: loan.is_active,
+            pathway_status: loan.pathway_status || 'on_loan',
+            current_level: loan.current_level || ''
         })
         setMessage(null)
     }
@@ -120,7 +126,9 @@ export function AdminLoans() {
         setEditForm({
             primary_team_db_id: '',
             loan_team_db_id: '',
-            is_active: true
+            is_active: true,
+            pathway_status: 'on_loan',
+            current_level: ''
         })
     }
 
@@ -134,7 +142,9 @@ export function AdminLoans() {
             const payload = {
                 primary_team_db_id: editForm.primary_team_db_id || undefined,
                 loan_team_db_id: editForm.loan_team_db_id || undefined,
-                is_active: editForm.is_active
+                is_active: editForm.is_active,
+                pathway_status: editForm.pathway_status,
+                current_level: editForm.current_level || null
             }
             await APIService.adminLoanUpdate(editingLoanId, payload)
 
@@ -149,7 +159,9 @@ export function AdminLoans() {
                     primary_team_name: primaryTeam?.name || loan.primary_team_name,
                     loan_team_id: editForm.loan_team_db_id ? parseInt(editForm.loan_team_db_id) : loan.loan_team_id,
                     loan_team_name: loanTeam?.name || loan.loan_team_name,
-                    is_active: editForm.is_active
+                    is_active: editForm.is_active,
+                    pathway_status: editForm.pathway_status,
+                    current_level: editForm.current_level || null
                 }
             }))
 
@@ -434,10 +446,34 @@ export function AdminLoans() {
         return null
     }
 
-    // Filter loans by data_source if set
-    const filteredLoans = filters.data_source
-        ? loans.filter(l => l.data_source === filters.data_source)
-        : loans
+    // Get pathway status badge
+    const getPathwayBadge = (loan) => {
+        const status = loan.pathway_status || 'on_loan'
+        const level = loan.current_level
+
+        const statusConfig = {
+            academy: { color: 'text-blue-600 border-blue-300 bg-blue-50', label: 'Academy' },
+            on_loan: { color: 'text-amber-600 border-amber-300 bg-amber-50', label: 'On Loan' },
+            first_team: { color: 'text-emerald-600 border-emerald-300 bg-emerald-50', label: 'First Team' },
+            released: { color: 'text-gray-500 border-gray-300 bg-gray-50', label: 'Released' }
+        }
+
+        const config = statusConfig[status] || statusConfig.on_loan
+        const label = level ? `${config.label} (${level})` : config.label
+
+        return (
+            <Badge variant="outline" className={`${config.color} text-xs`}>
+                {label}
+            </Badge>
+        )
+    }
+
+    // Filter loans by data_source and pathway_status if set
+    const filteredLoans = loans.filter(l => {
+        if (filters.data_source && l.data_source !== filters.data_source) return false
+        if (filters.pathway_status && (l.pathway_status || 'on_loan') !== filters.pathway_status) return false
+        return true
+    })
 
     return (
         <div className="space-y-6">
@@ -558,7 +594,7 @@ export function AdminLoans() {
                     </div>
                 </CardHeader>
                 <CardContent>
-                    <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
+                    <div className="grid grid-cols-1 md:grid-cols-5 gap-4">
                         <div>
                             <Label htmlFor="status-filter">Status</Label>
                             <select
@@ -579,6 +615,21 @@ export function AdminLoans() {
                                 onChange={(id) => setFilters({ ...filters, primary_team_db_id: id })}
                                 placeholder="Filter by team..."
                             />
+                        </div>
+                        <div>
+                            <Label htmlFor="pathway-filter">Pathway</Label>
+                            <select
+                                id="pathway-filter"
+                                className="flex h-10 w-full rounded-md border border-input bg-background px-3 py-2 text-sm ring-offset-background"
+                                value={filters.pathway_status}
+                                onChange={(e) => setFilters({ ...filters, pathway_status: e.target.value })}
+                            >
+                                <option value="">All Pathways</option>
+                                <option value="academy">Academy</option>
+                                <option value="on_loan">On Loan</option>
+                                <option value="first_team">First Team</option>
+                                <option value="released">Released</option>
+                            </select>
                         </div>
                         <div>
                             <Label htmlFor="source-filter">Source</Label>
@@ -674,6 +725,38 @@ export function AdminLoans() {
                                                 </div>
                                             </div>
 
+                                            {/* Pathway Tracking */}
+                                            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                                                <div>
+                                                    <Label className="text-sm font-medium">Pathway Status</Label>
+                                                    <select
+                                                        className="flex h-10 w-full rounded-md border border-input bg-background px-3 py-2 text-sm ring-offset-background"
+                                                        value={editForm.pathway_status}
+                                                        onChange={(e) => setEditForm({ ...editForm, pathway_status: e.target.value })}
+                                                    >
+                                                        <option value="on_loan">On Loan</option>
+                                                        <option value="academy">Academy</option>
+                                                        <option value="first_team">First Team</option>
+                                                        <option value="released">Released</option>
+                                                    </select>
+                                                </div>
+                                                <div>
+                                                    <Label className="text-sm font-medium">Current Level</Label>
+                                                    <select
+                                                        className="flex h-10 w-full rounded-md border border-input bg-background px-3 py-2 text-sm ring-offset-background"
+                                                        value={editForm.current_level}
+                                                        onChange={(e) => setEditForm({ ...editForm, current_level: e.target.value })}
+                                                    >
+                                                        <option value="">Not Set</option>
+                                                        <option value="U18">U18</option>
+                                                        <option value="U21">U21</option>
+                                                        <option value="U23">U23</option>
+                                                        <option value="Reserve">Reserve</option>
+                                                        <option value="Senior">Senior</option>
+                                                    </select>
+                                                </div>
+                                            </div>
+
                                             <div className="flex items-center gap-2">
                                                 <label className="flex items-center gap-2 cursor-pointer">
                                                     <input
@@ -725,6 +808,7 @@ export function AdminLoans() {
                                                                 Inactive
                                                             </Badge>
                                                         )}
+                                                        {getPathwayBadge(loan)}
                                                         {getDataSourceBadge(loan)}
                                                     </div>
                                                     <div className="text-sm text-muted-foreground space-y-0.5">
