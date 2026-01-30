@@ -5,8 +5,7 @@ import os
 import requests
 from datetime import datetime, timezone, timedelta
 from flask import render_template
-from src.models.league import db, Newsletter, NewsletterCommentary, UserAccount, StripeSubscription, NewsletterDigestQueue, UserSubscription
-from src.services.stripe_usage_service import record_newsletter_publication
+from src.models.league import db, Newsletter, NewsletterCommentary, UserAccount, NewsletterDigestQueue, UserSubscription
 
 logger = logging.getLogger(__name__)
 
@@ -418,16 +417,14 @@ def process_newsletter_deadline(week_start_date=None):
         
         results = {
             'newsletters_processed': 0,
-            'writers_charged': 0,
-            'subscribers_notified': 0,
+            'writers_contributed': 0,
             'details': []
         }
-        
+
         for newsletter in newsletters:
             newsletter_result = process_single_newsletter_deadline(newsletter)
             results['newsletters_processed'] += 1
-            results['writers_charged'] += newsletter_result['writers_charged']
-            results['subscribers_notified'] += newsletter_result['subscribers_notified']
+            results['writers_contributed'] += newsletter_result.get('writers_contributed', 0)
             results['details'].append({
                 'newsletter_id': newsletter.id,
                 'team_id': newsletter.team_id,
@@ -497,39 +494,25 @@ def process_single_newsletter_deadline(newsletter: Newsletter) -> dict:
             f"Published newsletter {newsletter.id} with content from "
             f"{len(writers_with_content)} writers"
         )
-        
-        # Record usage for each writer who submitted content
-        total_subscribers = 0
+
+        # Log contributing writers
         for writer in writers_with_content:
-            usage_result = record_newsletter_publication(
-                journalist_user_id=writer.id,
-                newsletter_id=newsletter.id,
-                quantity=1
-            )
-            
-            total_subscribers += usage_result['success']
-            
-            logger.info(
-                f"Recorded usage for writer {writer.display_name}: "
-                f"{usage_result['success']} subscribers charged"
-            )
-        
-        # Log writers who didn't submit (won't be charged)
+            logger.info(f"Writer {writer.display_name} contributed to newsletter {newsletter.id}")
+
+        # Log writers who didn't submit
         for writer in writers_without_content:
             logger.info(
                 f"Writer {writer.display_name} did not submit content for "
-                f"newsletter {newsletter.id} - their subscribers NOT charged"
+                f"newsletter {newsletter.id}"
             )
         
         # TODO: Send emails to subscribers
         # This would integrate with your existing email system
-        # For now, we'll return the count
-        
+
         return {
             'published': True,
-            'writers_charged': len(writers_with_content),
+            'writers_contributed': len(writers_with_content),
             'writers_without_content': len(writers_without_content),
-            'subscribers_notified': total_subscribers,
             'writer_names': [w.display_name for w in writers_with_content]
         }
         

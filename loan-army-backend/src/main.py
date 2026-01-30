@@ -7,7 +7,6 @@ from src.models.league import db, League, Team, LoanedPlayer, Newsletter, UserSu
 import src.models.weekly  # Ensure weekly models are registered with SQLAlchemy
 from src.routes.api import api_bp, require_api_key
 from src.routes.journalist import journalist_bp
-from src.routes.newsletter_usage import newsletter_usage_bp
 from src.routes.newsletter_deadline import newsletter_deadline_bp
 from src.routes.community_takes import community_takes_bp
 from src.routes.academy import academy_bp
@@ -76,7 +75,6 @@ for name in ("mcp", "agents.mcp", "mcp.shared.session", "mcp.client"):
 
 app.register_blueprint(api_bp, url_prefix='/api')
 app.register_blueprint(journalist_bp, url_prefix='/api')
-app.register_blueprint(newsletter_usage_bp, url_prefix='/api')
 app.register_blueprint(newsletter_deadline_bp, url_prefix='/api')
 app.register_blueprint(community_takes_bp, url_prefix='/api')
 app.register_blueprint(academy_bp, url_prefix='/api')
