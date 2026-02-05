@@ -55,7 +55,9 @@ os.environ.setdefault('TEST_ONLY_MANU', 'false')
 
 from src.models.league import db
 from src.routes.api import api_bp
+from src.routes.teams import teams_bp
 from src.extensions import limiter
+import src.models.weekly  # Ensure weekly models are registered for db.create_all()
 
 
 @pytest.fixture
@@ -80,6 +82,7 @@ def app():
     db.init_app(app)
     limiter.init_app(app)
     app.register_blueprint(api_bp, url_prefix='/api')
+    app.register_blueprint(teams_bp, url_prefix='/api')
     from src.routes.journalist import journalist_bp
     app.register_blueprint(journalist_bp, url_prefix='/api')
 

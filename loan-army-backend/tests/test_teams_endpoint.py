@@ -51,13 +51,13 @@ def test_teams_endpoint_dedupes_active_loans(client):
     db.session.add_all([loan_a, loan_b])
     db.session.commit()
 
-    resp = client.get('/teams')
+    resp = client.get('/api/teams')
     assert resp.status_code == 200
     payload = resp.get_json()
     manu = next(item for item in payload if item['team_id'] == parent.team_id)
     assert manu['current_loaned_out_count'] == 1
 
-    detail_resp = client.get(f'/teams/{parent.id}')
+    detail_resp = client.get(f'/api/teams/{parent.id}')
     assert detail_resp.status_code == 200
     detail = detail_resp.get_json()
     assert len(detail['active_loans']) == 1
@@ -111,7 +111,7 @@ def test_team_loans_endpoint_dedupes_active_rows_by_default(client):
     db.session.add_all([older, newer])
     db.session.commit()
 
-    resp = client.get(f'/teams/{parent.id}/loans')
+    resp = client.get(f'/api/teams/{parent.id}/loans')
     assert resp.status_code == 200
     payload = resp.get_json()
     assert isinstance(payload, list)
@@ -119,7 +119,7 @@ def test_team_loans_endpoint_dedupes_active_rows_by_default(client):
     assert payload[0]['window_key'] == '2024-25::WINTER'
 
     # Allow turning dedupe off for diagnostics.
-    resp = client.get(f'/teams/{parent.id}/loans?active_only=false&dedupe=false')
+    resp = client.get(f'/api/teams/{parent.id}/loans?active_only=false&dedupe=false')
     assert resp.status_code == 200
     payload = resp.get_json()
     assert isinstance(payload, list)
