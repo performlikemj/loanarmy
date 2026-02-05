@@ -13959,3 +13959,265 @@ def admin_review_manual_player(submission_id):
         db.session.rollback()
         logger.exception('Failed to review manual player')
         return jsonify(_safe_error_payload(e, 'Failed to review manual player')), 500
+
+
+# =============================================================================
+# Player Journey Endpoints
+# =============================================================================
+
+@api_bp.route('/players/<int:player_id>/journey', methods=['GET'])
+def get_player_journey(player_id: int):
+    """
+    Get a player's complete career journey.
+    
+    Query params:
+    - include_entries: bool - Include detailed journey entries (default: true)
+    - sync: bool - Trigger sync if journey doesn't exist (default: false)
+    """
+    try:
+        from src.models.journey import PlayerJourney, ClubLocation
+        
+        include_entries = request.args.get('include_entries', 'true').lower() == 'true'
+        should_sync = request.args.get('sync', 'false').lower() == 'true'
+        
+        journey = PlayerJourney.query.filter_by(player_api_id=player_id).first()
+        
+        if not journey and should_sync:
+            # Trigger sync if requested
+            from src.services.journey_sync import JourneySyncService
+            service = JourneySyncService()
+            journey = service.sync_player(player_id)
+        
+        if not journey:
+            return jsonify({'error': 'Journey not found', 'player_id': player_id}), 404
+        
+        return jsonify(journey.to_dict(include_entries=include_entries))
+        
+    except Exception as e:
+        logger.exception(f'Failed to get journey for player {player_id}')
+        return jsonify(_safe_error_payload(e, 'Failed to get player journey')), 500
+
+
+@api_bp.route('/players/<int:player_id>/journey/map', methods=['GET'])
+def get_player_journey_map(player_id: int):
+    """
+    Get a player's journey in map-optimized format (grouped by club with coordinates).
+    """
+    try:
+        from src.models.journey import PlayerJourney, ClubLocation
+        
+        journey = PlayerJourney.query.filter_by(player_api_id=player_id).first()
+        
+        if not journey:
+            return jsonify({'error': 'Journey not found', 'player_id': player_id}), 404
+        
+        map_data = journey.to_map_dict()
+        
+        # Add coordinates for each stop
+        club_ids = [stop['club_id'] for stop in map_data['stops']]
+        locations = ClubLocation.query.filter(ClubLocation.club_api_id.in_(club_ids)).all()
+        location_map = {loc.club_api_id: loc for loc in locations}
+        
+        for stop in map_data['stops']:
+            loc = location_map.get(stop['club_id'])
+            if loc:
+                stop['lat'] = loc.latitude
+                stop['lng'] = loc.longitude
+                stop['city'] = loc.city
+                stop['country'] = loc.country
+            else:
+                stop['lat'] = None
+                stop['lng'] = None
+        
+        # Build path (ordered list of coordinates)
+        map_data['path'] = [
+            [stop['lat'], stop['lng']]
+            for stop in map_data['stops']
+            if stop.get('lat') and stop.get('lng')
+        ]
+        
+        return jsonify(map_data)
+        
+    except Exception as e:
+        logger.exception(f'Failed to get journey map for player {player_id}')
+        return jsonify(_safe_error_payload(e, 'Failed to get player journey map')), 500
+
+
+@api_bp.route('/admin/journey/sync/<int:player_id>', methods=['POST'])
+@require_api_key
+def admin_sync_player_journey(player_id: int):
+    """
+    Trigger journey sync for a specific player.
+    
+    Body params:
+    - force_full: bool - Re-sync all seasons even if already synced
+    """
+    try:
+        from src.services.journey_sync import JourneySyncService
+        
+        data = request.get_json() or {}
+        force_full = data.get('force_full', False)
+        
+        service = JourneySyncService()
+        journey = service.sync_player(player_id, force_full=force_full)
+        
+        if not journey:
+            return jsonify({'error': 'Sync failed', 'player_id': player_id}), 500
+        
+        return jsonify({
+            'success': True,
+            'player_id': player_id,
+            'journey': journey.to_dict(include_entries=True)
+        })
+        
+    except Exception as e:
+        logger.exception(f'Failed to sync journey for player {player_id}')
+        return jsonify(_safe_error_payload(e, 'Failed to sync player journey')), 500
+
+
+@api_bp.route('/admin/journey/bulk-sync', methods=['POST'])
+@require_api_key
+def admin_bulk_sync_journeys():
+    """
+    Trigger journey sync for multiple players.
+    
+    Body params:
+    - player_ids: list[int] - List of player API IDs to sync
+    - force_full: bool - Re-sync all seasons even if already synced
+    """
+    try:
+        from src.services.journey_sync import JourneySyncService
+        
+        data = request.get_json() or {}
+        player_ids = data.get('player_ids', [])
+        force_full = data.get('force_full', False)
+        
+        if not player_ids:
+            return jsonify({'error': 'No player_ids provided'}), 400
+        
+        if len(player_ids) > 50:
+            return jsonify({'error': 'Maximum 50 players per bulk sync'}), 400
+        
+        service = JourneySyncService()
+        results = {'success': [], 'failed': []}
+        
+        for player_id in player_ids:
+            try:
+                journey = service.sync_player(player_id, force_full=force_full)
+                if journey:
+                    results['success'].append(player_id)
+                else:
+                    results['failed'].append({'player_id': player_id, 'error': 'Sync returned None'})
+            except Exception as e:
+                results['failed'].append({'player_id': player_id, 'error': str(e)})
+        
+        return jsonify(results)
+        
+    except Exception as e:
+        logger.exception('Failed to bulk sync journeys')
+        return jsonify(_safe_error_payload(e, 'Failed to bulk sync journeys')), 500
+
+
+@api_bp.route('/admin/journey/seed-locations', methods=['POST'])
+@require_api_key
+def admin_seed_club_locations():
+    """Seed initial club locations for major clubs."""
+    try:
+        from src.services.journey_sync import seed_club_locations
+        
+        added = seed_club_locations()
+        
+        return jsonify({
+            'success': True,
+            'clubs_added': added
+        })
+        
+    except Exception as e:
+        logger.exception('Failed to seed club locations')
+        return jsonify(_safe_error_payload(e, 'Failed to seed club locations')), 500
+
+
+@api_bp.route('/club-locations', methods=['GET'])
+def get_club_locations():
+    """Get all club locations for map display."""
+    try:
+        from src.models.journey import ClubLocation
+        
+        locations = ClubLocation.query.all()
+        
+        return jsonify({
+            'locations': [loc.to_dict() for loc in locations],
+            'count': len(locations)
+        })
+        
+    except Exception as e:
+        logger.exception('Failed to get club locations')
+        return jsonify(_safe_error_payload(e, 'Failed to get club locations')), 500
+
+
+@api_bp.route('/club-locations/<int:club_api_id>', methods=['GET'])
+def get_club_location(club_api_id: int):
+    """Get location for a specific club."""
+    try:
+        from src.models.journey import ClubLocation
+        
+        location = ClubLocation.query.filter_by(club_api_id=club_api_id).first()
+        
+        if not location:
+            return jsonify({'error': 'Club location not found'}), 404
+        
+        return jsonify(location.to_dict())
+        
+    except Exception as e:
+        logger.exception(f'Failed to get location for club {club_api_id}')
+        return jsonify(_safe_error_payload(e, 'Failed to get club location')), 500
+
+
+@api_bp.route('/admin/club-locations', methods=['POST'])
+@require_api_key
+def admin_add_club_location():
+    """Add or update a club location."""
+    try:
+        from src.models.journey import ClubLocation
+        
+        data = request.get_json() or {}
+        
+        required = ['club_api_id', 'club_name', 'latitude', 'longitude']
+        missing = [f for f in required if f not in data]
+        if missing:
+            return jsonify({'error': f'Missing required fields: {missing}'}), 400
+        
+        location = ClubLocation.query.filter_by(club_api_id=data['club_api_id']).first()
+        
+        if location:
+            # Update existing
+            location.club_name = data.get('club_name', location.club_name)
+            location.city = data.get('city', location.city)
+            location.country = data.get('country', location.country)
+            location.country_code = data.get('country_code', location.country_code)
+            location.latitude = data['latitude']
+            location.longitude = data['longitude']
+            location.geocode_source = data.get('geocode_source', 'manual')
+        else:
+            # Create new
+            location = ClubLocation(
+                club_api_id=data['club_api_id'],
+                club_name=data['club_name'],
+                city=data.get('city'),
+                country=data.get('country'),
+                country_code=data.get('country_code'),
+                latitude=data['latitude'],
+                longitude=data['longitude'],
+                geocode_source=data.get('geocode_source', 'manual'),
+                geocode_confidence=1.0,
+            )
+            db.session.add(location)
+        
+        db.session.commit()
+        
+        return jsonify(location.to_dict())
+        
+    except Exception as e:
+        db.session.rollback()
+        logger.exception('Failed to add club location')
+        return jsonify(_safe_error_payload(e, 'Failed to add club location')), 500
