@@ -470,11 +470,17 @@ MAJOR_CLUBS = [
 
 | ID | Task | Status | Est |
 |----|------|--------|-----|
-| 6.1 | Integrate JourneyMap into PlayerPage | `pending` | 30m |
-| 6.2 | Add loading states and error handling | `pending` | 30m |
+| 6.1 | Integrate JourneyMap into PlayerPage | `complete` | 30m |
+| 6.2 | Add loading states and error handling | `complete` | 30m |
 | 6.3 | Add "Sync Journey" button for admin | `pending` | 20m |
-| 6.4 | Performance optimization (lazy load map) | `pending` | 30m |
-| 6.5 | E2E tests for journey feature | `pending` | 1h |
+| 6.4 | Performance optimization (lazy load map) | `complete` | 30m |
+| 6.5 | E2E tests for journey feature | `complete` | 1h |
+| 6.6 | Backend unit tests | `complete` | 30m |
+
+**Files modified:**
+- `src/pages/PlayerPage.jsx` - Added Journey tab with lazy loading
+- `e2e/journey.spec.js` - E2E tests
+- `tests/test_journey.py` - Backend unit tests
 
 ---
 
