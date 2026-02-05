@@ -39,6 +39,24 @@ from src.utils.newsletter_slug import compose_newsletter_public_slug
 from src.services.email_service import email_service
 import threading
 
+# Import auth utilities from the extracted auth module
+from src.auth import (
+    require_api_key,
+    require_user_auth,
+    issue_user_token,
+    _user_serializer,
+    _get_authorized_email,
+    _admin_email_list,
+    _ensure_user_account,
+    _generate_default_display_name,
+    _normalize_display_name,
+    _make_display_name_unique,
+    get_client_ip,
+    ALLOWED_ADMIN_IPS,
+    _safe_error_payload,
+    _is_production,
+)
+
 logger = logging.getLogger(__name__)
 
 api_bp = Blueprint('api', __name__)
@@ -134,117 +152,7 @@ except Exception:
     SUBSCRIPTIONS_VERIFY_TTL_MINUTES = 60 * 24
 
 
-def _admin_email_list() -> list[str]:
-    raw = os.getenv('ADMIN_EMAILS') or ''
-    emails = [item.strip() for item in raw.split(',') if item.strip()]
-    if not emails:
-        return []
-    # Preserve order while removing duplicates
-    return list(dict.fromkeys(emails))
-
-# API Key Authentication Decorator
-def require_api_key(f):
-    """Decorator to require API key for admin endpoints with optional IP whitelisting."""
-    @wraps(f)
-    def decorated_function(*args, **kwargs):
-        if request.method == 'OPTIONS':
-            return make_response('', 204)
-        client_ip = get_client_ip()
-        auth_header = request.headers.get('Authorization') or ''
-        api_key_header = request.headers.get('X-API-Key') or request.headers.get('X-Admin-Key') or ''
-        logger.debug(
-            "Admin auth attempt ip=%s endpoint=%s auth_present=%s key_present=%s",
-            client_ip,
-            request.endpoint,
-            bool(auth_header),
-            bool(api_key_header),
-        )
-
-        # Check IP whitelist if configured
-        if ALLOWED_ADMIN_IPS and client_ip not in ALLOWED_ADMIN_IPS:
-            logger.warning(f"Admin access denied for IP {client_ip} (not in whitelist)")
-            return jsonify({
-                'error': 'Access denied from this IP address',
-                'message': 'Your IP is not authorized for admin operations'
-            }), 403
-        
-        # Get the API key from environment
-        required_api_key = os.getenv('ADMIN_API_KEY')
-        if required_api_key:
-            required_api_key = required_api_key.strip()
-        
-        if not required_api_key:
-            logger.warning("ADMIN_API_KEY not configured in environment")
-            return jsonify({
-                'error': 'API authentication not configured',
-                'message': 'Contact administrator'
-            }), 500
-        
-        # Require admin Bearer token
-        token_data = None
-        if auth_header.startswith('Bearer '):
-            token = auth_header.split(' ', 1)[1]
-            try:
-                data = _user_serializer().loads(token, max_age=60 * 60 * 24 * 30)
-                if (data or {}).get('role') == 'admin':
-                    token_data = data
-                    g.user_email = (data or {}).get('email')
-            except Exception as _e:
-                logger.warning(f"Bearer admin token failed for {client_ip}: {_e}")
-
-        if not token_data:
-            logger.warning(
-                "Admin token missing or invalid ip=%s endpoint=%s auth_sample=%s",
-                client_ip,
-                request.endpoint,
-                auth_header[:32],
-            )
-            return jsonify({'error': 'Admin login required', 'message': 'Provide a valid admin Bearer token'}), 401
-
-        # Require API key as a second factor
-        provided_key = request.headers.get('X-API-Key') or request.headers.get('X-Admin-Key')
-        provided_key = (provided_key or '').strip()
-
-        def _mask_admin_key(value: str | None) -> str:
-            if not value:
-                return '(none)'
-            trimmed = value.strip()
-            if len(trimmed) <= 6:
-                return trimmed
-            return f"{trimmed[:3]}...{trimmed[-3:]}"
-
-        masked_key = _mask_admin_key(provided_key)
-
-        if not provided_key:
-            logger.warning(
-                "Admin API key missing ip=%s user=%s endpoint=%s auth_sample=%s",
-                client_ip,
-                getattr(g, 'user_email', None),
-                request.endpoint,
-                auth_header[:32],
-            )
-            return jsonify({'error': 'Admin API key required', 'message': 'Send X-API-Key in the request headers'}), 401
-
-        if provided_key != required_api_key:
-            logger.warning(
-                "Invalid admin credential ip=%s user=%s endpoint=%s key=%s",
-                client_ip,
-                getattr(g, 'user_email', None),
-                request.endpoint,
-                masked_key,
-            )
-            return jsonify({'error': 'Invalid admin credential', 'message': 'Access denied'}), 403
-
-        logger.info(
-            "Admin dual auth granted ip=%s user=%s endpoint=%s key=%s",
-            client_ip,
-            getattr(g, 'user_email', None),
-            request.endpoint,
-            masked_key,
-        )
-        return f(*args, **kwargs)
-    
-    return decorated_function
+# require_api_key, require_user_auth, and other auth utilities are imported from src.auth
 
 # CORS support - only add headers not already set by Flask-CORS
 # Do NOT override Access-Control-Allow-Origin (Flask-CORS in main.py handles this based on CORS_ALLOW_ORIGINS)
@@ -450,155 +358,8 @@ def admin_toggle_editor_role(user_id):
         return jsonify(_safe_error_payload(e, 'Failed to update editor role')), 500
 
 
-# --- Lightweight user token auth (for comments/login) ---
-def _user_serializer() -> URLSafeTimedSerializer:
-    secret = current_app.config.get('SECRET_KEY') or os.getenv('SECRET_KEY')
-    is_prod = os.getenv("FLASK_ENV", "").lower() in ("prod", "production", "stage", "staging")
-    
-    # Fail fast in production if SECRET_KEY is missing or default
-    if is_prod and (not secret or secret == 'change-me'):
-        raise RuntimeError("SECRET_KEY must be properly configured in production")
-    
-    return URLSafeTimedSerializer(secret_key=secret or 'change-me', salt='user-auth')
-
-# def _user_rate_limit_key() is defined near the top of this file to ensure it exists before decorator usage
-def _base_display_name_from_email(email: str) -> str:
-    local = (email or '').split('@')[0]
-    cleaned = re.sub(r'[^a-zA-Z0-9]+', '', local)
-    if not cleaned:
-        cleaned = 'loaner'
-    return cleaned[:16] or 'loaner'
-
-def _make_display_name_unique(candidate: str) -> str:
-    base = candidate[:28] or 'loaner'
-    suffix = 1
-    name = candidate
-    while UserAccount.query.filter_by(display_name_lower=name.lower()).first():
-        suffix += 1
-        trim_base = base[: max(1, 30 - len(str(suffix)))]
-        name = f"{trim_base}{suffix}"
-    return name
-
-def _generate_default_display_name(email: str) -> str:
-    base = _base_display_name_from_email(email)
-    candidate = base
-    if len(candidate) < 3:
-        candidate = f"{candidate}{'fan'}"
-    candidate = candidate.title()
-    return _make_display_name_unique(candidate)
-
-def _normalize_display_name(value: str) -> str:
-    cleaned = sanitize_plain_text(value or '')
-    cleaned = re.sub(r'\s+', ' ', cleaned).strip()
-    cleaned = re.sub(r'[^A-Za-z0-9 ._\-]', '', cleaned)
-    return cleaned[:40]
-
-def _ensure_user_account(email: str) -> UserAccount:
-    now = datetime.now(timezone.utc)
-    user = UserAccount.query.filter_by(email=email).first()
-    if user:
-        user.last_login_at = now
-        if not user.display_name:
-            display_name = _generate_default_display_name(email)
-            user.display_name = display_name
-            user.display_name_lower = display_name.lower()
-            user.display_name_confirmed = False
-        if not user.last_display_name_change_at:
-            user.last_display_name_change_at = now
-        return user
-    display_name = _generate_default_display_name(email)
-    user = UserAccount(
-        email=email,
-        display_name=display_name,
-        display_name_lower=display_name.lower(),
-        display_name_confirmed=False,
-        created_at=now,
-        updated_at=now,
-        last_login_at=now,
-        last_display_name_change_at=now,
-    )
-    db.session.add(user)
-    db.session.flush()
-    return user
-
-def issue_user_token(email: str, ttl_seconds: int = 60 * 60 * 24 * 30, role: str = 'user') -> dict:
-    s = _user_serializer()
-    # embed ts in payload for debugging; URLSafeTimedSerializer enforces max_age on loads
-    payload = {'email': email, 'role': role, 'iat': int(time.time())}
-    token = s.dumps(payload)
-    logger.info("Issued auth token payload for %s with role=%s", email, role)
-    return {
-        'token': token,
-        'expires_in': ttl_seconds
-    }
-
-def require_user_auth(f):
-    @wraps(f)
-    def decorated(*args, **kwargs):
-        auth = request.headers.get('Authorization', '')
-        if auth.startswith('Bearer '):
-            token = auth.split(' ', 1)[1]
-        else:
-            token = None
-        if not token:
-            return jsonify({'error': 'missing auth token'}), 401
-        s = _user_serializer()
-        try:
-            # Accept tokens up to 30 days old by default
-            data = s.loads(token, max_age=60 * 60 * 24 * 30)
-            email = data.get('email')
-            g.user_email = email
-            if email:
-                user = UserAccount.query.filter_by(email=email).first()
-                if user:
-                    g.user = user
-                    g.user_id = user.id
-        except SignatureExpired:
-            return jsonify({'error': 'auth token expired'}), 401
-        except BadSignature:
-            return jsonify({'error': 'invalid auth token'}), 401
-        return f(*args, **kwargs)
-    return decorated
-
-
-def _get_authorized_email() -> str | None:
-    """Resolve the authenticated email from the current request, if present."""
-    email = getattr(g, 'user_email', None)
-    if email:
-        return email
-
-    auth_header = request.headers.get('Authorization', '')
-    if auth_header.startswith('Bearer '):
-        token = auth_header.split(' ', 1)[1].strip()
-        if token:
-            serializer = _user_serializer()
-            try:
-                data = serializer.loads(token, max_age=60 * 60 * 24 * 30)
-                resolved = (data or {}).get('email')
-                if resolved:
-                    g.user_email = resolved
-                    return resolved
-            except (SignatureExpired, BadSignature):
-                return None
-            except Exception:
-                logger.exception('Failed to decode auth token while resolving email')
-                return None
-    return None
-
-def _is_production() -> bool:
-    env = (os.getenv('ENV') or os.getenv('FLASK_ENV') or os.getenv('APP_ENV') or '').strip().lower()
-    return env in ('prod', 'production')
-
-def _safe_error_payload(exc: Exception, fallback_message: str, include_detail: bool = False) -> dict[str, str]:
-    """Return a sanitized error payload, hiding internal details in production."""
-    payload = {'error': fallback_message}
-    if include_detail or not _is_production():
-        payload['detail'] = str(exc)
-    else:
-        reference = uuid4().hex[:8]
-        payload['reference'] = reference
-        logger.error('Error reference=%s: %s', reference, exc, exc_info=True)
-    return payload
+# Auth utilities (_user_serializer, _ensure_user_account, issue_user_token, require_user_auth,
+# _get_authorized_email, _is_production, _safe_error_payload, display name helpers) are imported from src.auth
 
 def _send_login_code(email: str, code: str):
     """Send login code via email service (Mailgun/SMTP).
@@ -1236,24 +997,7 @@ def _sync_season(window_key: str | None = None, season: int | None = None):
     api_client._prime_team_cache(season_start)
     return season_start
 
-# Production Security Configuration
-ALLOWED_ADMIN_IPS = [ip.strip() for ip in os.getenv('ADMIN_IP_WHITELIST', '').split(',') if ip.strip()]
-
-def get_client_ip():
-    """Get the real client IP, handling proxies and load balancers."""
-    # Check X-Forwarded-For header (from load balancers, proxies)
-    forwarded_for = request.headers.get('X-Forwarded-For')
-    if forwarded_for:
-        # Take the first IP in the chain (original client)
-        return forwarded_for.split(',')[0].strip()
-    
-    # Check X-Real-IP header (nginx proxy)
-    real_ip = request.headers.get('X-Real-IP')
-    if real_ip:
-        return real_ip.strip()
-    
-    # Fall back to direct connection IP
-    return request.remote_addr
+# ALLOWED_ADMIN_IPS and get_client_ip are imported from src.auth
 
 # League endpoints
 @api_bp.route('/leagues', methods=['GET'])
