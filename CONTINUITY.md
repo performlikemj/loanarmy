@@ -53,11 +53,24 @@ Go On Loan — Football loan tracking platform with AI-powered newsletters and j
     - Duplicate content detection (24h window)
 
 ### Now
-- Ready for Phase 5: Polish & Launch, or testing current features
-- **See `ledgers/DEVELOPER_DIRECTIVE.md` for detailed handoff notes**
+- Player Journey feature (complete - needs migration and testing)
+  - Interactive map showing career path from academy to first team
+  - `PlayerJourney`, `PlayerJourneyEntry`, `ClubLocation` models
+  - `JourneySyncService` - fetches from API-Football, classifies levels
+  - 50+ major club coordinates seeded
+  - `JourneyMap.jsx` component with Leaflet
+  - `JourneyTimeline.jsx` fallback component
+  - Integrated into PlayerPage with new "Journey" tab
+  - E2E tests: `e2e/journey.spec.js`
+  - Backend tests: `tests/test_journey.py`
+- **See `ledgers/ACADEMY_WATCH_IMPLEMENTATION_PLAN.md` for detailed status**
 
 ### Next
-- Phase 5: Polish & Launch (E2E tests, performance, deployment)
+- Run migration: `flask db upgrade`
+- Install frontend deps: `cd loan-army-frontend && pnpm install`
+- Seed club locations: `POST /api/admin/journey/seed-locations`
+- Test journey sync: `POST /api/admin/journey/sync/284324` (Garnacho)
+- Run E2E tests: `pnpm test:e2e`
 
 ## Task Map
 
@@ -70,8 +83,9 @@ CONTINUITY.md
 
 | Ledger | Status | Owner | Blockers |
 |--------|--------|-------|----------|
-| ACADEMY_WATCH_REFACTOR_PLAN.md | ready | — | Awaiting review before implementation |
-| ACADEMY_WATCH_AGENT_DIRECTIVE.md | ready | — | Agent implementation guide |
+| ACADEMY_WATCH_REFACTOR_PLAN.md | complete | — | Phases 1-4 done |
+| ACADEMY_WATCH_IMPLEMENTATION_PLAN.md | in-progress | — | Phases 1-5 done, Phase 6 ready |
+| ACADEMY_WATCH_JOURNEY_REDESIGN.md | complete | — | Design doc for journey feature |
 
 ## Trivial Log
 
