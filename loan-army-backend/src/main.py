@@ -8,6 +8,7 @@ import src.models.weekly  # Ensure weekly models are registered with SQLAlchemy
 from src.routes.api import api_bp
 from src.routes.auth_routes import auth_bp
 from src.routes.teams import teams_bp
+from src.routes.loans import loans_bp
 from src.auth import require_api_key
 from src.routes.journalist import journalist_bp
 from src.routes.newsletter_deadline import newsletter_deadline_bp
@@ -79,6 +80,7 @@ for name in ("mcp", "agents.mcp", "mcp.shared.session", "mcp.client"):
 app.register_blueprint(api_bp, url_prefix='/api')
 app.register_blueprint(auth_bp, url_prefix='/api')
 app.register_blueprint(teams_bp, url_prefix='/api')
+app.register_blueprint(loans_bp, url_prefix='/api')
 app.register_blueprint(journalist_bp, url_prefix='/api')
 app.register_blueprint(newsletter_deadline_bp, url_prefix='/api')
 app.register_blueprint(community_takes_bp, url_prefix='/api')
