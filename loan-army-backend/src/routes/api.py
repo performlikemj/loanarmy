@@ -56,70 +56,17 @@ from src.auth import (
     _safe_error_payload,
     _is_production,
 )
+from src.utils.background_jobs import (
+    create_background_job as _create_background_job,
+    update_job as _update_job,
+    get_job as _get_job,
+)
 
 logger = logging.getLogger(__name__)
 
 api_bp = Blueprint('api', __name__)
 
-# Database-backed job store for background tasks (works across gunicorn workers)
-def _create_background_job(job_type: str) -> str:
-    """Create a new background job in the database and return its ID."""
-    job_id = str(uuid4())
-    try:
-        job = BackgroundJob(
-            id=job_id,
-            job_type=job_type,
-            status='running',
-            progress=0,
-            total=0,
-            started_at=datetime.now(timezone.utc)
-        )
-        db.session.add(job)
-        db.session.commit()
-    except Exception as e:
-        logger.error(f'Failed to create background job: {e}')
-        db.session.rollback()
-    return job_id
-
-def _update_job(job_id: str, **kwargs):
-    """Update a background job's status in the database."""
-    try:
-        job = db.session.get(BackgroundJob, job_id)
-        if job:
-            if 'progress' in kwargs:
-                job.progress = kwargs['progress']
-            if 'total' in kwargs:
-                job.total = kwargs['total']
-            if 'current_player' in kwargs:
-                job.current_player = kwargs.get('current_player')
-            if 'status' in kwargs:
-                job.status = kwargs['status']
-            if 'error' in kwargs:
-                job.error = kwargs.get('error')
-            if 'results' in kwargs:
-                results = kwargs.get('results')
-                if results is not None:
-                    job.results_json = json.dumps(results)
-            if 'completed_at' in kwargs:
-                completed = kwargs.get('completed_at')
-                if isinstance(completed, str):
-                    job.completed_at = datetime.fromisoformat(completed.replace('Z', '+00:00'))
-                else:
-                    job.completed_at = completed
-            db.session.commit()
-    except Exception as e:
-        logger.error(f'Failed to update background job {job_id}: {e}')
-        db.session.rollback()
-
-def _get_job(job_id: str) -> dict | None:
-    """Get a background job's status from the database."""
-    try:
-        job = db.session.get(BackgroundJob, job_id)
-        if job:
-            return job.to_dict()
-    except Exception as e:
-        logger.error(f'Failed to get background job {job_id}: {e}')
-    return None
+# Background job functions (_create_background_job, _update_job, _get_job) are imported from src.utils.background_jobs
 
 
 class LazyAPIFootballClient:
