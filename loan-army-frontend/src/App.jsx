@@ -94,6 +94,11 @@ import { AdminReddit } from '@/pages/admin/AdminReddit'
 import { AdminCuration } from '@/pages/admin/AdminCuration'
 import { AdminAcademy } from '@/pages/admin/AdminAcademy'
 import { AdminManualPlayers } from '@/pages/admin/AdminManualPlayers'
+import { AdminCohorts } from '@/pages/admin/AdminCohorts'
+import { CohortBrowser } from '@/pages/CohortBrowser'
+import { CohortDetail } from '@/pages/CohortDetail'
+import { CohortAnalytics } from '@/pages/CohortAnalytics'
+import { GolPanel } from '@/components/gol/GolPanel'
 import { ClaimAccount } from '@/pages/ClaimAccount'
 import { SubmitTake } from '@/pages/SubmitTake'
 import { WriterLogin } from '@/pages/writer/WriterLogin'
@@ -11333,6 +11338,9 @@ function AppRoutes() {
       <Route path="/verify" element={<VerifyPage />} />
       <Route path="/claim-account" element={<ClaimAccount />} />
       <Route path="/submit-take" element={<SubmitTake />} />
+      <Route path="/academy" element={<CohortBrowser />} />
+      <Route path="/academy/cohorts/:cohortId" element={<CohortDetail />} />
+      <Route path="/academy/analytics" element={<CohortAnalytics />} />
       <Route path="/admin" element={<AdminLayout />}>
         <Route index element={<Navigate to="/admin/dashboard" replace />} />
         <Route path="dashboard" element={<AdminDashboard />} />
@@ -11346,6 +11354,7 @@ function AppRoutes() {
         <Route path="reddit" element={<AdminReddit />} />
         <Route path="curation" element={<AdminCuration />} />
         <Route path="academy" element={<AdminAcademy />} />
+        <Route path="cohorts" element={<AdminCohorts />} />
         <Route path="settings" element={<AdminSettings />} />
       </Route>
       <Route
@@ -11465,6 +11474,7 @@ function App() {
       }}>
         <Router>
           <AppWithRouter />
+          <GolPanel />
         </Router>
       </AuthUIContext.Provider>
     </AuthContext.Provider>

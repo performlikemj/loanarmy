@@ -1502,4 +1502,74 @@ export class APIService {
             body: JSON.stringify(data)
         }, { admin: true })
     }
+
+    // ==========================================================================
+    // Cohorts
+    // ==========================================================================
+
+    static async getCohorts(filters = {}) {
+        const params = new URLSearchParams(filters).toString()
+        return this.request(`/cohorts${params ? '?' + params : ''}`)
+    }
+
+    static async getCohort(cohortId, params = {}) {
+        const query = new URLSearchParams(params).toString()
+        return this.request(`/cohorts/${cohortId}${query ? '?' + query : ''}`)
+    }
+
+    static async getCohortTeams() {
+        return this.request('/cohorts/teams')
+    }
+
+    static async getCohortAnalytics() {
+        return this.request('/cohorts/analytics')
+    }
+
+    static async adminSeedCohort(data) {
+        return this.request('/admin/cohorts/seed', {
+            method: 'POST',
+            body: JSON.stringify(data)
+        }, { admin: true })
+    }
+
+    static async adminSeedBig6(data = {}) {
+        return this.request('/admin/cohorts/seed-big6', {
+            method: 'POST',
+            body: JSON.stringify(data)
+        }, { admin: true })
+    }
+
+    static async adminSyncCohortJourneys(cohortId) {
+        return this.request(`/admin/cohorts/${cohortId}/sync-journeys`, {
+            method: 'POST'
+        }, { admin: true })
+    }
+
+    static async adminRefreshCohortStats(cohortId) {
+        return this.request(`/admin/cohorts/${cohortId}/refresh-stats`, {
+            method: 'POST'
+        }, { admin: true })
+    }
+
+    static async adminGetCohortSeedStatus() {
+        return this.request('/admin/cohorts/seed-status', {}, { admin: true })
+    }
+
+    static async adminDeleteCohort(cohortId) {
+        return this.request(`/admin/cohorts/${cohortId}`, {
+            method: 'DELETE'
+        }, { admin: true })
+    }
+
+    static async adminGetJobStatus(jobId) {
+        return this.request(`/admin/jobs/${jobId}`, {}, { admin: true })
+    }
+
+    // ==========================================================================
+    // GOL Assistant
+    // ==========================================================================
+
+    static async getGolSuggestions() {
+        return this.request('/gol/suggestions')
+    }
 }

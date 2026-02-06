@@ -3314,6 +3314,144 @@ def get_loan_stats():
     except Exception as e:
         return jsonify(_safe_error_payload(e, 'An unexpected error occurred. Please try again later.')), 500
 
+# Public teams endpoints
+@api_bp.route('/teams', methods=['GET'])
+def get_teams():
+    """Get all active teams with optional filtering."""
+    try:
+        league_id = request.args.get('league_id', type=int)
+        search = request.args.get('search', '')
+
+        query = Team.query.filter(Team.is_active.is_(True))
+
+        if league_id:
+            query = query.filter(Team.league_id == league_id)
+        if search:
+            query = query.filter(Team.name.ilike(f'%{search}%'))
+
+        # Deduplicate by team_id (API ID), taking the most recent season
+        from sqlalchemy import desc
+        subquery = db.session.query(
+            Team.team_id,
+            func.max(Team.season).label('max_season')
+        ).filter(Team.is_active.is_(True))
+
+        if league_id:
+            subquery = subquery.filter(Team.league_id == league_id)
+        if search:
+            subquery = subquery.filter(Team.name.ilike(f'%{search}%'))
+
+        subquery = subquery.group_by(Team.team_id).subquery()
+
+        teams = Team.query.join(
+            subquery,
+            (Team.team_id == subquery.c.team_id) & (Team.season == subquery.c.max_season)
+        ).order_by(Team.name.asc()).all()
+
+        return jsonify([{
+            'id': t.id,
+            'team_id': t.team_id,
+            'name': t.name,
+            'logo': t.logo,
+            'league_id': t.league_id,
+            'season': t.season
+        } for t in teams])
+    except Exception as e:
+        logger.error(f"Error fetching teams: {e}")
+        return jsonify(_safe_error_payload(e, 'Failed to fetch teams')), 500
+
+@api_bp.route('/teams/<int:team_id>', methods=['GET'])
+def get_team(team_id):
+    """Get a single team by ID."""
+    try:
+        team = Team.query.get_or_404(team_id)
+
+        # Get active loans for this team
+        loans = LoanedPlayer.query.filter(
+            LoanedPlayer.primary_team_id == team.id,
+            LoanedPlayer.is_active.is_(True)
+        ).all()
+
+        return jsonify({
+            'id': team.id,
+            'team_id': team.team_id,
+            'name': team.name,
+            'logo': team.logo,
+            'league_id': team.league_id,
+            'season': team.season,
+            'loans': [{
+                'id': loan.id,
+                'player_name': loan.player_name,
+                'loan_team_name': loan.loan_team_name,
+                'is_active': loan.is_active
+            } for loan in loans]
+        })
+    except Exception as e:
+        logger.error(f"Error fetching team {team_id}: {e}")
+        return jsonify(_safe_error_payload(e, 'Failed to fetch team')), 500
+
+@api_bp.route('/teams/<int:team_id>/loans', methods=['GET'])
+def get_team_loans(team_id):
+    """Get loans for a specific team."""
+    try:
+        team = Team.query.get_or_404(team_id)
+        active_only = request.args.get('active', 'true').lower() == 'true'
+
+        query = LoanedPlayer.query.filter(LoanedPlayer.primary_team_id == team.id)
+        if active_only:
+            query = query.filter(LoanedPlayer.is_active.is_(True))
+
+        loans = query.order_by(LoanedPlayer.player_name.asc()).all()
+
+        return jsonify([{
+            'id': loan.id,
+            'player_id': loan.player_id,
+            'player_name': loan.player_name,
+            'loan_team_id': loan.loan_team_id,
+            'loan_team_name': loan.loan_team_name,
+            'is_active': loan.is_active,
+            'window_key': loan.window_key,
+            'created_at': loan.created_at.isoformat() if loan.created_at else None
+        } for loan in loans])
+    except Exception as e:
+        logger.error(f"Error fetching loans for team {team_id}: {e}")
+        return jsonify(_safe_error_payload(e, 'Failed to fetch team loans')), 500
+
+# Public players endpoint
+@api_bp.route('/players', methods=['GET'])
+def get_players():
+    """Get players (loaned players) with optional filtering."""
+    try:
+        team_id = request.args.get('team_id', type=int)
+        search = request.args.get('search', '')
+        active_only = request.args.get('active', 'true').lower() == 'true'
+
+        query = LoanedPlayer.query
+
+        if active_only:
+            query = query.filter(LoanedPlayer.is_active.is_(True))
+        if team_id:
+            query = query.filter(LoanedPlayer.primary_team_id == team_id)
+        if search:
+            query = query.filter(LoanedPlayer.player_name.ilike(f'%{search}%'))
+
+        players = query.order_by(LoanedPlayer.player_name.asc()).limit(100).all()
+
+        return jsonify([{
+            'id': p.id,
+            'player_id': p.player_id,
+            'player_name': p.player_name,
+            'primary_team_id': p.primary_team_id,
+            'primary_team_name': p.primary_team_name,
+            'loan_team_id': p.loan_team_id,
+            'loan_team_name': p.loan_team_name,
+            'is_active': p.is_active,
+            'pathway_status': p.pathway_status
+        } for p in players])
+    except Exception as e:
+        logger.error(f"Error fetching players: {e}")
+        return jsonify(_safe_error_payload(e, 'Failed to fetch players')), 500
+
 # Data sync endpoints
 @api_bp.route('/init-data', methods=['POST'])
 def init_data():
@@ -12785,50 +12923,29 @@ def admin_review_manual_player(submission_id):
 # =============================================================================
 # Player Journey Endpoints
 # =============================================================================
-
-@api_bp.route('/players/<int:player_id>/journey', methods=['GET'])
-def get_player_journey(player_id: int):
-    """
-    Get a player's complete career journey.
-    
-    Query params:
-    - include_entries: bool - Include detailed journey entries (default: true)
-    - sync: bool - Trigger sync if journey doesn't exist (default: false)
-    """
-    try:
-        from src.models.journey import PlayerJourney, ClubLocation
-        
-        include_entries = request.args.get('include_entries', 'true').lower() == 'true'
-        should_sync = request.args.get('sync', 'false').lower() == 'true'
-        
-        journey = PlayerJourney.query.filter_by(player_api_id=player_id).first()
-        
-        if not journey and should_sync:
-            # Trigger sync if requested
-            from src.services.journey_sync import JourneySyncService
-            service = JourneySyncService()
-            journey = service.sync_player(player_id)
-        
-        if not journey:
-            return jsonify({'error': 'Journey not found', 'player_id': player_id}), 404
-        
-        return jsonify(journey.to_dict(include_entries=include_entries))
-        
-    except Exception as e:
-        logger.exception(f'Failed to get journey for player {player_id}')
-        return jsonify(_safe_error_payload(e, 'Failed to get player journey')), 500
-
+# Note: GET /players/<id>/journey is handled by journey_bp (routes/journey.py).
+# Only the /journey/map sub-route lives here.
 
 @api_bp.route('/players/<int:player_id>/journey/map', methods=['GET'])
 def get_player_journey_map(player_id: int):
     """
     Get a player's journey in map-optimized format (grouped by club with coordinates).
+
+    Query params:
+    - sync: bool - Trigger sync if journey doesn't exist (default: false)
     """
     try:
         from src.models.journey import PlayerJourney, ClubLocation
-        
+
+        should_sync = request.args.get('sync', 'false').lower() == 'true'
+
         journey = PlayerJourney.query.filter_by(player_api_id=player_id).first()
-        
+
+        if not journey and should_sync:
+            from src.services.journey_sync import JourneySyncService
+            service = JourneySyncService()
+            journey = service.sync_player(player_id)
+
         if not journey:
             return jsonify({'error': 'Journey not found', 'player_id': player_id}), 404
         

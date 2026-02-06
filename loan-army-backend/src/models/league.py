@@ -334,7 +334,7 @@ class LoanedPlayer(db.Model):
 
 class SupplementalLoan(db.Model):
     """DEPRECATED: Use LoanedPlayer with can_fetch_stats=False instead.
-    
+
     This table has been deprecated in favor of unified manual player handling.
     Manual/untrackable players are now identified by:
     - player_id < 0 (negative IDs)

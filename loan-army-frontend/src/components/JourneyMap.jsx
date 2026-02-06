@@ -1,48 +1,15 @@
 import React, { useState, useMemo } from 'react'
-import { MapContainer, TileLayer, Marker, Popup, Polyline, useMap } from 'react-leaflet'
+import {
+    ComposableMap, Geographies, Geography, Marker, Line, ZoomableGroup,
+} from 'react-simple-maps'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { Badge } from '@/components/ui/badge'
 import { Avatar, AvatarImage, AvatarFallback } from '@/components/ui/avatar'
 import { Drawer, DrawerContent, DrawerHeader, DrawerTitle, DrawerDescription } from '@/components/ui/drawer'
 import { ScrollArea } from '@/components/ui/scroll-area'
-import { Loader2, MapPin, Calendar, Target, Trophy, Users } from 'lucide-react'
-import L from 'leaflet'
-import 'leaflet/dist/leaflet.css'
+import { Loader2, MapPin, Calendar } from 'lucide-react'
 
-// Fix Leaflet marker icons (common issue with bundlers)
-delete L.Icon.Default.prototype._getIconUrl
-L.Icon.Default.mergeOptions({
-    iconRetinaUrl: 'https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/images/marker-icon-2x.png',
-    iconUrl: 'https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/images/marker-icon.png',
-    shadowUrl: 'https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/images/marker-shadow.png',
-})
-
-// Custom marker icons
-const createCustomIcon = (color, isOrigin = false, isCurrent = false) => {
-    const size = isCurrent ? 35 : isOrigin ? 30 : 25
-    return L.divIcon({
-        className: 'custom-marker',
-        html: `
-            <div style="
-                background-color: ${color};
-                width: ${size}px;
-                height: ${size}px;
-                border-radius: 50%;
-                border: 3px solid white;
-                box-shadow: 0 2px 8px rgba(0,0,0,0.3);
-                display: flex;
-                align-items: center;
-                justify-content: center;
-                ${isCurrent ? 'animation: pulse 2s infinite;' : ''}
-            ">
-                ${isOrigin ? '<span style="color:white;font-size:12px;font-weight:bold;">1</span>' : ''}
-                ${isCurrent ? '<span style="color:white;font-size:10px;">★</span>' : ''}
-            </div>
-        `,
-        iconSize: [size, size],
-        iconAnchor: [size / 2, size / 2],
-    })
-}
+const GEO_URL = 'https://cdn.jsdelivr.net/npm/world-atlas@2/countries-110m.json'
 
 // Level colors
 const LEVEL_COLORS = {
@@ -56,49 +23,60 @@ const LEVEL_COLORS = {
     'International Youth': '#d946ef', // Fuchsia
 }
 
-// Component to auto-fit map bounds
-function FitBounds({ stops }) {
-    const map = useMap()
-    
-    React.useEffect(() => {
-        if (stops.length > 0) {
-            const validStops = stops.filter(s => s.lat && s.lng)
-            if (validStops.length > 0) {
-                const bounds = L.latLngBounds(validStops.map(s => [s.lat, s.lng]))
-                map.fitBounds(bounds, { padding: [50, 50] })
-            }
-        }
-    }, [stops, map])
-    
-    return null
+/**
+ * Calculate zoom center and level from an array of stops.
+ * react-simple-maps coordinates are [lng, lat].
+ */
+function calculateView(stops) {
+    const valid = stops.filter(s => s.lat && s.lng)
+    if (valid.length === 0) return { center: [0, 30], zoom: 1 }
+
+    const lats = valid.map(s => s.lat)
+    const lngs = valid.map(s => s.lng)
+
+    const centerLat = (Math.min(...lats) + Math.max(...lats)) / 2
+    const centerLng = (Math.min(...lngs) + Math.max(...lngs)) / 2
+
+    const span = Math.max(
+        Math.max(...lats) - Math.min(...lats),
+        Math.max(...lngs) - Math.min(...lngs),
+        5,
+    )
+
+    let zoom = 1
+    if (span < 5) zoom = 6
+    else if (span < 15) zoom = 4
+    else if (span < 30) zoom = 3
+    else if (span < 60) zoom = 2
+
+    return { center: [centerLng, centerLat], zoom }
 }
 
 export function JourneyMap({ journeyData, loading, error }) {
     const [selectedStop, setSelectedStop] = useState(null)
-    
-    // Process journey data for map display
-    const { stops, path, center } = useMemo(() => {
+
+    const { stops, pathPairs, view } = useMemo(() => {
         if (!journeyData?.stops) {
-            return { stops: [], path: [], center: [51.5, -0.1] }
+            return { stops: [], pathPairs: [], view: { center: [0, 30], zoom: 1 } }
         }
-        
+
         const validStops = journeyData.stops.filter(s => s.lat && s.lng)
-        const pathCoords = validStops.map(s => [s.lat, s.lng])
-        
-        // Calculate center
-        let centerLat = 51.5, centerLng = -0.1
-        if (validStops.length > 0) {
-            centerLat = validStops.reduce((sum, s) => sum + s.lat, 0) / validStops.length
-            centerLng = validStops.reduce((sum, s) => sum + s.lng, 0) / validStops.length
+
+        const pairs = []
+        for (let i = 0; i < validStops.length - 1; i++) {
+            pairs.push({
+                from: [validStops[i].lng, validStops[i].lat],
+                to: [validStops[i + 1].lng, validStops[i + 1].lat],
+            })
         }
-        
+
         return {
             stops: journeyData.stops,
-            path: pathCoords,
-            center: [centerLat, centerLng]
+            pathPairs: pairs,
+            view: calculateView(validStops),
         }
     }, [journeyData])
-    
+
     if (loading) {
         return (
             <Card className="w-full h-[400px] flex items-center justify-center">
@@ -106,7 +84,7 @@ export function JourneyMap({ journeyData, loading, error }) {
             </Card>
         )
     }
-    
+
     if (error) {
         return (
             <Card className="w-full h-[400px] flex items-center justify-center">
@@ -114,7 +92,7 @@ export function JourneyMap({ journeyData, loading, error }) {
             </Card>
         )
     }
-    
+
     if (!journeyData || stops.length === 0) {
         return (
             <Card className="w-full h-[400px] flex items-center justify-center">
@@ -125,9 +103,9 @@ export function JourneyMap({ journeyData, loading, error }) {
             </Card>
         )
     }
-    
+
     const validStops = stops.filter(s => s.lat && s.lng)
-    
+
     return (
         <>
             <Card className="w-full overflow-hidden">
@@ -139,64 +117,92 @@ export function JourneyMap({ journeyData, loading, error }) {
                 </CardHeader>
                 <CardContent className="p-0">
                     <div className="h-[400px] w-full relative">
-                        <MapContainer
-                            center={center}
-                            zoom={4}
-                            style={{ height: '100%', width: '100%' }}
-                            scrollWheelZoom={true}
+                        <ComposableMap
+                            projection="geoMercator"
+                            projectionConfig={{ scale: 150 }}
+                            style={{ width: '100%', height: '100%' }}
                         >
-                            <TileLayer
-                                attribution='&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a>'
-                                url="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png"
-                            />
-                            
-                            <FitBounds stops={validStops} />
-                            
-                            {/* Journey path line */}
-                            {path.length > 1 && (
-                                <Polyline
-                                    positions={path}
-                                    pathOptions={{
-                                        color: '#3b82f6',
-                                        weight: 3,
-                                        opacity: 0.7,
-                                        dashArray: '10, 10'
-                                    }}
-                                />
-                            )}
-                            
-                            {/* Club markers */}
-                            {validStops.map((stop, index) => {
-                                const isOrigin = index === 0
-                                const isCurrent = index === validStops.length - 1
-                                const primaryLevel = stop.levels?.[0] || 'First Team'
-                                const color = LEVEL_COLORS[primaryLevel] || '#6b7280'
-                                
-                                return (
-                                    <Marker
-                                        key={stop.club_id}
-                                        position={[stop.lat, stop.lng]}
-                                        icon={createCustomIcon(color, isOrigin, isCurrent)}
-                                        eventHandlers={{
-                                            click: () => setSelectedStop(stop)
-                                        }}
-                                    >
-                                        <Popup>
-                                            <div className="text-sm">
-                                                <strong>{stop.club_name}</strong>
-                                                <br />
-                                                {stop.years}
-                                                <br />
-                                                {stop.total_apps} apps, {stop.total_goals} goals
-                                            </div>
-                                        </Popup>
-                                    </Marker>
-                                )
-                            })}
-                        </MapContainer>
-                        
+                            <ZoomableGroup center={view.center} zoom={view.zoom}>
+                                <Geographies geography={GEO_URL}>
+                                    {({ geographies }) =>
+                                        geographies.map((geo) => (
+                                            <Geography
+                                                key={geo.rsmKey}
+                                                geography={geo}
+                                                fill="#e5e7eb"
+                                                stroke="#d1d5db"
+                                                strokeWidth={0.5}
+                                                style={{
+                                                    default: { outline: 'none' },
+                                                    hover: { outline: 'none', fill: '#d1d5db' },
+                                                    pressed: { outline: 'none' },
+                                                }}
+                                            />
+                                        ))
+                                    }
+                                </Geographies>
+
+                                {/* Journey path lines */}
+                                {pathPairs.map((pair, i) => (
+                                    <Line
+                                        key={i}
+                                        from={pair.from}
+                                        to={pair.to}
+                                        stroke="#3b82f6"
+                                        strokeWidth={2}
+                                        strokeLinecap="round"
+                                        strokeDasharray="5,5"
+                                        strokeOpacity={0.7}
+                                    />
+                                ))}
+
+                                {/* Club markers */}
+                                {validStops.map((stop, index) => {
+                                    const isOrigin = index === 0
+                                    const isCurrent = index === validStops.length - 1
+                                    const primaryLevel = stop.levels?.[0] || 'First Team'
+                                    const color = LEVEL_COLORS[primaryLevel] || '#6b7280'
+                                    const r = isCurrent ? 8 : isOrigin ? 7 : 5
+
+                                    return (
+                                        <Marker
+                                            key={`${stop.club_id}-${index}`}
+                                            coordinates={[stop.lng, stop.lat]}
+                                        >
+                                            <circle
+                                                r={r}
+                                                fill={color}
+                                                stroke="white"
+                                                strokeWidth={2}
+                                                style={{ cursor: 'pointer' }}
+                                                onClick={() => setSelectedStop(stop)}
+                                            />
+                                            {isOrigin && (
+                                                <text
+                                                    textAnchor="middle"
+                                                    y={4}
+                                                    style={{ fontSize: '7px', fill: 'white', fontWeight: 'bold', pointerEvents: 'none' }}
+                                                >
+                                                    1
+                                                </text>
+                                            )}
+                                            {isCurrent && (
+                                                <text
+                                                    textAnchor="middle"
+                                                    y={3}
+                                                    style={{ fontSize: '7px', fill: 'white', pointerEvents: 'none' }}
+                                                >
+                                                    ★
+                                                </text>
+                                            )}
+                                        </Marker>
+                                    )
+                                })}
+                            </ZoomableGroup>
+                        </ComposableMap>
+
                         {/* Legend */}
-                        <div className="absolute bottom-2 left-2 bg-white/90 rounded-lg p-2 text-xs shadow-md z-[1000]">
+                        <div className="absolute bottom-2 left-2 bg-white/90 rounded-lg p-2 text-xs shadow-md z-10">
                             <div className="flex flex-wrap gap-2">
                                 <div className="flex items-center gap-1">
                                     <div className="w-3 h-3 rounded-full bg-purple-500" />
@@ -215,7 +221,7 @@ export function JourneyMap({ journeyData, loading, error }) {
                     </div>
                 </CardContent>
             </Card>
-            
+
             {/* Stop Detail Drawer */}
             <Drawer open={!!selectedStop} onOpenChange={(open) => !open && setSelectedStop(null)}>
                 <DrawerContent>
@@ -232,21 +238,21 @@ export function JourneyMap({ journeyData, loading, error }) {
                                 <DrawerDescription className="flex items-center gap-1">
                                     <Calendar className="h-3 w-3" />
                                     {selectedStop?.years}
-                                    {selectedStop?.city && ` • ${selectedStop.city}`}
+                                    {selectedStop?.city && ` \u2022 ${selectedStop.city}`}
                                     {selectedStop?.country && `, ${selectedStop.country}`}
                                 </DrawerDescription>
                             </div>
                         </div>
                     </DrawerHeader>
-                    
+
                     <div className="p-4 space-y-4">
                         {/* Levels */}
                         <div>
                             <h4 className="text-sm font-medium text-muted-foreground mb-2">Levels</h4>
                             <div className="flex flex-wrap gap-2">
                                 {selectedStop?.levels?.map(level => (
-                                    <Badge 
-                                        key={level} 
+                                    <Badge
+                                        key={level}
                                         style={{ backgroundColor: LEVEL_COLORS[level] || '#6b7280' }}
                                         className="text-white"
                                     >
@@ -255,7 +261,7 @@ export function JourneyMap({ journeyData, loading, error }) {
                                 ))}
                             </div>
                         </div>
-                        
+
                         {/* Stats Summary */}
                         <div className="grid grid-cols-3 gap-4">
                             <div className="text-center p-3 bg-muted rounded-lg">
@@ -271,7 +277,7 @@ export function JourneyMap({ journeyData, loading, error }) {
                                 <div className="text-xs text-muted-foreground">Assists</div>
                             </div>
                         </div>
-                        
+
                         {/* Level Breakdown */}
                         {selectedStop?.breakdown && Object.keys(selectedStop.breakdown).length > 0 && (
                             <div>
@@ -281,14 +287,14 @@ export function JourneyMap({ journeyData, loading, error }) {
                                         .sort(([a], [b]) => (LEVEL_COLORS[b] ? 1 : 0) - (LEVEL_COLORS[a] ? 1 : 0))
                                         .map(([level, stats]) => (
                                             <div key={level} className="flex items-center justify-between p-2 bg-muted/50 rounded">
-                                                <Badge 
+                                                <Badge
                                                     variant="outline"
                                                     style={{ borderColor: LEVEL_COLORS[level] || '#6b7280', color: LEVEL_COLORS[level] || '#6b7280' }}
                                                 >
                                                     {level}
                                                 </Badge>
                                                 <span className="text-sm">
-                                                    {stats.apps} apps • {stats.goals}G • {stats.assists}A
+                                                    {stats.apps} apps &bull; {stats.goals}G &bull; {stats.assists}A
                                                 </span>
                                             </div>
                                         ))
@@ -296,7 +302,7 @@ export function JourneyMap({ journeyData, loading, error }) {
                                 </div>
                             </div>
                         )}
-                        
+
                         {/* Competitions */}
                         {selectedStop?.competitions?.length > 0 && (
                             <div>
@@ -324,15 +330,6 @@ export function JourneyMap({ journeyData, loading, error }) {
                     </div>
                 </DrawerContent>
             </Drawer>
-            
-            {/* CSS for pulse animation */}
-            <style>{`
-                @keyframes pulse {
-                    0% { box-shadow: 0 0 0 0 rgba(34, 197, 94, 0.7); }
-                    70% { box-shadow: 0 0 0 10px rgba(34, 197, 94, 0); }
-                    100% { box-shadow: 0 0 0 0 rgba(34, 197, 94, 0); }
-                }
-            `}</style>
         </>
     )
 }

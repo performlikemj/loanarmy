@@ -85,7 +85,6 @@ export function JourneyTimeline({ journeyData, loading, error }) {
                                 const isLast = index === stops.length - 1
                                 const primaryLevel = stop.levels?.[0] || 'First Team'
                                 const color = LEVEL_COLORS[primaryLevel] || '#6b7280'
-                                const icon = LEVEL_ICONS[primaryLevel] || '📍'
                                 
                                 return (
                                     <div key={stop.club_id} className="relative pl-16">

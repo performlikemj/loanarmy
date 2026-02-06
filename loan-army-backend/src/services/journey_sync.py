@@ -10,12 +10,13 @@ from datetime import datetime, timezone
 from typing import Optional, List, Dict, Any
 from sqlalchemy.exc import IntegrityError
 
-from src.models.league import db
+from src.models.league import db, TeamProfile
 from src.models.journey import (
     PlayerJourney, PlayerJourneyEntry, ClubLocation,
     LEVEL_PRIORITY, YOUTH_LEVELS
 )
 from src.api_football_client import APIFootballClient
+from src.utils.geocoding import get_team_coordinates
 
 logger = logging.getLogger(__name__)
 
@@ -67,11 +68,18 @@ class JourneySyncService:
         logger.info(f"Starting journey sync for player {player_api_id}")
         
         try:
-            # Get or create journey record
+            # Get or create journey record (handle race conditions)
             journey = PlayerJourney.query.filter_by(player_api_id=player_api_id).first()
             if not journey:
                 journey = PlayerJourney(player_api_id=player_api_id)
                 db.session.add(journey)
+                try:
+                    db.session.flush()
+                except IntegrityError:
+                    db.session.rollback()
+                    journey = PlayerJourney.query.filter_by(player_api_id=player_api_id).first()
+                    if not journey:
+                        raise
             
             # Get all seasons for this player
             seasons = self._get_player_seasons(player_api_id)
@@ -141,12 +149,15 @@ class JourneySyncService:
             
             # Update journey aggregates
             self._update_journey_aggregates(journey)
-            
+
+            # Auto-geocode missing club locations
+            self._auto_geocode_clubs(journey)
+
             # Update sync tracking
             journey.seasons_synced = sorted(set((journey.seasons_synced or []) + seasons_to_sync))
             journey.last_synced_at = datetime.now(timezone.utc)
             journey.sync_error = None
-            
+
             db.session.commit()
             logger.info(f"Successfully synced journey for player {player_api_id}: {len(all_entries)} entries")
             
@@ -321,6 +332,78 @@ class JourneySyncService:
         )
         journey.total_goals = sum(e.goals for e in entries)
         journey.total_assists = sum(e.assists for e in entries)
+
+    def _auto_geocode_clubs(self, journey: PlayerJourney):
+        """Create ClubLocation rows for clubs that don't have one yet.
+
+        Uses TeamProfile city/country when available, falls back to
+        league_country from entries, and geocodes via get_team_coordinates().
+        """
+        entries = PlayerJourneyEntry.query.filter_by(journey_id=journey.id).all()
+        if not entries:
+            return
+
+        # Collect unique club IDs (skip international entries)
+        club_ids = set(e.club_api_id for e in entries if not e.is_international)
+        if not club_ids:
+            return
+
+        # Find which clubs already have locations
+        existing = set(
+            loc.club_api_id for loc in
+            ClubLocation.query.filter(ClubLocation.club_api_id.in_(club_ids)).all()
+        )
+        missing_ids = club_ids - existing
+        if not missing_ids:
+            return
+
+        # Build lookup: club_id -> (name, country) from entries
+        club_info = {}
+        for entry in entries:
+            if entry.club_api_id in missing_ids and entry.club_api_id not in club_info:
+                club_info[entry.club_api_id] = {
+                    'name': entry.club_name,
+                    'country': entry.league_country,
+                }
+
+        added = 0
+        for club_id in missing_ids:
+            info = club_info.get(club_id, {})
+            club_name = info.get('name', '')
+            country = info.get('country')
+
+            # Try TeamProfile for city/country
+            city = None
+            profile = TeamProfile.query.filter_by(team_id=club_id).first()
+            if profile:
+                city = profile.venue_city
+                country = profile.country or country
+
+            # Only geocode if we have an actual city name — using just a
+            # country name produces wildly wrong results (e.g. "Scotland"
+            # resolves to Virginia, USA).
+            if not city:
+                continue
+
+            coords = get_team_coordinates(city, country)
+            if not coords:
+                continue
+
+            location = ClubLocation(
+                club_api_id=club_id,
+                club_name=club_name,
+                city=city,
+                country=country,
+                latitude=coords[0],
+                longitude=coords[1],
+                geocode_source='auto',
+                geocode_confidence=0.7,
+            )
+            db.session.add(location)
+            added += 1
+
+        if added:
+            logger.info(f"Auto-geocoded {added} club locations for player {journey.player_api_id}")
 
 
 def seed_club_locations():

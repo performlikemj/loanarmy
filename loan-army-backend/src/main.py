@@ -6,11 +6,16 @@ from flask import Flask, send_from_directory, jsonify
 from src.models.league import db, League, Team, LoanedPlayer, Newsletter, UserSubscription
 import src.models.weekly  # Ensure weekly models are registered with SQLAlchemy
 import src.models.journey  # Ensure journey models are registered with SQLAlchemy
+import src.models.cohort   # Ensure cohort models are registered with SQLAlchemy
 from src.routes.api import api_bp, require_api_key
+from src.routes.auth_routes import auth_bp
 from src.routes.journalist import journalist_bp
 from src.routes.newsletter_deadline import newsletter_deadline_bp
 from src.routes.community_takes import community_takes_bp
 from src.routes.academy import academy_bp
+from src.routes.journey import journey_bp
+from src.routes.cohort import cohort_bp
+from src.routes.gol import gol_bp
 import logging
 from sqlalchemy.engine.url import make_url, URL
 from flask_migrate import Migrate
@@ -74,11 +79,15 @@ root_logger.addFilter(_MCPValidationFilter())
 for name in ("mcp", "agents.mcp", "mcp.shared.session", "mcp.client"):
     logging.getLogger(name).setLevel(logging.WARNING)
 
+app.register_blueprint(journey_bp, url_prefix='/api')
 app.register_blueprint(api_bp, url_prefix='/api')
+app.register_blueprint(auth_bp, url_prefix='/api')
 app.register_blueprint(journalist_bp, url_prefix='/api')
 app.register_blueprint(newsletter_deadline_bp, url_prefix='/api')
 app.register_blueprint(community_takes_bp, url_prefix='/api')
 app.register_blueprint(academy_bp, url_prefix='/api')
+app.register_blueprint(cohort_bp, url_prefix='/api')
+app.register_blueprint(gol_bp, url_prefix='/api')
 
 csp = {
     'default-src': ["'self'"],
