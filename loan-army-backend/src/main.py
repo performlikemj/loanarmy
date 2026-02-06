@@ -5,13 +5,8 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(__file__)))
 from flask import Flask, send_from_directory, jsonify
 from src.models.league import db, League, Team, LoanedPlayer, Newsletter, UserSubscription
 import src.models.weekly  # Ensure weekly models are registered with SQLAlchemy
-from src.routes.api import api_bp
-from src.routes.auth_routes import auth_bp
-from src.routes.teams import teams_bp
-from src.routes.loans import loans_bp
-from src.routes.players import players_bp
-from src.routes.subscriptions import subscriptions_bp
-from src.auth import require_api_key
+import src.models.journey  # Ensure journey models are registered with SQLAlchemy
+from src.routes.api import api_bp, require_api_key
 from src.routes.journalist import journalist_bp
 from src.routes.newsletter_deadline import newsletter_deadline_bp
 from src.routes.community_takes import community_takes_bp
@@ -80,11 +75,6 @@ for name in ("mcp", "agents.mcp", "mcp.shared.session", "mcp.client"):
     logging.getLogger(name).setLevel(logging.WARNING)
 
 app.register_blueprint(api_bp, url_prefix='/api')
-app.register_blueprint(auth_bp, url_prefix='/api')
-app.register_blueprint(teams_bp, url_prefix='/api')
-app.register_blueprint(loans_bp, url_prefix='/api')
-app.register_blueprint(players_bp, url_prefix='/api')
-app.register_blueprint(subscriptions_bp, url_prefix='/api')
 app.register_blueprint(journalist_bp, url_prefix='/api')
 app.register_blueprint(newsletter_deadline_bp, url_prefix='/api')
 app.register_blueprint(community_takes_bp, url_prefix='/api')

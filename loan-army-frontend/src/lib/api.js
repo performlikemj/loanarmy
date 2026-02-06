@@ -1446,4 +1446,60 @@ export class APIService {
         const query = new URLSearchParams(params).toString()
         return this.request(`/players/${playerId}/academy-stats${query ? '?' + query : ''}`)
     }
+
+    // ==========================================================================
+    // Player Journey
+    // ==========================================================================
+
+    // Public: Get player journey (full career data)
+    static async getPlayerJourney(playerId, params = {}) {
+        const query = new URLSearchParams(params).toString()
+        return this.request(`/players/${playerId}/journey${query ? '?' + query : ''}`)
+    }
+
+    // Public: Get player journey for map display
+    static async getPlayerJourneyMap(playerId) {
+        return this.request(`/players/${playerId}/journey/map`)
+    }
+
+    // Public: Get all club locations
+    static async getClubLocations() {
+        return this.request('/club-locations')
+    }
+
+    // Public: Get specific club location
+    static async getClubLocation(clubApiId) {
+        return this.request(`/club-locations/${clubApiId}`)
+    }
+
+    // Admin: Trigger journey sync for a player
+    static async adminSyncPlayerJourney(playerId, data = {}) {
+        return this.request(`/admin/journey/sync/${playerId}`, {
+            method: 'POST',
+            body: JSON.stringify(data)
+        }, { admin: true })
+    }
+
+    // Admin: Bulk sync player journeys
+    static async adminBulkSyncJourneys(playerIds, forceFull = false) {
+        return this.request('/admin/journey/bulk-sync', {
+            method: 'POST',
+            body: JSON.stringify({ player_ids: playerIds, force_full: forceFull })
+        }, { admin: true })
+    }
+
+    // Admin: Seed club locations
+    static async adminSeedClubLocations() {
+        return this.request('/admin/journey/seed-locations', {
+            method: 'POST'
+        }, { admin: true })
+    }
+
+    // Admin: Add/update club location
+    static async adminAddClubLocation(data) {
+        return this.request('/admin/club-locations', {
+            method: 'POST',
+            body: JSON.stringify(data)
+        }, { admin: true })
+    }
 }

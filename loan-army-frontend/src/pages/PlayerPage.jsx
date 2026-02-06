@@ -24,13 +24,15 @@ import {
     ResponsiveContainer,
     ReferenceLine,
 } from 'recharts'
-import { Loader2, ArrowLeft, User, TrendingUp, Calendar, Target, PenTool, ChevronRight, Users, Info, ExternalLink } from 'lucide-react'
+import { Loader2, ArrowLeft, User, TrendingUp, Calendar, Target, PenTool, ChevronRight, Users, Info, ExternalLink, MapPin } from 'lucide-react'
 import { APIService } from '@/lib/api'
 import { format } from 'date-fns'
 import { Avatar, AvatarFallback, AvatarImage } from '@/components/ui/avatar'
 import { SponsorSidebar, SponsorStrip } from '@/components/SponsorSidebar'
 import { Tooltip as UITooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip'
 import { MatchDetailDrawer } from '@/components/MatchDetailDrawer'
+import { JourneyMap } from '@/components/JourneyMap'
+import { JourneyTimeline } from '@/components/JourneyTimeline'
 
 const METRIC_CONFIG = {
     'Attacker': {
@@ -105,6 +107,11 @@ export function PlayerPage() {
     // Match detail drawer state
     const [matchDetailOpen, setMatchDetailOpen] = useState(false)
     const [selectedMatch, setSelectedMatch] = useState(null)
+    
+    // Journey map state
+    const [journeyData, setJourneyData] = useState(null)
+    const [journeyLoading, setJourneyLoading] = useState(false)
+    const [journeyError, setJourneyError] = useState(null)
 
     // Smart back navigation - goes to previous page, or home if no history
     const handleBack = () => {
@@ -165,6 +172,38 @@ export function PlayerPage() {
             setError('Failed to load player data.')
         } finally {
             setLoading(false)
+        }
+    }
+    
+    // Load journey data (lazy - only when tab is selected)
+    const loadJourneyData = async () => {
+        if (journeyData || journeyLoading) return // Already loaded or loading
+        
+        setJourneyLoading(true)
+        setJourneyError(null)
+        try {
+            // Try to get journey map data, with sync=true to trigger sync if not exists
+            const data = await APIService.getPlayerJourneyMap(playerId)
+            setJourneyData(data)
+        } catch (err) {
+            console.error('Failed to fetch journey data', err)
+            // If journey doesn't exist, try to sync it first
+            if (err.message?.includes('not found') || err.status === 404) {
+                try {
+                    // Trigger sync via the regular journey endpoint with sync param
+                    await APIService.getPlayerJourney(playerId, { sync: 'true' })
+                    // Then try map endpoint again
+                    const data = await APIService.getPlayerJourneyMap(playerId)
+                    setJourneyData(data)
+                } catch (syncErr) {
+                    console.error('Failed to sync journey', syncErr)
+                    setJourneyError('Journey data not available for this player')
+                }
+            } else {
+                setJourneyError('Failed to load journey data')
+            }
+        } finally {
+            setJourneyLoading(false)
         }
     }
 
@@ -676,6 +715,10 @@ export function PlayerPage() {
                                         <TabsList>
                                             <TabsTrigger value="charts">Charts</TabsTrigger>
                                             <TabsTrigger value="matches">Match Log</TabsTrigger>
+                                            <TabsTrigger value="journey" onClick={loadJourneyData}>
+                                                <MapPin className="h-4 w-4 mr-1" />
+                                                Journey
+                                            </TabsTrigger>
                                         </TabsList>
                                     </div>
                                 </CardHeader>
@@ -879,6 +922,26 @@ export function PlayerPage() {
                                                 </tbody>
                                             </table>
                                         </ScrollArea>
+                                    </TabsContent>
+                                    
+                                    <TabsContent value="journey" className="mt-0">
+                                        <div className="space-y-4">
+                                            {/* Journey Map */}
+                                            <JourneyMap 
+                                                journeyData={journeyData}
+                                                loading={journeyLoading}
+                                                error={journeyError}
+                                            />
+                                            
+                                            {/* Journey Timeline (always show below map for detailed view) */}
+                                            {journeyData && (
+                                                <JourneyTimeline 
+                                                    journeyData={journeyData}
+                                                    loading={false}
+                                                    error={null}
+                                                />
+                                            )}
+                                        </div>
                                     </TabsContent>
                                 </CardContent>
                             </Tabs>
