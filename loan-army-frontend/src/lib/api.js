@@ -1566,6 +1566,38 @@ export class APIService {
     }
 
     // ==========================================================================
+    // Formations
+    // ==========================================================================
+
+    static async adminGetFormations(teamId) {
+        return this.request(`/admin/teams/${teamId}/formations`, {}, { admin: true })
+    }
+
+    static async adminCreateFormation(teamId, payload) {
+        return this.request(`/admin/teams/${teamId}/formations`, {
+            method: 'POST',
+            body: JSON.stringify(payload)
+        }, { admin: true })
+    }
+
+    static async adminGetFormation(teamId, formationId) {
+        return this.request(`/admin/teams/${teamId}/formations/${formationId}`, {}, { admin: true })
+    }
+
+    static async adminUpdateFormation(teamId, formationId, payload) {
+        return this.request(`/admin/teams/${teamId}/formations/${formationId}`, {
+            method: 'PUT',
+            body: JSON.stringify(payload)
+        }, { admin: true })
+    }
+
+    static async adminDeleteFormation(teamId, formationId) {
+        return this.request(`/admin/teams/${teamId}/formations/${formationId}`, {
+            method: 'DELETE'
+        }, { admin: true })
+    }
+
+    // ==========================================================================
     // GOL Assistant
     // ==========================================================================
 

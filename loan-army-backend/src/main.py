@@ -7,6 +7,7 @@ from src.models.league import db, League, Team, LoanedPlayer, Newsletter, UserSu
 import src.models.weekly  # Ensure weekly models are registered with SQLAlchemy
 import src.models.journey  # Ensure journey models are registered with SQLAlchemy
 import src.models.cohort   # Ensure cohort models are registered with SQLAlchemy
+import src.models.formation  # Ensure formation models are registered with SQLAlchemy
 from src.routes.api import api_bp, require_api_key
 from src.routes.auth_routes import auth_bp
 from src.routes.journalist import journalist_bp
@@ -16,6 +17,8 @@ from src.routes.academy import academy_bp
 from src.routes.journey import journey_bp
 from src.routes.cohort import cohort_bp
 from src.routes.gol import gol_bp
+from src.routes.formation import formation_bp
+from src.routes.teams import teams_bp
 import logging
 from sqlalchemy.engine.url import make_url, URL
 from flask_migrate import Migrate
@@ -88,6 +91,8 @@ app.register_blueprint(community_takes_bp, url_prefix='/api')
 app.register_blueprint(academy_bp, url_prefix='/api')
 app.register_blueprint(cohort_bp, url_prefix='/api')
 app.register_blueprint(gol_bp, url_prefix='/api')
+app.register_blueprint(formation_bp, url_prefix='/api')
+app.register_blueprint(teams_bp, url_prefix='/api')
 
 csp = {
     'default-src': ["'self'"],

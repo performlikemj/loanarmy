@@ -135,6 +135,10 @@ class PlayerJourney(db.Model):
             club['total_apps'] += entry.appearances or 0
             club['total_goals'] += entry.goals or 0
             club['total_assists'] += entry.assists or 0
+            # Track latest transfer date for sorting tiebreaker
+            td = getattr(entry, 'transfer_date', None) or ''
+            if td > club.get('_max_transfer_date', ''):
+                club['_max_transfer_date'] = td
             
             # Add to level breakdown
             level = entry.level
@@ -175,9 +179,14 @@ class PlayerJourney(db.Model):
                 'competitions': sorted(club['competitions'], key=lambda x: x['season'], reverse=True),
             })
         
-        # Sort by earliest season
-        stops.sort(key=lambda x: int(x['years'].split('-')[0]))
-        
+        # Sort by earliest season, then by latest transfer date (so most
+        # recent club within the same season comes last → "Current" badge)
+        stops.sort(key=lambda x: (int(x['years'].split('-')[0]), x.get('_max_transfer_date', '')))
+
+        # Remove internal sort key from API response
+        for stop in stops:
+            stop.pop('_max_transfer_date', None)
+
         return {
             'player_api_id': self.player_api_id,
             'player_name': self.player_name,
@@ -220,6 +229,11 @@ class PlayerJourneyEntry(db.Model):
     assists = db.Column(db.Integer, default=0)
     minutes = db.Column(db.Integer, default=0)
     
+    # Transfer date (YYYY-MM-DD) — when the player moved to this club
+    # Populated from transfer API for loan entries; used as tiebreaker
+    # when multiple clubs share the same season and sort_priority.
+    transfer_date = db.Column(db.String(20))
+
     # Sorting priority (higher = more prominent display)
     sort_priority = db.Column(db.Integer, default=0)
     

@@ -15,7 +15,7 @@ from src.models.journey import (
     PlayerJourney, PlayerJourneyEntry, ClubLocation,
     LEVEL_PRIORITY, YOUTH_LEVELS
 )
-from src.api_football_client import APIFootballClient
+from src.api_football_client import APIFootballClient, is_new_loan_transfer, LOAN_RETURN_TYPES
 from src.utils.geocoding import get_team_coordinates
 
 logger = logging.getLogger(__name__)
@@ -102,29 +102,42 @@ class JourneySyncService:
                     if s not in already_synced or s >= current_year - 1
                 ]
             
+            # Fetch transfer history for loan classification
+            transfers = self._get_player_transfers(player_api_id)
+            loan_timeline = self._build_transfer_timeline(transfers)
+
             # Fetch and process each season
             all_entries = []
             player_info = None
-            
+
             for season in sorted(seasons_to_sync):
                 try:
                     player_data = self._get_player_season_data(player_api_id, season)
                     if not player_data:
                         continue
-                    
+
                     # Extract player info from first successful response
                     if not player_info and 'player' in player_data:
                         player_info = player_data['player']
-                    
+
                     # Process statistics into entries
                     for stat in player_data.get('statistics', []):
+                        if not self._is_official_competition(stat):
+                            logger.debug(f"Skipping non-official competition: {stat.get('league', {}).get('name')}")
+                            continue
                         entry = self._create_entry_from_stat(journey.id, season, stat)
                         if entry:
                             all_entries.append(entry)
-                    
+
                 except Exception as e:
                     logger.warning(f"Failed to fetch season {season} for player {player_api_id}: {e}")
                     continue
+
+            # Deduplicate entries with identical stat fingerprints
+            all_entries = self._deduplicate_entries(all_entries)
+
+            # Classify loan entries based on transfer history
+            self._apply_loan_classification(all_entries, loan_timeline)
             
             # Update player info
             if player_info:
@@ -287,7 +300,190 @@ class JourneySyncService:
         """Check if league is international"""
         league_lower = league_name.lower()
         return any(pattern in league_lower for pattern in self.INTERNATIONAL_PATTERNS)
-    
+
+    def _is_official_competition(self, stat: Dict) -> bool:
+        """
+        Check if a stat block represents an official competition.
+
+        Uses API-Football's league_id assignment as the allowlist:
+        - Non-null league_id = API-Football recognizes it as official
+        - Null league_id + youth team pattern = kept (youth cups sometimes lack IDs)
+        - Null league_id + international = kept
+        - Null league_id + none of the above = filtered (preseason/friendly)
+        """
+        league = stat.get('league', {})
+        team = stat.get('team', {})
+        league_id = league.get('id')
+
+        # Non-null league_id = API-Football recognizes it as official
+        if league_id is not None:
+            return True
+
+        # Null league_id: only keep if youth team or international
+        team_name = (team.get('name') or '').lower()
+
+        # Youth teams (FA Youth Cup etc. sometimes lack league IDs)
+        for pattern in ['u15', 'u16', 'u17', 'u18', 'u19', 'u20', 'u21', 'u23']:
+            if pattern in team_name:
+                return True
+
+        # International competitions
+        if self._is_international(league.get('name', '')):
+            return True
+
+        return False
+
+    def _get_player_transfers(self, player_api_id: int) -> list:
+        """
+        Get transfer records for a player.
+
+        Calls the API client's cached get_player_transfers method.
+        Returns a flat list of transfer dicts on success, [] on error.
+        """
+        try:
+            data = self.api.get_player_transfers(player_api_id)
+            # API returns list of player blocks, each with a 'transfers' list
+            transfers = []
+            for block in data:
+                transfers.extend(block.get('transfers', []))
+            return transfers
+        except Exception as e:
+            logger.warning(f"Failed to get transfers for player {player_api_id}: {e}")
+            return []
+
+    def _build_transfer_timeline(self, transfers: list) -> list:
+        """
+        Build a list of loan periods from transfer records.
+
+        Returns list of dicts:
+            [{club_id, club_name, parent_club_id, start_date, end_date}, ...]
+
+        Loan starts are identified by is_new_loan_transfer().
+        Loan ends are identified by LOAN_RETURN_TYPES.
+        """
+        loan_periods = []
+
+        for transfer in transfers:
+            transfer_type = (transfer.get('type') or '').strip().lower()
+            transfer_date = transfer.get('date')
+            teams = transfer.get('teams', {})
+            team_in = teams.get('in', {})
+            team_out = teams.get('out', {})
+
+            if is_new_loan_transfer(transfer_type):
+                # New loan: player goes OUT from parent → IN to loan club
+                loan_periods.append({
+                    'club_id': team_in.get('id'),
+                    'club_name': team_in.get('name'),
+                    'parent_club_id': team_out.get('id'),
+                    'start_date': transfer_date,
+                    'end_date': None,  # open-ended until we find a return
+                })
+            elif transfer_type in LOAN_RETURN_TYPES:
+                # Loan return: close the most recent open loan for this parent club
+                return_parent_id = team_in.get('id')
+                for period in reversed(loan_periods):
+                    if period['parent_club_id'] == return_parent_id and period['end_date'] is None:
+                        period['end_date'] = transfer_date
+                        break
+
+        return loan_periods
+
+    def _loan_overlaps_season(self, loan: Dict, season: int) -> bool:
+        """
+        Check if a loan period overlaps a football season.
+
+        A season (e.g. 2023) runs roughly July 2023 to June 2024.
+        """
+        season_start = f"{season}-07-01"
+        season_end = f"{season + 1}-06-30"
+
+        loan_start = loan.get('start_date') or ''
+        loan_end = loan.get('end_date')
+
+        if not loan_start:
+            return False
+
+        # Loan must start before season ends
+        if loan_start > season_end:
+            return False
+
+        # If loan has an end date, it must end after season starts
+        if loan_end and loan_end < season_start:
+            return False
+
+        return True
+
+    def _deduplicate_entries(self, entries: list) -> list:
+        """
+        Remove duplicate entries based on stat fingerprint.
+
+        Fingerprint: (season, appearances, minutes, goals, assists)
+
+        When duplicates found:
+        - Prefer youth entries (is_youth=True) over senior
+        - If no youth entry, prefer lowest sort_priority
+        """
+        from collections import defaultdict
+
+        groups = defaultdict(list)
+        for entry in entries:
+            fingerprint = (
+                entry.season,
+                entry.appearances,
+                entry.minutes,
+                entry.goals,
+                entry.assists,
+            )
+            groups[fingerprint].append(entry)
+
+        result = []
+        for fingerprint, group in groups.items():
+            if len(group) == 1:
+                result.append(group[0])
+                continue
+
+            # Multiple entries with same fingerprint — pick the best one
+            youth_entries = [e for e in group if e.is_youth]
+            if youth_entries:
+                # Prefer youth entry (stats often duplicated UP from youth to senior)
+                winner = min(youth_entries, key=lambda e: e.sort_priority)
+            else:
+                winner = min(group, key=lambda e: e.sort_priority)
+
+            removed = [e for e in group if e is not winner]
+            for e in removed:
+                logger.debug(
+                    f"Dedup: removed {e.club_name}/{e.league_name} season {e.season} "
+                    f"(dup of {winner.club_name}/{winner.league_name})"
+                )
+
+            result.append(winner)
+
+        return result
+
+    def _apply_loan_classification(self, entries: list, loan_timeline: list):
+        """
+        Set entry_type='loan' and transfer_date for entries at loan clubs.
+
+        For each non-international entry, if club_api_id matches a loan period
+        overlapping that season, classify it as a loan and record the
+        transfer start date for ordering purposes.
+        """
+        if not loan_timeline:
+            return
+
+        for entry in entries:
+            if entry.is_international:
+                continue
+
+            for loan in loan_timeline:
+                if (entry.club_api_id == loan.get('club_id') and
+                        self._loan_overlaps_season(loan, entry.season)):
+                    entry.entry_type = 'loan'
+                    entry.transfer_date = loan.get('start_date')
+                    break
+
     def _update_journey_aggregates(self, journey: PlayerJourney):
         """Update aggregate stats on the journey record"""
         entries = PlayerJourneyEntry.query.filter_by(journey_id=journey.id).all()
@@ -301,10 +497,10 @@ class JourneySyncService:
         journey.origin_club_name = earliest.club_name
         journey.origin_year = earliest.season
         
-        # Find current (latest entry with highest priority)
+        # Find current club: latest season, highest priority, most recent transfer
         latest_season = max(e.season for e in entries)
         latest_entries = [e for e in entries if e.season == latest_season]
-        current = max(latest_entries, key=lambda e: e.sort_priority)
+        current = max(latest_entries, key=lambda e: (e.sort_priority, e.transfer_date or ''))
         journey.current_club_api_id = current.club_api_id
         journey.current_club_name = current.club_name
         journey.current_level = current.level
@@ -329,6 +525,9 @@ class JourneySyncService:
         )
         journey.total_youth_apps = sum(
             e.appearances for e in entries if e.is_youth
+        )
+        journey.total_loan_apps = sum(
+            e.appearances for e in entries if e.entry_type == 'loan'
         )
         journey.total_goals = sum(e.goals for e in entries)
         journey.total_assists = sum(e.assists for e in entries)

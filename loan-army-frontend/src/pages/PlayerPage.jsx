@@ -32,6 +32,21 @@ import { SponsorSidebar, SponsorStrip } from '@/components/SponsorSidebar'
 import { Tooltip as UITooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip'
 import { MatchDetailDrawer } from '@/components/MatchDetailDrawer'
 import PlayerJourneyView from '@/components/PlayerJourneyView'
+import { JourneyProvider, useJourney } from '@/contexts/JourneyContext'
+import { MiniProgressBar } from '@/components/MiniProgressBar'
+import { SeasonStatsPanel } from '@/components/SeasonStatsPanel'
+
+/** Dims children when viewing a past career stop so SeasonStatsPanel takes focus. */
+function JourneyDimmer({ children, className = '' }) {
+    const { selectedNode, progressionNodes } = useJourney()
+    const isLatest = selectedNode && selectedNode.id === progressionNodes[progressionNodes.length - 1]?.id
+    const dimmed = selectedNode && !isLatest
+    return (
+        <div className={`transition-opacity duration-300 ${dimmed ? 'opacity-30 pointer-events-none' : ''} ${className}`}>
+            {children}
+        </div>
+    )
+}
 
 const METRIC_CONFIG = {
     'Attacker': {
@@ -106,6 +121,9 @@ export function PlayerPage() {
     // Match detail drawer state
     const [matchDetailOpen, setMatchDetailOpen] = useState(false)
     const [selectedMatch, setSelectedMatch] = useState(null)
+
+    // Journey data (lifted here so MiniProgressBar can access it from header)
+    const [journeyData, setJourneyData] = useState(null)
     
 
     // Smart back navigation - goes to previous page, or home if no history
@@ -129,17 +147,19 @@ export function PlayerPage() {
         setLoading(true)
         setError(null)
         try {
-            const [profileData, statsData, seasonData, commentariesData] = await Promise.all([
+            const [profileData, statsData, seasonData, commentariesData, journeyMapData] = await Promise.all([
                 APIService.getPublicPlayerProfile(playerId).catch(() => null),
                 APIService.getPublicPlayerStats(playerId),
                 APIService.getPublicPlayerSeasonStats(playerId).catch(() => null),
-                APIService.getPlayerCommentaries(playerId).catch(() => ({ commentaries: [], authors: [], total_count: 0 }))
+                APIService.getPlayerCommentaries(playerId).catch(() => ({ commentaries: [], authors: [], total_count: 0 })),
+                APIService.getPlayerJourneyMap(playerId).catch(() => null),
             ])
             
             setProfile(profileData)
             setStats(statsData || [])
             setSeasonStats(seasonData)
             setCommentaries(commentariesData || { commentaries: [], authors: [], total_count: 0 })
+            if (journeyMapData) setJourneyData(journeyMapData)
 
             // Infer position from stats
             if (statsData && statsData.length > 0) {
@@ -192,7 +212,8 @@ export function PlayerPage() {
             const loans = await APIService.getTeamLoans(profile.primary_team_db_id, {
                 active_only: 'true',
                 dedupe: 'true',
-                direction: 'loaned_from'
+                direction: 'loaned_from',
+                pathway_status: 'academy',
             })
             // Filter out current player
             const otherPlayers = loans.filter(loan => loan.player_id !== parseInt(playerId))
@@ -342,6 +363,7 @@ export function PlayerPage() {
     }
 
     return (
+        <JourneyProvider journeyData={journeyData}>
         <div className="min-h-screen bg-gradient-to-b from-slate-50 to-slate-100">
             {/* Header */}
             <div className="bg-white border-b sticky top-0 z-10">
@@ -376,6 +398,8 @@ export function PlayerPage() {
                                         <Badge variant="outline" className="text-gray-600">{profile.nationality}</Badge>
                                     )}
                                 </div>
+                                {/* Mini Progress Bar — career stops at a glance */}
+                                <MiniProgressBar />
                                 {/* Club Info */}
                                 <div className="flex flex-wrap items-center gap-3 mt-2 text-sm">
                                     {profile?.parent_team_name && (
@@ -543,7 +567,8 @@ export function PlayerPage() {
                             </div>
                         ) : (
                             <div className="space-y-6">
-                        {/* Season Summary Cards - Position-aware */}
+                        {/* Season Summary Cards - Position-aware (dimmed when viewing past stop) */}
+                        <JourneyDimmer>
                         <div className="grid grid-cols-2 md:grid-cols-5 gap-4">
                             <Card>
                                 <CardContent className="pt-4 text-center">
@@ -595,6 +620,10 @@ export function PlayerPage() {
                                 </CardContent>
                             </Card>
                         </div>
+                        </JourneyDimmer>
+
+                        {/* Season Stats Panel — slides in when a past career stop is selected */}
+                        <SeasonStatsPanel />
 
                         {/* Per-Club Breakdown (if multiple clubs) */}
                         {seasonStats?.clubs && seasonStats.clubs.length > 1 && (
@@ -889,7 +918,7 @@ export function PlayerPage() {
                                     </TabsContent>
                                     
                                     <TabsContent value="journey" className="mt-0">
-                                        <PlayerJourneyView playerId={parseInt(playerId)} />
+                                        <PlayerJourneyView />
                                     </TabsContent>
                                 </CardContent>
                             </Tabs>
@@ -1194,6 +1223,7 @@ export function PlayerPage() {
                 </DrawerContent>
             </Drawer>
         </div>
+        </JourneyProvider>
     )
 }
 

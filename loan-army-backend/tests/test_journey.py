@@ -154,6 +154,492 @@ class TestJourneyEntryCreation:
         assert entry.is_youth == True
 
 
+class TestIsOfficialCompetition:
+    """Test official competition filtering"""
+
+    def setup_method(self):
+        from src.services.journey_sync import JourneySyncService
+        self.service = JourneySyncService(api_client=Mock())
+
+    def test_non_null_league_id_is_official(self):
+        """Entries with a league_id are always official"""
+        stat = {
+            'league': {'id': 39, 'name': 'Premier League'},
+            'team': {'id': 33, 'name': 'Manchester United'},
+        }
+        assert self.service._is_official_competition(stat) is True
+
+    def test_null_league_id_senior_team_filtered(self):
+        """Null league_id + senior team = preseason/friendly, filtered out"""
+        stat = {
+            'league': {'id': None, 'name': 'PL Summer Series'},
+            'team': {'id': 33, 'name': 'Manchester United'},
+        }
+        assert self.service._is_official_competition(stat) is False
+
+    def test_null_league_id_youth_team_kept(self):
+        """Null league_id + youth team = kept (FA Youth Cup etc.)"""
+        stat = {
+            'league': {'id': None, 'name': 'FA Youth Cup'},
+            'team': {'id': 1234, 'name': 'Watford U18'},
+        }
+        assert self.service._is_official_competition(stat) is True
+
+    def test_null_league_id_u21_team_kept(self):
+        """Null league_id + U21 team = kept"""
+        stat = {
+            'league': {'id': None, 'name': 'Some Cup'},
+            'team': {'id': 5678, 'name': 'Liverpool U21'},
+        }
+        assert self.service._is_official_competition(stat) is True
+
+    def test_null_league_id_international_kept(self):
+        """Null league_id + international = kept"""
+        stat = {
+            'league': {'id': None, 'name': 'World Cup - Qualification'},
+            'team': {'id': 99, 'name': 'England'},
+        }
+        assert self.service._is_official_competition(stat) is True
+
+    def test_missing_league_id_key_filtered(self):
+        """Missing league id key (no 'id' in league dict) is treated as null"""
+        stat = {
+            'league': {'name': 'Random Friendly'},
+            'team': {'id': 33, 'name': 'Manchester United'},
+        }
+        assert self.service._is_official_competition(stat) is False
+
+    def test_championship_with_league_id_kept(self):
+        """Championship (non-top league) with league_id is kept"""
+        stat = {
+            'league': {'id': 40, 'name': 'Championship'},
+            'team': {'id': 62, 'name': 'Sheffield Wednesday'},
+        }
+        assert self.service._is_official_competition(stat) is True
+
+
+class TestDeduplicateEntries:
+    """Test deduplication of journey entries"""
+
+    def setup_method(self):
+        from src.services.journey_sync import JourneySyncService
+        self.service = JourneySyncService(api_client=Mock())
+
+    def _make_entry(self, **kwargs):
+        """Create a mock entry with defaults"""
+        entry = MagicMock()
+        entry.season = kwargs.get('season', 2024)
+        entry.appearances = kwargs.get('appearances', 13)
+        entry.minutes = kwargs.get('minutes', 346)
+        entry.goals = kwargs.get('goals', 0)
+        entry.assists = kwargs.get('assists', 0)
+        entry.is_youth = kwargs.get('is_youth', False)
+        entry.sort_priority = kwargs.get('sort_priority', 100)
+        entry.club_name = kwargs.get('club_name', 'Manchester United')
+        entry.league_name = kwargs.get('league_name', 'Premier League')
+        return entry
+
+    def test_no_duplicates_passes_through(self):
+        """Entries with unique fingerprints pass through unchanged"""
+        e1 = self._make_entry(appearances=10, minutes=800)
+        e2 = self._make_entry(appearances=5, minutes=400)
+        result = self.service._deduplicate_entries([e1, e2])
+        assert len(result) == 2
+
+    def test_identical_stats_youth_preferred(self):
+        """When stats are identical, youth entry is preferred"""
+        senior = self._make_entry(
+            is_youth=False, sort_priority=100,
+            club_name='Man Utd', league_name='Premier League'
+        )
+        youth = self._make_entry(
+            is_youth=True, sort_priority=20,
+            club_name='Man Utd U18', league_name='U18 Premier League'
+        )
+        result = self.service._deduplicate_entries([senior, youth])
+        assert len(result) == 1
+        assert result[0] is youth
+
+    def test_identical_stats_no_youth_lowest_priority_wins(self):
+        """When no youth entry, lowest sort_priority wins"""
+        e1 = self._make_entry(sort_priority=100, club_name='Team A', league_name='League A')
+        e2 = self._make_entry(sort_priority=50, club_name='Team B', league_name='League B')
+        result = self.service._deduplicate_entries([e1, e2])
+        assert len(result) == 1
+        assert result[0] is e2
+
+    def test_three_duplicates_one_survives(self):
+        """Three entries with same fingerprint → only one survives"""
+        e1 = self._make_entry(sort_priority=100, club_name='A', league_name='L1')
+        e2 = self._make_entry(is_youth=True, sort_priority=20, club_name='B U18', league_name='L2')
+        e3 = self._make_entry(sort_priority=90, club_name='C', league_name='L3')
+        result = self.service._deduplicate_entries([e1, e2, e3])
+        assert len(result) == 1
+        assert result[0] is e2
+
+    def test_different_seasons_not_deduped(self):
+        """Same stats in different seasons are not duplicates"""
+        e1 = self._make_entry(season=2023)
+        e2 = self._make_entry(season=2024)
+        result = self.service._deduplicate_entries([e1, e2])
+        assert len(result) == 2
+
+    def test_empty_entries(self):
+        """Empty list returns empty"""
+        assert self.service._deduplicate_entries([]) == []
+
+
+class TestBuildTransferTimeline:
+    """Test building loan timeline from transfer records"""
+
+    def setup_method(self):
+        from src.services.journey_sync import JourneySyncService
+        self.service = JourneySyncService(api_client=Mock())
+
+    def test_simple_loan_and_return(self):
+        """Loan start followed by loan return creates a period with end date"""
+        transfers = [
+            {
+                'type': 'Loan',
+                'date': '2023-08-01',
+                'teams': {
+                    'out': {'id': 33, 'name': 'Manchester United'},
+                    'in': {'id': 62, 'name': 'Sheffield Wednesday'},
+                },
+            },
+            {
+                'type': 'End of loan',
+                'date': '2024-06-30',
+                'teams': {
+                    'out': {'id': 62, 'name': 'Sheffield Wednesday'},
+                    'in': {'id': 33, 'name': 'Manchester United'},
+                },
+            },
+        ]
+        timeline = self.service._build_transfer_timeline(transfers)
+        assert len(timeline) == 1
+        assert timeline[0]['club_id'] == 62
+        assert timeline[0]['parent_club_id'] == 33
+        assert timeline[0]['start_date'] == '2023-08-01'
+        assert timeline[0]['end_date'] == '2024-06-30'
+
+    def test_open_ended_loan(self):
+        """Loan without return has end_date=None"""
+        transfers = [
+            {
+                'type': 'Loan',
+                'date': '2024-01-15',
+                'teams': {
+                    'out': {'id': 33, 'name': 'Manchester United'},
+                    'in': {'id': 71, 'name': 'Norwich City'},
+                },
+            },
+        ]
+        timeline = self.service._build_transfer_timeline(transfers)
+        assert len(timeline) == 1
+        assert timeline[0]['end_date'] is None
+
+    def test_non_loan_transfers_ignored(self):
+        """Permanent transfers and free transfers are ignored"""
+        transfers = [
+            {
+                'type': 'Transfer',
+                'date': '2020-07-01',
+                'teams': {
+                    'out': {'id': 100, 'name': 'Watford'},
+                    'in': {'id': 33, 'name': 'Manchester United'},
+                },
+            },
+        ]
+        timeline = self.service._build_transfer_timeline(transfers)
+        assert len(timeline) == 0
+
+    def test_multiple_loans(self):
+        """Multiple loan periods tracked separately"""
+        transfers = [
+            {
+                'type': 'Loan',
+                'date': '2023-08-01',
+                'teams': {
+                    'out': {'id': 33, 'name': 'Man Utd'},
+                    'in': {'id': 62, 'name': 'Sheffield Wed'},
+                },
+            },
+            {
+                'type': 'End of loan',
+                'date': '2024-06-30',
+                'teams': {
+                    'out': {'id': 62, 'name': 'Sheffield Wed'},
+                    'in': {'id': 33, 'name': 'Man Utd'},
+                },
+            },
+            {
+                'type': 'Loan',
+                'date': '2024-08-01',
+                'teams': {
+                    'out': {'id': 33, 'name': 'Man Utd'},
+                    'in': {'id': 71, 'name': 'Norwich'},
+                },
+            },
+        ]
+        timeline = self.service._build_transfer_timeline(transfers)
+        assert len(timeline) == 2
+        assert timeline[0]['club_id'] == 62
+        assert timeline[0]['end_date'] == '2024-06-30'
+        assert timeline[1]['club_id'] == 71
+        assert timeline[1]['end_date'] is None
+
+    def test_empty_transfers(self):
+        """Empty transfers list returns empty timeline"""
+        assert self.service._build_transfer_timeline([]) == []
+
+
+class TestLoanOverlapsSeason:
+    """Test loan/season overlap detection"""
+
+    def setup_method(self):
+        from src.services.journey_sync import JourneySyncService
+        self.service = JourneySyncService(api_client=Mock())
+
+    def test_full_season_loan(self):
+        """Loan covering entire season overlaps"""
+        loan = {'start_date': '2023-07-01', 'end_date': '2024-06-30'}
+        assert self.service._loan_overlaps_season(loan, 2023) is True
+
+    def test_loan_starts_mid_season(self):
+        """January loan overlaps that season"""
+        loan = {'start_date': '2024-01-15', 'end_date': '2024-06-30'}
+        assert self.service._loan_overlaps_season(loan, 2023) is True
+
+    def test_loan_before_season(self):
+        """Loan ending before season starts doesn't overlap"""
+        loan = {'start_date': '2022-08-01', 'end_date': '2023-05-30'}
+        assert self.service._loan_overlaps_season(loan, 2023) is False
+
+    def test_loan_after_season(self):
+        """Loan starting after season ends doesn't overlap"""
+        loan = {'start_date': '2025-08-01', 'end_date': '2026-06-30'}
+        assert self.service._loan_overlaps_season(loan, 2023) is False
+
+    def test_open_ended_loan_overlaps_future(self):
+        """Open-ended loan overlaps future seasons"""
+        loan = {'start_date': '2023-08-01', 'end_date': None}
+        assert self.service._loan_overlaps_season(loan, 2023) is True
+        assert self.service._loan_overlaps_season(loan, 2024) is True
+
+    def test_no_start_date(self):
+        """Missing start date returns False"""
+        loan = {'start_date': '', 'end_date': '2024-06-30'}
+        assert self.service._loan_overlaps_season(loan, 2023) is False
+
+    def test_loan_ends_exactly_season_start(self):
+        """Loan ending exactly at season start boundary"""
+        loan = {'start_date': '2022-08-01', 'end_date': '2023-07-01'}
+        assert self.service._loan_overlaps_season(loan, 2023) is True
+
+
+class TestApplyLoanClassification:
+    """Test loan classification of journey entries"""
+
+    def setup_method(self):
+        from src.services.journey_sync import JourneySyncService
+        self.service = JourneySyncService(api_client=Mock())
+
+    def _make_entry(self, **kwargs):
+        entry = MagicMock()
+        entry.club_api_id = kwargs.get('club_api_id', 33)
+        entry.season = kwargs.get('season', 2023)
+        entry.is_international = kwargs.get('is_international', False)
+        entry.entry_type = kwargs.get('entry_type', 'first_team')
+        return entry
+
+    def test_entry_at_loan_club_classified(self):
+        """Entry at a loan club during loan period gets entry_type='loan' and transfer_date"""
+        entry = self._make_entry(club_api_id=62, season=2023, entry_type='first_team')
+        loan_timeline = [{
+            'club_id': 62,
+            'parent_club_id': 33,
+            'start_date': '2023-08-01',
+            'end_date': '2024-06-30',
+        }]
+        self.service._apply_loan_classification([entry], loan_timeline)
+        assert entry.entry_type == 'loan'
+        assert entry.transfer_date == '2023-08-01'
+
+    def test_entry_at_parent_club_not_classified(self):
+        """Entry at parent club is not classified as loan"""
+        entry = self._make_entry(club_api_id=33, season=2023, entry_type='first_team')
+        loan_timeline = [{
+            'club_id': 62,
+            'parent_club_id': 33,
+            'start_date': '2023-08-01',
+            'end_date': '2024-06-30',
+        }]
+        self.service._apply_loan_classification([entry], loan_timeline)
+        assert entry.entry_type == 'first_team'
+
+    def test_international_entries_skipped(self):
+        """International entries are never classified as loans"""
+        entry = self._make_entry(club_api_id=62, season=2023, is_international=True, entry_type='international')
+        loan_timeline = [{
+            'club_id': 62,
+            'parent_club_id': 33,
+            'start_date': '2023-08-01',
+            'end_date': '2024-06-30',
+        }]
+        self.service._apply_loan_classification([entry], loan_timeline)
+        assert entry.entry_type == 'international'
+
+    def test_empty_timeline_no_changes(self):
+        """Empty loan timeline makes no changes"""
+        entry = self._make_entry(entry_type='first_team')
+        self.service._apply_loan_classification([entry], [])
+        assert entry.entry_type == 'first_team'
+
+    def test_entry_outside_loan_period_not_classified(self):
+        """Entry at loan club but outside loan period is not classified"""
+        entry = self._make_entry(club_api_id=62, season=2022, entry_type='first_team')
+        loan_timeline = [{
+            'club_id': 62,
+            'parent_club_id': 33,
+            'start_date': '2023-08-01',
+            'end_date': '2024-06-30',
+        }]
+        self.service._apply_loan_classification([entry], loan_timeline)
+        assert entry.entry_type == 'first_team'
+
+
+class TestCurrentClubTiebreaker:
+    """Test that current club is determined by transfer_date when sort_priority ties"""
+
+    def test_later_transfer_date_wins(self):
+        """When two First Team entries share a season, the one with the later transfer_date wins"""
+        from src.services.journey_sync import JourneySyncService
+        from src.models.journey import LEVEL_PRIORITY
+
+        service = JourneySyncService(api_client=Mock())
+
+        # Sheffield Wed: loaned Aug 2025
+        shef = MagicMock()
+        shef.season = 2025
+        shef.club_api_id = 62
+        shef.club_name = 'Sheffield Wednesday'
+        shef.level = 'First Team'
+        shef.entry_type = 'loan'
+        shef.is_youth = False
+        shef.is_international = False
+        shef.appearances = 21
+        shef.goals = 1
+        shef.assists = 1
+        shef.sort_priority = LEVEL_PRIORITY['First Team']
+        shef.transfer_date = '2025-08-01'
+
+        # Norwich: loaned Jan 2026
+        norw = MagicMock()
+        norw.season = 2025
+        norw.club_api_id = 71
+        norw.club_name = 'Norwich'
+        norw.level = 'First Team'
+        norw.entry_type = 'loan'
+        norw.is_youth = False
+        norw.is_international = False
+        norw.appearances = 1
+        norw.goals = 0
+        norw.assists = 0
+        norw.sort_priority = LEVEL_PRIORITY['First Team']
+        norw.transfer_date = '2026-01-15'
+
+        mock_journey = MagicMock()
+        mock_journey.id = 1
+
+        with patch('src.services.journey_sync.PlayerJourneyEntry') as MockEntry:
+            MockEntry.query.filter_by.return_value.all.return_value = [shef, norw]
+            service._update_journey_aggregates(mock_journey)
+
+        assert mock_journey.current_club_api_id == 71
+        assert mock_journey.current_club_name == 'Norwich'
+
+    def test_no_transfer_date_falls_back_gracefully(self):
+        """Entries without transfer_date still work (empty string tiebreaker)"""
+        from src.services.journey_sync import JourneySyncService
+        from src.models.journey import LEVEL_PRIORITY
+
+        service = JourneySyncService(api_client=Mock())
+
+        entry = MagicMock()
+        entry.season = 2025
+        entry.club_api_id = 33
+        entry.club_name = 'Manchester United'
+        entry.level = 'First Team'
+        entry.entry_type = 'first_team'
+        entry.is_youth = False
+        entry.is_international = False
+        entry.appearances = 5
+        entry.goals = 0
+        entry.assists = 0
+        entry.sort_priority = LEVEL_PRIORITY['First Team']
+        entry.transfer_date = None
+
+        mock_journey = MagicMock()
+        mock_journey.id = 1
+
+        with patch('src.services.journey_sync.PlayerJourneyEntry') as MockEntry:
+            MockEntry.query.filter_by.return_value.all.return_value = [entry]
+            service._update_journey_aggregates(mock_journey)
+
+        assert mock_journey.current_club_api_id == 33
+        assert mock_journey.current_club_name == 'Manchester United'
+
+
+class TestUpdateAggregatesWithLoans:
+    """Test that _update_journey_aggregates counts loan apps"""
+
+    def test_total_loan_apps_populated(self):
+        """total_loan_apps should sum appearances of loan entries"""
+        from src.services.journey_sync import JourneySyncService
+        from src.models.journey import LEVEL_PRIORITY
+
+        service = JourneySyncService(api_client=Mock())
+
+        # Create mock entries
+        loan_entry = MagicMock()
+        loan_entry.season = 2023
+        loan_entry.club_api_id = 62
+        loan_entry.club_name = 'Sheffield Wednesday'
+        loan_entry.level = 'First Team'
+        loan_entry.entry_type = 'loan'
+        loan_entry.is_youth = False
+        loan_entry.is_international = False
+        loan_entry.appearances = 21
+        loan_entry.goals = 0
+        loan_entry.assists = 1
+        loan_entry.sort_priority = LEVEL_PRIORITY['First Team']
+
+        first_team_entry = MagicMock()
+        first_team_entry.season = 2024
+        first_team_entry.club_api_id = 33
+        first_team_entry.club_name = 'Manchester United'
+        first_team_entry.level = 'First Team'
+        first_team_entry.entry_type = 'first_team'
+        first_team_entry.is_youth = False
+        first_team_entry.is_international = False
+        first_team_entry.appearances = 5
+        first_team_entry.goals = 0
+        first_team_entry.assists = 0
+        first_team_entry.sort_priority = LEVEL_PRIORITY['First Team']
+
+        # Mock the query to return our entries
+        mock_journey = MagicMock()
+        mock_journey.id = 1
+
+        with patch('src.services.journey_sync.PlayerJourneyEntry') as MockEntry:
+            MockEntry.query.filter_by.return_value.all.return_value = [loan_entry, first_team_entry]
+            service._update_journey_aggregates(mock_journey)
+
+        assert mock_journey.total_loan_apps == 21
+        assert mock_journey.total_first_team_apps == 26
+
+
 class TestClubLocationSeeding:
     """Test club location seeding"""
     

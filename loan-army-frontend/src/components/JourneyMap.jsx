@@ -8,20 +8,10 @@ import { Avatar, AvatarImage, AvatarFallback } from '@/components/ui/avatar'
 import { Drawer, DrawerContent, DrawerHeader, DrawerTitle, DrawerDescription } from '@/components/ui/drawer'
 import { ScrollArea } from '@/components/ui/scroll-area'
 import { Loader2, MapPin, Calendar } from 'lucide-react'
+import { useJourney } from '@/contexts/JourneyContext'
+import { LEVEL_COLORS } from '@/lib/journey-utils'
 
 const GEO_URL = 'https://cdn.jsdelivr.net/npm/world-atlas@2/countries-110m.json'
-
-// Level colors
-const LEVEL_COLORS = {
-    'U18': '#9333ea',      // Purple
-    'U19': '#8b5cf6',      // Violet
-    'U21': '#6366f1',      // Indigo
-    'U23': '#3b82f6',      // Blue
-    'Reserve': '#06b6d4',  // Cyan
-    'First Team': '#22c55e', // Green
-    'International': '#f59e0b', // Amber
-    'International Youth': '#d946ef', // Fuchsia
-}
 
 /**
  * Calculate zoom center and level from an array of stops.
@@ -53,7 +43,8 @@ function calculateView(stops) {
 }
 
 export function JourneyMap({ journeyData, loading, error }) {
-    const [selectedStop, setSelectedStop] = useState(null)
+    const [drawerStop, setDrawerStop] = useState(null)
+    const { progressionNodes, selectedNode, selectNode } = useJourney()
 
     const { stops, pathPairs, view } = useMemo(() => {
         if (!journeyData?.stops) {
@@ -67,6 +58,8 @@ export function JourneyMap({ journeyData, loading, error }) {
             pairs.push({
                 from: [validStops[i].lng, validStops[i].lat],
                 to: [validStops[i + 1].lng, validStops[i + 1].lat],
+                fromIndex: i,
+                toIndex: i + 1,
             })
         }
 
@@ -76,6 +69,28 @@ export function JourneyMap({ journeyData, loading, error }) {
             view: calculateView(validStops),
         }
     }, [journeyData])
+
+    /**
+     * Determine if a path segment (between two stop indices) is "visited"
+     * based on the selected progression node.
+     */
+    const isPathVisited = (fromStopIndex, toStopIndex) => {
+        if (!selectedNode) return true // no selection = all visited
+        // The path is visited if both stops are at or before the selected node's stopIndex
+        return fromStopIndex <= selectedNode.stopIndex && toStopIndex <= selectedNode.stopIndex
+    }
+
+    /** Is this stop at/before the selected node in the journey? */
+    const isStopVisited = (stopIndex) => {
+        if (!selectedNode) return true
+        return stopIndex <= selectedNode.stopIndex
+    }
+
+    /** Is this the stop that the selected node belongs to? */
+    const isStopSelected = (stopIndex) => {
+        if (!selectedNode) return false
+        return stopIndex === selectedNode.stopIndex
+    }
 
     if (loading) {
         return (
@@ -113,6 +128,11 @@ export function JourneyMap({ journeyData, loading, error }) {
                     <CardTitle className="text-lg flex items-center gap-2">
                         <MapPin className="h-5 w-5" />
                         Career Journey
+                        {selectedNode && (
+                            <Badge variant="outline" className="text-xs ml-2 bg-blue-50 text-blue-700 border-blue-200">
+                                {selectedNode.years} — {selectedNode.clubName}
+                            </Badge>
+                        )}
                     </CardTitle>
                 </CardHeader>
                 <CardContent className="p-0">
@@ -142,19 +162,22 @@ export function JourneyMap({ journeyData, loading, error }) {
                                     }
                                 </Geographies>
 
-                                {/* Journey path lines */}
-                                {pathPairs.map((pair, i) => (
-                                    <Line
-                                        key={i}
-                                        from={pair.from}
-                                        to={pair.to}
-                                        stroke="#3b82f6"
-                                        strokeWidth={2}
-                                        strokeLinecap="round"
-                                        strokeDasharray="5,5"
-                                        strokeOpacity={0.7}
-                                    />
-                                ))}
+                                {/* Journey path lines — trail vs future */}
+                                {pathPairs.map((pair, i) => {
+                                    const visited = isPathVisited(pair.fromIndex, pair.toIndex)
+                                    return (
+                                        <Line
+                                            key={i}
+                                            from={pair.from}
+                                            to={pair.to}
+                                            stroke={visited ? '#3b82f6' : '#d1d5db'}
+                                            strokeWidth={2}
+                                            strokeLinecap="round"
+                                            strokeDasharray={visited ? 'none' : '5,5'}
+                                            strokeOpacity={visited ? 0.8 : 0.3}
+                                        />
+                                    )
+                                })}
 
                                 {/* Club markers */}
                                 {validStops.map((stop, index) => {
@@ -162,22 +185,63 @@ export function JourneyMap({ journeyData, loading, error }) {
                                     const isCurrent = index === validStops.length - 1
                                     const primaryLevel = stop.levels?.[0] || 'First Team'
                                     const color = LEVEL_COLORS[primaryLevel] || '#6b7280'
-                                    const r = isCurrent ? 8 : isOrigin ? 7 : 5
+
+                                    const visited = isStopVisited(index)
+                                    const selected = isStopSelected(index)
+                                    const r = selected ? 10 : isCurrent ? 8 : isOrigin ? 7 : 5
 
                                     return (
                                         <Marker
                                             key={`${stop.club_id}-${index}`}
                                             coordinates={[stop.lng, stop.lat]}
                                         >
+                                            {/* Pulse ring for selected */}
+                                            {selected && (
+                                                <circle
+                                                    r={14}
+                                                    fill="none"
+                                                    stroke={color}
+                                                    strokeWidth={2}
+                                                    opacity={0.4}
+                                                >
+                                                    <animate
+                                                        attributeName="r"
+                                                        from="10"
+                                                        to="18"
+                                                        dur="1.5s"
+                                                        repeatCount="indefinite"
+                                                    />
+                                                    <animate
+                                                        attributeName="opacity"
+                                                        from="0.5"
+                                                        to="0"
+                                                        dur="1.5s"
+                                                        repeatCount="indefinite"
+                                                    />
+                                                </circle>
+                                            )}
                                             <circle
                                                 r={r}
-                                                fill={color}
+                                                fill={visited ? color : '#d1d5db'}
                                                 stroke="white"
                                                 strokeWidth={2}
-                                                style={{ cursor: 'pointer' }}
-                                                onClick={() => setSelectedStop(stop)}
+                                                opacity={visited ? 1 : 0.4}
+                                                style={{ cursor: 'pointer', transition: 'r 0.2s, opacity 0.3s' }}
+                                                onClick={() => {
+                                                    // Find a progression node for this stop
+                                                    const matchNode = progressionNodes.find(n => n.stopIndex === index)
+                                                    if (matchNode) {
+                                                        // Toggle: deselect if clicking the already-selected stop
+                                                        if (selected && selectedNode) {
+                                                            selectNode(null)
+                                                        } else {
+                                                            selectNode(matchNode)
+                                                        }
+                                                    }
+                                                    setDrawerStop(stop)
+                                                }}
                                             />
-                                            {isOrigin && (
+                                            {isOrigin && visited && (
                                                 <text
                                                     textAnchor="middle"
                                                     y={4}
@@ -186,7 +250,7 @@ export function JourneyMap({ journeyData, loading, error }) {
                                                     1
                                                 </text>
                                             )}
-                                            {isCurrent && (
+                                            {isCurrent && visited && (
                                                 <text
                                                     textAnchor="middle"
                                                     y={3}
@@ -223,23 +287,23 @@ export function JourneyMap({ journeyData, loading, error }) {
             </Card>
 
             {/* Stop Detail Drawer */}
-            <Drawer open={!!selectedStop} onOpenChange={(open) => !open && setSelectedStop(null)}>
+            <Drawer open={!!drawerStop} onOpenChange={(open) => !open && setDrawerStop(null)}>
                 <DrawerContent>
                     <DrawerHeader>
                         <div className="flex items-center gap-3">
-                            {selectedStop?.club_logo && (
+                            {drawerStop?.club_logo && (
                                 <Avatar className="h-12 w-12">
-                                    <AvatarImage src={selectedStop.club_logo} alt={selectedStop?.club_name} />
-                                    <AvatarFallback>{selectedStop?.club_name?.[0]}</AvatarFallback>
+                                    <AvatarImage src={drawerStop.club_logo} alt={drawerStop?.club_name} />
+                                    <AvatarFallback>{drawerStop?.club_name?.[0]}</AvatarFallback>
                                 </Avatar>
                             )}
                             <div>
-                                <DrawerTitle>{selectedStop?.club_name}</DrawerTitle>
+                                <DrawerTitle>{drawerStop?.club_name}</DrawerTitle>
                                 <DrawerDescription className="flex items-center gap-1">
                                     <Calendar className="h-3 w-3" />
-                                    {selectedStop?.years}
-                                    {selectedStop?.city && ` \u2022 ${selectedStop.city}`}
-                                    {selectedStop?.country && `, ${selectedStop.country}`}
+                                    {selectedNode ? selectedNode.years : drawerStop?.years}
+                                    {drawerStop?.city && ` \u2022 ${drawerStop.city}`}
+                                    {drawerStop?.country && `, ${drawerStop.country}`}
                                 </DrawerDescription>
                             </div>
                         </div>
@@ -250,7 +314,7 @@ export function JourneyMap({ journeyData, loading, error }) {
                         <div>
                             <h4 className="text-sm font-medium text-muted-foreground mb-2">Levels</h4>
                             <div className="flex flex-wrap gap-2">
-                                {selectedStop?.levels?.map(level => (
+                                {drawerStop?.levels?.map(level => (
                                     <Badge
                                         key={level}
                                         style={{ backgroundColor: LEVEL_COLORS[level] || '#6b7280' }}
@@ -262,28 +326,28 @@ export function JourneyMap({ journeyData, loading, error }) {
                             </div>
                         </div>
 
-                        {/* Stats Summary */}
+                        {/* Stats Summary — show season stats if a node is selected */}
                         <div className="grid grid-cols-3 gap-4">
                             <div className="text-center p-3 bg-muted rounded-lg">
-                                <div className="text-2xl font-bold">{selectedStop?.total_apps || 0}</div>
+                                <div className="text-2xl font-bold">{selectedNode ? selectedNode.stats.apps : (drawerStop?.total_apps || 0)}</div>
                                 <div className="text-xs text-muted-foreground">Appearances</div>
                             </div>
                             <div className="text-center p-3 bg-muted rounded-lg">
-                                <div className="text-2xl font-bold">{selectedStop?.total_goals || 0}</div>
+                                <div className="text-2xl font-bold">{selectedNode ? selectedNode.stats.goals : (drawerStop?.total_goals || 0)}</div>
                                 <div className="text-xs text-muted-foreground">Goals</div>
                             </div>
                             <div className="text-center p-3 bg-muted rounded-lg">
-                                <div className="text-2xl font-bold">{selectedStop?.total_assists || 0}</div>
+                                <div className="text-2xl font-bold">{selectedNode ? selectedNode.stats.assists : (drawerStop?.total_assists || 0)}</div>
                                 <div className="text-xs text-muted-foreground">Assists</div>
                             </div>
                         </div>
 
                         {/* Level Breakdown */}
-                        {selectedStop?.breakdown && Object.keys(selectedStop.breakdown).length > 0 && (
+                        {!selectedNode && drawerStop?.breakdown && Object.keys(drawerStop.breakdown).length > 0 && (
                             <div>
                                 <h4 className="text-sm font-medium text-muted-foreground mb-2">By Level</h4>
                                 <div className="space-y-2">
-                                    {Object.entries(selectedStop.breakdown)
+                                    {Object.entries(drawerStop.breakdown)
                                         .sort(([a], [b]) => (LEVEL_COLORS[b] ? 1 : 0) - (LEVEL_COLORS[a] ? 1 : 0))
                                         .map(([level, stats]) => (
                                             <div key={level} className="flex items-center justify-between p-2 bg-muted/50 rounded">
@@ -303,30 +367,38 @@ export function JourneyMap({ journeyData, loading, error }) {
                             </div>
                         )}
 
-                        {/* Competitions */}
-                        {selectedStop?.competitions?.length > 0 && (
-                            <div>
-                                <h4 className="text-sm font-medium text-muted-foreground mb-2">Competitions</h4>
-                                <ScrollArea className="h-[200px]">
-                                    <div className="space-y-2">
-                                        {selectedStop.competitions.map((comp, idx) => (
-                                            <div key={idx} className="flex items-center justify-between p-2 border rounded text-sm">
-                                                <div>
-                                                    <div className="font-medium">{comp.league}</div>
-                                                    <div className="text-xs text-muted-foreground">{comp.season}/{comp.season + 1}</div>
-                                                </div>
-                                                <div className="text-right">
-                                                    <div>{comp.apps} apps</div>
-                                                    <div className="text-xs text-muted-foreground">
-                                                        {comp.goals}G {comp.assists}A
+                        {/* Competitions — filtered to selected season when applicable */}
+                        {(() => {
+                            const comps = selectedNode
+                                ? selectedNode.competitions
+                                : drawerStop?.competitions
+                            if (!comps || comps.length === 0) return null
+                            return (
+                                <div>
+                                    <h4 className="text-sm font-medium text-muted-foreground mb-2">
+                                        Competitions{selectedNode ? ` (${selectedNode.years})` : ''}
+                                    </h4>
+                                    <ScrollArea className="h-[200px]">
+                                        <div className="space-y-2">
+                                            {comps.map((comp, idx) => (
+                                                <div key={idx} className="flex items-center justify-between p-2 border rounded text-sm">
+                                                    <div>
+                                                        <div className="font-medium">{comp.league}</div>
+                                                        <div className="text-xs text-muted-foreground">{comp.season}/{comp.season + 1}</div>
+                                                    </div>
+                                                    <div className="text-right">
+                                                        <div>{comp.apps} apps</div>
+                                                        <div className="text-xs text-muted-foreground">
+                                                            {comp.goals}G {comp.assists}A
+                                                        </div>
                                                     </div>
                                                 </div>
-                                            </div>
-                                        ))}
-                                    </div>
-                                </ScrollArea>
-                            </div>
-                        )}
+                                            ))}
+                                        </div>
+                                    </ScrollArea>
+                                </div>
+                            )
+                        })()}
                     </div>
                 </DrawerContent>
             </Drawer>

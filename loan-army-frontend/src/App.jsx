@@ -1,4 +1,4 @@
-import { useState, useEffect, useMemo, useCallback, useContext, createContext, useRef } from 'react'
+import { useState, useEffect, useMemo, useCallback, useContext, createContext, useRef, Fragment } from 'react'
 import { BrowserRouter as Router, Routes, Route, Link, Navigate, useLocation, useParams, useNavigate, useSearchParams } from 'react-router-dom'
 import { Button } from '@/components/ui/button.jsx'
 import { Card, CardContent, CardDescription, CardFooter, CardHeader, CardTitle } from '@/components/ui/card.jsx'
@@ -95,6 +95,8 @@ import { AdminCuration } from '@/pages/admin/AdminCuration'
 import { AdminAcademy } from '@/pages/admin/AdminAcademy'
 import { AdminManualPlayers } from '@/pages/admin/AdminManualPlayers'
 import { AdminCohorts } from '@/pages/admin/AdminCohorts'
+import { AdminFormation } from '@/pages/admin/AdminFormation'
+import { PublicFormationBuilder } from '@/pages/PublicFormationBuilder'
 import { CohortBrowser } from '@/pages/CohortBrowser'
 import { CohortDetail } from '@/pages/CohortDetail'
 import { CohortAnalytics } from '@/pages/CohortAnalytics'
@@ -7139,6 +7141,7 @@ function Navigation() {
     const items = [
       { path: '/', label: 'Home', icon: Home },
       { path: '/teams', label: 'Browse Teams', icon: Users },
+      { path: '/dream-team', label: 'Dream XI', icon: Trophy },
       { path: '/newsletters', label: 'Newsletters', icon: FileText },
       { path: '/journalists', label: 'Journalists', icon: UserPlus },
     ]
@@ -7433,31 +7436,20 @@ function HomePage() {
     loadStats()
   }, [])
 
-  const handleInitializeData = async () => {
-    try {
-      await APIService.initializeData()
-      // Reload stats after initialization
-      const data = await APIService.getStats()
-      setStats(data)
-    } catch (error) {
-      console.error('Failed to initialize data:', error)
-    }
-  }
-
   return (
     <div className="max-w-[1400px] mx-auto py-6 sm:px-6 lg:px-8">
       <div className="flex flex-col lg:flex-row gap-6">
         {/* Main Content */}
         <div className="flex-1 min-w-0 px-4 py-6 sm:px-0">
           {/* Hero Section */}
-          <div className="text-center mb-12">
-            <p className="inline-flex items-center gap-2 text-sm font-medium text-blue-700 bg-blue-50 border border-blue-100 rounded-full px-3 py-1 mb-4">
-              The Academy Watch · <span className="font-semibold">goonloan.com</span>
+          <div className="text-center mb-16">
+            <p className="text-sm text-gray-500 tracking-wide uppercase mb-4">
+              The Academy Watch
             </p>
-            <h1 className="text-4xl font-bold text-gray-900 mb-4">
-              The Academy Watch — Track European Football Loans
+            <h1 className="text-5xl sm:text-6xl font-bold text-gray-900 tracking-tight mb-4">
+              Track European Football Loans
             </h1>
-            <p className="text-xl text-gray-600 mb-8">
+            <p className="text-lg text-gray-500 max-w-2xl mx-auto mb-8">
               AI-powered newsletters and dashboards that help you follow every loan spell in Europe's top leagues.
             </p>
 
@@ -7466,11 +7458,11 @@ function HomePage() {
               <button
                 type="button"
                 onClick={openSearch}
-                className="w-full relative flex items-center justify-between gap-3 rounded-xl border-2 border-gray-200 bg-white px-4 py-4 text-left shadow-lg hover:border-blue-300 hover:shadow-xl transition-all cursor-text"
+                className="w-full relative flex items-center justify-between gap-3 rounded-xl border border-gray-200 bg-white px-4 py-3.5 text-left shadow-sm hover:border-gray-300 transition-all cursor-text"
               >
                 <div className="flex items-center gap-3 text-gray-400">
                   <Search className="h-5 w-5" />
-                  <span className="text-base">Search for your club (e.g., Manchester United, Barcelona)</span>
+                  <span className="text-base">Search for your club...</span>
                 </div>
                 <kbd className="hidden sm:inline-flex items-center gap-1 rounded border border-gray-200 bg-gray-100 px-2 py-1 font-mono text-xs text-gray-500">
                   <span>⌘</span>K
@@ -7479,16 +7471,16 @@ function HomePage() {
 
               {/* Secondary CTAs */}
               <div className="flex flex-wrap justify-center gap-3">
-                <Link to="/teams">
+                <Link to="/dream-team">
                   <Button size="lg" variant="outline">
-                    <Users className="h-5 w-5 mr-2" />
-                    Browse All Teams
+                    <Trophy className="h-5 w-5 mr-2" />
+                    Build Your Dream XI
                   </Button>
                 </Link>
-                <Link to="/newsletters">
+                <Link to="/academy">
                   <Button size="lg" variant="outline">
-                    <FileText className="h-5 w-5 mr-2" />
-                    Latest Newsletters
+                    <Star className="h-5 w-5 mr-2" />
+                    Academy Tracker
                   </Button>
                 </Link>
                 {adminUnlocked && (
@@ -7505,95 +7497,66 @@ function HomePage() {
 
           {/* Stats Cards */}
           {loading ? (
-            <div className="text-center py-8">
-              <div className="animate-spin rounded-full h-32 w-32 border-b-2 border-blue-600 mx-auto"></div>
-              <p className="mt-4 text-gray-600">Loading statistics...</p>
+            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-8 mb-16">
+              {[1, 2, 3].map((i) => (
+                <div key={i} className="bg-white rounded-xl border border-gray-100 p-6">
+                  <div className="h-4 w-24 bg-gray-100 rounded animate-pulse mb-3" />
+                  <div className="h-8 w-16 bg-gray-100 rounded animate-pulse mb-2" />
+                  <div className="h-3 w-32 bg-gray-50 rounded animate-pulse" />
+                </div>
+              ))}
             </div>
           ) : stats ? (
-            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6 mb-12">
-              <Card>
-                <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
-                  <CardTitle className="text-sm font-medium">Clubs with Active Loans</CardTitle>
-                  <Users className="h-4 w-4 text-muted-foreground" />
-                </CardHeader>
-                <CardContent>
-                  <div className="text-2xl font-bold">{stats.teams_with_loans}</div>
-                  <p className="text-xs text-muted-foreground">
-                    Currently tracking loanees
-                  </p>
-                </CardContent>
-              </Card>
-
-              <Card>
-                <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
-                  <CardTitle className="text-sm font-medium">Active Loans</CardTitle>
-                  <TrendingUp className="h-4 w-4 text-muted-foreground" />
-                </CardHeader>
-                <CardContent>
-                  <div className="text-2xl font-bold">{stats.total_active_loans}</div>
-                  <p className="text-xs text-muted-foreground">
-                    Players out on loan
-                  </p>
-                </CardContent>
-              </Card>
-
-              <Card>
-                <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
-                  <CardTitle className="text-sm font-medium">Newsletters</CardTitle>
-                  <FileText className="h-4 w-4 text-muted-foreground" />
-                </CardHeader>
-                <CardContent>
-                  <div className="text-2xl font-bold">{stats.total_newsletters}</div>
-                  <p className="text-xs text-muted-foreground">
-                    AI-generated reports
-                  </p>
-                </CardContent>
-              </Card>
+            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-8 mb-16">
+              <div className="bg-white rounded-xl border border-gray-100 p-6">
+                <p className="text-sm text-gray-500 mb-1">Clubs Tracked</p>
+                <p className="text-3xl font-bold text-gray-900">{stats.teams_with_loans}</p>
+                <p className="text-xs text-gray-400 mt-1">With active loans</p>
+              </div>
+              <div className="bg-white rounded-xl border border-gray-100 p-6">
+                <p className="text-sm text-gray-500 mb-1">Active Loans</p>
+                <p className="text-3xl font-bold text-gray-900">{stats.total_active_loans}</p>
+                <p className="text-xs text-gray-400 mt-1">Players out on loan</p>
+              </div>
+              <div className="bg-white rounded-xl border border-gray-100 p-6">
+                <p className="text-sm text-gray-500 mb-1">Newsletters</p>
+                <p className="text-3xl font-bold text-gray-900">{stats.total_newsletters}</p>
+                <p className="text-xs text-gray-400 mt-1">AI-generated reports</p>
+              </div>
             </div>
-          ) : (
-            <div className="text-center py-8">
-              <Alert className="max-w-md mx-auto">
-                <AlertCircle className="h-4 w-4" />
-                <AlertDescription>
-                  No data available. Initialize sample data to get started.
-                </AlertDescription>
-              </Alert>
-              <Button onClick={handleInitializeData} className="mt-4">
-                Initialize Sample Data
-              </Button>
-            </div>
-          )}
+          ) : null}
 
           {/* Features Section */}
-          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-8">
-            <div className="text-center">
-              <div className="bg-blue-100 rounded-full p-3 w-12 h-12 mx-auto mb-4">
-                <Globe className="h-6 w-6 text-blue-600" />
-              </div>
-              <h3 className="text-lg font-semibold mb-2">European Focus</h3>
-              <p className="text-gray-600">
-                Track loans from Premier League, La Liga, Serie A, Bundesliga, and Ligue 1
-              </p>
-            </div>
-
-            <div className="text-center">
-              <div className="bg-green-100 rounded-full p-3 w-12 h-12 mx-auto mb-4">
-                <Star className="h-6 w-6 text-green-600" />
-              </div>
-              <h3 className="text-lg font-semibold mb-2">AI-Powered</h3>
-              <p className="text-gray-600">
-                Get intelligent analysis and insights about player development
-              </p>
-            </div>
-
-            <div className="text-center">
-              <div className="bg-purple-100 rounded-full p-3 w-12 h-12 mx-auto mb-4">
-                <Mail className="h-6 w-6 text-purple-600" />
-              </div>
-              <h3 className="text-lg font-semibold mb-2">Weekly Updates</h3>
-              <p className="text-gray-600">
-                Receive regular newsletters with the latest loan developments
-              </p>
+          <div className="max-w-3xl mx-auto">
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-6">
+              <Link to="/dream-team" className="group flex items-start gap-4 p-4 rounded-xl hover:bg-gray-50 transition-colors">
+                <Trophy className="h-5 w-5 text-gray-400 mt-0.5 shrink-0" />
+                <div>
+                  <h3 className="font-semibold text-gray-900 group-hover:text-blue-600 transition-colors mb-1">Dream XI Builder</h3>
+                  <p className="text-sm text-gray-500">Build your ideal lineup from academy players on loan</p>
+                </div>
+              </Link>
+              <Link to="/academy" className="group flex items-start gap-4 p-4 rounded-xl hover:bg-gray-50 transition-colors">
+                <Star className="h-5 w-5 text-gray-400 mt-0.5 shrink-0" />
+                <div>
+                  <h3 className="font-semibold text-gray-900 group-hover:text-blue-600 transition-colors mb-1">Academy Tracker</h3>
+                  <p className="text-sm text-gray-500">Follow player development pathways through cohorts</p>
+                </div>
+              </Link>
+              <Link to="/teams" className="group flex items-start gap-4 p-4 rounded-xl hover:bg-gray-50 transition-colors">
+                <Globe className="h-5 w-5 text-gray-400 mt-0.5 shrink-0" />
+                <div>
+                  <h3 className="font-semibold text-gray-900 group-hover:text-blue-600 transition-colors mb-1">Player Journeys</h3>
+                  <p className="text-sm text-gray-500">See where academy players have traveled on loan</p>
+                </div>
+              </Link>
+              <Link to="/newsletters" className="group flex items-start gap-4 p-4 rounded-xl hover:bg-gray-50 transition-colors">
+                <Mail className="h-5 w-5 text-gray-400 mt-0.5 shrink-0" />
+                <div>
+                  <h3 className="font-semibold text-gray-900 group-hover:text-blue-600 transition-colors mb-1">Weekly Newsletters</h3>
+                  <p className="text-sm text-gray-500">AI-powered analysis delivered to your inbox</p>
+                </div>
+              </Link>
             </div>
           </div>
         </div>
@@ -7847,38 +7810,31 @@ function TeamsPage() {
   const [filter, setFilter] = useState('all')
   const [expandedTeamId, setExpandedTeamId] = useState(null)
   const [teamLoans, setTeamLoans] = useState({})
-  const [loadingLoans, setLoadingLoans] = useState({}) // Track loading state per team
-  const [flagState, setFlagState] = useState({ open: false, team: null, loan: null, reason: '', email: '' })
-  const [submittingFlag, setSubmittingFlag] = useState(false)
-  const [selectedTeams, setSelectedTeams] = useState([])
+  const [loadingLoans, setLoadingLoans] = useState({})
   const [trackingRequestState, setTrackingRequestState] = useState({ open: false, team: null, reason: '', email: '' })
   const [submittingTrackingRequest, setSubmittingTrackingRequest] = useState(false)
-  const [email, setEmail] = useState('')
-  const [submitting, setSubmitting] = useState(false)
   const [message, setMessage] = useState(null)
   const [teamSearch, setTeamSearch] = useState('')
-  const [showSubscribeSection, setShowSubscribeSection] = useState(false)
+
+  // Subscribe dialog state
+  const [subscribeOpen, setSubscribeOpen] = useState(false)
+  const [selectedTeams, setSelectedTeams] = useState([])
+  const [email, setEmail] = useState('')
+  const [submitting, setSubmitting] = useState(false)
 
   useEffect(() => {
     const loadTeams = async () => {
       try {
-        // Check database status for debugging
-        try {
-          const dbStatus = await APIService.debugDatabase()
-        } catch (dbError) {
-          console.warn('⚠️ [TeamsPage] Could not get database status:', dbError)
-        }
-
         const filters = { european_only: 'true' }
         if (filter === 'with_loans') {
           filters.has_loans = 'true'
         }
 
         const data = await APIService.getTeams(filters)
-        const { season, teams: filtered } = filterLatestSeasonTeams(Array.isArray(data) ? data : [])
+        const { teams: filtered } = filterLatestSeasonTeams(Array.isArray(data) ? data : [])
         setTeams(filtered)
       } catch (error) {
-        console.error('❌ [TeamsPage] Failed to load teams:', error)
+        console.error('Failed to load teams:', error)
       } finally {
         setLoading(false)
       }
@@ -7892,7 +7848,6 @@ function TeamsPage() {
     setExpandedTeamId(prev => (prev === teamId ? null : teamId))
 
     if (isExpanding && !teamLoans[teamId]) {
-      // Set loading state
       setLoadingLoans(prev => ({ ...prev, [teamId]: true }))
       try {
         const teamMeta = teams.find((row) => row.id === teamId)
@@ -7900,49 +7855,14 @@ function TeamsPage() {
         if (teamMeta && typeof teamMeta.season !== 'undefined' && teamMeta.season !== null) {
           params.season = teamMeta.season
         }
-        // Request season context for accurate cumulative stats (like newsletter uses)
         const loans = await APIService.getTeamLoans(teamId, { ...params, include_season_context: 'true' })
         setTeamLoans(prev => ({ ...prev, [teamId]: loans }))
       } catch (error) {
-        console.error('❌ Failed to load loans for team', teamId, error)
-        // Set empty array on error to prevent retry loops
+        console.error('Failed to load loans for team', teamId, error)
         setTeamLoans(prev => ({ ...prev, [teamId]: [] }))
       } finally {
-        // Clear loading state
         setLoadingLoans(prev => ({ ...prev, [teamId]: false }))
       }
-    }
-  }
-
-  const openFlag = (team, loan) => {
-    setFlagState({ open: true, team, loan, reason: '', email: '' })
-  }
-  const closeFlag = () => setFlagState(prev => ({ ...prev, open: false }))
-  const submitFlag = async () => {
-    if (!flagState.reason.trim()) return
-    setSubmittingFlag(true)
-    try {
-      const now = new Date()
-      const season = now.getMonth() >= 7 ? now.getFullYear() : now.getFullYear() - 1
-      await fetch('/api/loans/flags', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          player_id: flagState.loan?.player_id,
-          primary_team_api_id: flagState.team?.team_id,
-          loan_team_api_id: flagState.loan?.loan_team_api_id,
-          season,
-          reason: flagState.reason,
-          email: flagState.email || undefined,
-        })
-      })
-      alert('Thanks for the report. We will review it.')
-      closeFlag()
-    } catch (error) {
-      console.error('Flag submit failed', error)
-      alert('Failed to submit flag. Please try again later.')
-    } finally {
-      setSubmittingFlag(false)
     }
   }
 
@@ -7977,16 +7897,6 @@ function TeamsPage() {
     }
   }
 
-  const handleTeamToggle = (teamId) => {
-    setSelectedTeams((prev) => prev.includes(teamId) ? prev.filter((id) => id !== teamId) : [...prev, teamId])
-  }
-
-  const handleCardClick = (e, teamId) => {
-    const tag = (e.target.tagName || '').toLowerCase()
-    if (['button', 'input', 'textarea', 'select', 'a', 'svg', 'path'].includes(tag)) return
-    handleTeamToggle(teamId)
-  }
-
   const handleBulkSubscribe = async () => {
     if (!email.trim() || selectedTeams.length === 0) {
       setMessage({ type: 'error', text: 'Please enter email and select at least one team' })
@@ -7998,6 +7908,7 @@ function TeamsPage() {
       setMessage({ type: 'success', text: `Successfully subscribed to ${selectedTeams.length} teams!` })
       setSelectedTeams([])
       setEmail('')
+      setSubscribeOpen(false)
     } catch (error) {
       console.error('Failed to create subscriptions', error)
       setMessage({ type: 'error', text: 'Failed to create subscriptions' })
@@ -8008,50 +7919,141 @@ function TeamsPage() {
 
   // Filter teams by search query
   const searchQuery = teamSearch.trim().toLowerCase()
-  const searchedTeams = searchQuery
-    ? teams
-      .filter(team => team.name.toLowerCase().startsWith(searchQuery))
-      .sort((a, b) => a.name.localeCompare(b.name))
-    : []
+  const filteredTeams = useMemo(() => {
+    if (!searchQuery) return null
+    return teams
+      .filter(team => team.name.toLowerCase().includes(searchQuery))
+      .sort((a, b) => {
+        const aStarts = a.name.toLowerCase().startsWith(searchQuery) ? 0 : 1
+        const bStarts = b.name.toLowerCase().startsWith(searchQuery) ? 0 : 1
+        return aStarts - bStarts || a.name.localeCompare(b.name)
+      })
+  }, [teams, searchQuery])
 
-  // Also include teams that contain (but don't start with) the query, sorted after
-  const containsTeams = searchQuery
-    ? teams
-      .filter(team =>
-        !team.name.toLowerCase().startsWith(searchQuery) &&
-        team.name.toLowerCase().includes(searchQuery)
-      )
-      .sort((a, b) => a.name.localeCompare(b.name))
-    : []
-
-  const allSearchResults = [...searchedTeams, ...containsTeams]
   const isSearching = searchQuery.length > 0
 
   // Group teams by league (used when not searching)
-  const teamsByLeague = teams.reduce((acc, team) => {
+  const teamsByLeague = useMemo(() => teams.reduce((acc, team) => {
     const league = team.league_name || 'Other'
     if (!acc[league]) acc[league] = []
     acc[league].push(team)
     return acc
-  }, {})
+  }, {}), [teams])
+
+  // Compact team card renderer
+  const renderTeamCard = (team) => (
+    <button
+      key={team.id}
+      onClick={() => toggleExpand(team.id)}
+      className={`flex items-center gap-3 p-3 rounded-lg border bg-white text-left transition-all w-full ${
+        expandedTeamId === team.id ? 'ring-1 ring-blue-200 border-blue-200' : 'border-gray-200 hover:border-gray-300 hover:shadow-sm'
+      }`}
+    >
+      <Avatar className="h-9 w-9 shrink-0">
+        {team.logo ? <AvatarImage src={team.logo} alt={team.name} /> : null}
+        <AvatarFallback className="text-xs bg-gray-100">
+          {team.name.split(' ').map(n => n[0]).join('').slice(0, 2).toUpperCase()}
+        </AvatarFallback>
+      </Avatar>
+      <div className="flex-1 min-w-0">
+        <p className="text-sm font-medium text-gray-900 truncate">{team.name}</p>
+        {team.league_name && <p className="text-xs text-gray-400 truncate">{team.league_name}</p>}
+      </div>
+      {team.is_tracked !== false && (
+        <span className="text-xs text-gray-400 tabular-nums shrink-0">
+          {team.current_loaned_out_count || 0}
+        </span>
+      )}
+      {team.is_tracked === false && (
+        <span className="text-xs text-amber-500 shrink-0">untracked</span>
+      )}
+    </button>
+  )
+
+  // Expanded loan list
+  const renderExpandedLoans = (team) => {
+    if (expandedTeamId !== team.id) return null
+    return (
+      <div className="col-span-full bg-white border border-gray-200 rounded-lg p-4 space-y-2">
+        <div className="flex items-center justify-between mb-2">
+          <div className="flex items-center gap-2">
+            <Avatar className="h-7 w-7">
+              {team.logo ? <AvatarImage src={team.logo} alt={team.name} /> : null}
+              <AvatarFallback className="text-xs bg-gray-100">
+                {team.name.split(' ').map(n => n[0]).join('').slice(0, 2).toUpperCase()}
+              </AvatarFallback>
+            </Avatar>
+            <span className="font-medium text-sm">{team.name}</span>
+          </div>
+          {team.is_tracked === false && (
+            <Button size="sm" variant="outline" className="text-xs h-7" onClick={() => openRequestTracking(team)}>
+              Request Tracking
+            </Button>
+          )}
+        </div>
+        {loadingLoans[team.id] ? (
+          <div className="flex items-center justify-center py-6">
+            <Loader2 className="h-4 w-4 animate-spin text-gray-400 mr-2" />
+            <span className="text-sm text-gray-500">Loading loans...</span>
+          </div>
+        ) : (teamLoans[team.id] || []).length === 0 ? (
+          <p className="text-sm text-gray-500 text-center py-4">No loans found.</p>
+        ) : (
+          <div className="space-y-1">
+            {(teamLoans[team.id] || []).map((loan) => (
+              <Link
+                key={loan.id}
+                to={`/players/${loan.player_id}`}
+                className="flex items-center gap-3 p-2 rounded-md hover:bg-gray-50 transition-colors group"
+              >
+                <Avatar className="h-7 w-7 shrink-0">
+                  {loan.player_photo ? <AvatarImage src={loan.player_photo} alt={loan.player_name} /> : null}
+                  <AvatarFallback className="text-xs bg-blue-50">
+                    {loan.player_name.split(' ').map(n => n[0]).join('').slice(0, 2).toUpperCase()}
+                  </AvatarFallback>
+                </Avatar>
+                <div className="flex-1 min-w-0">
+                  <span className="text-sm font-medium text-gray-900 group-hover:text-blue-600 transition-colors">{loan.player_name}</span>
+                  <span className="text-xs text-gray-400 ml-2">{loan.loan_team_name ? `→ ${loan.loan_team_name}` : ''}</span>
+                </div>
+                <div className="flex items-center gap-2 text-xs text-gray-500 shrink-0">
+                  {loan.appearances != null && <span>{loan.appearances} apps</span>}
+                  {(loan.position !== 'G' && loan.position !== 'Goalkeeper') ? (
+                    <>
+                      {loan.goals != null && loan.goals > 0 && <span className="text-green-600">{loan.goals}G</span>}
+                      {loan.assists != null && loan.assists > 0 && <span className="text-blue-600">{loan.assists}A</span>}
+                    </>
+                  ) : (
+                    <>
+                      {loan.clean_sheets != null && loan.clean_sheets > 0 && <span className="text-emerald-600">{loan.clean_sheets} CS</span>}
+                    </>
+                  )}
+                </div>
+                <ChevronRight className="h-3.5 w-3.5 text-gray-300 group-hover:text-blue-400 shrink-0" />
+              </Link>
+            ))}
+          </div>
+        )}
+      </div>
+    )
+  }
 
   return (
     <div className="max-w-[1400px] mx-auto py-6 sm:px-6 lg:px-8">
       <div className="flex flex-col lg:flex-row gap-6">
         {/* Main Content */}
         <div className="flex-1 min-w-0 px-4 py-6 sm:px-0">
-          <div className="flex flex-col gap-4 mb-6 sticky top-0 bg-gray-50/80 backdrop-blur supports-[backdrop-filter]:bg-gray-50/60 z-10 p-3 rounded-b">
-            <div className="flex justify-between items-center">
-              <div>
-                <h1 className="text-3xl font-bold text-gray-900 mb-2">European Teams</h1>
-                <Badge variant="secondary" className="bg-green-100 text-green-800 border-green-300">
-                  <Calendar className="h-3 w-3 mr-1" />
-                  Current Season
-                </Badge>
-              </div>
-              <div className="flex items-center gap-2">
+          {/* Sticky header */}
+          <div className="sticky top-0 z-10 bg-white/90 backdrop-blur py-3 px-1 -mx-1 mb-6 border-b border-gray-100">
+            <div className="flex items-center gap-3 mb-3">
+              <h1 className="text-2xl font-semibold text-gray-900">European Teams</h1>
+              <div className="ml-auto flex items-center gap-2">
+                <Button variant="outline" size="sm" className="text-xs" onClick={() => setSubscribeOpen(true)}>
+                  <Mail className="h-3.5 w-3.5 mr-1" />
+                  Subscribe
+                </Button>
                 <Select value={filter} onValueChange={setFilter}>
-                  <SelectTrigger className="w-40">
+                  <SelectTrigger className="w-36 h-8 text-xs">
                     <SelectValue />
                   </SelectTrigger>
                   <SelectContent>
@@ -8061,484 +8063,127 @@ function TeamsPage() {
                 </Select>
               </div>
             </div>
-
-            {/* Compact Search Bar */}
             <div className="relative">
-              <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 h-4 w-4 text-gray-400" />
+              <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-gray-400" />
               <Input
                 type="text"
-                placeholder="Search teams by name..."
+                placeholder="Search teams..."
                 value={teamSearch}
                 onChange={(e) => setTeamSearch(e.target.value)}
-                className="pl-10 pr-10"
+                className="pl-10 pr-10 h-9"
               />
               {teamSearch && (
                 <button
                   onClick={() => setTeamSearch('')}
-                  className="absolute right-3 top-1/2 transform -translate-y-1/2 text-gray-400 hover:text-gray-600"
+                  className="absolute right-3 top-1/2 -translate-y-1/2 text-gray-400 hover:text-gray-600"
                 >
                   <X className="h-4 w-4" />
                 </button>
               )}
             </div>
-
-            {/* Collapsible Subscribe Section */}
-            <div className="border rounded-lg bg-white">
-              <button
-                onClick={() => setShowSubscribeSection(!showSubscribeSection)}
-                className="w-full flex items-center justify-between p-3 text-left hover:bg-gray-50 transition-colors"
-              >
-                <div className="flex items-center gap-2">
-                  <Mail className="h-4 w-4 text-blue-600" />
-                  <span className="font-medium text-sm">Subscribe to Team Updates</span>
-                  {selectedTeams.length > 0 && (
-                    <Badge variant="secondary" className="bg-blue-100 text-blue-800">
-                      {selectedTeams.length} selected
-                    </Badge>
-                  )}
-                </div>
-                <ChevronDown className={`h-4 w-4 text-gray-400 transition-transform ${showSubscribeSection ? 'rotate-180' : ''}`} />
-              </button>
-
-              {showSubscribeSection && (
-                <div className="px-3 pb-3 border-t">
-                  <div className="pt-3 space-y-3">
-                    <TeamMultiSelect
-                      teams={teams}
-                      value={selectedTeams}
-                      onChange={setSelectedTeams}
-                      placeholder="Search and select teams…"
-                      className="w-full"
-                    />
-                    {message && (
-                      <Alert className={`${message.type === 'error' ? 'border-red-500' : message.type === 'info' ? 'border-blue-500' : 'border-green-500'}`}>
-                        <AlertCircle className="h-4 w-4" />
-                        <AlertDescription>{message.text}</AlertDescription>
-                      </Alert>
-                    )}
-                    <div className="flex flex-col sm:flex-row gap-2 items-stretch sm:items-end">
-                      <div className="flex-1">
-                        <Label htmlFor="bulk-email" className="text-xs">Email Address</Label>
-                        <Input id="bulk-email" type="email" value={email} onChange={(e) => setEmail(e.target.value)} placeholder="your.email@example.com" className="h-9" required />
-                      </div>
-                      <Button onClick={handleBulkSubscribe} disabled={submitting || selectedTeams.length === 0} className="bg-blue-600 hover:bg-blue-700 h-9">
-                        {submitting ? 'Subscribing…' : `Subscribe (${selectedTeams.length})`}
-                      </Button>
-                    </div>
-                  </div>
-                </div>
-              )}
-            </div>
           </div>
+
+          {message && (
+            <Alert className={`mb-4 ${message.type === 'error' ? 'border-red-500' : message.type === 'info' ? 'border-blue-500' : 'border-green-500'}`}>
+              <AlertCircle className="h-4 w-4" />
+              <AlertDescription>{message.text}</AlertDescription>
+            </Alert>
+          )}
+
           {loading ? (
-            <div className="text-center py-12">
-              <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-blue-600 mx-auto"></div>
-              <p className="mt-4 text-gray-600">Loading teams...</p>
+            <div className="flex items-center justify-center py-16">
+              <Loader2 className="h-6 w-6 animate-spin text-gray-400" />
             </div>
           ) : isSearching ? (
-            /* Search Results View - flat list of matching teams */
-            <div className="space-y-4">
+            <div className="space-y-3">
               <div className="flex items-center justify-between px-1">
-                <h2 className="text-lg font-semibold text-gray-900">
-                  {allSearchResults.length === 0
+                <p className="text-sm text-gray-500">
+                  {filteredTeams.length === 0
                     ? 'No teams found'
-                    : `${allSearchResults.length} team${allSearchResults.length !== 1 ? 's' : ''} matching "${teamSearch}"`
+                    : `${filteredTeams.length} team${filteredTeams.length !== 1 ? 's' : ''} found`
                   }
-                </h2>
-                <Button variant="ghost" size="sm" onClick={() => setTeamSearch('')}>
-                  Clear search
+                </p>
+                <Button variant="ghost" size="sm" className="text-xs" onClick={() => setTeamSearch('')}>
+                  Clear
                 </Button>
               </div>
-              {allSearchResults.length > 0 && (
-                <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-4">
-                  {allSearchResults.map((team) => (
-                    <Card key={team.id} className={`hover:shadow-lg transition-shadow cursor-pointer ${selectedTeams.includes(team.id) ? 'ring-2 ring-blue-400' : ''}`} onClick={(e) => handleCardClick(e, team.id)}>
-                      <CardHeader className="pb-3">
-                        <div className="flex flex-col sm:flex-row items-center sm:items-start gap-2 sm:gap-3 mb-2">
-                          {team.logo ? (
-                            <Avatar className="h-10 w-10 sm:h-12 sm:w-12 shrink-0">
-                              <AvatarImage src={team.logo} alt={`${team.name} logo`} />
-                              <AvatarFallback className="text-xs bg-gray-200">
-                                {team.name.split(' ').map(n => n[0]).join('').slice(0, 2).toUpperCase()}
-                              </AvatarFallback>
-                            </Avatar>
-                          ) : (
-                            <Avatar className="h-10 w-10 sm:h-12 sm:w-12 shrink-0 bg-gray-200">
-                              <AvatarFallback className="text-xs">
-                                {team.name.split(' ').map(n => n[0]).join('').slice(0, 2).toUpperCase()}
-                              </AvatarFallback>
-                            </Avatar>
-                          )}
-                          <div className="flex-1 min-w-0 text-center sm:text-left">
-                            <CardTitle className="text-base sm:text-lg truncate">{team.name}</CardTitle>
-                            <CardDescription className="text-xs break-words sm:break-normal">
-                              {team.league_name && <span className="text-blue-600">{team.league_name}</span>}
-                              {team.league_name && ' • '}
-                              {team.country} • Founded {team.founded || 'N/A'}
-                            </CardDescription>
-                          </div>
-                        </div>
-                      </CardHeader>
-                      <CardContent>
-                        {/* Tracking Status Badge */}
-                        {team.is_tracked === false && (
-                          <div className="mb-3 p-2 bg-amber-50 border border-amber-200 rounded-md">
-                            <div className="flex items-center justify-between gap-2">
-                              <div className="flex items-center gap-1.5">
-                                <AlertCircle className="h-3.5 w-3.5 text-amber-600" />
-                                <span className="text-xs text-amber-700 font-medium">Not currently tracked</span>
-                              </div>
-                              <Button
-                                size="sm"
-                                variant="ghost"
-                                className="h-6 px-2 text-xs text-amber-700 hover:text-amber-900 hover:bg-amber-100"
-                                onClick={(e) => { e.stopPropagation(); openRequestTracking(team) }}
-                              >
-                                Request Tracking
-                              </Button>
-                            </div>
-                          </div>
-                        )}
-                        <div className="flex items-center gap-2 mb-3">
-                          <input type="checkbox" checked={selectedTeams.includes(team.id)} onChange={() => handleTeamToggle(team.id)} className="rounded border-gray-300 text-blue-600 focus:ring-blue-500" />
-                          <span className="text-sm">{selectedTeams.includes(team.id) ? 'Selected' : 'Select team'}</span>
-                        </div>
-                        <div className="flex justify-between items-center">
-                          <div className="text-sm text-gray-600">
-                            <div className="flex items-center">
-                              <TrendingUp className="h-4 w-4 mr-1" />
-                              {team.is_tracked ? `${team.current_loaned_out_count} active loans` : 'No loan data'}
-                            </div>
-                          </div>
-                          {team.is_tracked !== false && (
-                            <Button size="sm" variant="outline" onClick={(e) => { e.stopPropagation(); toggleExpand(team.id) }}>
-                              {expandedTeamId === team.id ? 'Hide Loans' : 'Show Loans'}
-                              <ArrowRight className="h-4 w-4 ml-1" />
-                            </Button>
-                          )}
-                        </div>
-                        {expandedTeamId === team.id && (
-                          <div className="mt-4 space-y-3">
-                            {loadingLoans[team.id] ? (
-                              <div className="flex items-center justify-center py-8">
-                                <Loader2 className="h-5 w-5 animate-spin text-gray-400 mr-2" />
-                                <span className="text-sm text-gray-500">Loading loans...</span>
-                              </div>
-                            ) : (teamLoans[team.id] || []).length === 0 ? (
-                              <div className="text-sm text-gray-500 text-center py-4">No loans found.</div>
-                            ) : (
-                              <div className="space-y-2">
-                                {(teamLoans[team.id] || []).map((loan) => (
-                                  <Link
-                                    key={loan.id}
-                                    to={`/players/${loan.player_id}`}
-                                    className="flex items-center gap-3 p-2 rounded-lg hover:bg-gray-100 transition-colors group"
-                                    onClick={(e) => e.stopPropagation()}
-                                  >
-                                    {loan.player_photo ? (
-                                      <Avatar className="h-8 w-8 ring-2 ring-transparent group-hover:ring-blue-300 transition-all">
-                                        <AvatarImage src={loan.player_photo} alt={loan.player_name} />
-                                        <AvatarFallback className="text-xs bg-blue-100">
-                                          {loan.player_name.split(' ').map(n => n[0]).join('').slice(0, 2).toUpperCase()}
-                                        </AvatarFallback>
-                                      </Avatar>
-                                    ) : (
-                                      <Avatar className="h-8 w-8 bg-blue-100 ring-2 ring-transparent group-hover:ring-blue-300 transition-all">
-                                        <AvatarFallback className="text-xs">
-                                          {loan.player_name.split(' ').map(n => n[0]).join('').slice(0, 2).toUpperCase()}
-                                        </AvatarFallback>
-                                      </Avatar>
-                                    )}
-                                    <div className="flex-1 min-w-0">
-                                      <div className="font-medium text-sm text-gray-900 group-hover:text-blue-600 transition-colors truncate">
-                                        {loan.player_name}
-                                      </div>
-                                      <div className="text-xs text-gray-500 truncate">
-                                        → {loan.loan_team_name}
-                                      </div>
-                                    </div>
-                                    <ChevronRight className="h-4 w-4 text-gray-400 group-hover:text-blue-500 transition-colors" />
-                                  </Link>
-                                ))}
-                              </div>
-                            )}
-                          </div>
-                        )}
-                      </CardContent>
-                    </Card>
-                  ))}
-                </div>
-              )}
+              <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-2">
+                {filteredTeams.map((team) => {
+                  const expanded = renderExpandedLoans(team)
+                  return expanded ? (
+                    <Fragment key={team.id}>
+                      {renderTeamCard(team)}
+                      {expanded}
+                    </Fragment>
+                  ) : renderTeamCard(team)
+                })}
+              </div>
             </div>
           ) : (
-            <Accordion type="single" collapsible className="space-y-4">
+            <div className="space-y-8">
               {Object.entries(teamsByLeague).map(([league, leagueTeams]) => (
-                <AccordionItem key={league} value={league} className="border rounded-md">
-                  <AccordionTrigger className="px-4">
-                    <div className="flex items-center">
-                      <div className="w-6 h-6 rounded mr-3" style={{ backgroundColor: LEAGUE_COLORS[league] || '#666' }} />
-                      <span className="text-lg font-semibold">{league}</span>
-                      <Badge variant="secondary" className="ml-2">{leagueTeams.length} teams</Badge>
-                    </div>
-                  </AccordionTrigger>
-                  <AccordionContent>
-                    <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-4 px-4">
-                      {leagueTeams.map((team) => (
-                        <Card key={team.id} className={`hover:shadow-lg transition-shadow cursor-pointer ${selectedTeams.includes(team.id) ? 'ring-2 ring-blue-400' : ''}`} onClick={(e) => handleCardClick(e, team.id)}>
-                          <CardHeader className="pb-3">
-                            <div className="flex flex-col sm:flex-row items-center sm:items-start gap-2 sm:gap-3 mb-2">
-                              {team.logo ? (
-                                <Avatar className="h-10 w-10 sm:h-12 sm:w-12 shrink-0">
-                                  <AvatarImage src={team.logo} alt={`${team.name} logo`} />
-                                  <AvatarFallback className="text-xs bg-gray-200">
-                                    {team.name.split(' ').map(n => n[0]).join('').slice(0, 2).toUpperCase()}
-                                  </AvatarFallback>
-                                </Avatar>
-                              ) : (
-                                <Avatar className="h-10 w-10 sm:h-12 sm:w-12 shrink-0 bg-gray-200">
-                                  <AvatarFallback className="text-xs">
-                                    {team.name.split(' ').map(n => n[0]).join('').slice(0, 2).toUpperCase()}
-                                  </AvatarFallback>
-                                </Avatar>
-                              )}
-                              <div className="flex-1 min-w-0 text-center sm:text-left">
-                                <CardTitle className="text-base sm:text-lg truncate">{team.name}</CardTitle>
-                                <CardDescription className="text-xs break-words sm:break-normal">
-                                  {team.country} • Founded {team.founded || 'N/A'}
-                                </CardDescription>
-                              </div>
-                            </div>
-                          </CardHeader>
-                          <CardContent>
-                            <div className="flex items-center gap-2 mb-3">
-                              <input type="checkbox" checked={selectedTeams.includes(team.id)} onChange={() => handleTeamToggle(team.id)} className="rounded border-gray-300 text-blue-600 focus:ring-blue-500" />
-                              <span className="text-sm">{selectedTeams.includes(team.id) ? 'Selected' : 'Select team'}</span>
-                            </div>
-                            <div className="flex justify-between items-center">
-                              <div className="text-sm text-gray-600">
-                                <div className="flex items-center">
-                                  <TrendingUp className="h-4 w-4 mr-1" />
-                                  {team.current_loaned_out_count} active loans
-                                </div>
-                              </div>
-                              <Button size="sm" variant="outline" onClick={(e) => { e.stopPropagation(); toggleExpand(team.id) }}>
-                                {expandedTeamId === team.id ? 'Hide Loans' : 'Show Loans'}
-                                <ArrowRight className="h-4 w-4 ml-1" />
-                              </Button>
-                            </div>
-                            {expandedTeamId === team.id && (
-                              <div className="mt-4 space-y-3">
-                                {loadingLoans[team.id] ? (
-                                  <div className="flex items-center justify-center py-8">
-                                    <Loader2 className="h-5 w-5 animate-spin text-gray-400 mr-2" />
-                                    <span className="text-sm text-gray-500">Loading loans...</span>
-                                  </div>
-                                ) : (teamLoans[team.id] || []).length === 0 ? (
-                                  <div className="text-sm text-gray-500 text-center py-4">No loans found.</div>
-                                ) : (
-                                  (teamLoans[team.id] || []).map((loan) => (
-                                    <div key={loan.id} className="border rounded-lg p-2.5 sm:p-3 bg-gray-50/50 hover:bg-gray-50 transition-colors">
-                                      <div className="flex items-start gap-2 sm:gap-3">
-                                        {/* Player Photo & Name - Clickable Link */}
-                                        <Link
-                                          to={`/players/${loan.player_id}`}
-                                          className="flex items-start gap-2 sm:gap-3 flex-1 min-w-0 group"
-                                          onClick={(e) => e.stopPropagation()}
-                                        >
-                                          <div className="shrink-0">
-                                            {loan.player_photo ? (
-                                              <Avatar className="h-10 w-10 sm:h-12 sm:w-12 ring-2 ring-transparent group-hover:ring-blue-300 transition-all">
-                                                <AvatarImage src={loan.player_photo} alt={`${loan.player_name} headshot`} />
-                                                <AvatarFallback className="text-xs bg-blue-100">
-                                                  {loan.player_name.split(' ').map(n => n[0]).join('').slice(0, 2).toUpperCase()}
-                                                </AvatarFallback>
-                                              </Avatar>
-                                            ) : (
-                                              <Avatar className="h-10 w-10 sm:h-12 sm:w-12 bg-blue-100 ring-2 ring-transparent group-hover:ring-blue-300 transition-all">
-                                                <AvatarFallback className="text-xs">
-                                                  {loan.player_name.split(' ').map(n => n[0]).join('').slice(0, 2).toUpperCase()}
-                                                </AvatarFallback>
-                                              </Avatar>
-                                            )}
-                                          </div>
-                                          <div className="flex-1 min-w-0">
-                                            <div className="font-medium text-sm mb-1 break-words text-gray-900 group-hover:text-blue-600 transition-colors">{loan.player_name}</div>
-                                          </div>
-                                        </Link>
-                                      </div>
-
-                                      {/* Player Info */}
-                                      <div className="ml-12 sm:ml-[60px]">
-
-                                        {/* Loan Team with Logo */}
-                                        <div className="flex flex-wrap items-center gap-1.5 sm:gap-2 mb-2">
-                                          <span className="text-xs text-gray-600 whitespace-nowrap">Loaned to:</span>
-                                          {loan.loan_team_logo ? (
-                                            <div className="flex items-center gap-1.5 min-w-0">
-                                              <img
-                                                src={loan.loan_team_logo}
-                                                alt={`${loan.loan_team_name} logo`}
-                                                className="h-4 w-4 object-contain shrink-0"
-                                                onError={(e) => { e.target.style.display = 'none' }}
-                                              />
-                                              <span className="text-xs font-medium text-gray-700 break-words">{loan.loan_team_name}</span>
-                                            </div>
-                                          ) : (
-                                            <span className="text-xs font-medium text-gray-700 break-words">{loan.loan_team_name}</span>
-                                          )}
-                                        </div>
-
-                                        {/* Stats Badges - Position-aware */}
-                                        <div className="flex flex-wrap items-center gap-1.5 mb-2">
-                                          {loan.appearances !== null && loan.appearances !== undefined ? (
-                                            <Badge variant="secondary" className="text-xs px-1.5 py-0.5">
-                                              {loan.appearances} {loan.appearances === 1 ? 'app' : 'apps'}
-                                            </Badge>
-                                          ) : null}
-                                          {/* Goalkeeper stats */}
-                                          {loan.position === 'G' || loan.position === 'Goalkeeper' ? (
-                                            <>
-                                              {loan.saves !== null && loan.saves !== undefined ? (
-                                                <Badge
-                                                  variant="secondary"
-                                                  className={`text-xs px-1.5 py-0.5 ${loan.saves > 0 ? 'bg-purple-100 text-purple-800' : 'bg-gray-100 text-gray-600'}`}
-                                                >
-                                                  {loan.saves} {loan.saves === 1 ? 'save' : 'saves'}
-                                                </Badge>
-                                              ) : null}
-                                              {loan.goals_conceded !== null && loan.goals_conceded !== undefined ? (
-                                                <Badge
-                                                  variant="secondary"
-                                                  className={`text-xs px-1.5 py-0.5 ${loan.goals_conceded === 0 ? 'bg-green-100 text-green-800' : 'bg-gray-100 text-gray-600'}`}
-                                                >
-                                                  {loan.goals_conceded} conceded
-                                                </Badge>
-                                              ) : null}
-                                              {loan.clean_sheets !== null && loan.clean_sheets !== undefined && loan.clean_sheets > 0 ? (
-                                                <Badge
-                                                  variant="secondary"
-                                                  className="text-xs px-1.5 py-0.5 bg-emerald-100 text-emerald-800"
-                                                >
-                                                  {loan.clean_sheets} clean {loan.clean_sheets === 1 ? 'sheet' : 'sheets'}
-                                                </Badge>
-                                              ) : null}
-                                            </>
-                                          ) : (
-                                            /* Outfield player stats */
-                                            <>
-                                              {loan.goals !== null && loan.goals !== undefined ? (
-                                                <Badge
-                                                  variant="secondary"
-                                                  className={`text-xs px-1.5 py-0.5 ${loan.goals > 0 ? 'bg-green-100 text-green-800' : 'bg-gray-100 text-gray-600'}`}
-                                                >
-                                                  {loan.goals} {loan.goals === 1 ? 'goal' : 'goals'}
-                                                </Badge>
-                                              ) : null}
-                                              {loan.assists !== null && loan.assists !== undefined ? (
-                                                <Badge
-                                                  variant="secondary"
-                                                  className={`text-xs px-1.5 py-0.5 ${loan.assists > 0 ? 'bg-blue-100 text-blue-800' : 'bg-gray-100 text-gray-600'}`}
-                                                >
-                                                  {loan.assists} {loan.assists === 1 ? 'assist' : 'assists'}
-                                                </Badge>
-                                              ) : null}
-                                            </>
-                                          )}
-                                          {/* No stats fallback */}
-                                          {(loan.appearances === null || loan.appearances === undefined) &&
-                                            (loan.position === 'G' || loan.position === 'Goalkeeper'
-                                              ? (loan.saves === null || loan.saves === undefined) && (loan.goals_conceded === null || loan.goals_conceded === undefined)
-                                              : (loan.goals === null || loan.goals === undefined) && (loan.assists === null || loan.assists === undefined)
-                                            ) && (
-                                              <span className="text-xs text-gray-500">No stats available</span>
-                                            )}
-                                        </div>
-
-                                        {/* Flag Button */}
-                                        <div className="mt-3 pt-2 border-t border-gray-200">
-                                          <Button
-                                            size="sm"
-                                            variant="ghost"
-                                            onClick={(e) => { e.stopPropagation(); openFlag(team, loan); }}
-                                            className="h-9 sm:h-8 text-xs text-gray-600 hover:text-gray-900 hover:bg-gray-100 min-h-[44px] sm:min-h-0 w-full sm:w-auto"
-                                          >
-                                            <AlertCircle className="h-3 w-3 mr-1.5" />
-                                            Flag incorrect
-                                          </Button>
-                                        </div>
-
-                                        {/* Flag Form */}
-                                        {flagState.open && flagState.team?.id === team.id && flagState.loan?.id === loan.id && (
-                                          <div className="mt-3 pt-3 border-t border-gray-200 space-y-3 bg-blue-50/30 rounded-lg p-2.5 sm:p-3">
-                                            <div className="space-y-1.5">
-                                              <Label htmlFor={`flag-reason-${loan.id}`} className="text-xs font-medium text-gray-700">
-                                                Why is this incorrect?
-                                              </Label>
-                                              <Textarea
-                                                id={`flag-reason-${loan.id}`}
-                                                className="w-full text-sm resize-none"
-                                                rows="3"
-                                                placeholder="Please provide details about what's wrong with this loan information..."
-                                                value={flagState.reason}
-                                                onChange={(e) => setFlagState(prev => ({ ...prev, reason: e.target.value }))}
-                                              />
-                                            </div>
-                                            <div className="space-y-1.5">
-                                              <Label htmlFor={`flag-email-${loan.id}`} className="text-xs font-medium text-gray-700">
-                                                Email (optional)
-                                              </Label>
-                                              <Input
-                                                id={`flag-email-${loan.id}`}
-                                                type="email"
-                                                className="w-full text-sm min-h-[44px]"
-                                                placeholder="your.email@example.com"
-                                                value={flagState.email}
-                                                onChange={(e) => setFlagState(prev => ({ ...prev, email: e.target.value }))}
-                                              />
-                                            </div>
-                                            <div className="flex flex-col sm:flex-row gap-2 pt-1">
-                                              <Button
-                                                size="sm"
-                                                onClick={submitFlag}
-                                                disabled={submittingFlag || !flagState.reason.trim()}
-                                                className="flex-1 min-h-[44px] sm:min-h-0"
-                                              >
-                                                {submittingFlag ? (
-                                                  <>
-                                                    <Loader2 className="h-3 w-3 mr-1.5 animate-spin" />
-                                                    Submitting...
-                                                  </>
-                                                ) : (
-                                                  'Submit Report'
-                                                )}
-                                              </Button>
-                                              <Button
-                                                size="sm"
-                                                variant="outline"
-                                                onClick={closeFlag}
-                                                disabled={submittingFlag}
-                                                className="min-h-[44px] sm:min-h-0"
-                                              >
-                                                Cancel
-                                              </Button>
-                                            </div>
-                                          </div>
-                                        )}
-                                      </div>
-                                    </div>
-                                  ))
-                                )}
-                              </div>
-                            )}
-                          </CardContent>
-                        </Card>
-                      ))}
-                    </div>
-                  </AccordionContent>
-                </AccordionItem>
+                <div key={league}>
+                  <div className="flex items-center gap-3 mb-3 pl-1">
+                    <div className="w-1 h-5 rounded-full" style={{ backgroundColor: LEAGUE_COLORS[league] || '#9ca3af' }} />
+                    <h2 className="text-sm font-semibold text-gray-900">{league}</h2>
+                    <span className="text-xs text-gray-400">{leagueTeams.length}</span>
+                  </div>
+                  <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-2">
+                    {leagueTeams.map((team) => {
+                      const expanded = renderExpandedLoans(team)
+                      return expanded ? (
+                        <Fragment key={team.id}>
+                          {renderTeamCard(team)}
+                          {expanded}
+                        </Fragment>
+                      ) : renderTeamCard(team)
+                    })}
+                  </div>
+                </div>
               ))}
-            </Accordion>
+            </div>
           )}
+
+          {/* Subscribe Dialog */}
+          <Dialog open={subscribeOpen} onOpenChange={setSubscribeOpen}>
+            <DialogContent className="sm:max-w-md">
+              <DialogHeader>
+                <DialogTitle className="flex items-center gap-2">
+                  <Mail className="h-5 w-5 text-blue-600" />
+                  Subscribe to Team Updates
+                </DialogTitle>
+                <DialogDescription>
+                  Get weekly newsletters for the teams you follow.
+                </DialogDescription>
+              </DialogHeader>
+              <div className="space-y-4 py-2">
+                <TeamMultiSelect
+                  teams={teams}
+                  value={selectedTeams}
+                  onChange={setSelectedTeams}
+                  placeholder="Search and select teams..."
+                  className="w-full"
+                />
+                <div>
+                  <Label htmlFor="sub-email" className="text-xs">Email Address</Label>
+                  <Input
+                    id="sub-email"
+                    type="email"
+                    value={email}
+                    onChange={(e) => setEmail(e.target.value)}
+                    placeholder="your.email@example.com"
+                    className="h-9 mt-1"
+                  />
+                </div>
+              </div>
+              <DialogFooter className="gap-2 sm:gap-0">
+                <Button variant="outline" onClick={() => setSubscribeOpen(false)}>Cancel</Button>
+                <Button onClick={handleBulkSubscribe} disabled={submitting || selectedTeams.length === 0}>
+                  {submitting ? 'Subscribing...' : `Subscribe (${selectedTeams.length})`}
+                </Button>
+              </DialogFooter>
+            </DialogContent>
+          </Dialog>
 
           {/* Tracking Request Dialog */}
           <Dialog open={trackingRequestState.open} onOpenChange={(open) => !open && closeRequestTracking()}>
@@ -11318,6 +10963,7 @@ function AppRoutes() {
     <Routes>
       <Route path="/" element={<HomePage />} />
       <Route path="/teams" element={<TeamsPage />} />
+      <Route path="/dream-team" element={<PublicFormationBuilder />} />
       <Route path="/newsletters" element={<NewslettersPage />} />
       <Route path="/newsletters/:newsletterId" element={<NewslettersPage />} />
       <Route path="/newsletters/historical" element={<HistoricalNewslettersPage />} />
@@ -11350,6 +10996,7 @@ function AppRoutes() {
         <Route path="loans" element={<AdminLoans />} />
         <Route path="players" element={<AdminPlayers />} />
         <Route path="teams" element={<AdminTeams />} />
+        <Route path="teams/:teamId/formation" element={<AdminFormation />} />
         <Route path="sponsors" element={<AdminSponsors />} />
         <Route path="reddit" element={<AdminReddit />} />
         <Route path="curation" element={<AdminCuration />} />

@@ -1,4 +1,5 @@
 import { useState, useEffect, useCallback, useMemo } from 'react'
+import { Link } from 'react-router-dom'
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
 import { Button } from '@/components/ui/button'
 import { Badge } from '@/components/ui/badge'
@@ -27,7 +28,8 @@ import {
   Pencil,
   Save,
   X,
-  Wand2
+  Wand2,
+  LayoutGrid
 } from 'lucide-react'
 import { APIService } from '@/lib/api'
 
@@ -843,6 +845,16 @@ export function AdminTeams() {
                                     Sync Fixtures
                                   </>
                                 )}
+                              </Button>
+                              <Button
+                                variant="outline"
+                                size="sm"
+                                asChild
+                              >
+                                <Link to={`/admin/teams/${team.id}/formation`}>
+                                  <LayoutGrid className="h-4 w-4 mr-1" />
+                                  Formation
+                                </Link>
                               </Button>
                               <Button
                                 variant="destructive"

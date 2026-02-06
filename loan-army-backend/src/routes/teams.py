@@ -258,6 +258,7 @@ def get_team_loans(team_id):
     - season: filter by season year
     - include_supplemental: include supplemental loans (default: false)
     - include_season_context: enrich with season stats (default: false)
+    - pathway_status: filter by pathway status (e.g. 'academy', 'on_loan')
     """
     try:
         team = Team.query.get_or_404(team_id)
@@ -265,6 +266,7 @@ def get_team_loans(team_id):
         dedupe = request.args.get('dedupe', 'true').lower() in ('1', 'true', 'yes', 'on', 'y')
         season_val = request.args.get('season', type=int)
         direction = request.args.get('direction', 'loaned_from').lower()
+        pathway_status = request.args.get('pathway_status', '').strip().lower()
 
         # Filter by direction: loaned_from = parent club, loaned_to = loan destination
         if direction == 'loaned_to':
@@ -274,6 +276,9 @@ def get_team_loans(team_id):
 
         if active_only:
             query = query.filter(LoanedPlayer.is_active.is_(True))
+
+        if pathway_status:
+            query = query.filter(LoanedPlayer.pathway_status == pathway_status)
 
         if season_val:
             slug = f"{season_val}-{str(season_val + 1)[-2:]}"
