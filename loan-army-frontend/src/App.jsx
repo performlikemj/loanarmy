@@ -11,6 +11,7 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs.j
 import TeamMultiSelect from '@/components/ui/TeamMultiSelect.jsx'
 import TeamSelect from '@/components/ui/TeamSelect.jsx'
 import { JournalistList } from '@/components/JournalistList.jsx'
+import { ChatPanel } from '@/components/chat/ChatPanel.jsx'
 import { BuyMeCoffeeButton } from '@/components/BuyMeCoffeeButton.jsx'
 import { CommentaryManager } from '@/components/CommentaryManager.jsx'
 import { Accordion, AccordionContent, AccordionItem, AccordionTrigger } from '@/components/ui/accordion.jsx'
@@ -11307,6 +11308,26 @@ function AppWithRouter() {
   )
 }
 
+// Analyst page — full-page chat experience
+function AnalystPage() {
+  const navigate = useNavigate()
+  return (
+    <div className="max-w-4xl mx-auto py-6 px-4">
+      <div className="mb-4 flex items-center gap-3">
+        <button onClick={() => navigate(-1)} className="text-gray-500 hover:text-gray-700">
+          <ArrowLeft className="h-5 w-5" />
+        </button>
+        <h1 className="text-2xl font-bold">Academy Watch Analyst</h1>
+      </div>
+      <p className="text-gray-500 text-sm mb-4">
+        Chat with our AI analyst about academy players, loan performance, stats, and more.
+        The analyst can generate charts and tables on the fly.
+      </p>
+      <ChatPanel />
+    </div>
+  )
+}
+
 // App routes extracted for cleaner structure
 function AppRoutes() {
   return (
@@ -11333,6 +11354,7 @@ function AppRoutes() {
       <Route path="/verify" element={<VerifyPage />} />
       <Route path="/claim-account" element={<ClaimAccount />} />
       <Route path="/submit-take" element={<SubmitTake />} />
+      <Route path="/analyst" element={<RequireAuth><AnalystPage /></RequireAuth>} />
       <Route path="/admin" element={<AdminLayout />}>
         <Route index element={<Navigate to="/admin/dashboard" replace />} />
         <Route path="dashboard" element={<AdminDashboard />} />
