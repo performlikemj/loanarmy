@@ -1509,27 +1509,27 @@ export class APIService {
         return this.request('/chat/sessions', {
             method: 'POST',
             body: JSON.stringify(options),
-        }, { auth: true })
+        })
     }
 
     static async listChatSessions() {
-        return this.request('/chat/sessions', {}, { auth: true })
+        return this.request('/chat/sessions')
     }
 
     static async getChatHistory(sessionId) {
-        return this.request(`/chat/sessions/${sessionId}/history`, {}, { auth: true })
+        return this.request(`/chat/sessions/${sessionId}/history`)
     }
 
     static async sendChatMessage(sessionId, message) {
         return this.request(`/chat/sessions/${sessionId}/messages`, {
             method: 'POST',
             body: JSON.stringify({ message }),
-        }, { auth: true })
+        })
     }
 
     static async deleteChatSession(sessionId) {
         return this.request(`/chat/sessions/${sessionId}`, {
             method: 'DELETE',
-        }, { auth: true })
+        })
     }
 }

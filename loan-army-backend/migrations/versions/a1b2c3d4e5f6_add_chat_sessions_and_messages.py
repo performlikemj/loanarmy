@@ -32,6 +32,8 @@ def upgrade():
         sa.PrimaryKeyConstraint('id')
     )
 
+    op.create_index('ix_chat_sessions_user_active', 'chat_sessions', ['user_id', 'is_active'])
+
     op.create_table('chat_messages',
         sa.Column('id', sa.Integer(), nullable=False),
         sa.Column('session_id', sa.Integer(), nullable=False),
@@ -41,10 +43,14 @@ def upgrade():
         sa.Column('tokens_used', sa.Integer(), nullable=True, server_default=sa.text('0')),
         sa.Column('created_at', sa.DateTime(), nullable=True),
         sa.ForeignKeyConstraint(['session_id'], ['chat_sessions.id'], ),
+        sa.CheckConstraint("role IN ('user', 'assistant', 'system')", name='valid_role'),
         sa.PrimaryKeyConstraint('id')
     )
+    op.create_index('ix_chat_messages_session_id', 'chat_messages', ['session_id'])
 
 
 def downgrade():
+    op.drop_index('ix_chat_messages_session_id', table_name='chat_messages')
     op.drop_table('chat_messages')
+    op.drop_index('ix_chat_sessions_user_active', table_name='chat_sessions')
     op.drop_table('chat_sessions')

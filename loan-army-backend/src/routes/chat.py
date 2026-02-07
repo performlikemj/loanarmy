@@ -6,8 +6,10 @@ to the AI analyst agent.
 """
 
 import asyncio
+import concurrent.futures
 import json
 import logging
+import time
 from datetime import datetime, timezone
 
 from flask import Blueprint, jsonify, request, g
@@ -26,6 +28,32 @@ from agents import Runner
 logger = logging.getLogger(__name__)
 
 chat_bp = Blueprint('chat', __name__)
+
+# --- DataFrame cache (TTL-based, keyed by session_id) ---
+_df_cache: dict[int, tuple[float, dict]] = {}
+DF_CACHE_TTL = 300  # 5 minutes
+
+MAX_MESSAGES_PER_SESSION = 200
+
+
+def _get_cached_dataframes(session_id, team_id=None, league_id=None):
+    """Load DataFrames with per-session TTL cache."""
+    key = session_id
+    now = time.time()
+    if key in _df_cache:
+        ts, dfs = _df_cache[key]
+        if now - ts < DF_CACHE_TTL:
+            return dfs
+    dfs = load_context(team_id=team_id, league_id=league_id)
+    _df_cache[key] = (now, dfs)
+    return dfs
+
+
+def _run_agent_sync(agent, messages):
+    """Run async agent in a new thread to avoid event loop conflicts."""
+    with concurrent.futures.ThreadPoolExecutor(max_workers=1) as pool:
+        future = pool.submit(asyncio.run, Runner.run(agent, messages))
+        return future.result(timeout=60)
 
 
 @chat_bp.route('/chat/sessions', methods=['POST'])
@@ -123,6 +151,11 @@ def send_message(session_id):
     if len(user_message) > 4000:
         return jsonify({'error': 'Message too long (max 4000 characters)'}), 400
 
+    # Check max messages per session
+    msg_count = ChatMessage.query.filter_by(session_id=session.id).count()
+    if msg_count >= MAX_MESSAGES_PER_SESSION:
+        return jsonify({'error': f'Session message limit reached ({MAX_MESSAGES_PER_SESSION}). Please start a new session.'}), 400
+
     # Save user message
     user_msg = ChatMessage(
         session_id=session.id,
@@ -132,9 +165,10 @@ def send_message(session_id):
     db.session.add(user_msg)
     db.session.flush()
 
-    # Load DataFrames for this session's context
+    # Load DataFrames for this session's context (cached)
     try:
-        dataframes = load_context(
+        dataframes = _get_cached_dataframes(
+            session.id,
             team_id=session.team_id,
             league_id=session.league_id,
         )
@@ -143,17 +177,18 @@ def send_message(session_id):
         logger.error("Failed to load data context: %s", e)
         dataframes = {}
 
-    # Build conversation history
+    # Build conversation history (last 30 messages to prevent context overflow)
     history = ChatMessage.query.filter_by(
         session_id=session.id
-    ).order_by(ChatMessage.created_at).all()
+    ).order_by(ChatMessage.created_at.desc()).limit(30).all()
+    history.reverse()  # Back to chronological order
 
     messages = [{'role': m.role, 'content': m.content} for m in history]
 
     # Run agent
     try:
         agent = build_academy_watch_agent()
-        result = asyncio.run(Runner.run(agent, messages))
+        result = _run_agent_sync(agent, messages)
 
         response_text = result.final_output or ''
         tokens_used = 0

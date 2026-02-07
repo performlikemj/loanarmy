@@ -13,6 +13,7 @@ import base64
 import json
 import logging
 import os
+import platform
 import subprocess
 import sys
 import tempfile
@@ -129,9 +130,28 @@ def output_table(df, title=None):
     else:
         _tables.append({'title': title, 'data': df})
 
+# --- Security: restricted builtins (NO open/exec/eval/compile/__import__/etc.) ---
+_SAFE_BUILTINS = {
+    'print': print, 'len': len, 'range': range, 'enumerate': enumerate,
+    'zip': zip, 'map': map, 'filter': filter, 'sorted': sorted,
+    'min': min, 'max': max, 'sum': sum, 'abs': abs, 'round': round,
+    'int': int, 'float': float, 'str': str, 'bool': bool,
+    'list': list, 'dict': dict, 'set': set, 'tuple': tuple, 'frozenset': frozenset,
+    'type': type, 'isinstance': isinstance, 'issubclass': issubclass,
+    'hasattr': hasattr, 'getattr': getattr, 'setattr': setattr,
+    'any': any, 'all': all, 'reversed': reversed,
+    'format': format, 'repr': repr, 'hash': hash, 'id': id,
+    'slice': slice, 'iter': iter, 'next': next,
+    'True': True, 'False': False, 'None': None,
+    'Exception': Exception, 'ValueError': ValueError, 'TypeError': TypeError,
+    'KeyError': KeyError, 'IndexError': IndexError, 'RuntimeError': RuntimeError,
+    'StopIteration': StopIteration, 'ZeroDivisionError': ZeroDivisionError,
+    '__import__': _restricted_import,
+}
+
 # --- Execute user code ---
 exec_globals = {
-    '__builtins__': __builtins__,
+    '__builtins__': _SAFE_BUILTINS,
     'output_chart': output_chart,
     'output_table': output_table,
     'pd': pd,
@@ -198,10 +218,16 @@ def execute_sandboxed_code(
         with open(script_path, 'w') as f:
             f.write(_SANDBOX_SCRIPT)
 
-        # Execute in subprocess with no network
+        # Execute in subprocess with network isolation
+        # NOTE: For production, prefer running inside a Docker container for full sandboxing.
+        if platform.system() == 'Linux':
+            cmd = ['unshare', '--net', '--', sys.executable, script_path, work_dir]
+        else:
+            cmd = [sys.executable, script_path, work_dir]
+
         try:
             result = subprocess.run(
-                [sys.executable, script_path, work_dir],
+                cmd,
                 capture_output=True,
                 text=True,
                 timeout=15,  # slightly above the internal 10s alarm

@@ -5,6 +5,7 @@ Stores chat sessions and messages for the interactive analyst feature.
 """
 
 from datetime import datetime, timezone
+from sqlalchemy import CheckConstraint
 from src.models.league import db
 
 
@@ -33,6 +34,9 @@ class ChatSession(db.Model):
                                order_by='ChatMessage.created_at',
                                cascade='all, delete-orphan')
 
+    def __repr__(self):
+        return f'<ChatSession id={self.id} user_id={self.user_id} title={self.title!r}>'
+
     def to_dict(self, include_messages=False):
         data = {
             'id': self.id,
@@ -52,6 +56,9 @@ class ChatSession(db.Model):
 class ChatMessage(db.Model):
     """Individual messages in a chat session."""
     __tablename__ = 'chat_messages'
+    __table_args__ = (
+        CheckConstraint("role IN ('user', 'assistant', 'system')", name='valid_role'),
+    )
 
     id = db.Column(db.Integer, primary_key=True)
     session_id = db.Column(db.Integer, db.ForeignKey('chat_sessions.id'), nullable=False)
@@ -61,6 +68,9 @@ class ChatMessage(db.Model):
     tokens_used = db.Column(db.Integer, default=0)
 
     created_at = db.Column(db.DateTime, default=lambda: datetime.now(timezone.utc))
+
+    def __repr__(self):
+        return f'<ChatMessage id={self.id} session_id={self.session_id} role={self.role!r}>'
 
     def to_dict(self):
         import json
