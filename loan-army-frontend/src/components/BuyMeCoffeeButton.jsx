@@ -125,7 +125,7 @@ export function BuyMeCoffeeButton({ align = 'center', className = '' }) {
 
   return (
     <div className={`my-6 flex ${alignment} ${className}`.trim()}>
-      <div ref={containerRef} aria-label="Support Go On Loan" />
+      <div ref={containerRef} aria-label="Support The Academy Watch" />
     </div>
   )
 }

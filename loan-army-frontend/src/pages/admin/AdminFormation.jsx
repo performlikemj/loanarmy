@@ -13,6 +13,7 @@ import { PitchSVG } from '@/components/formation/PitchSVG'
 import { BenchSidebar } from '@/components/formation/BenchSidebar'
 import { FormationHeader } from '@/components/formation/FormationHeader'
 import { PlayerStatsPopover } from '@/components/formation/PlayerStatsPopover'
+import { SquadSummaryStrip } from '@/components/formation/SquadSummaryStrip'
 import { useFormationState } from '@/hooks/useFormationState'
 
 export function AdminFormation() {
@@ -48,7 +49,7 @@ export function AdminFormation() {
       try {
         setLoading(true)
         const [loans, formations] = await Promise.all([
-          APIService.getTeamLoans(teamId),
+          APIService.getTeamLoans(teamId, { aggregate_stats: 'true', academy_only: 'true' }),
           APIService.adminGetFormations(teamId),
         ])
 
@@ -259,7 +260,7 @@ export function AdminFormation() {
           <CardTitle className="text-base">Formation</CardTitle>
           {allPlayers.length === 0 && (
             <CardDescription className="text-amber-600">
-              No loaned players found for this team. Track a team with active loans to use the formation board.
+              No players found for this team. Track a team with active academy players to use the formation board.
             </CardDescription>
           )}
         </CardHeader>
@@ -297,6 +298,8 @@ export function AdminFormation() {
               onDropFromPitch={handleRemoveFromPitch}
             />
           </div>
+
+          <SquadSummaryStrip placements={formation.placements} />
 
           {/* Notes */}
           <Textarea
@@ -354,6 +357,9 @@ export function AdminFormation() {
                       placements={formation.placements}
                       onDrop={() => {}}
                     />
+                    <div className="mt-2">
+                      <SquadSummaryStrip placements={formation.placements} />
+                    </div>
                   </div>
                   <div className="flex-1">
                     <p className="text-xs font-semibold text-muted-foreground mb-2 text-center">
@@ -364,6 +370,9 @@ export function AdminFormation() {
                       placements={comparePlacements}
                       onDrop={() => {}}
                     />
+                    <div className="mt-2">
+                      <SquadSummaryStrip placements={comparePlacements} />
+                    </div>
                   </div>
                 </div>
               ) : (

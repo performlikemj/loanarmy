@@ -1,7 +1,7 @@
 import React from 'react'
 import { MapPin } from 'lucide-react'
 import { useJourney } from '@/contexts/JourneyContext'
-import { JourneyMap } from './JourneyMap'
+import { JourneyStrip } from './JourneyStrip'
 import { JourneyTimeline } from './JourneyTimeline'
 
 /**
@@ -23,7 +23,7 @@ export default function PlayerJourneyView() {
 
     return (
         <div className="space-y-4">
-            <JourneyMap journeyData={journeyData} loading={false} error={null} />
+            <JourneyStrip />
             <JourneyTimeline journeyData={journeyData} loading={false} error={null} />
         </div>
     )

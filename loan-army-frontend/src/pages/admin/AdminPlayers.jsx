@@ -201,7 +201,7 @@ export function AdminPlayers() {
     }
 
     const deletePlayer = async (playerId, playerName) => {
-        const confirmed = window.confirm(`Delete ${playerName || 'this player'} from tracking? This removes their loan rows and cached links.`)
+        const confirmed = window.confirm(`Delete ${playerName || 'this player'} from tracking? This removes their player records and cached links.`)
         if (!confirmed) return
         setDeletingId(playerId)
         try {

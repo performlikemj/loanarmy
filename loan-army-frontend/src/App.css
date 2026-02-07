@@ -120,7 +120,7 @@
 }
 
 /* Hide Buy Me a Coffee buttons inside newsletter content */
-.newsletter-content [aria-label="Support Go On Loan"],
+.newsletter-content [aria-label="Support The Academy Watch"],
 .newsletter-content a[href*="buymeacoffee"] {
   display: none !important;
 }

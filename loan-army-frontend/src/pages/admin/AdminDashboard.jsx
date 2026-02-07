@@ -286,7 +286,7 @@ export function AdminDashboard() {
             <div>
                 <h2 className="text-3xl font-bold tracking-tight">Dashboard</h2>
                 <p className="text-muted-foreground mt-1">
-                    Overview of your loan tracking system
+                    Overview of your academy tracking system
                 </p>
             </div>
 

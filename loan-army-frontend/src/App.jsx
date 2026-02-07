@@ -4872,7 +4872,7 @@ function AdminPage({ defaultTab = 'newsletters', includeSandbox = true, forcedTa
                   <div id="admin-supplemental-loans" className="border rounded p-4 md:col-span-2">
                     <h2 className="font-semibold mb-3">Manual Player Entries</h2>
                     <p className="text-sm text-gray-600 mb-4">
-                      Add players who aren't tracked by the API-Football service. Use this for loans from or to teams outside the API's coverage,
+                      Add players who aren't tracked by the API-Football service. Use this for players at teams outside the API's coverage,
                       or for players missing from the automated data feeds. These entries won't have automatic stats updates.
                     </p>
                     <div className="space-y-4">
@@ -7204,7 +7204,7 @@ function Navigation() {
           </span>
           <div className="flex flex-col leading-tight">
             <span className="text-lg font-semibold">The Academy Watch</span>
-            <span className="hidden text-xs text-gray-500 sm:block">European loans tracker</span>
+            <span className="hidden text-xs text-gray-500 sm:block">Academy player tracker</span>
           </div>
         </Link>
 
@@ -7447,10 +7447,10 @@ function HomePage() {
               The Academy Watch
             </p>
             <h1 className="text-5xl sm:text-6xl font-bold text-gray-900 tracking-tight mb-4">
-              Track European Football Loans
+              Follow Every Academy Prospect
             </h1>
             <p className="text-lg text-gray-500 max-w-2xl mx-auto mb-8">
-              AI-powered newsletters and dashboards that help you follow every loan spell in Europe's top leagues.
+              Career journeys, loan spells, and stats for academy players from Europe's top clubs — plus AI-powered newsletters.
             </p>
 
             {/* Primary CTA: Team Search */}
@@ -7509,14 +7509,14 @@ function HomePage() {
           ) : stats ? (
             <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-8 mb-16">
               <div className="bg-white rounded-xl border border-gray-100 p-6">
-                <p className="text-sm text-gray-500 mb-1">Clubs Tracked</p>
+                <p className="text-sm text-gray-500 mb-1">Academies Tracked</p>
                 <p className="text-3xl font-bold text-gray-900">{stats.teams_with_loans}</p>
-                <p className="text-xs text-gray-400 mt-1">With active loans</p>
+                <p className="text-xs text-gray-400 mt-1">From Europe's top clubs</p>
               </div>
               <div className="bg-white rounded-xl border border-gray-100 p-6">
-                <p className="text-sm text-gray-500 mb-1">Active Loans</p>
+                <p className="text-sm text-gray-500 mb-1">Players Tracked</p>
                 <p className="text-3xl font-bold text-gray-900">{stats.total_active_loans}</p>
-                <p className="text-xs text-gray-400 mt-1">Players out on loan</p>
+                <p className="text-xs text-gray-400 mt-1">Academy prospects on loan</p>
               </div>
               <div className="bg-white rounded-xl border border-gray-100 p-6">
                 <p className="text-sm text-gray-500 mb-1">Newsletters</p>
@@ -7855,7 +7855,7 @@ function TeamsPage() {
         if (teamMeta && typeof teamMeta.season !== 'undefined' && teamMeta.season !== null) {
           params.season = teamMeta.season
         }
-        const loans = await APIService.getTeamLoans(teamId, { ...params, include_season_context: 'true' })
+        const loans = await APIService.getTeamLoans(teamId, { ...params, include_season_context: 'true', academy_only: 'true' })
         setTeamLoans(prev => ({ ...prev, [teamId]: loans }))
       } catch (error) {
         console.error('Failed to load loans for team', teamId, error)

@@ -682,7 +682,7 @@ export function AdminTeams() {
                 <div>
                   <CardTitle>Tracked Teams</CardTitle>
                   <CardDescription>
-                    Teams currently being tracked for loan player data
+                    Teams currently being tracked for academy player data
                   </CardDescription>
                 </div>
                 <Button variant="outline" size="sm" asChild>
@@ -1284,7 +1284,7 @@ export function AdminTeams() {
                 Purge All Data Except One Team
               </CardTitle>
               <CardDescription>
-                Delete ALL loaned player data except for one specific team. This is useful for resetting to track only one team.
+                Delete ALL player data except for one specific team. This is useful for resetting to track only one team.
               </CardDescription>
             </CardHeader>
             <CardContent className="space-y-4">

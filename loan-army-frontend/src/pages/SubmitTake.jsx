@@ -17,7 +17,7 @@ export function SubmitTake() {
                 <div className="mb-8 text-center">
                     <h1 className="text-3xl font-bold tracking-tight mb-2">The Academy Watch</h1>
                     <p className="text-muted-foreground">
-                        Share your thoughts on academy and loan players
+                        Share your thoughts on academy prospects
                     </p>
                 </div>
 

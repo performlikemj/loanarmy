@@ -202,7 +202,7 @@ export function JournalistNewsletterView() {
 
       // Description
       const writerNames = activeWriters.map(w => w.display_name).join(', ')
-      const description = `Read analysis by ${writerNames} on ${data.newsletter?.team?.name || 'Loan Army'}`
+      const description = `Read analysis by ${writerNames} on ${data.newsletter?.team?.name || 'The Academy Watch'}`
       updateTag('og:description', description)
 
       // Author / Attribution
