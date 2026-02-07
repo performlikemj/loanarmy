@@ -11,6 +11,7 @@ import { PitchSVG } from '@/components/formation/PitchSVG'
 import { BenchSidebar } from '@/components/formation/BenchSidebar'
 import { FormationHeader } from '@/components/formation/FormationHeader'
 import { PlayerStatsPopover } from '@/components/formation/PlayerStatsPopover'
+import { SquadSummaryStrip } from '@/components/formation/SquadSummaryStrip'
 import { useFormationState } from '@/hooks/useFormationState'
 
 function mapLoanToPlayer(loan) {
@@ -86,8 +87,8 @@ export function PublicFormationBuilder() {
     setStep('builder')
     setPlayersLoading(true)
     try {
-      const loans = await APIService.getTeamLoans(team.id || team.team_id)
-      const players = (Array.isArray(loans) ? loans : loans?.items || []).map(mapLoanToPlayer)
+      const teamData = await APIService.getTeamPlayers(team.id || team.team_id)
+      const players = (teamData?.players || []).map(mapLoanToPlayer)
       setAllPlayers(players)
 
       // Restore formation from URL params if provided
@@ -169,7 +170,7 @@ export function PublicFormationBuilder() {
       <div className="max-w-5xl mx-auto px-4 py-8">
         <div className="text-center mb-8">
           <h1 className="text-3xl font-bold text-gray-900 mb-2">Dream XI Builder</h1>
-          <p className="text-gray-500">Pick a club, then build your ideal lineup from their academy loanees</p>
+          <p className="text-gray-500">Pick a club, then build your ideal lineup from their academy players</p>
         </div>
 
         {/* Search */}
@@ -259,7 +260,7 @@ export function PublicFormationBuilder() {
         </div>
       ) : allPlayers.length === 0 ? (
         <div className="text-center py-16 text-gray-500">
-          <p className="mb-2">No loaned players found for this team.</p>
+          <p className="mb-2">No academy players found for this team.</p>
           <Button variant="outline" size="sm" onClick={goBackToTeams}>
             Choose another team
           </Button>
@@ -287,6 +288,8 @@ export function PublicFormationBuilder() {
               onDropFromPitch={formation.handleRemoveFromPitch}
             />
           </div>
+
+          <SquadSummaryStrip placements={formation.placements} />
         </div>
       )}
 

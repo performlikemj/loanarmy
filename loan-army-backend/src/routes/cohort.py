@@ -249,3 +249,346 @@ def cohort_analytics():
     analytics.sort(key=lambda x: x['conversion_rate'], reverse=True)
 
     return jsonify({'analytics': analytics})
+
+
+# =============================================================================
+# Full Academy Rebuild
+# =============================================================================
+
+@cohort_bp.route('/admin/academy/full-rebuild', methods=['POST'])
+@require_api_key
+def admin_full_rebuild():
+    """Run the full academy rebuild pipeline as a background job.
+
+    Stages:
+      1. Clean slate (delete tracked players, journeys, cohorts, loans, locations)
+      2. Seed academy leagues
+      3. Cohort discovery + journey sync (Big 6 seeding)
+      4. Create TrackedPlayer records for each team
+      5. Link orphaned journeys
+      6. Refresh statuses
+      7. Seed club locations
+
+    Body (all optional):
+      team_ids: list of API team IDs (default: Big 6)
+      seasons: list of season years (default: 2020-2024)
+      skip_clean: bool (default: false)
+      skip_cohorts: bool (default: false)
+    """
+    from src.models.league import Team, LoanedPlayer, AcademyLeague
+    from src.models.tracked_player import TrackedPlayer
+    from src.models.journey import PlayerJourney, PlayerJourneyEntry, ClubLocation
+    from src.services.big6_seeding_service import run_big6_seed, BIG_6, SEASONS
+    from src.utils.academy_classifier import derive_player_status
+    from src.api_football_client import APIFootballClient
+    from src.services.journey_sync import JourneySyncService, seed_club_locations
+    from sqlalchemy import cast
+    from sqlalchemy.dialects.postgresql import JSONB as PG_JSONB
+
+    data = request.get_json() or {}
+    team_ids = data.get('team_ids') or list(BIG_6.keys())
+    seasons = data.get('seasons') or SEASONS
+    skip_clean = data.get('skip_clean', False)
+    skip_cohorts = data.get('skip_cohorts', False)
+
+    job_id = create_background_job('full_rebuild')
+
+    YOUTH_LEAGUES_DATA = [
+        {'api_league_id': 706, 'name': 'Premier League 2 - Division One', 'country': 'England', 'level': 'U23', 'season': 2024},
+        {'api_league_id': 707, 'name': 'Premier League 2 - Division Two', 'country': 'England', 'level': 'U23', 'season': 2024},
+        {'api_league_id': 703, 'name': 'U18 Premier League', 'country': 'England', 'level': 'U18', 'season': 2024},
+        {'api_league_id': 708, 'name': 'Professional Development League', 'country': 'England', 'level': 'U21', 'season': 2024},
+        {'api_league_id': 775, 'name': 'UEFA Youth League', 'country': 'Europe', 'level': 'U21', 'season': 2024},
+        {'api_league_id': 718, 'name': 'FA Youth Cup', 'country': 'England', 'level': 'U18', 'season': 2024},
+    ]
+
+    @copy_current_request_context
+    def run_in_background():
+        stage = 'starting'
+        try:
+            total_stages = 7
+            results = {
+                'stages_completed': [],
+                'teams': {},
+                'errors': [],
+            }
+
+            # ── Stage 1: Clean slate ──
+            if not skip_clean:
+                stage = 'clean'
+                update_job(job_id, progress=0, total=total_stages, current_player='Stage 1: Cleaning data...')
+                deleted = {}
+                for name, model in [
+                    ('tracked_players', TrackedPlayer),
+                    ('journey_entries', PlayerJourneyEntry),
+                    ('journeys', PlayerJourney),
+                    ('cohort_members', CohortMember),
+                    ('cohorts', AcademyCohort),
+                    ('loaned_players', LoanedPlayer),
+                    ('club_locations', ClubLocation),
+                ]:
+                    count = model.query.count()
+                    if count > 0:
+                        model.query.delete()
+                        db.session.commit()
+                    deleted[name] = count
+                results['deleted'] = deleted
+                results['stages_completed'].append('clean')
+            else:
+                results['stages_completed'].append('clean (skipped)')
+
+            # ── Stage 2: Seed academy leagues ──
+            stage = 'seed_leagues'
+            update_job(job_id, progress=1, total=total_stages, current_player='Stage 2: Seeding academy leagues...')
+            leagues_created = 0
+            for ld in YOUTH_LEAGUES_DATA:
+                existing = AcademyLeague.query.filter_by(api_league_id=ld['api_league_id']).first()
+                if not existing:
+                    league = AcademyLeague(
+                        api_league_id=ld['api_league_id'],
+                        name=ld['name'],
+                        country=ld['country'],
+                        level=ld['level'],
+                        season=ld.get('season'),
+                        is_active=True,
+                        sync_enabled=True,
+                        created_at=datetime.now(timezone.utc),
+                        updated_at=datetime.now(timezone.utc),
+                    )
+                    db.session.add(league)
+                    leagues_created += 1
+            if leagues_created:
+                db.session.commit()
+            results['leagues_created'] = leagues_created
+            results['stages_completed'].append('seed_leagues')
+
+            # ── Stage 3: Cohort discovery + journey sync ──
+            if not skip_cohorts:
+                stage = 'cohorts'
+                update_job(job_id, progress=2, total=total_stages, current_player='Stage 3: Discovering cohorts + syncing journeys...')
+                seed_result = run_big6_seed(job_id, seasons=seasons, team_ids=team_ids)
+                results['cohorts_created'] = seed_result.get('cohorts_created', 0)
+                results['players_synced'] = seed_result.get('players_synced', 0)
+                results['stages_completed'].append('cohorts')
+            else:
+                results['stages_completed'].append('cohorts (skipped)')
+
+            # ── Stage 4: Create TrackedPlayers ──
+            stage = 'tracked_players'
+            update_job(job_id, progress=4, total=total_stages, current_player='Stage 4: Creating TrackedPlayer records...')
+            api_client = APIFootballClient()
+            journey_svc = JourneySyncService(api_client)
+            current_season = max(seasons)
+            total_created = 0
+            total_skipped = 0
+
+            for api_team_id in team_ids:
+                team_name = BIG_6.get(api_team_id, str(api_team_id))
+                update_job(job_id, current_player=f'Stage 4: Seeding {team_name}...')
+
+                team = Team.query.filter_by(team_id=api_team_id).order_by(Team.season.desc()).first()
+                if not team:
+                    results['errors'].append(f'{team_name}: no Team row found')
+                    continue
+
+                parent_api_id = team.team_id
+
+                # Source 1: academy_club_ids
+                known_journeys = PlayerJourney.query.filter(
+                    PlayerJourney.academy_club_ids.contains(cast([parent_api_id], PG_JSONB))
+                ).all()
+                candidate_ids = {j.player_api_id: j for j in known_journeys}
+
+                # Source 2: API squad (multiple seasons)
+                squad_data = []
+                seasons_to_fetch = range(current_season - 3, current_season + 1)
+                for fetch_season in seasons_to_fetch:
+                    try:
+                        season_squad = api_client.get_team_players(parent_api_id, season=fetch_season)
+                        for entry in season_squad:
+                            player_info = (entry or {}).get('player') or {}
+                            pid = player_info.get('id')
+                            if pid:
+                                pass  # just collecting data
+                        squad_data.extend(season_squad)
+                    except Exception as e:
+                        logger.warning('Squad fetch failed for %s season %d: %s', team_name, fetch_season, e)
+
+                # Sync journeys for squad players
+                for entry in squad_data:
+                    player_info = (entry or {}).get('player') or {}
+                    pid = player_info.get('id')
+                    if not pid:
+                        continue
+                    pid = int(pid)
+                    if pid in candidate_ids:
+                        continue
+                    age = player_info.get('age')
+                    if age and int(age) > 23:
+                        continue
+                    existing_journey = PlayerJourney.query.filter_by(player_api_id=pid).first()
+                    if existing_journey:
+                        if parent_api_id in (existing_journey.academy_club_ids or []):
+                            candidate_ids[pid] = existing_journey
+                        continue
+                    try:
+                        journey = journey_svc.sync_player(pid)
+                        if journey and parent_api_id in (journey.academy_club_ids or []):
+                            candidate_ids[pid] = journey
+                    except Exception:
+                        pass
+
+                # Source 3: CohortMember records
+                cohort_ids = [c.id for c in AcademyCohort.query.filter_by(team_api_id=parent_api_id).all()]
+                if cohort_ids:
+                    cohort_members = CohortMember.query.filter(CohortMember.cohort_id.in_(cohort_ids)).all()
+                    for cm in cohort_members:
+                        if cm.player_api_id and cm.player_api_id not in candidate_ids:
+                            journey = PlayerJourney.query.filter_by(player_api_id=cm.player_api_id).first()
+                            candidate_ids[cm.player_api_id] = journey
+
+                # Build squad lookup
+                squad_by_id = {}
+                for entry in squad_data:
+                    pi = (entry or {}).get('player') or {}
+                    if pi.get('id'):
+                        squad_by_id[int(pi['id'])] = entry
+
+                # Create TrackedPlayer rows
+                created = 0
+                skipped = 0
+                for pid, journey in candidate_ids.items():
+                    try:
+                        existing = TrackedPlayer.query.filter_by(player_api_id=pid, team_id=team.id).first()
+                        if existing:
+                            skipped += 1
+                            continue
+
+                        squad_entry = squad_by_id.get(pid) or {}
+                        pi = squad_entry.get('player') or {}
+
+                        player_name = (journey.player_name if journey else None) or pi.get('name') or f'Player {pid}'
+                        photo_url = (journey.player_photo if journey else None) or pi.get('photo')
+                        nationality = (journey.nationality if journey else None) or pi.get('nationality')
+                        birth_date = (journey.birth_date if journey else None) or (pi.get('birth') or {}).get('date')
+                        position = pi.get('position') or ''
+                        age = pi.get('age')
+
+                        status, loan_club_api_id, loan_club_name = derive_player_status(
+                            current_club_api_id=journey.current_club_api_id if journey else None,
+                            current_club_name=journey.current_club_name if journey else None,
+                            current_level=journey.current_level if journey else None,
+                            parent_api_id=parent_api_id,
+                            parent_club_name=team.name,
+                        )
+
+                        current_level = journey.current_level if journey and journey.current_level else None
+
+                        tp = TrackedPlayer(
+                            player_api_id=pid,
+                            player_name=player_name,
+                            photo_url=photo_url,
+                            position=position,
+                            nationality=nationality,
+                            birth_date=birth_date,
+                            age=int(age) if age else None,
+                            team_id=team.id,
+                            status=status,
+                            current_level=current_level,
+                            loan_club_api_id=loan_club_api_id,
+                            loan_club_name=loan_club_name,
+                            data_source='api-football',
+                            data_depth='full_stats',
+                            journey_id=journey.id if journey else None,
+                        )
+                        db.session.add(tp)
+                        created += 1
+                    except Exception as entry_err:
+                        results['errors'].append(f'{team_name} player {pid}: {entry_err}')
+
+                db.session.commit()
+                results['teams'][team_name] = {'created': created, 'skipped': skipped, 'candidates': len(candidate_ids)}
+                total_created += created
+                total_skipped += skipped
+
+            results['total_created'] = total_created
+            results['total_skipped'] = total_skipped
+            results['stages_completed'].append('tracked_players')
+
+            # ── Stage 5: Link orphaned journeys ──
+            stage = 'link_journeys'
+            update_job(job_id, progress=5, total=total_stages, current_player='Stage 5: Linking orphaned journeys...')
+            unlinked = TrackedPlayer.query.filter(
+                TrackedPlayer.is_active == True,
+                TrackedPlayer.journey_id.is_(None),
+            ).all()
+            linked = 0
+            for tp in unlinked:
+                journey = PlayerJourney.query.filter_by(player_api_id=tp.player_api_id).first()
+                if journey:
+                    tp.journey_id = journey.id
+                    linked += 1
+            if linked:
+                db.session.commit()
+            results['journeys_linked'] = linked
+            results['stages_completed'].append('link_journeys')
+
+            # ── Stage 6: Refresh statuses ──
+            stage = 'refresh_statuses'
+            update_job(job_id, progress=6, total=total_stages, current_player='Stage 6: Refreshing statuses...')
+            tracked = TrackedPlayer.query.filter(TrackedPlayer.is_active == True).all()
+            updated = 0
+            status_counts = {}
+            for tp in tracked:
+                if not tp.team:
+                    continue
+                journey = tp.journey
+                status, loan_api_id, loan_name = derive_player_status(
+                    current_club_api_id=journey.current_club_api_id if journey else None,
+                    current_club_name=journey.current_club_name if journey else None,
+                    current_level=journey.current_level if journey else None,
+                    parent_api_id=tp.team.team_id,
+                    parent_club_name=tp.team.name,
+                )
+                if tp.status != status or tp.loan_club_api_id != loan_api_id:
+                    tp.status = status
+                    tp.loan_club_api_id = loan_api_id
+                    tp.loan_club_name = loan_name
+                    updated += 1
+                status_counts[status] = status_counts.get(status, 0) + 1
+            if updated:
+                db.session.commit()
+            results['statuses_updated'] = updated
+            results['status_breakdown'] = status_counts
+            results['stages_completed'].append('refresh_statuses')
+
+            # ── Stage 7: Seed club locations ──
+            stage = 'locations'
+            update_job(job_id, progress=7, total=total_stages, current_player='Stage 7: Seeding club locations...')
+            locations_added = seed_club_locations()
+            results['locations_added'] = locations_added
+            results['stages_completed'].append('locations')
+
+            update_job(job_id, status='completed', results=results,
+                       completed_at=datetime.now(timezone.utc).isoformat())
+
+        except Exception as e:
+            logger.exception(f'Full rebuild job {job_id} failed at stage: {stage}')
+            update_job(job_id, status='failed', error=f'Failed at {stage}: {e}',
+                       completed_at=datetime.now(timezone.utc).isoformat())
+
+    thread = threading.Thread(target=run_in_background)
+    thread.start()
+
+    return jsonify({
+        'message': 'Full academy rebuild started in background',
+        'job_id': job_id,
+        'status': 'running',
+        'check_status_url': f'/api/admin/jobs/{job_id}',
+        'config': {
+            'team_ids': team_ids,
+            'seasons': seasons,
+            'skip_clean': skip_clean,
+            'skip_cohorts': skip_cohorts,
+        }
+    }), 202

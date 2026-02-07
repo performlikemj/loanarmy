@@ -174,7 +174,7 @@ export function QuickTakeForm({
                             id="take-content"
                             value={content}
                             onChange={(e) => setContent(e.target.value)}
-                            placeholder="Share your opinion on this player's performance, potential, or loan spell..."
+                            placeholder="Share your opinion on this player's performance, potential, or current spell..."
                             rows={3}
                             disabled={loading}
                             maxLength={MAX_CONTENT_LENGTH}

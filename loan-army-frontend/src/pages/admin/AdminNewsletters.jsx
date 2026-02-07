@@ -79,9 +79,7 @@ export function AdminNewsletters() {
     const [bulkPublishBusy, setBulkPublishBusy] = useState(false)
     const [bulkDeleteBusy, setBulkDeleteBusy] = useState(false)
     
-    // Reddit integration state
-    const [postToReddit, setPostToReddit] = useState(false)
-    const [redditConfigured, setRedditConfigured] = useState(null) // null = unknown, true/false = status
+    // Reddit integration removed
 
     // JSON/Markdown viewer modal
     const [jsonViewerOpen, setJsonViewerOpen] = useState(false)
@@ -131,19 +129,6 @@ export function AdminNewsletters() {
         loadConfig()
     }, [])
 
-    // Check Reddit integration status
-    useEffect(() => {
-        const checkRedditStatus = async () => {
-            try {
-                const status = await APIService.adminRedditStatus()
-                setRedditConfigured(status?.configured && status?.authenticated)
-            } catch (err) {
-                console.warn('Failed to check Reddit status', err)
-                setRedditConfigured(false)
-            }
-        }
-        checkRedditStatus()
-    }, [])
 
     // Load teams
     useEffect(() => {
@@ -344,25 +329,9 @@ export function AdminNewsletters() {
                 return
             }
 
-            const options = publish && postToReddit ? { postToReddit: true } : {}
-            const result = await APIService.adminNewsletterBulkPublish(idsToPublish, publish, options)
-            
-            let successText = `${idsToPublish.length} newsletter(s) ${publish ? 'published' : 'unpublished'}`
-            
-            // Add Reddit posting info if applicable
-            if (publish && postToReddit && result?.reddit) {
-                const redditInfo = result.reddit
-                if (redditInfo.posted_count > 0) {
-                    successText += `. Posted ${redditInfo.posted_count} to Reddit.`
-                } else if (redditInfo.results?.length > 0) {
-                    const failures = redditInfo.results.filter(r => r.failed_count > 0 || r.skipped)
-                    if (failures.length > 0) {
-                        successText += `. Reddit posting had issues - check console.`
-                        console.log('Reddit posting results:', redditInfo.results)
-                    }
-                }
-            }
-            
+            const result = await APIService.adminNewsletterBulkPublish(idsToPublish, publish)
+
+            const successText = `${idsToPublish.length} newsletter(s) ${publish ? 'published' : 'unpublished'}`
             setMessage({ type: 'success', text: successText })
             clearSelection()
             await loadNewsletters()
@@ -371,7 +340,7 @@ export function AdminNewsletters() {
         } finally {
             setBulkPublishBusy(false)
         }
-    }, [selectAllFiltered, newsletters, selectedIds, loadNewsletters, postToReddit])
+    }, [selectAllFiltered, newsletters, selectedIds, loadNewsletters])
 
     // Delete newsletter
     const confirmDelete = (newsletter) => {
@@ -687,7 +656,7 @@ export function AdminNewsletters() {
         <div className="space-y-6">
             <div>
                 <h2 className="text-3xl font-bold tracking-tight">Newsletters</h2>
-                <p className="text-muted-foreground mt-1">Generate and manage newsletters for loan teams</p>
+                <p className="text-muted-foreground mt-1">Generate and manage newsletters for tracked teams</p>
             </div>
 
             {/* Message Display */}
@@ -1078,26 +1047,13 @@ export function AdminNewsletters() {
                                 )}
                                 <span className="text-xs font-semibold">Selected {selectedCount}</span>
                                 
-                                {/* Reddit toggle */}
-                                {redditConfigured && (
-                                    <label className="flex items-center gap-2 text-xs border-l pl-2 ml-1">
-                                        <input
-                                            type="checkbox"
-                                            checked={postToReddit}
-                                            onChange={(e) => setPostToReddit(e.target.checked)}
-                                            className="h-4 w-4"
-                                        />
-                                        <span className="text-orange-600 font-medium">Post to Reddit</span>
-                                    </label>
-                                )}
-                                
                                 <Button
                                     size="sm"
                                     onClick={() => bulkPublish(true)}
                                     disabled={selectedCount === 0 || bulkPublishBusy || bulkDeleteBusy}
                                 >
                                     {bulkPublishBusy && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
-                                    {postToReddit ? 'Publish & Post to Reddit' : 'Publish Selected'}
+                                    Publish Selected
                                 </Button>
                                 <Button
                                     size="sm"
@@ -1343,7 +1299,7 @@ export function AdminNewsletters() {
                     
                     <div className="px-6 py-4 border-t shrink-0 flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3">
                         <p className="text-xs text-muted-foreground">
-                            💡 Copy and paste directly into Reddit's post editor
+                            💡 Copy and paste the markdown content above
                         </p>
                         <Button onClick={() => setJsonViewerOpen(false)}>Close</Button>
                     </div>
@@ -1401,7 +1357,7 @@ export function AdminNewsletters() {
                             Pending Games Detected
                         </DialogTitle>
                         <DialogDescription>
-                            The following teams have loaned players with upcoming games in the target week.
+                            The following teams have tracked players with upcoming games in the target week.
                             Generating now might miss these match stats.
                         </DialogDescription>
                     </DialogHeader>
@@ -1495,7 +1451,7 @@ export function AdminNewsletters() {
                                             <tr className="text-left">
                                                 <th className="px-3 py-2 w-10">Status</th>
                                                 <th className="px-3 py-2">Team</th>
-                                                <th className="px-3 py-2 w-24 text-center">Active Loans</th>
+                                                <th className="px-3 py-2 w-24 text-center">Active Players</th>
                                                 <th className="px-3 py-2 w-24 text-center">Pending</th>
                                                 <th className="px-3 py-2">Details</th>
                                             </tr>

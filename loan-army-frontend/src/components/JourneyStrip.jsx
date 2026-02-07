@@ -143,6 +143,16 @@ export function JourneyStrip() {
                                                 {level}
                                             </Badge>
                                         ))}
+                                        {stop.entry_types?.includes('development') && (
+                                            <Badge className="text-[9px] px-1 py-0 leading-tight bg-orange-100 text-orange-700 border border-orange-300">
+                                                Dev
+                                            </Badge>
+                                        )}
+                                        {stop.entry_types?.includes('integration') && (
+                                            <Badge className="text-[9px] px-1 py-0 leading-tight bg-cyan-100 text-cyan-700 border border-cyan-300">
+                                                New Signing
+                                            </Badge>
+                                        )}
                                     </div>
 
                                     {/* Stats */}

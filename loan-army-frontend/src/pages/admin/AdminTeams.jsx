@@ -1291,7 +1291,7 @@ export function AdminTeams() {
               <Alert className="border-red-500">
                 <AlertCircle className="h-4 w-4" />
                 <AlertDescription>
-                  <strong>Warning:</strong> This will permanently delete all loaned players and their fixture stats
+                  <strong>Warning:</strong> This will permanently delete all tracked players and their fixture stats
                   from every team EXCEPT the one you select. This cannot be undone.
                 </AlertDescription>
               </Alert>

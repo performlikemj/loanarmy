@@ -8,6 +8,8 @@ import src.models.weekly  # Ensure weekly models are registered with SQLAlchemy
 import src.models.journey  # Ensure journey models are registered with SQLAlchemy
 import src.models.cohort   # Ensure cohort models are registered with SQLAlchemy
 import src.models.formation  # Ensure formation models are registered with SQLAlchemy
+import src.models.api_cache  # Ensure API cache models are registered with SQLAlchemy
+import src.models.tracked_player  # Ensure TrackedPlayer model is registered with SQLAlchemy
 from src.routes.api import api_bp, require_api_key
 from src.routes.auth_routes import auth_bp
 from src.routes.journalist import journalist_bp

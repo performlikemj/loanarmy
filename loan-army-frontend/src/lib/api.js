@@ -284,6 +284,55 @@ export class APIService {
         return this.request(`/teams/${teamId}/loans${suffix}`)
     }
 
+    static async getTeamPlayers(teamId) {
+        return this.request(`/teams/${teamId}/players`)
+    }
+
+    static async adminTrackedPlayersList(params = {}) {
+        const search = new URLSearchParams()
+        for (const [key, value] of Object.entries(params)) {
+            if (value === undefined || value === null || value === '') continue
+            search.append(key, String(value))
+        }
+        const query = search.toString()
+        const suffix = query ? `?${query}` : ''
+        return this.request(`/admin/tracked-players${suffix}`, {}, { admin: true })
+    }
+
+    static async adminTrackedPlayerCreate(data) {
+        return this.request('/admin/tracked-players', {
+            method: 'POST',
+            body: JSON.stringify(data),
+        }, { admin: true })
+    }
+
+    static async adminTrackedPlayerUpdate(id, data) {
+        return this.request(`/admin/tracked-players/${id}`, {
+            method: 'PUT',
+            body: JSON.stringify(data),
+        }, { admin: true })
+    }
+
+    static async adminTrackedPlayerDelete(id) {
+        return this.request(`/admin/tracked-players/${id}`, {
+            method: 'DELETE',
+        }, { admin: true })
+    }
+
+    static async adminSeedTeamPlayers(data) {
+        return this.request('/admin/tracked-players/seed-team', {
+            method: 'POST',
+            body: JSON.stringify(data),
+        }, { admin: true })
+    }
+
+    static async adminRefreshTrackedPlayerStatuses(data = {}) {
+        return this.request('/admin/tracked-players/refresh-statuses', {
+            method: 'POST',
+            body: JSON.stringify(data),
+        }, { admin: true })
+    }
+
     static async getTeam(teamId) {
         return this.request(`/teams/${teamId}`)
     }
@@ -712,11 +761,6 @@ export class APIService {
     static async adminNewsletterBulkPublish(selection, publish = true, options = {}) {
         const payload = { publish: !!publish }
 
-        // Handle post_to_reddit option
-        if (options.postToReddit) {
-            payload.post_to_reddit = true
-        }
-
         if (selection && typeof selection === 'object' && !Array.isArray(selection)) {
             const filterParams = selection.filter_params || selection.filterParams
             if (filterParams) payload.filter_params = filterParams
@@ -740,35 +784,6 @@ export class APIService {
         }
         const body = JSON.stringify(payload)
         return this.request('/admin/newsletters/bulk-publish', { method: 'POST', body }, { admin: true })
-    }
-
-    // Reddit Integration API methods
-    static async adminRedditStatus() {
-        return this.request('/admin/reddit/status', {}, { admin: true })
-    }
-    static async adminTeamSubredditsList(params = {}) {
-        const searchParams = new URLSearchParams()
-        if (params.team_id) searchParams.set('team_id', params.team_id)
-        if (params.active_only) searchParams.set('active_only', 'true')
-        const query = searchParams.toString()
-        return this.request(`/admin/team-subreddits${query ? `?${query}` : ''}`, {}, { admin: true })
-    }
-    static async adminTeamSubredditCreate(payload) {
-        return this.request('/admin/team-subreddits', { method: 'POST', body: JSON.stringify(payload) }, { admin: true })
-    }
-    static async adminTeamSubredditUpdate(subredditId, payload) {
-        return this.request(`/admin/team-subreddits/${subredditId}`, { method: 'PUT', body: JSON.stringify(payload) }, { admin: true })
-    }
-    static async adminTeamSubredditDelete(subredditId) {
-        return this.request(`/admin/team-subreddits/${subredditId}`, { method: 'DELETE' }, { admin: true })
-    }
-    static async adminNewsletterRedditPosts(newsletterId) {
-        return this.request(`/admin/newsletters/${newsletterId}/reddit-posts`, {}, { admin: true })
-    }
-    static async adminPostNewsletterToReddit(newsletterId, options = {}) {
-        const payload = {}
-        if (options.subredditId) payload.subreddit_id = options.subredditId
-        return this.request(`/admin/newsletters/${newsletterId}/post-to-reddit`, { method: 'POST', body: JSON.stringify(payload) }, { admin: true })
     }
 
     static async adminNewsletterYoutubeLinksList(newsletterId) {
@@ -1539,6 +1554,13 @@ export class APIService {
         }, { admin: true })
     }
 
+    static async adminFullRebuild(data = {}) {
+        return this.request('/admin/academy/full-rebuild', {
+            method: 'POST',
+            body: JSON.stringify(data)
+        }, { admin: true })
+    }
+
     static async adminSyncCohortJourneys(cohortId) {
         return this.request(`/admin/cohorts/${cohortId}/sync-journeys`, {
             method: 'POST'
@@ -1603,5 +1625,14 @@ export class APIService {
 
     static async getGolSuggestions() {
         return this.request('/gol/suggestions')
+    }
+
+    // ==========================================================================
+    // Academy Network
+    // ==========================================================================
+
+    static async getAcademyNetwork(teamApiId, params = {}) {
+        const query = new URLSearchParams(params).toString()
+        return this.request(`/teams/${teamApiId}/academy-network${query ? '?' + query : ''}`)
     }
 }

@@ -123,7 +123,11 @@ def run_big6_seed(job_id, seasons=None, team_ids=None, league_ids=None):
             update_job(job_id, progress=idx,
                        current_player=f"Discovering {team_name} {league_name} {season}")
 
-            cohort = cohort_service.discover_cohort(team_id, league_id, season)
+            cohort = cohort_service.discover_cohort(
+                team_id, league_id, season,
+                fallback_team_name=team_name,
+                fallback_league_name=league_name
+            )
             cohort_ids.append(cohort.id)
 
         except Exception as e:

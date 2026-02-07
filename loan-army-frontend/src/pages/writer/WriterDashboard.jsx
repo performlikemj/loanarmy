@@ -253,7 +253,7 @@ export function WriterDashboard() {
                                 <div>
                                     <h4 className="text-sm font-medium text-gray-700 mb-2 flex items-center">
                                         <Building2 className="h-4 w-4 mr-1 text-blue-600" />
-                                        Parent Clubs (all loanees)
+                                        Parent Clubs (all academy players)
                                     </h4>
                                     <div className="flex flex-wrap gap-2">
                                         {teams.parent_club_assignments.map(assignment => (
@@ -270,7 +270,7 @@ export function WriterDashboard() {
                                 <div>
                                     <h4 className="text-sm font-medium text-gray-700 mb-2 flex items-center">
                                         <MapPin className="h-4 w-4 mr-1 text-green-600" />
-                                        Loan Destinations (players on loan there)
+                                        Current Clubs (players currently there)
                                     </h4>
                                     <div className="flex flex-wrap gap-2">
                                         {teams.loan_team_assignments.map(assignment => (

@@ -170,6 +170,16 @@ export function JourneyTimeline({ journeyData, loading, error }) {
                                                             {LEVEL_ICONS[level]} {level}
                                                         </Badge>
                                                     ))}
+                                                    {node.entryTypes?.includes('development') && (
+                                                        <Badge variant="secondary" className="text-xs bg-orange-50 text-orange-700 border-orange-300">
+                                                            Development
+                                                        </Badge>
+                                                    )}
+                                                    {node.entryTypes?.includes('integration') && (
+                                                        <Badge variant="secondary" className="text-xs bg-cyan-50 text-cyan-700 border-cyan-300">
+                                                            New Signing
+                                                        </Badge>
+                                                    )}
                                                 </div>
 
                                                 {/* Stats */}
@@ -273,6 +283,16 @@ export function JourneyTimeline({ journeyData, loading, error }) {
                                                             {LEVEL_ICONS[level]} {level}
                                                         </Badge>
                                                     ))}
+                                                    {stop.entry_types?.includes('development') && (
+                                                        <Badge variant="secondary" className="text-xs bg-orange-50 text-orange-700 border-orange-300">
+                                                            Development
+                                                        </Badge>
+                                                    )}
+                                                    {stop.entry_types?.includes('integration') && (
+                                                        <Badge variant="secondary" className="text-xs bg-cyan-50 text-cyan-700 border-cyan-300">
+                                                            New Signing
+                                                        </Badge>
+                                                    )}
                                                 </div>
 
                                                 <div className="flex gap-4 mt-2 text-sm">

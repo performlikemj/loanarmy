@@ -11,8 +11,8 @@ export function GolSuggestions({ onSelect }) {
       .then(data => setSuggestions(data.suggestions || []))
       .catch(() => setSuggestions([
         "Which Big 6 academy is producing the most first-team players?",
-        "Show me all players on loan from Arsenal",
-        "Who are the top-performing loan players this season?",
+        "Show me all academy players from Arsenal",
+        "Who are the top-performing academy players this season?",
         "Tell me about Chelsea's academy pipeline",
       ]))
   }, [])
@@ -22,7 +22,7 @@ export function GolSuggestions({ onSelect }) {
       <MessageCircle className="h-12 w-12 text-muted-foreground mb-4" />
       <h3 className="text-lg font-semibold mb-2">GOL Assistant</h3>
       <p className="text-sm text-muted-foreground mb-6 text-center">
-        Ask me about players, loans, academy pathways, and more
+        Ask me about players, academy pathways, career journeys, and more
       </p>
       <div className="grid gap-2 w-full max-w-sm">
         {suggestions.map((s, i) => (

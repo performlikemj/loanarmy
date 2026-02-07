@@ -379,7 +379,7 @@ export function PlayerPage() {
                                 </div>
                                 {/* Mini Progress Bar — career stops at a glance */}
                                 <MiniProgressBar />
-                                {/* Academy link — opens drawer to browse other academy loanees */}
+                                {/* Academy link — opens drawer to browse other academy players */}
                                 {profile?.parent_team_name && (
                                     <div className="mt-2">
                                         <button
@@ -461,7 +461,7 @@ export function PlayerPage() {
                                 {seasonStats?.clubs && seasonStats.clubs.length > 0 && (
                                     <Card>
                                         <CardHeader className="pb-2">
-                                            <CardTitle className="text-base">Current Loan</CardTitle>
+                                            <CardTitle className="text-base">Current Club</CardTitle>
                                         </CardHeader>
                                         <CardContent>
                                             <div className="flex items-center gap-3">
@@ -553,7 +553,7 @@ export function PlayerPage() {
                                         <Calendar className="h-4 w-4" />
                                         Stats by Club
                                     </CardTitle>
-                                    <CardDescription>Season breakdown across loan destinations</CardDescription>
+                                    <CardDescription>Season breakdown by club</CardDescription>
                                 </CardHeader>
                                 <CardContent>
                                     <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
@@ -965,7 +965,7 @@ export function PlayerPage() {
                 </div>
             </div>
 
-            {/* Academy Drawer — browse other academy loanees from the same parent club */}
+            {/* Academy Drawer — browse other academy players from the same parent club */}
             <Drawer open={drawerOpen} onOpenChange={setDrawerOpen}>
                 <DrawerContent>
                     <DrawerHeader className="border-b">

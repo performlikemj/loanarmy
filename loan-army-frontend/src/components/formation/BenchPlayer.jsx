@@ -1,3 +1,4 @@
+import { Link } from 'react-router-dom'
 import { Badge } from '@/components/ui/badge'
 import { Avatar, AvatarImage, AvatarFallback } from '@/components/ui/avatar'
 
@@ -26,7 +27,14 @@ export function BenchPlayer({ player }) {
         <AvatarFallback className="text-[10px]">{surname.slice(0, 2).toUpperCase()}</AvatarFallback>
       </Avatar>
       <div className="flex-1 min-w-0">
-        <p className="text-xs font-medium truncate">{name}</p>
+        <Link
+          to={`/players/${player.player_id || player.id}`}
+          className="text-xs font-medium truncate block hover:text-blue-600 hover:underline transition-colors"
+          draggable={false}
+          onClick={(e) => e.stopPropagation()}
+        >
+          {name}
+        </Link>
         {player.loan_team_name && (
           <p className="text-[10px] text-muted-foreground truncate">{player.loan_team_name}</p>
         )}

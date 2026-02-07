@@ -91,11 +91,20 @@ def can_writer_cover_player(user_id: int, player_id: int, team_id: int = None) -
     Returns:
         True if writer can cover this player
     """
-    # Find the player's loan record
+    # Find the player's loan record (check TrackedPlayer first, then LoanedPlayer)
+    from src.models.tracked_player import TrackedPlayer
+    tracked = TrackedPlayer.query.filter_by(player_api_id=player_id, is_active=True).first()
+    if tracked:
+        assignment = JournalistTeamAssignment.query.filter_by(
+            user_id=user_id, team_id=tracked.team_id
+        ).first()
+        if assignment:
+            return True
+
     loan = LoanedPlayer.query.filter_by(player_id=player_id).order_by(
         LoanedPlayer.updated_at.desc()
     ).first()
-    
+
     if not loan:
         # Player not found - fall back to team check if provided
         if team_id:
@@ -185,14 +194,26 @@ def get_writer_available_players(user_id: int) -> list:
     
     if not conditions:
         return []
-    
+
     players = LoanedPlayer.query.filter(
         LoanedPlayer.is_active == True,
         or_(*conditions)
     ).order_by(
         LoanedPlayer.player_name.asc()
     ).all()
-    
+
+    # Also include TrackedPlayer records for assigned parent clubs
+    from src.models.tracked_player import TrackedPlayer
+    if parent_team_ids:
+        tracked = TrackedPlayer.query.filter(
+            TrackedPlayer.is_active == True,
+            TrackedPlayer.team_id.in_(parent_team_ids),
+        ).all()
+        existing_ids = {p.player_id for p in players}
+        for tp in tracked:
+            if tp.player_api_id not in existing_ids:
+                players.append(tp)
+
     return players
 
 @journalist_bp.route('/journalists', methods=['GET'])

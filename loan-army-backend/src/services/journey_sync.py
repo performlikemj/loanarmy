@@ -6,17 +6,25 @@ complete journey records with academy, loan, and first team data.
 """
 
 import logging
+import re
 from datetime import datetime, timezone
 from typing import Optional, List, Dict, Any
 from sqlalchemy.exc import IntegrityError
 
-from src.models.league import db, TeamProfile
+from src.models.league import db, Team, TeamProfile
 from src.models.journey import (
     PlayerJourney, PlayerJourneyEntry, ClubLocation,
     LEVEL_PRIORITY, YOUTH_LEVELS
 )
 from src.api_football_client import APIFootballClient, is_new_loan_transfer, LOAN_RETURN_TYPES
 from src.utils.geocoding import get_team_coordinates
+from src.utils.academy_classifier import (
+    YOUTH_SUFFIXES as _YOUTH_SUFFIXES_RE,
+    INTERNATIONAL_PATTERNS as _INTERNATIONAL_PATTERNS,
+    is_international_competition,
+    is_national_team,
+    strip_youth_suffix,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -24,6 +32,9 @@ logger = logging.getLogger(__name__)
 class JourneySyncService:
     """Service for syncing player journey data from API-Football"""
     
+    # Delegate to shared utility (kept as class attr for backward compat)
+    YOUTH_SUFFIXES = _YOUTH_SUFFIXES_RE
+
     # Patterns to detect youth/academy levels
     LEVEL_PATTERNS = {
         'U18': ['u18', 'under 18', 'under-18', 'youth cup'],
@@ -43,12 +54,8 @@ class JourneySyncService:
         'community shield', 'supercopa', 'super cup',
     ]
     
-    # International competitions
-    INTERNATIONAL_PATTERNS = [
-        'world cup', 'euro', 'copa america', 'african cup', 'asian cup',
-        'gold cup', 'nations league', 'friendlies', 'qualification',
-        'u20 world', 'u17 world', 'olympic', 'toulon', 'maurice revello',
-    ]
+    # Delegate to shared utility
+    INTERNATIONAL_PATTERNS = _INTERNATIONAL_PATTERNS
     
     def __init__(self, api_client: Optional[APIFootballClient] = None):
         """Initialize with optional API client"""
@@ -138,7 +145,11 @@ class JourneySyncService:
 
             # Classify loan entries based on transfer history
             self._apply_loan_classification(all_entries, loan_timeline)
-            
+
+            # Reclassify youth entries as 'development' where the player
+            # already had first-team appearances at the same parent club
+            self._apply_development_classification(all_entries)
+
             # Update player info
             if player_info:
                 journey.player_name = player_info.get('name')
@@ -298,8 +309,7 @@ class JourneySyncService:
     
     def _is_international(self, league_name: str) -> bool:
         """Check if league is international"""
-        league_lower = league_name.lower()
-        return any(pattern in league_lower for pattern in self.INTERNATIONAL_PATTERNS)
+        return is_international_competition(league_name)
 
     def _is_official_competition(self, stat: Dict) -> bool:
         """
@@ -484,6 +494,59 @@ class JourneySyncService:
                     entry.transfer_date = loan.get('start_date')
                     break
 
+    def _apply_development_classification(self, entries: list):
+        """
+        Reclassify youth 'academy' entries based on the player's career context.
+
+        Three youth categories:
+        - 'academy': genuine academy product with no prior first-team
+          experience anywhere (e.g. Rashford at Man Utd U19).
+        - 'development': player had first-team apps at the SAME parent club
+          in a prior season — senior player sent to youth for game time.
+          Same-season entries (breakthrough year) stay as 'academy'.
+        - 'integration': player had first-team apps at a DIFFERENT club
+          before this youth entry — bought player being integrated
+          (e.g. Diallo playing Man Utd U23 after Atalanta first team).
+        """
+        # Build lookup: parent_base_name -> earliest first-team season
+        first_team_debut_by_club = {}
+        for entry in entries:
+            if entry.level == 'First Team' and not entry.is_international:
+                base_name = self._strip_youth_suffix(entry.club_name)
+                existing = first_team_debut_by_club.get(base_name)
+                if existing is None or entry.season < existing:
+                    first_team_debut_by_club[base_name] = entry.season
+
+        if not first_team_debut_by_club:
+            return
+
+        for entry in entries:
+            if entry.entry_type != 'academy' or entry.is_international:
+                continue
+
+            parent_name = self._strip_youth_suffix(entry.club_name)
+            same_club_debut = first_team_debut_by_club.get(parent_name)
+
+            # Development: same parent club had first-team in a prior season
+            if same_club_debut is not None and entry.season > same_club_debut:
+                entry.entry_type = 'development'
+                logger.debug(
+                    f"Reclassified {entry.club_name} season {entry.season} as "
+                    f"development (first-team debut at {parent_name} in {same_club_debut})"
+                )
+                continue
+
+            # Integration: first-team at a DIFFERENT club before or during
+            # this youth season (player was bought with senior experience)
+            for club_name, debut in first_team_debut_by_club.items():
+                if club_name != parent_name and debut <= entry.season:
+                    entry.entry_type = 'integration'
+                    logger.debug(
+                        f"Reclassified {entry.club_name} season {entry.season} as "
+                        f"integration (first-team at {club_name} in {debut})"
+                    )
+                    break
+
     def _update_journey_aggregates(self, journey: PlayerJourney):
         """Update aggregate stats on the journey record"""
         entries = PlayerJourneyEntry.query.filter_by(journey_id=journey.id).all()
@@ -498,12 +561,35 @@ class JourneySyncService:
         journey.origin_year = earliest.season
         
         # Find current club: latest season, highest priority, most recent transfer
-        latest_season = max(e.season for e in entries)
-        latest_entries = [e for e in entries if e.season == latest_season]
-        current = max(latest_entries, key=lambda e: (e.sort_priority, e.transfer_date or ''))
-        journey.current_club_api_id = current.club_api_id
-        journey.current_club_name = current.club_name
-        journey.current_level = current.level
+        # Exclude international entries — call-ups are not club moves
+        # Use multi-signal filter: flag, entry_type, level text, and club name
+        def _is_domestic(e):
+            if e.is_international:
+                return False
+            if e.entry_type == 'international':
+                return False
+            if 'International' in (e.level or ''):
+                return False
+            if is_national_team(e.club_name):
+                return False
+            return True
+
+        domestic_entries = [e for e in entries if _is_domestic(e)]
+        if domestic_entries:
+            latest_season = max(e.season for e in domestic_entries)
+            latest_entries = [e for e in domestic_entries if e.season == latest_season]
+            current = max(latest_entries, key=lambda e: (e.sort_priority, e.transfer_date or ''))
+            journey.current_club_api_id = current.club_api_id
+            journey.current_club_name = current.club_name
+            journey.current_level = current.level
+        else:
+            # Only international entries exist — use them as fallback
+            latest_season = max(e.season for e in entries)
+            latest_entries = [e for e in entries if e.season == latest_season]
+            current = max(latest_entries, key=lambda e: (e.sort_priority, e.transfer_date or ''))
+            journey.current_club_api_id = current.club_api_id
+            journey.current_club_name = current.club_name
+            journey.current_level = current.level
         
         # Find first team debut
         first_team_entries = [e for e in entries if e.level == 'First Team' and not e.is_international]
@@ -531,6 +617,127 @@ class JourneySyncService:
         )
         journey.total_goals = sum(e.goals for e in entries)
         journey.total_assists = sum(e.assists for e in entries)
+
+        # Compute academy connections from youth entries
+        self._compute_academy_club_ids(journey, entries)
+
+    def _strip_youth_suffix(self, club_name: str) -> str:
+        """Strip youth team suffix to get parent club base name."""
+        return strip_youth_suffix(club_name)
+
+    def _compute_academy_club_ids(self, journey: PlayerJourney, entries: list | None = None):
+        """
+        Derive academy parent club IDs from youth journey entries.
+
+        Algorithm:
+        1. Collect all youth entries (is_youth=True, excluding internationals)
+        2. Strip youth suffix from club name to get parent base name
+        3. Resolve parent club API ID:
+           - First: check non-youth entries in same journey for matching club name
+           - Fallback: query TeamProfile for matching name
+        4. Deduplicate and store as JSON array
+        """
+        if entries is None:
+            entries = PlayerJourneyEntry.query.filter_by(journey_id=journey.id).all()
+
+        youth_entries = [e for e in entries if e.is_youth and not e.is_international]
+        if not youth_entries:
+            journey.academy_club_ids = []
+            return
+
+        # Build lookup: base_name -> api_id from non-youth, non-international entries
+        senior_name_to_id = {}
+        for e in entries:
+            if not e.is_youth and not e.is_international:
+                senior_name_to_id[e.club_name] = e.club_api_id
+
+        academy_ids = set()
+        unresolved = []
+
+        for entry in youth_entries:
+            base_name = self._strip_youth_suffix(entry.club_name)
+
+            # Try matching a senior entry first
+            if base_name in senior_name_to_id:
+                academy_ids.add(senior_name_to_id[base_name])
+                continue
+
+            # Fallback 1: query TeamProfile
+            profile = TeamProfile.query.filter(
+                TeamProfile.name == base_name
+            ).first()
+            if profile:
+                academy_ids.add(profile.team_id)
+                continue
+
+            # Fallback 2: query Team table (broader coverage)
+            team = Team.query.filter(Team.name == base_name).first()
+            if team:
+                academy_ids.add(team.team_id)
+                continue
+
+            unresolved.append(base_name)
+
+        if unresolved:
+            logger.warning(
+                f"Could not resolve academy parent club for player "
+                f"{journey.player_api_id}: {set(unresolved)}"
+            )
+
+        journey.academy_club_ids = sorted(academy_ids)
+
+        # Auto-upsert TrackedPlayer rows for each academy connection
+        self._upsert_tracked_players(journey, academy_ids)
+
+    def _upsert_tracked_players(self, journey: PlayerJourney, academy_ids: set):
+        """Create or update TrackedPlayer rows for discovered academy connections."""
+        if not academy_ids:
+            return
+
+        from src.models.tracked_player import TrackedPlayer
+        from src.utils.academy_classifier import derive_player_status
+
+        for academy_api_id in academy_ids:
+            team = Team.query.filter_by(team_id=academy_api_id, is_active=True)\
+                .order_by(Team.season.desc()).first()
+            if not team:
+                continue
+
+            existing = TrackedPlayer.query.filter_by(
+                player_api_id=journey.player_api_id,
+                team_id=team.id,
+            ).first()
+
+            status, loan_club_api_id, loan_club_name = derive_player_status(
+                current_club_api_id=journey.current_club_api_id,
+                current_club_name=journey.current_club_name,
+                current_level=journey.current_level,
+                parent_api_id=academy_api_id,
+                parent_club_name=team.name,
+            )
+
+            if not existing:
+                tp = TrackedPlayer(
+                    player_api_id=journey.player_api_id,
+                    player_name=journey.player_name or f'Player {journey.player_api_id}',
+                    photo_url=journey.player_photo,
+                    nationality=journey.nationality,
+                    birth_date=journey.birth_date,
+                    team_id=team.id,
+                    journey_id=journey.id,
+                    data_source='journey-sync',
+                    data_depth='full_stats',
+                    status=status,
+                    loan_club_api_id=loan_club_api_id,
+                    loan_club_name=loan_club_name,
+                )
+                db.session.add(tp)
+            else:
+                # Update status and journey link if stale
+                existing.journey_id = journey.id
+                existing.status = status
+                existing.loan_club_api_id = loan_club_api_id
+                existing.loan_club_name = loan_club_name
 
     def _auto_geocode_clubs(self, journey: PlayerJourney):
         """Create ClubLocation rows for clubs that don't have one yet.

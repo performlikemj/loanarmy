@@ -1,7 +1,8 @@
+import { Link } from 'react-router-dom'
 import { Avatar, AvatarImage, AvatarFallback } from '@/components/ui/avatar'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
-import { X } from 'lucide-react'
+import { X, ExternalLink } from 'lucide-react'
 
 export function PlayerStatsPopover({ player, slotLabel, onClose, onRemove }) {
   if (!player) return null
@@ -33,7 +34,7 @@ export function PlayerStatsPopover({ player, slotLabel, onClose, onRemove }) {
           <div className="flex-1 min-w-0">
             <p className="font-bold text-white text-sm truncate">{name}</p>
             {player.loan_team_name && (
-              <p className="text-green-100 text-xs truncate">On loan at {player.loan_team_name}</p>
+              <p className="text-green-100 text-xs truncate">Currently at {player.loan_team_name}</p>
             )}
             <div className="flex items-center gap-1.5 mt-1">
               {player.position && (
@@ -70,7 +71,14 @@ export function PlayerStatsPopover({ player, slotLabel, onClose, onRemove }) {
         </div>
 
         {/* Actions */}
-        <div className="px-4 pb-4">
+        <div className="px-4 pb-4 space-y-2">
+          {(player.player_id || player.id) && (
+            <Button variant="default" size="sm" className="w-full text-xs" asChild>
+              <Link to={`/players/${player.player_id || player.id}`}>
+                View Profile <ExternalLink className="h-3 w-3 ml-1" />
+              </Link>
+            </Button>
+          )}
           <Button variant="outline" size="sm" className="w-full text-xs" onClick={onRemove}>
             Remove from pitch
           </Button>

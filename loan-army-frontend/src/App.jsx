@@ -84,16 +84,13 @@ import { AdminLayout } from '@/components/layouts/AdminLayout'
 import { SponsorSidebar, SponsorStrip } from '@/components/SponsorSidebar'
 import { AdminDashboard } from '@/pages/admin/AdminDashboard'
 import { AdminNewsletters } from '@/pages/admin/AdminNewsletters'
-import { AdminLoans } from '@/pages/admin/AdminLoans'
 import { AdminPlayers } from '@/pages/admin/AdminPlayers'
 import { AdminSettings } from '@/pages/admin/AdminSettings'
 import { AdminUsers } from '@/pages/admin/AdminUsers'
 import { AdminTeams } from '@/pages/admin/AdminTeams'
 import { AdminSponsors } from '@/pages/admin/AdminSponsors'
-import { AdminReddit } from '@/pages/admin/AdminReddit'
 import { AdminCuration } from '@/pages/admin/AdminCuration'
 import { AdminAcademy } from '@/pages/admin/AdminAcademy'
-import { AdminManualPlayers } from '@/pages/admin/AdminManualPlayers'
 import { AdminCohorts } from '@/pages/admin/AdminCohorts'
 import { AdminFormation } from '@/pages/admin/AdminFormation'
 import { PublicFormationBuilder } from '@/pages/PublicFormationBuilder'
@@ -109,6 +106,7 @@ import { WriteupEditor } from '@/pages/writer/WriteupEditor'
 import { ContributorManager } from '@/pages/writer/ContributorManager'
 import { WriteupPage } from '@/pages/WriteupPage'
 import { PlayerPage } from '@/pages/PlayerPage'
+import { TeamDetailPage } from '@/pages/TeamDetailPage'
 import { JournalistProfile } from '@/pages/JournalistProfile'
 import { JournalistNewsletterView } from '@/components/JournalistNewsletterView'
 import {
@@ -309,7 +307,7 @@ function HistoricalNewslettersPage() {
             Historical Newsletters
           </h1>
           <p className="text-lg text-gray-600">
-            Generate newsletters for any date. Select teams and a date to see loan activities for that week.
+            Generate newsletters for any date. Select teams and a date to see academy player activities for that week.
           </p>
           {currentSeason !== null && (
             <p className="text-sm text-gray-500">Latest season detected: {currentSeason}–{String(currentSeason + 1).slice(-2)}</p>
@@ -3605,7 +3603,7 @@ function AdminPage({ defaultTab = 'newsletters', includeSandbox = true, forcedTa
                         )}
                       </CardTitle>
                       <CardDescription>
-                        Generate weekly newsletters for selected teams or all teams with active loans
+                        Generate weekly newsletters for selected teams or all tracked teams
                       </CardDescription>
                     </CardHeader>
                     <CardContent className="space-y-4">
@@ -4157,7 +4155,7 @@ function AdminPage({ defaultTab = 'newsletters', includeSandbox = true, forcedTa
                       <DialogHeader>
                         <DialogTitle>Confirm Generate for All Teams</DialogTitle>
                         <DialogDescription>
-                          This will generate newsletters for ALL teams with active loans. This process cannot be cancelled once started.
+                          This will generate newsletters for ALL tracked teams. This process cannot be cancelled once started.
                         </DialogDescription>
                       </DialogHeader>
                       <div className="space-y-4 py-4">
@@ -7140,7 +7138,7 @@ function Navigation() {
   const navItems = useMemo(() => {
     const items = [
       { path: '/', label: 'Home', icon: Home },
-      { path: '/teams', label: 'Browse Teams', icon: Users },
+      { path: '/teams', label: 'Teams', icon: Users },
       { path: '/dream-team', label: 'Dream XI', icon: Trophy },
       { path: '/newsletters', label: 'Newsletters', icon: FileText },
       { path: '/journalists', label: 'Journalists', icon: UserPlus },
@@ -7450,7 +7448,7 @@ function HomePage() {
               Follow Every Academy Prospect
             </h1>
             <p className="text-lg text-gray-500 max-w-2xl mx-auto mb-8">
-              Career journeys, loan spells, and stats for academy players from Europe's top clubs — plus AI-powered newsletters.
+              Career journeys, stats, and insights for academy players from Europe's top clubs — plus AI-powered newsletters.
             </p>
 
             {/* Primary CTA: Team Search */}
@@ -7516,7 +7514,7 @@ function HomePage() {
               <div className="bg-white rounded-xl border border-gray-100 p-6">
                 <p className="text-sm text-gray-500 mb-1">Players Tracked</p>
                 <p className="text-3xl font-bold text-gray-900">{stats.total_active_loans}</p>
-                <p className="text-xs text-gray-400 mt-1">Academy prospects on loan</p>
+                <p className="text-xs text-gray-400 mt-1">Academy prospects tracked</p>
               </div>
               <div className="bg-white rounded-xl border border-gray-100 p-6">
                 <p className="text-sm text-gray-500 mb-1">Newsletters</p>
@@ -7533,7 +7531,7 @@ function HomePage() {
                 <Trophy className="h-5 w-5 text-gray-400 mt-0.5 shrink-0" />
                 <div>
                   <h3 className="font-semibold text-gray-900 group-hover:text-blue-600 transition-colors mb-1">Dream XI Builder</h3>
-                  <p className="text-sm text-gray-500">Build your ideal lineup from academy players on loan</p>
+                  <p className="text-sm text-gray-500">Build your ideal lineup from academy prospects</p>
                 </div>
               </Link>
               <Link to="/academy" className="group flex items-start gap-4 p-4 rounded-xl hover:bg-gray-50 transition-colors">
@@ -7547,7 +7545,7 @@ function HomePage() {
                 <Globe className="h-5 w-5 text-gray-400 mt-0.5 shrink-0" />
                 <div>
                   <h3 className="font-semibold text-gray-900 group-hover:text-blue-600 transition-colors mb-1">Player Journeys</h3>
-                  <p className="text-sm text-gray-500">See where academy players have traveled on loan</p>
+                  <p className="text-sm text-gray-500">Follow the journey of academy players across clubs</p>
                 </div>
               </Link>
               <Link to="/newsletters" className="group flex items-start gap-4 p-4 rounded-xl hover:bg-gray-50 transition-colors">
@@ -7693,7 +7691,7 @@ function SubscribePage() {
             Subscribe to Team Updates
           </h1>
           <p className="text-lg text-gray-600">
-            Get AI-powered newsletters about your favorite teams' loaned players
+            Get AI-powered newsletters about your favorite teams' academy players
           </p>
         </div>
 
@@ -7761,7 +7759,7 @@ function SubscribePage() {
                                 <div className="flex items-center justify-between">
                                   <div>
                                     <div className="font-medium">{team.name}</div>
-                                    <div className="text-sm text-gray-500">{team.current_loaned_out_count} active loans</div>
+                                    <div className="text-sm text-gray-500">{team.current_loaned_out_count} players tracked</div>
                                   </div>
                                   {selectedTeams.includes(team.id) && (<CheckCircle className="h-5 w-5 text-blue-600" />)}
                                 </div>
@@ -7808,11 +7806,6 @@ function TeamsPage() {
   const [teams, setTeams] = useState([])
   const [loading, setLoading] = useState(true)
   const [filter, setFilter] = useState('all')
-  const [expandedTeamId, setExpandedTeamId] = useState(null)
-  const [teamLoans, setTeamLoans] = useState({})
-  const [loadingLoans, setLoadingLoans] = useState({})
-  const [trackingRequestState, setTrackingRequestState] = useState({ open: false, team: null, reason: '', email: '' })
-  const [submittingTrackingRequest, setSubmittingTrackingRequest] = useState(false)
   const [message, setMessage] = useState(null)
   const [teamSearch, setTeamSearch] = useState('')
 
@@ -7842,60 +7835,6 @@ function TeamsPage() {
 
     loadTeams()
   }, [filter])
-
-  const toggleExpand = async (teamId) => {
-    const isExpanding = expandedTeamId !== teamId
-    setExpandedTeamId(prev => (prev === teamId ? null : teamId))
-
-    if (isExpanding && !teamLoans[teamId]) {
-      setLoadingLoans(prev => ({ ...prev, [teamId]: true }))
-      try {
-        const teamMeta = teams.find((row) => row.id === teamId)
-        const params = {}
-        if (teamMeta && typeof teamMeta.season !== 'undefined' && teamMeta.season !== null) {
-          params.season = teamMeta.season
-        }
-        const loans = await APIService.getTeamLoans(teamId, { ...params, include_season_context: 'true', academy_only: 'true' })
-        setTeamLoans(prev => ({ ...prev, [teamId]: loans }))
-      } catch (error) {
-        console.error('Failed to load loans for team', teamId, error)
-        setTeamLoans(prev => ({ ...prev, [teamId]: [] }))
-      } finally {
-        setLoadingLoans(prev => ({ ...prev, [teamId]: false }))
-      }
-    }
-  }
-
-  // Tracking Request handlers
-  const openRequestTracking = (team) => {
-    setTrackingRequestState({ open: true, team, reason: '', email: '' })
-  }
-  const closeRequestTracking = () => setTrackingRequestState(prev => ({ ...prev, open: false }))
-  const submitTrackingRequest = async () => {
-    if (!trackingRequestState.team) return
-    setSubmittingTrackingRequest(true)
-    try {
-      await APIService.submitTrackingRequest(trackingRequestState.team.id, {
-        reason: trackingRequestState.reason || undefined,
-        email: trackingRequestState.email || undefined,
-      })
-      setMessage({ type: 'success', text: `Tracking request submitted for ${trackingRequestState.team.name}. We'll review it soon!` })
-      closeRequestTracking()
-    } catch (error) {
-      console.error('Tracking request failed', error)
-      if (error.message?.includes('already pending')) {
-        setMessage({ type: 'info', text: 'A tracking request for this team is already pending.' })
-        closeRequestTracking()
-      } else if (error.message?.includes('already being tracked')) {
-        setMessage({ type: 'info', text: 'Good news - this team is already being tracked!' })
-        closeRequestTracking()
-      } else {
-        setMessage({ type: 'error', text: 'Failed to submit tracking request. Please try again.' })
-      }
-    } finally {
-      setSubmittingTrackingRequest(false)
-    }
-  }
 
   const handleBulkSubscribe = async () => {
     if (!email.trim() || selectedTeams.length === 0) {
@@ -7942,12 +7881,10 @@ function TeamsPage() {
 
   // Compact team card renderer
   const renderTeamCard = (team) => (
-    <button
+    <Link
       key={team.id}
-      onClick={() => toggleExpand(team.id)}
-      className={`flex items-center gap-3 p-3 rounded-lg border bg-white text-left transition-all w-full ${
-        expandedTeamId === team.id ? 'ring-1 ring-blue-200 border-blue-200' : 'border-gray-200 hover:border-gray-300 hover:shadow-sm'
-      }`}
+      to={`/teams/${team.id}`}
+      className="flex items-center gap-3 p-3 rounded-lg border bg-white text-left transition-all w-full border-gray-200 hover:border-gray-300 hover:shadow-sm"
     >
       <Avatar className="h-9 w-9 shrink-0">
         {team.logo ? <AvatarImage src={team.logo} alt={team.name} /> : null}
@@ -7961,82 +7898,15 @@ function TeamsPage() {
       </div>
       {team.is_tracked !== false && (
         <span className="text-xs text-gray-400 tabular-nums shrink-0">
-          {team.current_loaned_out_count || 0}
+          {team.tracked_player_count ?? team.current_loaned_out_count ?? 0}
         </span>
       )}
       {team.is_tracked === false && (
         <span className="text-xs text-amber-500 shrink-0">untracked</span>
       )}
-    </button>
+      <ChevronRight className="h-3.5 w-3.5 text-gray-300 shrink-0" />
+    </Link>
   )
-
-  // Expanded loan list
-  const renderExpandedLoans = (team) => {
-    if (expandedTeamId !== team.id) return null
-    return (
-      <div className="col-span-full bg-white border border-gray-200 rounded-lg p-4 space-y-2">
-        <div className="flex items-center justify-between mb-2">
-          <div className="flex items-center gap-2">
-            <Avatar className="h-7 w-7">
-              {team.logo ? <AvatarImage src={team.logo} alt={team.name} /> : null}
-              <AvatarFallback className="text-xs bg-gray-100">
-                {team.name.split(' ').map(n => n[0]).join('').slice(0, 2).toUpperCase()}
-              </AvatarFallback>
-            </Avatar>
-            <span className="font-medium text-sm">{team.name}</span>
-          </div>
-          {team.is_tracked === false && (
-            <Button size="sm" variant="outline" className="text-xs h-7" onClick={() => openRequestTracking(team)}>
-              Request Tracking
-            </Button>
-          )}
-        </div>
-        {loadingLoans[team.id] ? (
-          <div className="flex items-center justify-center py-6">
-            <Loader2 className="h-4 w-4 animate-spin text-gray-400 mr-2" />
-            <span className="text-sm text-gray-500">Loading loans...</span>
-          </div>
-        ) : (teamLoans[team.id] || []).length === 0 ? (
-          <p className="text-sm text-gray-500 text-center py-4">No loans found.</p>
-        ) : (
-          <div className="space-y-1">
-            {(teamLoans[team.id] || []).map((loan) => (
-              <Link
-                key={loan.id}
-                to={`/players/${loan.player_id}`}
-                className="flex items-center gap-3 p-2 rounded-md hover:bg-gray-50 transition-colors group"
-              >
-                <Avatar className="h-7 w-7 shrink-0">
-                  {loan.player_photo ? <AvatarImage src={loan.player_photo} alt={loan.player_name} /> : null}
-                  <AvatarFallback className="text-xs bg-blue-50">
-                    {loan.player_name.split(' ').map(n => n[0]).join('').slice(0, 2).toUpperCase()}
-                  </AvatarFallback>
-                </Avatar>
-                <div className="flex-1 min-w-0">
-                  <span className="text-sm font-medium text-gray-900 group-hover:text-blue-600 transition-colors">{loan.player_name}</span>
-                  <span className="text-xs text-gray-400 ml-2">{loan.loan_team_name ? `→ ${loan.loan_team_name}` : ''}</span>
-                </div>
-                <div className="flex items-center gap-2 text-xs text-gray-500 shrink-0">
-                  {loan.appearances != null && <span>{loan.appearances} apps</span>}
-                  {(loan.position !== 'G' && loan.position !== 'Goalkeeper') ? (
-                    <>
-                      {loan.goals != null && loan.goals > 0 && <span className="text-green-600">{loan.goals}G</span>}
-                      {loan.assists != null && loan.assists > 0 && <span className="text-blue-600">{loan.assists}A</span>}
-                    </>
-                  ) : (
-                    <>
-                      {loan.clean_sheets != null && loan.clean_sheets > 0 && <span className="text-emerald-600">{loan.clean_sheets} CS</span>}
-                    </>
-                  )}
-                </div>
-                <ChevronRight className="h-3.5 w-3.5 text-gray-300 group-hover:text-blue-400 shrink-0" />
-              </Link>
-            ))}
-          </div>
-        )}
-      </div>
-    )
-  }
 
   return (
     <div className="max-w-[1400px] mx-auto py-6 sm:px-6 lg:px-8">
@@ -8058,7 +7928,7 @@ function TeamsPage() {
                   </SelectTrigger>
                   <SelectContent>
                     <SelectItem value="all">All Teams</SelectItem>
-                    <SelectItem value="with_loans">With Loans</SelectItem>
+                    <SelectItem value="with_loans">With Players</SelectItem>
                   </SelectContent>
                 </Select>
               </div>
@@ -8108,15 +7978,7 @@ function TeamsPage() {
                 </Button>
               </div>
               <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-2">
-                {filteredTeams.map((team) => {
-                  const expanded = renderExpandedLoans(team)
-                  return expanded ? (
-                    <Fragment key={team.id}>
-                      {renderTeamCard(team)}
-                      {expanded}
-                    </Fragment>
-                  ) : renderTeamCard(team)
-                })}
+                {filteredTeams.map((team) => renderTeamCard(team))}
               </div>
             </div>
           ) : (
@@ -8129,15 +7991,7 @@ function TeamsPage() {
                     <span className="text-xs text-gray-400">{leagueTeams.length}</span>
                   </div>
                   <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-2">
-                    {leagueTeams.map((team) => {
-                      const expanded = renderExpandedLoans(team)
-                      return expanded ? (
-                        <Fragment key={team.id}>
-                          {renderTeamCard(team)}
-                          {expanded}
-                        </Fragment>
-                      ) : renderTeamCard(team)
-                    })}
+                    {leagueTeams.map((team) => renderTeamCard(team))}
                   </div>
                 </div>
               ))}
@@ -8185,72 +8039,6 @@ function TeamsPage() {
             </DialogContent>
           </Dialog>
 
-          {/* Tracking Request Dialog */}
-          <Dialog open={trackingRequestState.open} onOpenChange={(open) => !open && closeRequestTracking()}>
-            <DialogContent className="sm:max-w-md">
-              <DialogHeader>
-                <DialogTitle className="flex items-center gap-2">
-                  <TrendingUp className="h-5 w-5 text-blue-600" />
-                  Request Team Tracking
-                </DialogTitle>
-                <DialogDescription>
-                  {trackingRequestState.team && (
-                    <span>Request to track loan players for <strong>{trackingRequestState.team.name}</strong></span>
-                  )}
-                </DialogDescription>
-              </DialogHeader>
-              <div className="space-y-4 py-4">
-                <div className="flex items-center gap-3 p-3 bg-muted/50 rounded-lg">
-                  {trackingRequestState.team?.logo && (
-                    <Avatar className="h-12 w-12">
-                      <AvatarImage src={trackingRequestState.team.logo} alt={trackingRequestState.team.name} />
-                      <AvatarFallback className="bg-gray-200 text-xs">
-                        {trackingRequestState.team?.name?.split(' ').map(n => n[0]).join('').slice(0, 2).toUpperCase()}
-                      </AvatarFallback>
-                    </Avatar>
-                  )}
-                  <div>
-                    <p className="font-medium">{trackingRequestState.team?.name}</p>
-                    <p className="text-sm text-muted-foreground">{trackingRequestState.team?.league_name || trackingRequestState.team?.country}</p>
-                  </div>
-                </div>
-                <div className="space-y-2">
-                  <Label htmlFor="tracking-reason">Why are you interested in this team? (optional)</Label>
-                  <Textarea
-                    id="tracking-reason"
-                    placeholder="e.g., I'm a fan of this club and want to follow their loan players..."
-                    value={trackingRequestState.reason}
-                    onChange={(e) => setTrackingRequestState(prev => ({ ...prev, reason: e.target.value }))}
-                    rows={3}
-                  />
-                </div>
-                <div className="space-y-2">
-                  <Label htmlFor="tracking-email">Your email (optional)</Label>
-                  <Input
-                    id="tracking-email"
-                    type="email"
-                    placeholder="you@example.com"
-                    value={trackingRequestState.email}
-                    onChange={(e) => setTrackingRequestState(prev => ({ ...prev, email: e.target.value }))}
-                  />
-                  <p className="text-xs text-muted-foreground">We'll notify you when we start tracking this team.</p>
-                </div>
-              </div>
-              <DialogFooter className="gap-2 sm:gap-0">
-                <Button variant="outline" onClick={closeRequestTracking}>Cancel</Button>
-                <Button onClick={submitTrackingRequest} disabled={submittingTrackingRequest}>
-                  {submittingTrackingRequest ? (
-                    <>
-                      <Loader2 className="h-4 w-4 mr-2 animate-spin" />
-                      Submitting...
-                    </>
-                  ) : (
-                    'Submit Request'
-                  )}
-                </Button>
-              </DialogFooter>
-            </DialogContent>
-          </Dialog>
         </div>
 
         {/* Sponsor Sidebar - visible on larger screens */}
@@ -8868,7 +8656,7 @@ function NewslettersPage() {
               Published Newsletters
             </h1>
             <p className="text-lg text-gray-600">
-              Insights about European team loan activities
+              Insights about European academy prospects
             </p>
             {latestSeason !== null && (
               <p className="text-sm text-gray-500">
@@ -10012,7 +9800,7 @@ function SettingsPage() {
         id,
         name: team.name || `Team #${id}`,
         league: team.league_name || team.league || null,
-        loans: team.current_loaned_out_count,
+        loans: team.tracked_player_count ?? team.current_loaned_out_count,
       }
     })
   }, [selectedTeamIds, subscriptions, teams])
@@ -10573,7 +10361,7 @@ function SettingsPage() {
                             <div>
                               <div className="font-semibold text-gray-900">{team.name}</div>
                               <div className="text-xs text-gray-500">
-                                {[team.league, team.loans != null ? `${team.loans} active loans` : null]
+                                {[team.league, team.loans != null ? `${team.loans} players tracked` : null]
                                   .filter(Boolean)
                                   .join(' · ')}
                               </div>
@@ -10836,13 +10624,13 @@ function StatsPage() {
           <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
             <Card>
               <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
-                <CardTitle className="text-sm font-medium">Clubs with Active Loans</CardTitle>
+                <CardTitle className="text-sm font-medium">Clubs Tracked</CardTitle>
                 <Users className="h-4 w-4 text-muted-foreground" />
               </CardHeader>
               <CardContent>
                 <div className="text-2xl font-bold">{stats.teams_with_loans}</div>
                 <p className="text-xs text-muted-foreground">
-                  Currently tracking loanees
+                  Academies currently tracked
                 </p>
               </CardContent>
             </Card>
@@ -10862,13 +10650,13 @@ function StatsPage() {
 
             <Card>
               <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
-                <CardTitle className="text-sm font-medium">Active Loans</CardTitle>
+                <CardTitle className="text-sm font-medium">Tracked Players</CardTitle>
                 <Globe className="h-4 w-4 text-muted-foreground" />
               </CardHeader>
               <CardContent>
                 <div className="text-2xl font-bold">{stats.total_active_loans}</div>
                 <p className="text-xs text-muted-foreground">
-                  Currently tracked
+                  Academy prospects tracked
                 </p>
               </CardContent>
             </Card>
@@ -10963,6 +10751,7 @@ function AppRoutes() {
     <Routes>
       <Route path="/" element={<HomePage />} />
       <Route path="/teams" element={<TeamsPage />} />
+      <Route path="/teams/:teamId" element={<TeamDetailPage />} />
       <Route path="/dream-team" element={<PublicFormationBuilder />} />
       <Route path="/newsletters" element={<NewslettersPage />} />
       <Route path="/newsletters/:newsletterId" element={<NewslettersPage />} />
@@ -10992,13 +10781,10 @@ function AppRoutes() {
         <Route path="dashboard" element={<AdminDashboard />} />
         <Route path="newsletters" element={<AdminNewsletters />} />
         <Route path="users" element={<AdminUsers />} />
-        <Route path="manual-players" element={<AdminManualPlayers />} />
-        <Route path="loans" element={<AdminLoans />} />
         <Route path="players" element={<AdminPlayers />} />
         <Route path="teams" element={<AdminTeams />} />
         <Route path="teams/:teamId/formation" element={<AdminFormation />} />
         <Route path="sponsors" element={<AdminSponsors />} />
-        <Route path="reddit" element={<AdminReddit />} />
         <Route path="curation" element={<AdminCuration />} />
         <Route path="academy" element={<AdminAcademy />} />
         <Route path="cohorts" element={<AdminCohorts />} />

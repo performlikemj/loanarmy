@@ -285,11 +285,86 @@ class APIFootballClient:
             logger.error(f"❌ API handshake failed: {e}")
             raise
     
+    # ------------------------------------------------------------------
+    # 🗄️ Persistent DB cache + quota helpers
+    # ------------------------------------------------------------------
+
+    # Endpoints that must NEVER be cached
+    _NO_CACHE_ENDPOINTS = frozenset({"status"})
+
+    # Completed-match fixture statuses (immutable data)
+    _COMPLETED_STATUSES = frozenset({"FT", "AET", "PEN"})
+
+    # 10-year TTL used for immutable data (effectively "never expires")
+    _IMMUTABLE_TTL = 10 * 365 * 24 * 3600  # ~10 years in seconds
+
+    def _get_ttl_seconds(self, endpoint: str, params: Dict[str, Any] | None, response: Dict[str, Any]) -> int:
+        """Determine cache TTL in seconds based on endpoint and response content."""
+
+        # --- Fixture sub-endpoints (fixtures/players, fixtures/lineups, fixtures/events, etc.) ---
+        if endpoint.startswith("fixtures/"):
+            items = response.get("response", [])
+            # Sub-endpoints don't always nest fixture.status, but if results
+            # were returned for a specific fixture id the data is immutable
+            if items:
+                return self._IMMUTABLE_TTL
+            return 6 * 3600
+
+        # --- Bare "fixtures" endpoint ---
+        if endpoint == "fixtures":
+            items = response.get("response", [])
+            if items and all(self._fixture_is_completed(item) for item in items):
+                return self._IMMUTABLE_TTL
+            return 6 * 3600  # 6 hours for upcoming/live
+
+        # --- Team/league metadata (rarely changes) ---
+        if endpoint in ("teams", "leagues", "teams/seasons"):
+            return 30 * 24 * 3600  # 30 days
+
+        # --- Transfers (depends on transfer window) ---
+        if endpoint == "transfers":
+            now = datetime.now(timezone.utc).date()
+            # During transfer windows (Jan or Jun-Aug) use shorter TTL
+            if now.month in (1, 6, 7, 8):
+                return 24 * 3600  # 24 hours
+            return 7 * 24 * 3600  # 7 days
+
+        # --- Player profiles / seasons ---
+        if endpoint in ("players", "players/seasons"):
+            return 7 * 24 * 3600  # 7 days
+
+        # --- Default fallback ---
+        return 24 * 3600  # 24 hours
+
+    @staticmethod
+    def _fixture_is_completed(item: dict) -> bool:
+        """Return True if a fixture response item represents a completed match."""
+        fixture_info = item.get("fixture", {}) if isinstance(item, dict) else {}
+        status_short = (fixture_info.get("status") or {}).get("short", "")
+        return status_short in ("FT", "AET", "PEN")
+
+    def _check_quota_limit(self) -> None:
+        """Raise RuntimeError if daily quota has been exceeded."""
+        limit_str = os.getenv("API_FOOTBALL_DAILY_LIMIT")
+        if not limit_str:
+            return
+        try:
+            limit = int(limit_str)
+        except (ValueError, TypeError):
+            return
+        try:
+            from src.models.api_cache import APIUsageDaily
+            current = APIUsageDaily.today_total()
+            if current >= limit:
+                raise RuntimeError(
+                    f"API-Football daily quota reached ({current}/{limit}). "
+                    "No more live API calls will be made today."
+                )
+        except ImportError:
+            pass
+
     def _make_request(self, endpoint: str, params: Dict[str, Any] = None) -> Dict[str, Any]:
-        """Make authenticated request to API-Football."""
-        # logger.info(f"🏈 Making API-Football request to endpoint: {endpoint}")
-        # logger.info(f"📝 Request params: {params}")
-        # logger.info(f"🔑 API key configured: {'Yes' if self.api_key else 'No'}")
+        """Make authenticated request to API-Football with DB cache + quota tracking."""
 
         # NOTE: The transfers endpoint does **not** accept a `season` query parameter (see API‑Football v3 docs).
 
@@ -303,10 +378,33 @@ class APIFootballClient:
             logger.info("🔄 Returning sample data for endpoint '%s' (stub mode)", endpoint)
             return self._get_sample_data(endpoint, params)
 
+        # ------------------------------------------------------------------
+        # L2: DB-backed persistent cache (skipped for uncacheable endpoints)
+        # ------------------------------------------------------------------
+        use_db_cache = endpoint not in self._NO_CACHE_ENDPOINTS
+        if use_db_cache:
+            try:
+                from src.models.api_cache import APICache
+                cached = APICache.get_cached(endpoint, params)
+                if cached is not None:
+                    logger.debug("DB cache HIT for %s params=%s", endpoint, params)
+                    return cached
+            except Exception as exc:
+                # DB unavailable – fall through to live call
+                logger.debug("DB cache lookup failed for %s: %s", endpoint, exc)
+
+        # ------------------------------------------------------------------
+        # Quota gate
+        # ------------------------------------------------------------------
+        try:
+            self._check_quota_limit()
+        except RuntimeError:
+            raise
+        except Exception:
+            pass  # DB issue – don't block the API call
+
         try:
             url = f"{self.base_url}/{endpoint}"
-            # logger.info(f"🌐 Full request URL: {url}")
-            # logger.info(f"📡 Request headers: {self.headers}")
 
             response = requests.get(url, headers=self.headers, params=params or {}, timeout=15)
 
@@ -328,18 +426,35 @@ class APIFootballClient:
                     f"Errors: {data.get('errors')} - Response: {response.text[:200]}"
                 )
 
-            # logger.info(f"📦 Response data keys: {list(data.keys()) if isinstance(data, dict) else 'Not a dict'}")
-
             # Warn if no results (might indicate plan/season coverage issues)
             results_count = data.get("results", 0)
             if results_count == 0:
                 logger.warning(f"API returned 0 results for {url} params={params} - check plan coverage")
+
+            # ------------------------------------------------------------------
+            # Post-call: persist to DB cache + track usage
+            # ------------------------------------------------------------------
+            if use_db_cache:
+                try:
+                    from src.models.api_cache import APICache
+                    ttl = self._get_ttl_seconds(endpoint, params, data)
+                    APICache.set_cached(endpoint, params, data, ttl)
+                except Exception as exc:
+                    logger.debug("DB cache write failed for %s: %s", endpoint, exc)
+
+            try:
+                from src.models.api_cache import APIUsageDaily
+                APIUsageDaily.increment(endpoint)
+            except Exception as exc:
+                logger.debug("Usage tracking failed for %s: %s", endpoint, exc)
 
             return data
 
         except requests.exceptions.RequestException as e:
             logger.error(f"❌ API request failed: {e}")
             raise RuntimeError(f"API request failed for {url}: {e}")
+        except RuntimeError:
+            raise
         except Exception as e:
             logger.error(f"❌ Unexpected error: {e}")
             import traceback
@@ -980,10 +1095,107 @@ class APIFootballClient:
             logger.error(f"Error fetching fixtures for team {team_id}: {e}")
             return []
 
+    def get_fixtures_for_team_cached(
+        self,
+        team_id: int,
+        season: int,
+        start: str,
+        end: str,
+    ) -> List[Dict[str, Any]]:
+        """Like get_fixtures_for_team but returns DB-stored completed fixtures
+        without making an API call when all fixtures are already known.
+
+        Strategy:
+        1. Query the Fixture table for completed fixtures matching this team +
+           season + date range.
+        2. Always call the API to find upcoming/live fixtures and any completed
+           games that are not yet in the DB.
+        3. Merge DB results with API results, deduplicating by fixture_id_api.
+
+        Because Part 1's _make_request DB cache already caches the raw API
+        response, this mainly helps when the same fixture data is requested
+        with *different* date ranges (e.g. "Aug-Dec" then "Aug-Feb").
+        """
+        try:
+            from src.models.weekly import Fixture
+            from src.models.league import db
+            from sqlalchemy import or_ as sa_or
+            import json as _json
+
+            start_dt = datetime.strptime(start, "%Y-%m-%d")
+            end_dt = datetime.strptime(end, "%Y-%m-%d")
+            normalized_team_id = int(team_id)
+
+            # Fetch completed fixtures from DB for this team & season & date range
+            db_fixtures = Fixture.query.filter(
+                Fixture.season == season,
+                Fixture.date_utc >= start_dt,
+                Fixture.date_utc <= end_dt,
+                sa_or(
+                    Fixture.home_team_api_id == normalized_team_id,
+                    Fixture.away_team_api_id == normalized_team_id,
+                ),
+            ).all()
+
+            db_fixture_ids = set()
+            db_results = []
+            for f in db_fixtures:
+                db_fixture_ids.add(f.fixture_id_api)
+                # Reconstruct API-shape dict from raw_json if available
+                if f.raw_json:
+                    try:
+                        db_results.append(_json.loads(f.raw_json))
+                        continue
+                    except (_json.JSONDecodeError, TypeError):
+                        pass
+                # Fallback: minimal dict from structured columns
+                db_results.append({
+                    "fixture": {
+                        "id": f.fixture_id_api,
+                        "date": f.date_utc.isoformat() if f.date_utc else None,
+                        "status": {"short": "FT"},
+                    },
+                    "league": {"name": f.competition_name, "season": f.season},
+                    "teams": {
+                        "home": {"id": f.home_team_api_id},
+                        "away": {"id": f.away_team_api_id},
+                    },
+                    "goals": {
+                        "home": f.home_goals,
+                        "away": f.away_goals,
+                    },
+                })
+
+            if db_results:
+                logger.info(
+                    "DB-first fixtures: found %d completed in DB for team=%s season=%s range=%s..%s",
+                    len(db_results), team_id, season, start, end,
+                )
+
+            # Still call the API so we pick up upcoming/live fixtures + any
+            # completed games not yet persisted.
+            api_fixtures = self.get_fixtures_for_team(normalized_team_id, season, start, end)
+
+            # Merge: API results take precedence (they have full data),
+            # but add any DB-only fixtures that weren't returned by the API.
+            api_ids = {
+                (fx.get("fixture") or {}).get("id") for fx in api_fixtures
+            }
+            for db_fx in db_results:
+                fid = (db_fx.get("fixture") or {}).get("id")
+                if fid and fid not in api_ids:
+                    api_fixtures.append(db_fx)
+
+            return api_fixtures
+
+        except Exception as exc:
+            logger.debug("get_fixtures_for_team_cached fell back to API-only: %s", exc)
+            return self.get_fixtures_for_team(team_id, season, start, end)
+
     def get_fixture_result(self, fixture_id: int) -> Dict[str, Any]:
         """
         Fetch result for a specific fixture by ID.
-        
+
         Returns dict with:
         - status: 'FT' (finished), 'NS' (not started), etc.
         - home_team_id, away_team_id

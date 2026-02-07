@@ -1,65 +1,737 @@
-import { useState, useEffect } from 'react'
+import { useState, useEffect, useCallback } from 'react'
 import { APIService } from '@/lib/api'
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 import { Alert, AlertDescription } from '@/components/ui/alert'
-import { UserPlus, Search, AlertCircle, CheckCircle2, Trash2, RefreshCw } from 'lucide-react'
+import { Badge } from '@/components/ui/badge'
+import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
+import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from '@/components/ui/dialog'
+import { Textarea } from '@/components/ui/textarea'
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
+import { UserPlus, Search, AlertCircle, CheckCircle2, Trash2, RefreshCw, Pencil, X, Save, Loader2, CheckCircle, XCircle, Clock, User, Shield, Download } from 'lucide-react'
 import TeamSelect from '@/components/ui/TeamSelect'
 
-export function AdminPlayers() {
-    // Teams for selection
-    const [teams, setTeams] = useState([])
-    // Players list
+const STATUS_OPTIONS = [
+    { value: 'academy', label: 'Academy' },
+    { value: 'on_loan', label: 'On Loan' },
+    { value: 'first_team', label: 'First Team' },
+    { value: 'released', label: 'Released' },
+    { value: 'sold', label: 'Sold' },
+]
+
+const LEVEL_OPTIONS = [
+    { value: 'U18', label: 'U18' },
+    { value: 'U21', label: 'U21' },
+    { value: 'U23', label: 'U23' },
+    { value: 'Reserve', label: 'Reserve' },
+    { value: 'Senior', label: 'Senior' },
+]
+
+const POSITION_OPTIONS = ['Goalkeeper', 'Defender', 'Midfielder', 'Attacker']
+
+function StatusBadge({ status }) {
+    const colors = {
+        academy: 'bg-blue-100 text-blue-800',
+        on_loan: 'bg-yellow-100 text-yellow-800',
+        first_team: 'bg-green-100 text-green-800',
+        released: 'bg-red-100 text-red-800',
+        sold: 'bg-gray-100 text-gray-800',
+    }
+    return <Badge className={colors[status] || 'bg-gray-100 text-gray-800'}>{(status || '').replace('_', ' ')}</Badge>
+}
+
+// ============================================================
+// Tab 1: All Players
+// ============================================================
+function AllPlayersTab({ teams, setMessage }) {
     const [players, setPlayers] = useState([])
-    const [loadingPlayers, setLoadingPlayers] = useState(false)
-    const [deletingId, setDeletingId] = useState(null)
+    const [loading, setLoading] = useState(false)
     const [page, setPage] = useState(1)
-    const [pageSize, setPageSize] = useState(20)
+    const [pageSize] = useState(20)
     const [totalPages, setTotalPages] = useState(1)
+    const [editingId, setEditingId] = useState(null)
+    const [editForm, setEditForm] = useState({})
+    const [saving, setSaving] = useState(false)
+    const [deletingId, setDeletingId] = useState(null)
+    const [refreshingStatuses, setRefreshingStatuses] = useState(false)
 
-    // Add Player state
-    const [showAddForm, setShowAddForm] = useState(false)
-    const [addPlayerForm, setAddPlayerForm] = useState({
-        name: '',
-        firstname: '',
-        lastname: '',
-        position: '',
-        nationality: '',
-        age: '',
-        sofascore_id: '',
-        primary_team_id: '',
-        loan_team_id: '',
-        window_key: '',
-        use_custom_primary_team: false,
-        custom_primary_team_name: '',
-        use_custom_loan_team: false,
-        custom_loan_team_name: ''
-    })
-
-    // Message state
-    const [message, setMessage] = useState(null)
-
-    // Player field options
-    const [playerFieldOptions, setPlayerFieldOptions] = useState({
-        positions: ['Goalkeeper', 'Defender', 'Midfielder', 'Forward'],
-        nationalities: ['England', 'Scotland', 'Wales', 'Ireland', 'France', 'Germany', 'Spain', 'Italy', 'Portugal', 'Netherlands', 'Belgium']
-    })
-
-    // Filters
     const [filters, setFilters] = useState({
         search: '',
         team_id: '',
-        has_sofascore: 'any',
+        status: '',
+        current_level: '',
+        data_source: '',
     })
 
-    // Load teams
+    const loadPlayers = useCallback(async (nextPage) => {
+        setLoading(true)
+        try {
+            const params = { page: nextPage || page, page_size: pageSize }
+            if (filters.search.trim()) params.search = filters.search.trim()
+            if (filters.team_id) params.team_id = Number(filters.team_id)
+            if (filters.status) params.status = filters.status
+            if (filters.current_level) params.current_level = filters.current_level
+            if (filters.data_source) params.data_source = filters.data_source
+
+            const res = await APIService.adminTrackedPlayersList(params)
+            setPlayers(res.items || [])
+            setPage(res.page || 1)
+            setTotalPages(res.total_pages || 1)
+        } catch (error) {
+            setMessage({ type: 'error', text: `Failed to load players: ${error?.body?.error || error.message}` })
+        } finally {
+            setLoading(false)
+        }
+    }, [page, pageSize, filters, setMessage])
+
+    useEffect(() => {
+        loadPlayers(1)
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    }, [filters.search, filters.team_id, filters.status, filters.current_level, filters.data_source])
+
+    const startEdit = (player) => {
+        setEditingId(player.id)
+        setEditForm({
+            status: player.status || 'academy',
+            current_level: player.current_level || '',
+            loan_club_api_id: player.loan_club_api_id || '',
+            loan_club_name: player.loan_club_name || '',
+            notes: player.notes || '',
+            position: player.position || '',
+        })
+    }
+
+    const saveEdit = async () => {
+        setSaving(true)
+        try {
+            await APIService.adminTrackedPlayerUpdate(editingId, editForm)
+            setEditingId(null)
+            setMessage({ type: 'success', text: 'Player updated' })
+            loadPlayers()
+        } catch (error) {
+            setMessage({ type: 'error', text: `Update failed: ${error?.body?.error || error.message}` })
+        } finally {
+            setSaving(false)
+        }
+    }
+
+    const deletePlayer = async (id, name) => {
+        if (!window.confirm(`Remove "${name}" from tracking?`)) return
+        setDeletingId(id)
+        try {
+            await APIService.adminTrackedPlayerDelete(id)
+            setMessage({ type: 'success', text: `Removed ${name}` })
+            setPlayers((prev) => prev.filter((p) => p.id !== id))
+        } catch (error) {
+            setMessage({ type: 'error', text: `Delete failed: ${error?.body?.error || error.message}` })
+        } finally {
+            setDeletingId(null)
+        }
+    }
+
+    return (
+        <div className="space-y-4">
+            {/* Filters */}
+            <div className="flex flex-wrap items-end gap-3">
+                <div className="flex-1 min-w-[180px]">
+                    <Input
+                        placeholder="Search player name..."
+                        value={filters.search}
+                        onChange={(e) => setFilters({ ...filters, search: e.target.value })}
+                    />
+                </div>
+                <TeamSelect
+                    teams={teams}
+                    value={filters.team_id}
+                    placeholder="Filter by team..."
+                    onChange={(id) => setFilters({ ...filters, team_id: id })}
+                    className="min-w-[180px]"
+                />
+                <select
+                    className="h-10 rounded-md border border-input bg-background px-3 text-sm"
+                    value={filters.status}
+                    onChange={(e) => setFilters({ ...filters, status: e.target.value })}
+                >
+                    <option value="">All statuses</option>
+                    {STATUS_OPTIONS.map((opt) => (
+                        <option key={opt.value} value={opt.value}>{opt.label}</option>
+                    ))}
+                </select>
+                <select
+                    className="h-10 rounded-md border border-input bg-background px-3 text-sm"
+                    value={filters.current_level}
+                    onChange={(e) => setFilters({ ...filters, current_level: e.target.value })}
+                >
+                    <option value="">All levels</option>
+                    {LEVEL_OPTIONS.map((opt) => (
+                        <option key={opt.value} value={opt.value}>{opt.label}</option>
+                    ))}
+                </select>
+                <Button variant="outline" size="sm" onClick={() => loadPlayers(1)} disabled={loading}>
+                    <RefreshCw className={`h-4 w-4 mr-1 ${loading ? 'animate-spin' : ''}`} />
+                    Refresh
+                </Button>
+                <Button
+                    variant="outline"
+                    size="sm"
+                    disabled={refreshingStatuses}
+                    onClick={async () => {
+                        setRefreshingStatuses(true)
+                        try {
+                            const payload = filters.team_id ? { team_id: Number(filters.team_id) } : {}
+                            const res = await APIService.adminRefreshTrackedPlayerStatuses(payload)
+                            setMessage({ type: 'success', text: `Refreshed statuses: ${res.updated} of ${res.total} updated` })
+                            loadPlayers()
+                        } catch (error) {
+                            setMessage({ type: 'error', text: `Refresh failed: ${error?.body?.error || error.message}` })
+                        } finally {
+                            setRefreshingStatuses(false)
+                        }
+                    }}
+                >
+                    {refreshingStatuses ? <Loader2 className="h-4 w-4 mr-1 animate-spin" /> : <Shield className="h-4 w-4 mr-1" />}
+                    Re-classify
+                </Button>
+                <Button
+                    variant="outline"
+                    size="sm"
+                    disabled={refreshingStatuses}
+                    title="Re-syncs journey data from API-Football then re-classifies. Use this to fix stale statuses (e.g. international teams showing as loans)."
+                    onClick={async () => {
+                        if (!filters.team_id) {
+                            setMessage({ type: 'error', text: 'Select a team first — re-sync is too slow for all teams at once' })
+                            return
+                        }
+                        setRefreshingStatuses(true)
+                        try {
+                            const payload = { team_id: Number(filters.team_id), resync_journeys: true }
+                            const res = await APIService.adminRefreshTrackedPlayerStatuses(payload)
+                            const parts = [`${res.updated} of ${res.total} updated`]
+                            if (res.journeys_resynced) parts.push(`${res.journeys_resynced} journeys re-synced`)
+                            setMessage({ type: 'success', text: `Re-sync complete: ${parts.join(', ')}` })
+                            loadPlayers()
+                        } catch (error) {
+                            setMessage({ type: 'error', text: `Re-sync failed: ${error?.body?.error || error.message}` })
+                        } finally {
+                            setRefreshingStatuses(false)
+                        }
+                    }}
+                >
+                    {refreshingStatuses ? <Loader2 className="h-4 w-4 mr-1 animate-spin" /> : <RefreshCw className="h-4 w-4 mr-1" />}
+                    Re-sync & Re-classify
+                </Button>
+            </div>
+
+            {/* Players Table */}
+            {loading && <p className="text-sm text-muted-foreground">Loading players...</p>}
+            {!loading && players.length === 0 && (
+                <p className="text-sm text-muted-foreground py-8 text-center">No tracked players found.</p>
+            )}
+            {!loading && players.length > 0 && (
+                <div className="space-y-2">
+                    {players.map((p) => (
+                        <div key={p.id} className="rounded-md border px-4 py-3 bg-card">
+                            {editingId === p.id ? (
+                                /* Edit form */
+                                <div className="space-y-3">
+                                    <div className="font-medium">{p.player_name}</div>
+                                    <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+                                        <div>
+                                            <Label className="text-xs">Status</Label>
+                                            <select
+                                                className="h-9 w-full rounded-md border border-input bg-background px-2 text-sm"
+                                                value={editForm.status}
+                                                onChange={(e) => setEditForm({ ...editForm, status: e.target.value })}
+                                            >
+                                                {STATUS_OPTIONS.map((opt) => (
+                                                    <option key={opt.value} value={opt.value}>{opt.label}</option>
+                                                ))}
+                                            </select>
+                                        </div>
+                                        <div>
+                                            <Label className="text-xs">Level</Label>
+                                            <select
+                                                className="h-9 w-full rounded-md border border-input bg-background px-2 text-sm"
+                                                value={editForm.current_level}
+                                                onChange={(e) => setEditForm({ ...editForm, current_level: e.target.value })}
+                                            >
+                                                <option value="">None</option>
+                                                {LEVEL_OPTIONS.map((opt) => (
+                                                    <option key={opt.value} value={opt.value}>{opt.label}</option>
+                                                ))}
+                                            </select>
+                                        </div>
+                                        <div>
+                                            <Label className="text-xs">Position</Label>
+                                            <select
+                                                className="h-9 w-full rounded-md border border-input bg-background px-2 text-sm"
+                                                value={editForm.position}
+                                                onChange={(e) => setEditForm({ ...editForm, position: e.target.value })}
+                                            >
+                                                <option value="">None</option>
+                                                {POSITION_OPTIONS.map((pos) => (
+                                                    <option key={pos} value={pos}>{pos}</option>
+                                                ))}
+                                            </select>
+                                        </div>
+                                    </div>
+                                    {editForm.status === 'on_loan' && (
+                                        <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                                            <div>
+                                                <Label className="text-xs">Loan Club Name</Label>
+                                                <Input
+                                                    value={editForm.loan_club_name}
+                                                    onChange={(e) => setEditForm({ ...editForm, loan_club_name: e.target.value })}
+                                                    placeholder="e.g. Sheffield Wednesday"
+                                                />
+                                            </div>
+                                            <div>
+                                                <Label className="text-xs">Loan Club API ID</Label>
+                                                <Input
+                                                    type="number"
+                                                    value={editForm.loan_club_api_id}
+                                                    onChange={(e) => setEditForm({ ...editForm, loan_club_api_id: e.target.value })}
+                                                    placeholder="Optional"
+                                                />
+                                            </div>
+                                        </div>
+                                    )}
+                                    <div>
+                                        <Label className="text-xs">Notes</Label>
+                                        <Textarea
+                                            value={editForm.notes}
+                                            onChange={(e) => setEditForm({ ...editForm, notes: e.target.value })}
+                                            rows={2}
+                                        />
+                                    </div>
+                                    <div className="flex gap-2">
+                                        <Button size="sm" onClick={saveEdit} disabled={saving}>
+                                            {saving ? <Loader2 className="h-4 w-4 mr-1 animate-spin" /> : <Save className="h-4 w-4 mr-1" />}
+                                            Save
+                                        </Button>
+                                        <Button size="sm" variant="outline" onClick={() => setEditingId(null)}>
+                                            <X className="h-4 w-4 mr-1" /> Cancel
+                                        </Button>
+                                    </div>
+                                </div>
+                            ) : (
+                                /* Display row */
+                                <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
+                                    <div className="flex items-center gap-3">
+                                        {p.photo_url ? (
+                                            <img src={p.photo_url} alt="" className="w-8 h-8 rounded-full object-cover bg-gray-100" />
+                                        ) : (
+                                            <div className="w-8 h-8 rounded-full bg-gray-200 flex items-center justify-center text-xs text-gray-500">
+                                                {(p.player_name || '?')[0]}
+                                            </div>
+                                        )}
+                                        <div>
+                                            <div className="font-medium">{p.player_name}</div>
+                                            <div className="flex flex-wrap gap-x-3 text-xs text-muted-foreground">
+                                                <span>{p.team_name || '—'}</span>
+                                                {p.position && <span>{p.position}</span>}
+                                                {p.current_level && <span>{p.current_level}</span>}
+                                                {p.loan_club_name && <span>@ {p.loan_club_name}</span>}
+                                            </div>
+                                        </div>
+                                    </div>
+                                    <div className="flex items-center gap-2">
+                                        <StatusBadge status={p.status} />
+                                        <Badge variant="outline" className="text-xs">{p.data_source}</Badge>
+                                        <Button variant="ghost" size="sm" onClick={() => startEdit(p)}>
+                                            <Pencil className="h-4 w-4" />
+                                        </Button>
+                                        <Button
+                                            variant="ghost"
+                                            size="sm"
+                                            className="text-red-600 hover:text-red-700"
+                                            disabled={deletingId === p.id}
+                                            onClick={() => deletePlayer(p.id, p.player_name)}
+                                        >
+                                            <Trash2 className="h-4 w-4" />
+                                        </Button>
+                                    </div>
+                                </div>
+                            )}
+                        </div>
+                    ))}
+                </div>
+            )}
+
+            {/* Pagination */}
+            {!loading && players.length > 0 && (
+                <div className="flex items-center justify-between pt-2">
+                    <div className="text-xs text-muted-foreground">Page {page} of {totalPages}</div>
+                    <div className="flex gap-2">
+                        <Button variant="outline" size="sm" disabled={page <= 1} onClick={() => { setPage(page - 1); loadPlayers(page - 1) }}>Prev</Button>
+                        <Button variant="outline" size="sm" disabled={page >= totalPages} onClick={() => { setPage(page + 1); loadPlayers(page + 1) }}>Next</Button>
+                    </div>
+                </div>
+            )}
+        </div>
+    )
+}
+
+// ============================================================
+// Tab 2: Submissions (writer-submitted manual players)
+// ============================================================
+function SubmissionsTab({ setMessage }) {
+    const [submissions, setSubmissions] = useState([])
+    const [loading, setLoading] = useState(true)
+    const [activeFilter, setActiveFilter] = useState('pending')
+    const [reviewDialog, setReviewDialog] = useState({ open: false, submission: null, action: null })
+    const [adminNotes, setAdminNotes] = useState('')
+    const [processing, setProcessing] = useState(false)
+
+    const loadSubmissions = useCallback(async () => {
+        setLoading(true)
+        try {
+            const data = await APIService.adminListManualPlayers({ status: activeFilter === 'all' ? undefined : activeFilter })
+            setSubmissions(Array.isArray(data) ? data : [])
+        } catch (error) {
+            console.error('Failed to load submissions', error)
+        } finally {
+            setLoading(false)
+        }
+    }, [activeFilter])
+
+    useEffect(() => { loadSubmissions() }, [loadSubmissions])
+
+    const handleReview = async () => {
+        if (!reviewDialog.submission || !reviewDialog.action) return
+        setProcessing(true)
+        try {
+            await APIService.adminReviewManualPlayer(reviewDialog.submission.id, {
+                status: reviewDialog.action,
+                admin_notes: adminNotes,
+            })
+            setReviewDialog({ open: false, submission: null, action: null })
+            setMessage({ type: 'success', text: `Submission ${reviewDialog.action}` })
+            loadSubmissions()
+        } catch (error) {
+            setMessage({ type: 'error', text: `Review failed: ${error.message}` })
+        } finally {
+            setProcessing(false)
+        }
+    }
+
+    const getStatusBadge = (status) => {
+        if (status === 'approved') return <Badge className="bg-green-600"><CheckCircle className="h-3 w-3 mr-1" /> Approved</Badge>
+        if (status === 'rejected') return <Badge variant="destructive"><XCircle className="h-3 w-3 mr-1" /> Rejected</Badge>
+        return <Badge variant="secondary"><Clock className="h-3 w-3 mr-1" /> Pending</Badge>
+    }
+
+    return (
+        <div className="space-y-4">
+            <div className="flex gap-2">
+                {['pending', 'approved', 'rejected', 'all'].map((f) => (
+                    <Button
+                        key={f}
+                        variant={activeFilter === f ? 'default' : 'outline'}
+                        size="sm"
+                        onClick={() => setActiveFilter(f)}
+                    >
+                        {f.charAt(0).toUpperCase() + f.slice(1)}
+                    </Button>
+                ))}
+            </div>
+
+            {loading ? (
+                <div className="flex justify-center py-8">
+                    <Loader2 className="h-8 w-8 animate-spin text-muted-foreground" />
+                </div>
+            ) : submissions.length === 0 ? (
+                <p className="text-center py-8 text-muted-foreground">No submissions found.</p>
+            ) : (
+                <div className="space-y-3">
+                    {submissions.map((sub) => (
+                        <div key={sub.id} className="border rounded-lg p-4 flex flex-col sm:flex-row gap-4 justify-between items-start bg-card">
+                            <div className="space-y-2 flex-1">
+                                <div className="flex items-center gap-2">
+                                    <h3 className="font-semibold">{sub.player_name}</h3>
+                                    <Badge variant="outline">{sub.team_name}</Badge>
+                                    {getStatusBadge(sub.status)}
+                                </div>
+                                <div className="grid grid-cols-1 sm:grid-cols-2 gap-x-8 gap-y-1 text-sm text-muted-foreground">
+                                    <div><User className="h-3 w-3 inline mr-1" />By: <span className="font-medium text-foreground">{sub.user_name}</span></div>
+                                    <div><Clock className="h-3 w-3 inline mr-1" />{new Date(sub.created_at).toLocaleDateString()}</div>
+                                    {sub.position && <div>Position: {sub.position}</div>}
+                                    {sub.league_name && <div>League: {sub.league_name}</div>}
+                                </div>
+                                {sub.notes && (
+                                    <div className="bg-muted/50 p-2 rounded text-sm mt-1">{sub.notes}</div>
+                                )}
+                                {sub.admin_notes && (
+                                    <div className="bg-blue-50 text-blue-800 p-2 rounded text-sm mt-1 border border-blue-100">
+                                        <Shield className="h-3 w-3 inline mr-1" /> {sub.admin_notes}
+                                    </div>
+                                )}
+                            </div>
+                            {sub.status === 'pending' && (
+                                <div className="flex flex-col gap-2 min-w-[120px]">
+                                    <Button className="w-full bg-green-600 hover:bg-green-700" size="sm" onClick={() => { setReviewDialog({ open: true, submission: sub, action: 'approved' }); setAdminNotes('') }}>
+                                        <CheckCircle className="h-4 w-4 mr-1" /> Approve
+                                    </Button>
+                                    <Button variant="destructive" size="sm" className="w-full" onClick={() => { setReviewDialog({ open: true, submission: sub, action: 'rejected' }); setAdminNotes('') }}>
+                                        <XCircle className="h-4 w-4 mr-1" /> Reject
+                                    </Button>
+                                </div>
+                            )}
+                        </div>
+                    ))}
+                </div>
+            )}
+
+            <Dialog open={reviewDialog.open} onOpenChange={(open) => !open && setReviewDialog({ ...reviewDialog, open: false })}>
+                <DialogContent>
+                    <DialogHeader>
+                        <DialogTitle>{reviewDialog.action === 'approved' ? 'Approve' : 'Reject'} Submission</DialogTitle>
+                        <DialogDescription>
+                            {reviewDialog.action === 'approved' ? 'This player will be added to tracking.' : 'Provide a reason for rejection.'}
+                        </DialogDescription>
+                    </DialogHeader>
+                    <div className="py-4">
+                        <Label>Admin Notes (Optional)</Label>
+                        <Textarea value={adminNotes} onChange={(e) => setAdminNotes(e.target.value)} placeholder="Optional notes..." />
+                    </div>
+                    <DialogFooter>
+                        <Button variant="outline" onClick={() => setReviewDialog({ ...reviewDialog, open: false })}>Cancel</Button>
+                        <Button
+                            variant={reviewDialog.action === 'approved' ? 'default' : 'destructive'}
+                            onClick={handleReview}
+                            disabled={processing}
+                            className={reviewDialog.action === 'approved' ? 'bg-green-600 hover:bg-green-700' : ''}
+                        >
+                            {processing && <Loader2 className="h-4 w-4 mr-1 animate-spin" />}
+                            Confirm
+                        </Button>
+                    </DialogFooter>
+                </DialogContent>
+            </Dialog>
+        </div>
+    )
+}
+
+// ============================================================
+// Tab 3: Seed Players
+// ============================================================
+function SeedTab({ teams, setMessage }) {
+    const [selectedTeam, setSelectedTeam] = useState('')
+    const [maxAge, setMaxAge] = useState('23')
+    const [seeding, setSeeding] = useState(false)
+    const [seedResult, setSeedResult] = useState(null)
+
+    const handleSeed = async () => {
+        if (!selectedTeam) {
+            setMessage({ type: 'error', text: 'Select a team first' })
+            return
+        }
+        setSeeding(true)
+        setSeedResult(null)
+        try {
+            const payload = { team_id: Number(selectedTeam) }
+            if (maxAge) payload.max_age = parseInt(maxAge)
+            const result = await APIService.adminSeedTeamPlayers(payload)
+            setSeedResult(result)
+            setMessage({ type: 'success', text: `Seeded ${result.created || 0} players for ${result.team_name}` })
+        } catch (error) {
+            setMessage({ type: 'error', text: `Seed failed: ${error?.body?.error || error.message}` })
+        } finally {
+            setSeeding(false)
+        }
+    }
+
+    const trackedTeams = teams.filter((t) => t.is_tracked)
+
+    return (
+        <div className="space-y-6">
+            <Card>
+                <CardHeader>
+                    <CardTitle className="flex items-center gap-2">
+                        <Download className="h-5 w-5" />
+                        Seed Academy Players
+                    </CardTitle>
+                    <CardDescription>
+                        Identify academy products for a team using journey data, squad analysis, and cohort records.
+                        Only players confirmed as academy products of this club will be added.
+                    </CardDescription>
+                </CardHeader>
+                <CardContent className="space-y-4">
+                    <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                        <div>
+                            <Label>Select Team</Label>
+                            <TeamSelect
+                                teams={trackedTeams.length > 0 ? trackedTeams : teams}
+                                value={selectedTeam}
+                                onChange={setSelectedTeam}
+                                placeholder="Select a tracked team..."
+                            />
+                            {trackedTeams.length === 0 && teams.length > 0 && (
+                                <p className="text-xs text-muted-foreground mt-1">No tracked teams found. Showing all teams.</p>
+                            )}
+                        </div>
+                        <div>
+                            <Label>Max Age</Label>
+                            <Input type="number" value={maxAge} onChange={(e) => setMaxAge(e.target.value)} placeholder="23" className="w-24" />
+                            <p className="text-xs text-muted-foreground mt-1">Only sync journeys for squad players at or below this age</p>
+                        </div>
+                    </div>
+                    <Button onClick={handleSeed} disabled={seeding || !selectedTeam}>
+                        {seeding ? <Loader2 className="h-4 w-4 mr-2 animate-spin" /> : <Download className="h-4 w-4 mr-2" />}
+                        Discover Academy Players
+                    </Button>
+
+                    {seedResult && (
+                        <div className={`mt-4 p-4 rounded-md border text-sm space-y-1 ${seedResult.created > 0 ? 'bg-green-50 border-green-200' : 'bg-amber-50 border-amber-200'}`}>
+                            <div className="flex items-center gap-2 font-medium">
+                                <CheckCircle2 className={`h-4 w-4 ${seedResult.created > 0 ? 'text-green-600' : 'text-amber-600'}`} />
+                                Seed Complete — {seedResult.team_name}
+                            </div>
+                            <div className="text-muted-foreground space-y-0.5">
+                                <div>Created: {seedResult.created || 0} • Skipped (already tracked): {seedResult.skipped || 0}</div>
+                                <div>Academy players identified: {seedResult.candidates_found || 0} • Squad checked: {seedResult.squad_size || 0}</div>
+                                {seedResult.journeys_synced > 0 && (
+                                    <div>Journeys synced: {seedResult.journeys_synced} • Not academy: {seedResult.not_academy || 0}</div>
+                                )}
+                            </div>
+                        </div>
+                    )}
+                </CardContent>
+            </Card>
+
+            <Card>
+                <CardHeader>
+                    <CardTitle>Add Player Manually</CardTitle>
+                    <CardDescription>Add a player who isn't in the API data</CardDescription>
+                </CardHeader>
+                <CardContent>
+                    <ManualAddForm teams={teams} setMessage={setMessage} />
+                </CardContent>
+            </Card>
+        </div>
+    )
+}
+
+// ============================================================
+// Manual Add Player Form
+// ============================================================
+function ManualAddForm({ teams, setMessage }) {
+    const [form, setForm] = useState({
+        player_name: '',
+        position: '',
+        nationality: '',
+        age: '',
+        team_id: '',
+        status: 'academy',
+        current_level: '',
+        loan_club_name: '',
+        notes: '',
+    })
+
+    const handleSubmit = async () => {
+        if (!form.player_name.trim()) {
+            setMessage({ type: 'error', text: 'Player name is required' })
+            return
+        }
+        if (!form.team_id) {
+            setMessage({ type: 'error', text: 'Team is required' })
+            return
+        }
+
+        try {
+            const payload = {
+                player_name: form.player_name.trim(),
+                team_id: Number(form.team_id),
+                status: form.status,
+                data_source: 'manual',
+            }
+            if (form.position) payload.position = form.position
+            if (form.nationality) payload.nationality = form.nationality
+            if (form.age) payload.age = parseInt(form.age)
+            if (form.current_level) payload.current_level = form.current_level
+            if (form.loan_club_name) payload.loan_club_name = form.loan_club_name
+            if (form.notes) payload.notes = form.notes
+
+            await APIService.adminTrackedPlayerCreate(payload)
+            setMessage({ type: 'success', text: `Added ${form.player_name}` })
+            setForm({ player_name: '', position: '', nationality: '', age: '', team_id: '', status: 'academy', current_level: '', loan_club_name: '', notes: '' })
+        } catch (error) {
+            setMessage({ type: 'error', text: `Create failed: ${error?.body?.error || error.message}` })
+        }
+    }
+
+    return (
+        <div className="space-y-4">
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                <div className="md:col-span-2">
+                    <Label>Player Name *</Label>
+                    <Input value={form.player_name} onChange={(e) => setForm({ ...form, player_name: e.target.value })} placeholder="Full name" />
+                </div>
+                <div>
+                    <Label>Parent Team *</Label>
+                    <TeamSelect teams={teams} value={form.team_id} onChange={(id) => setForm({ ...form, team_id: id })} placeholder="Select team..." />
+                </div>
+                <div>
+                    <Label>Status</Label>
+                    <select className="h-10 w-full rounded-md border border-input bg-background px-3 text-sm" value={form.status} onChange={(e) => setForm({ ...form, status: e.target.value })}>
+                        {STATUS_OPTIONS.map((opt) => <option key={opt.value} value={opt.value}>{opt.label}</option>)}
+                    </select>
+                </div>
+                <div>
+                    <Label>Position</Label>
+                    <select className="h-10 w-full rounded-md border border-input bg-background px-3 text-sm" value={form.position} onChange={(e) => setForm({ ...form, position: e.target.value })}>
+                        <option value="">Select...</option>
+                        {POSITION_OPTIONS.map((pos) => <option key={pos} value={pos}>{pos}</option>)}
+                    </select>
+                </div>
+                <div>
+                    <Label>Level</Label>
+                    <select className="h-10 w-full rounded-md border border-input bg-background px-3 text-sm" value={form.current_level} onChange={(e) => setForm({ ...form, current_level: e.target.value })}>
+                        <option value="">None</option>
+                        {LEVEL_OPTIONS.map((opt) => <option key={opt.value} value={opt.value}>{opt.label}</option>)}
+                    </select>
+                </div>
+                <div>
+                    <Label>Nationality</Label>
+                    <Input value={form.nationality} onChange={(e) => setForm({ ...form, nationality: e.target.value })} placeholder="e.g. England" />
+                </div>
+                <div>
+                    <Label>Age</Label>
+                    <Input type="number" value={form.age} onChange={(e) => setForm({ ...form, age: e.target.value })} placeholder="Age" />
+                </div>
+                {form.status === 'on_loan' && (
+                    <div className="md:col-span-2">
+                        <Label>Loan Club Name</Label>
+                        <Input value={form.loan_club_name} onChange={(e) => setForm({ ...form, loan_club_name: e.target.value })} placeholder="e.g. Sheffield Wednesday" />
+                    </div>
+                )}
+                <div className="md:col-span-2">
+                    <Label>Notes</Label>
+                    <Textarea value={form.notes} onChange={(e) => setForm({ ...form, notes: e.target.value })} rows={2} />
+                </div>
+            </div>
+            <Button onClick={handleSubmit}>
+                <UserPlus className="h-4 w-4 mr-2" />
+                Create Player
+            </Button>
+        </div>
+    )
+}
+
+// ============================================================
+// Main export
+// ============================================================
+export function AdminPlayers() {
+    const [teams, setTeams] = useState([])
+    const [message, setMessage] = useState(null)
+
     useEffect(() => {
         const loadTeams = async () => {
             try {
-                const teamsData = await APIService.getTeams()
-                setTeams(teamsData || [])
+                const data = await APIService.getTeams()
+                setTeams(Array.isArray(data) ? data : [])
             } catch (error) {
                 console.error('Failed to load teams', error)
             }
@@ -67,545 +739,44 @@ export function AdminPlayers() {
         loadTeams()
     }, [])
 
-    // Load players list
-    const loadPlayers = async (opts = {}) => {
-        setLoadingPlayers(true)
-        const nextPage = opts.page || page
-        const nextPageSize = opts.pageSize || pageSize
-        try {
-            const params = {
-                page: nextPage,
-                page_size: nextPageSize,
-                sort: '-updated_at',
-            }
-            if (filters.search.trim()) params.search = filters.search.trim()
-            if (filters.team_id) params.team_id = Number(filters.team_id)
-            if (filters.has_sofascore === 'true') params.has_sofascore = 'true'
-            if (filters.has_sofascore === 'false') params.has_sofascore = 'false'
-
-            const res = await APIService.adminPlayersList(params)
-            setPlayers(res.items || [])
-            setPage(res.page || 1)
-            setPageSize(res.page_size || nextPageSize)
-            setTotalPages(res.total_pages || 1)
-        } catch (error) {
-            console.error('Failed to load players', error)
-            setMessage({ type: 'error', text: `Failed to load players: ${error?.body?.error || error.message}` })
-        } finally {
-            setLoadingPlayers(false)
-        }
-    }
-
-    useEffect(() => {
-        loadPlayers({ page: 1 })
-        // eslint-disable-next-line react-hooks/exhaustive-deps
-    }, [filters.search, filters.team_id, filters.has_sofascore])
-
-    // Generate season options (last 3 years, next year)
-    const generateSeasonOptions = () => {
-        const currentYear = new Date().getFullYear()
-        const seasons = []
-
-        for (let year = currentYear + 1; year >= currentYear - 2; year--) {
-            const nextYear = year + 1
-            seasons.push({ value: `${year}-Summer`, label: `${year}/${nextYear} Summer` })
-            seasons.push({ value: `${year}-Winter`, label: `${year}/${nextYear} Winter` })
-        }
-
-        return seasons
-    }
-
-    // Create player
-    const createManualPlayer = async () => {
-        if (!addPlayerForm.name.trim()) {
-            setMessage({ type: 'error', text: 'Player name is required' })
-            return
-        }
-
-        // Validate primary team
-        if (!addPlayerForm.use_custom_primary_team && !addPlayerForm.primary_team_id) {
-            setMessage({ type: 'error', text: 'Primary team is required (or check "Custom team")' })
-            return
-        }
-        if (addPlayerForm.use_custom_primary_team && !addPlayerForm.custom_primary_team_name.trim()) {
-            setMessage({ type: 'error', text: 'Custom primary team name is required' })
-            return
-        }
-
-        // Validate loan team
-        if (!addPlayerForm.use_custom_loan_team && !addPlayerForm.loan_team_id) {
-            setMessage({ type: 'error', text: 'Loan team is required (or check "Custom team")' })
-            return
-        }
-        if (addPlayerForm.use_custom_loan_team && !addPlayerForm.custom_loan_team_name.trim()) {
-            setMessage({ type: 'error', text: 'Custom loan team name is required' })
-            return
-        }
-
-        if (!addPlayerForm.window_key) {
-            setMessage({ type: 'error', text: 'Season/window is required' })
-            return
-        }
-
-        try {
-            const payload = {
-                name: addPlayerForm.name.trim(),
-                firstname: addPlayerForm.firstname.trim() || null,
-                lastname: addPlayerForm.lastname.trim() || null,
-                position: addPlayerForm.position.trim() || null,
-                nationality: addPlayerForm.nationality.trim() || null,
-                age: addPlayerForm.age ? parseInt(addPlayerForm.age) : null,
-                sofascore_id: addPlayerForm.sofascore_id ? parseInt(addPlayerForm.sofascore_id) : null,
-                window_key: addPlayerForm.window_key
-            }
-
-            // Add primary team (either ID or custom name)
-            if (addPlayerForm.use_custom_primary_team) {
-                payload.custom_primary_team_name = addPlayerForm.custom_primary_team_name.trim()
-            } else {
-                payload.primary_team_id = parseInt(addPlayerForm.primary_team_id)
-            }
-
-            // Add loan team (either ID or custom name)
-            if (addPlayerForm.use_custom_loan_team) {
-                payload.custom_loan_team_name = addPlayerForm.custom_loan_team_name.trim()
-            } else {
-                payload.loan_team_id = parseInt(addPlayerForm.loan_team_id)
-            }
-
-            const result = await APIService.adminPlayerCreate(payload)
-            setMessage({ type: 'success', text: result.message || `Player "${payload.name}" created successfully` })
-            setShowAddForm(false)
-            loadPlayers({ page: 1 })
-
-            // Reset form
-            setAddPlayerForm({
-                name: '',
-                firstname: '',
-                lastname: '',
-                position: '',
-                nationality: '',
-                age: '',
-                sofascore_id: '',
-                primary_team_id: '',
-                loan_team_id: '',
-                window_key: '',
-                use_custom_primary_team: false,
-                custom_primary_team_name: '',
-                use_custom_loan_team: false,
-                custom_loan_team_name: ''
-            })
-        } catch (error) {
-            setMessage({ type: 'error', text: `Failed to create player: ${error?.body?.error || error.message}` })
-        }
-    }
-
-    const deletePlayer = async (playerId, playerName) => {
-        const confirmed = window.confirm(`Delete ${playerName || 'this player'} from tracking? This removes their player records and cached links.`)
-        if (!confirmed) return
-        setDeletingId(playerId)
-        try {
-            await APIService.adminPlayerDelete(playerId)
-            setMessage({ type: 'success', text: `Deleted player ${playerName || playerId}` })
-            setPlayers((prev) => prev.filter((p) => p.player_id !== playerId))
-        } catch (error) {
-            setMessage({ type: 'error', text: `Failed to delete: ${error?.body?.error || error.message}` })
-        } finally {
-            setDeletingId(null)
-        }
-    }
-
     return (
         <div className="space-y-6">
-            <div className="flex items-center justify-between">
-                <div>
-                    <h2 className="text-3xl font-bold tracking-tight">Players</h2>
-                    <p className="text-muted-foreground mt-1">Add and manage loan players</p>
-                </div>
-                <Button onClick={() => setShowAddForm(!showAddForm)}>
-                    <UserPlus className="h-4 w-4 mr-2" />
-                    {showAddForm ? 'Cancel' : 'Add Player'}
-                </Button>
+            <div>
+                <h2 className="text-3xl font-bold tracking-tight">Players</h2>
+                <p className="text-muted-foreground mt-1">Manage tracked academy players</p>
             </div>
 
-            {/* Message Display */}
             {message && (
                 <Alert className={message.type === 'error' ? 'border-red-500 bg-red-50' : 'border-green-500 bg-green-50'}>
                     {message.type === 'error' ? <AlertCircle className="h-4 w-4 text-red-600" /> : <CheckCircle2 className="h-4 w-4 text-green-600" />}
                     <AlertDescription className={message.type === 'error' ? 'text-red-800' : 'text-green-800'}>
                         {message.text}
+                        <Button variant="ghost" size="sm" className="ml-2 h-6 px-2" onClick={() => setMessage(null)}>
+                            <X className="h-3 w-3" />
+                        </Button>
                     </AlertDescription>
                 </Alert>
             )}
 
-            {/* Add Player Form */}
-            {showAddForm && (
-                <Card className="border-green-200 bg-gradient-to-r from-green-50 to-blue-50">
-                    <CardHeader>
-                        <CardTitle>Create New Player</CardTitle>
-                        <CardDescription>Add a player who didn't show up in the seeding process</CardDescription>
-                    </CardHeader>
-                    <CardContent className="space-y-4">
-                        <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                            {/* Player Name */}
-                            <div className="md:col-span-2">
-                                <Label htmlFor="player-name">Player Name *</Label>
-                                <Input
-                                    id="player-name"
-                                    type="text"
-                                    placeholder="Full name"
-                                    value={addPlayerForm.name}
-                                    onChange={(e) => setAddPlayerForm({ ...addPlayerForm, name: e.target.value })}
-                                />
-                            </div>
+            <Tabs defaultValue="all" className="space-y-4">
+                <TabsList>
+                    <TabsTrigger value="all">All Players</TabsTrigger>
+                    <TabsTrigger value="submissions">Submissions</TabsTrigger>
+                    <TabsTrigger value="seed">Seed</TabsTrigger>
+                </TabsList>
 
-                            {/* Primary Team */}
-                            <div>
-                                <div className="flex items-center justify-between mb-2">
-                                    <Label>Primary Team (Parent Club) *</Label>
-                                    <label className="flex items-center gap-1 text-xs text-muted-foreground cursor-pointer">
-                                        <input
-                                            type="checkbox"
-                                            checked={addPlayerForm.use_custom_primary_team}
-                                            onChange={(e) => setAddPlayerForm({
-                                                ...addPlayerForm,
-                                                use_custom_primary_team: e.target.checked,
-                                                primary_team_id: '',
-                                                custom_primary_team_name: ''
-                                            })}
-                                            className="h-3 w-3"
-                                        />
-                                        Custom team
-                                    </label>
-                                </div>
-                                {addPlayerForm.use_custom_primary_team ? (
-                                    <Input
-                                        type="text"
-                                        placeholder="e.g. Portsmouth, Sunderland"
-                                        value={addPlayerForm.custom_primary_team_name}
-                                        onChange={(e) => setAddPlayerForm({ ...addPlayerForm, custom_primary_team_name: e.target.value })}
-                                    />
-                                ) : (
-                                    <TeamSelect
-                                        teams={teams}
-                                        value={addPlayerForm.primary_team_id}
-                                        onChange={(id) => setAddPlayerForm({ ...addPlayerForm, primary_team_id: id })}
-                                        placeholder="Select primary team..."
-                                    />
-                                )}
-                            </div>
+                <TabsContent value="all">
+                    <AllPlayersTab teams={teams} setMessage={setMessage} />
+                </TabsContent>
 
-                            {/* Loan Team */}
-                            <div>
-                                <div className="flex items-center justify-between mb-2">
-                                    <Label>Loan Team (Current Club) *</Label>
-                                    <label className="flex items-center gap-1 text-xs text-muted-foreground cursor-pointer">
-                                        <input
-                                            type="checkbox"
-                                            checked={addPlayerForm.use_custom_loan_team}
-                                            onChange={(e) => setAddPlayerForm({
-                                                ...addPlayerForm,
-                                                use_custom_loan_team: e.target.checked,
-                                                loan_team_id: '',
-                                                custom_loan_team_name: ''
-                                            })}
-                                            className="h-3 w-3"
-                                        />
-                                        Custom team
-                                    </label>
-                                </div>
-                                {addPlayerForm.use_custom_loan_team ? (
-                                    <Input
-                                        type="text"
-                                        placeholder="e.g. Sheffield Wednesday, Hull City"
-                                        value={addPlayerForm.custom_loan_team_name}
-                                        onChange={(e) => setAddPlayerForm({ ...addPlayerForm, custom_loan_team_name: e.target.value })}
-                                    />
-                                ) : (
-                                    <TeamSelect
-                                        teams={teams}
-                                        value={addPlayerForm.loan_team_id}
-                                        onChange={(id) => setAddPlayerForm({ ...addPlayerForm, loan_team_id: id })}
-                                        placeholder="Select loan team..."
-                                    />
-                                )}
-                            </div>
+                <TabsContent value="submissions">
+                    <SubmissionsTab setMessage={setMessage} />
+                </TabsContent>
 
-                            {/* Season/Window */}
-                            <div className="md:col-span-2">
-                                <Label htmlFor="window">Season / Window *</Label>
-                                <select
-                                    id="window"
-                                    className="flex h-10 w-full rounded-md border border-input bg-background px-3 py-2 text-sm ring-offset-background focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
-                                    value={addPlayerForm.window_key}
-                                    onChange={(e) => setAddPlayerForm({ ...addPlayerForm, window_key: e.target.value })}
-                                >
-                                    <option value="">Select season...</option>
-                                    {generateSeasonOptions().map(opt => (
-                                        <option key={opt.value} value={opt.value}>{opt.label}</option>
-                                    ))}
-                                </select>
-                            </div>
-
-                            {/* Position */}
-                            <div>
-                                <Label htmlFor="position">Position</Label>
-                                <select
-                                    id="position"
-                                    className="flex h-10 w-full rounded-md border border-input bg-background px-3 py-2 text-sm ring-offset-background focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
-                                    value={addPlayerForm.position}
-                                    onChange={(e) => setAddPlayerForm({ ...addPlayerForm, position: e.target.value })}
-                                >
-                                    <option value="">Select position...</option>
-                                    {playerFieldOptions.positions.map(pos => (
-                                        <option key={pos} value={pos}>{pos}</option>
-                                    ))}
-                                    <option value="__custom__">+ Add custom position</option>
-                                </select>
-                                {addPlayerForm.position === '__custom__' && (
-                                    <Input
-                                        type="text"
-                                        placeholder="Enter custom position"
-                                        onChange={(e) => setAddPlayerForm({ ...addPlayerForm, position: e.target.value })}
-                                        className="mt-2"
-                                        autoFocus
-                                    />
-                                )}
-                            </div>
-
-                            {/* Nationality */}
-                            <div>
-                                <Label htmlFor="nationality">Nationality</Label>
-                                <select
-                                    id="nationality"
-                                    className="flex h-10 w-full rounded-md border border-input bg-background px-3 py-2 text-sm ring-offset-background focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
-                                    value={addPlayerForm.nationality}
-                                    onChange={(e) => setAddPlayerForm({ ...addPlayerForm, nationality: e.target.value })}
-                                >
-                                    <option value="">Select nationality...</option>
-                                    {playerFieldOptions.nationalities.map(nat => (
-                                        <option key={nat} value={nat}>{nat}</option>
-                                    ))}
-                                    <option value="__custom__">+ Add custom nationality</option>
-                                </select>
-                                {addPlayerForm.nationality === '__custom__' && (
-                                    <Input
-                                        type="text"
-                                        placeholder="Enter custom nationality"
-                                        onChange={(e) => setAddPlayerForm({ ...addPlayerForm, nationality: e.target.value })}
-                                        className="mt-2"
-                                        autoFocus
-                                    />
-                                )}
-                            </div>
-
-                            {/* Age */}
-                            <div>
-                                <Label htmlFor="age">Age</Label>
-                                <Input
-                                    id="age"
-                                    type="number"
-                                    placeholder="Age"
-                                    value={addPlayerForm.age}
-                                    onChange={(e) => setAddPlayerForm({ ...addPlayerForm, age: e.target.value })}
-                                />
-                            </div>
-
-                            {/* Sofascore ID */}
-                            <div>
-                                <Label htmlFor="sofascore-id">Sofascore ID</Label>
-                                <Input
-                                    id="sofascore-id"
-                                    type="number"
-                                    placeholder="Optional Sofascore ID"
-                                    value={addPlayerForm.sofascore_id}
-                                    onChange={(e) => setAddPlayerForm({ ...addPlayerForm, sofascore_id: e.target.value })}
-                                />
-                            </div>
-                        </div>
-
-                        {/* Form Actions */}
-                        <div className="flex items-center gap-2 pt-2 border-t">
-                            <Button onClick={createManualPlayer}>
-                                Create Player
-                            </Button>
-                            <Button variant="outline" onClick={() => {
-                                setShowAddForm(false)
-                                setAddPlayerForm({
-                                    name: '',
-                                    firstname: '',
-                                    lastname: '',
-                                    position: '',
-                                    nationality: '',
-                                    age: '',
-                                    sofascore_id: '',
-                                    primary_team_id: '',
-                                    loan_team_id: '',
-                                    window_key: '',
-                                    use_custom_primary_team: false,
-                                    custom_primary_team_name: '',
-                                    use_custom_loan_team: false,
-                                    custom_loan_team_name: ''
-                                })
-                            }}>
-                                Cancel
-                            </Button>
-                        </div>
-                    </CardContent>
-                </Card>
-            )}
-
-            {/* Tracked players with delete controls */}
-            <Card>
-                <CardHeader className="flex flex-row items-center justify-between">
-                    <div>
-                        <CardTitle>Tracked Players</CardTitle>
-                        <CardDescription>Remove a player to re-seed or clean up tracking</CardDescription>
-                    </div>
-                    <div className="flex items-center gap-2">
-                        <Input
-                            placeholder="Search player name"
-                            className="h-9 w-48"
-                            value={filters.search}
-                            onChange={(e) => setFilters({ ...filters, search: e.target.value })}
-                        />
-                        <TeamSelect
-                            teams={teams}
-                            value={filters.team_id}
-                            placeholder="Filter by team..."
-                            onChange={(id) => setFilters({ ...filters, team_id: id })}
-                            className="min-w-[180px]"
-                        />
-                        <select
-                            className="h-9 rounded-md border border-input bg-background px-2 text-sm"
-                            value={filters.has_sofascore}
-                            onChange={(e) => setFilters({ ...filters, has_sofascore: e.target.value })}
-                        >
-                            <option value="any">All</option>
-                            <option value="true">With Sofascore ID</option>
-                            <option value="false">Without Sofascore ID</option>
-                        </select>
-                        <Button variant="outline" size="sm" onClick={() => loadPlayers({ page: 1 })} disabled={loadingPlayers}>
-                            {loadingPlayers ? (
-                                <span className="flex items-center gap-1">
-                                    <RefreshCw className="h-4 w-4 animate-spin" /> Refreshing…
-                                </span>
-                            ) : (
-                                <span className="flex items-center gap-1">
-                                    <RefreshCw className="h-4 w-4" /> Refresh
-                                </span>
-                            )}
-                        </Button>
-                    </div>
-                </CardHeader>
-                <CardContent className="space-y-3">
-                    {loadingPlayers && <p className="text-sm text-muted-foreground">Loading players…</p>}
-                    {!loadingPlayers && players.length === 0 && (
-                        <p className="text-sm text-muted-foreground">No players tracked yet.</p>
-                    )}
-                    {!loadingPlayers && players.length > 0 && (
-                        <div className="space-y-2">
-                            {players.map((p) => (
-                                <div
-                                    key={p.player_id}
-                                    className="flex flex-col gap-1 rounded-md border px-3 py-2 md:flex-row md:items-center md:justify-between"
-                                >
-                                    <div>
-                                        <div className="font-medium">{p.player_name || p.name || 'Unknown player'}</div>
-                                        <div className="text-xs text-muted-foreground">
-                                            ID: {p.player_id} • Parent: {p.primary_team_name || '—'} • Loan: {p.loan_team_name || '—'} • Season: {p.window_key || '—'}
-                                        </div>
-                                    </div>
-                                    <Button
-                                        variant="destructive"
-                                        size="sm"
-                                        disabled={deletingId === p.player_id}
-                                        onClick={() => deletePlayer(p.player_id, p.player_name || p.name)}
-                                    >
-                                        {deletingId === p.player_id ? (
-                                            <span className="flex items-center gap-1">
-                                                <Trash2 className="h-4 w-4 animate-pulse" /> Deleting…
-                                            </span>
-                                        ) : (
-                                            <span className="flex items-center gap-1">
-                                                <Trash2 className="h-4 w-4" /> Delete
-                                            </span>
-                                        )}
-                                    </Button>
-                                </div>
-                            ))}
-                        </div>
-                    )}
-                    {/* Pagination */}
-                    {!loadingPlayers && players.length > 0 && (
-                        <div className="flex items-center justify-between pt-2">
-                            <div className="text-xs text-muted-foreground">
-                                Page {page} of {totalPages}
-                            </div>
-                            <div className="flex items-center gap-2">
-                                <select
-                                    className="h-9 rounded-md border border-input bg-background px-2 text-sm"
-                                    value={pageSize}
-                                    onChange={(e) => {
-                                        const size = Number(e.target.value) || 20
-                                        setPageSize(size)
-                                        setPage(1)
-                                        loadPlayers({ page: 1, pageSize: size })
-                                    }}
-                                >
-                                    {[10, 20, 50, 100].map((n) => (
-                                        <option key={n} value={n}>{n} / page</option>
-                                    ))}
-                                </select>
-                                <Button
-                                    variant="outline"
-                                    size="sm"
-                                    disabled={page <= 1}
-                                    onClick={() => {
-                                        const next = Math.max(1, page - 1)
-                                        setPage(next)
-                                        loadPlayers({ page: next })
-                                    }}
-                                >
-                                    Prev
-                                </Button>
-                                <Button
-                                    variant="outline"
-                                    size="sm"
-                                    disabled={page >= totalPages}
-                                    onClick={() => {
-                                        const next = Math.min(totalPages, page + 1)
-                                        setPage(next)
-                                        loadPlayers({ page: next })
-                                    }}
-                                >
-                                    Next
-                                </Button>
-                            </div>
-                        </div>
-                    )}
-                </CardContent>
-            </Card>
-
-            {/* Info Card */}
-            <Card>
-                <CardHeader>
-                    <CardTitle className="flex items-center gap-2">
-                        <Search className="h-5 w-5" />
-                        Player Management
-                    </CardTitle>
-                    <CardDescription>
-                        Use the form above to add players who didn't appear in the seeding process.
-                        For comprehensive player search and editing, use the full admin tools.
-                    </CardDescription>
-                </CardHeader>
-                <CardContent>
-                    <div className="rounded-lg border border-dashed bg-muted/40 p-6 text-sm text-muted-foreground space-y-2">
-                        <p><strong>Tip:</strong> After seeding teams, some loan players may not appear automatically. Use the "+ Add Player" button to manually add them.</p>
-                        <p><strong>Custom Teams:</strong> If a team isn't in the dropdown, check the "Custom team" option to enter the team name manually.</p>
-                    </div>
-                </CardContent>
-            </Card>
+                <TabsContent value="seed">
+                    <SeedTab teams={teams} setMessage={setMessage} />
+                </TabsContent>
+            </Tabs>
         </div>
     )
 }

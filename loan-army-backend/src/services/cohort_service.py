@@ -14,6 +14,7 @@ from src.models.cohort import AcademyCohort, CohortMember
 from src.models.journey import PlayerJourney, PlayerJourneyEntry, YOUTH_LEVELS
 from src.api_football_client import APIFootballClient
 from src.services.journey_sync import JourneySyncService
+from src.utils.academy_classifier import derive_player_status
 
 logger = logging.getLogger(__name__)
 
@@ -24,7 +25,8 @@ class CohortService:
     def __init__(self, api_client: Optional[APIFootballClient] = None):
         self.api = api_client or APIFootballClient()
 
-    def discover_cohort(self, team_api_id: int, league_api_id: int, season: int) -> AcademyCohort:
+    def discover_cohort(self, team_api_id: int, league_api_id: int, season: int,
+                        fallback_team_name: str = None, fallback_league_name: str = None) -> AcademyCohort:
         """
         Discover players in a youth league/season for a team.
 
@@ -149,6 +151,11 @@ class CohortService:
                 page += 1
 
             cohort.total_players = players_added
+            # Apply fallback names if the API didn't return any data
+            if not cohort.team_name and fallback_team_name:
+                cohort.team_name = fallback_team_name
+            if not cohort.league_name and fallback_league_name:
+                cohort.league_name = fallback_league_name
             cohort.seeded_at = datetime.now(timezone.utc)
             cohort.sync_status = 'complete'
             db.session.commit()
@@ -226,7 +233,11 @@ class CohortService:
                     member.total_loan_spells = loan_entries
 
                     # Derive current status
-                    member.current_status = self._derive_status(journey, current_year)
+                    member.current_status = self._derive_status(
+                        journey, current_year,
+                        parent_api_id=cohort.team_api_id,
+                        parent_club_name=cohort.team_name or '',
+                    )
 
                 member.journey_synced = True
                 member.journey_sync_error = None
@@ -265,23 +276,34 @@ class CohortService:
         logger.info(f"Refreshed stats for cohort {cohort_id}: {cohort.total_players} players")
 
     @staticmethod
-    def _derive_status(journey: PlayerJourney, current_year: int) -> str:
-        """Derive current_status from a player's journey data."""
+    def _derive_status(
+        journey: PlayerJourney,
+        current_year: int,
+        parent_api_id: int = 0,
+        parent_club_name: str = '',
+    ) -> str:
+        """Derive current_status from a player's journey data.
+
+        Uses the centralised academy classifier to correctly handle
+        international duty and same-club youth teams.
+        """
         if not journey:
             return 'unknown'
 
-        level = journey.current_level
-        if level == 'First Team':
-            return 'first_team'
-        if level in YOUTH_LEVELS:
-            return 'academy'
+        status, _, _ = derive_player_status(
+            current_club_api_id=journey.current_club_api_id,
+            current_club_name=journey.current_club_name,
+            current_level=journey.current_level,
+            parent_api_id=parent_api_id,
+            parent_club_name=parent_club_name,
+        )
 
-        # Check if player has recent entries
-        latest_entry = PlayerJourneyEntry.query.filter_by(
-            journey_id=journey.id
-        ).order_by(PlayerJourneyEntry.season.desc()).first()
+        # Additional check: player not seen for 2+ seasons → released
+        if status in ('academy', 'on_loan'):
+            latest_entry = PlayerJourneyEntry.query.filter_by(
+                journey_id=journey.id
+            ).order_by(PlayerJourneyEntry.season.desc()).first()
+            if latest_entry and latest_entry.season < current_year - 2:
+                return 'released'
 
-        if latest_entry and latest_entry.season < current_year - 2:
-            return 'released'
-
-        return 'on_loan'
+        return status

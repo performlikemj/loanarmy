@@ -35,6 +35,8 @@ import requests
 from src.extensions import limiter
 from src.utils.sanitize import sanitize_comment_body, sanitize_plain_text, sanitize_commentary_html
 from src.agents.errors import NoActiveLoaneesError
+from src.models.tracked_player import TrackedPlayer
+from src.utils.academy_classifier import derive_player_status, is_same_club
 from src.utils.newsletter_slug import compose_newsletter_public_slug
 from src.services.email_service import email_service
 import threading
@@ -1003,7 +1005,7 @@ def get_newsletters():
         query = Newsletter.query
         
         # Filter by team
-        team_id = request.args.get('team')
+        team_id = request.args.get('team', type=int)
         if team_id:
             query = query.filter_by(team_id=team_id)
 
@@ -1573,7 +1575,18 @@ def get_public_player_stats(player_id: int):
         if not all_loans:
             all_loans = [LoanedPlayer.query.filter_by(player_id=player_id).order_by(LoanedPlayer.updated_at.desc()).first()]
             all_loans = [l for l in all_loans if l]  # Remove None
-        
+
+        # TrackedPlayer fallback — resolve loan team for academy-tracked players
+        tracked_player_for_stats = None
+        if not all_loans:
+            tracked_player_for_stats = TrackedPlayer.query.filter_by(player_api_id=player_id, is_active=True).first()
+            if tracked_player_for_stats:
+                # If TrackedPlayer links to a LoanedPlayer, use that
+                if tracked_player_for_stats.loaned_player_id:
+                    linked_loan = LoanedPlayer.query.get(tracked_player_for_stats.loaned_player_id)
+                    if linked_loan:
+                        all_loans = [linked_loan]
+
         # Build a map of team_api_id -> team info for all loan teams
         loan_teams_info = {}  # {api_team_id: {name, logo, window_type}}
         for loan in all_loans:
@@ -1592,8 +1605,19 @@ def get_public_player_stats(player_id: int):
                         'is_active': loan.is_active,
                     }
         
+        # TrackedPlayer fallback: inject loan club if no LoanedPlayer provided teams
+        if not loan_teams_info and tracked_player_for_stats and tracked_player_for_stats.loan_club_api_id:
+            loan_team_record = Team.query.filter_by(team_id=tracked_player_for_stats.loan_club_api_id).first()
+            if loan_team_record:
+                loan_teams_info[loan_team_record.team_id] = {
+                    'name': loan_team_record.name,
+                    'logo': loan_team_record.logo,
+                    'window_type': 'Summer',
+                    'is_active': True,
+                }
+
         loan_team_api_ids = list(loan_teams_info.keys())
-        
+
         # Query local stats for ALL loan teams
         stats_query = db.session.query(
             FixturePlayerStats, Fixture
@@ -1602,7 +1626,7 @@ def get_public_player_stats(player_id: int):
         ).filter(
             FixturePlayerStats.player_api_id == player_id
         )
-        
+
         # Filter to only loan team games
         if loan_team_api_ids:
             stats_query = stats_query.filter(
@@ -1614,6 +1638,8 @@ def get_public_player_stats(player_id: int):
         # Sync missing games from each loan team
         # Get player name from loan records for ID verification during sync
         player_name_for_sync = all_loans[0].player_name if all_loans else None
+        if not player_name_for_sync and tracked_player_for_stats:
+            player_name_for_sync = tracked_player_for_stats.player_name
         
         for loan_team_api_id in loan_team_api_ids:
             try:
@@ -1710,10 +1736,10 @@ def _sync_player_club_fixtures(player_id: int, loan_team_api_id: int, season: in
     season_start = f"{season}-08-01"
     today = datetime.now(timezone.utc).strftime('%Y-%m-%d')
     
-    fixtures = api_client.get_fixtures_for_team(
-        loan_team_api_id, 
-        season, 
-        season_start, 
+    fixtures = api_client.get_fixtures_for_team_cached(
+        loan_team_api_id,
+        season,
+        season_start,
         today
     )
     
@@ -1980,6 +2006,51 @@ def get_public_player_profile(player_id: int):
                     result['parent_team_id'] = parent_team.team_id
                     result['primary_team_db_id'] = loaned.primary_team_id  # DB ID for API calls
         
+        # TrackedPlayer fallback — fills in gaps for academy/first_team/released players
+        tracked = None
+        if not result['name'] or not result['photo'] or not loaned:
+            tracked = TrackedPlayer.query.filter_by(player_api_id=player_id, is_active=True).first()
+            if tracked:
+                if not result['name']:
+                    result['name'] = tracked.player_name
+                if not result['photo']:
+                    result['photo'] = tracked.photo_url
+                if not result['age']:
+                    result['age'] = tracked.age
+                if not result['nationality']:
+                    result['nationality'] = tracked.nationality
+                if not result['position']:
+                    result['position'] = tracked.position
+                # Parent team from tracked player's team relationship
+                if not result['parent_team_name'] and tracked.team:
+                    result['parent_team_name'] = tracked.team.name
+                    result['parent_team_logo'] = tracked.team.logo
+                    result['parent_team_id'] = tracked.team.team_id
+                    result['primary_team_db_id'] = tracked.team_id
+                # Loan team from tracked player (if on_loan)
+                if not result['loan_team_name'] and tracked.loan_club_api_id:
+                    result['loan_team_name'] = tracked.loan_club_name
+                    loan_team_record = Team.query.filter_by(team_id=tracked.loan_club_api_id).first()
+                    if loan_team_record:
+                        result['loan_team_logo'] = loan_team_record.logo
+                        result['loan_team_id'] = loan_team_record.team_id
+                        result['loan_team_db_id'] = loan_team_record.id
+                # Additive fields
+                result['pathway_status'] = tracked.status
+                result['current_level'] = tracked.current_level
+
+        # PlayerJourney fallback — last resort for name/photo/nationality
+        if not result['name'] or not result['photo']:
+            from src.models.journey import PlayerJourney
+            journey = PlayerJourney.query.filter_by(player_api_id=player_id).first()
+            if journey:
+                if not result['name']:
+                    result['name'] = journey.player_name
+                if not result['photo']:
+                    result['photo'] = journey.player_photo
+                if not result['nationality']:
+                    result['nationality'] = journey.nationality
+
         # If still no name, try supplemental loans
         if not result['name']:
             supplemental = SupplementalLoan.query.filter_by(api_player_id=player_id).first()
@@ -2052,9 +2123,25 @@ def get_public_player_profile(player_id: int):
                 'is_active': loan.is_active,
             })
         
+        # If loan_history is empty and TrackedPlayer is on_loan, synthesize an entry
+        if not loan_history and tracked and tracked.status == 'on_loan' and tracked.loan_club_api_id:
+            loan_team_record = Team.query.filter_by(team_id=tracked.loan_club_api_id).first()
+            loan_history.append({
+                'loan_team_name': tracked.loan_club_name or (loan_team_record.name if loan_team_record else None),
+                'loan_team_id': tracked.loan_club_api_id,
+                'loan_team_db_id': loan_team_record.id if loan_team_record else None,
+                'loan_team_logo': loan_team_record.logo if loan_team_record else None,
+                'parent_team_name': tracked.team.name if tracked.team else None,
+                'parent_team_id': tracked.team.team_id if tracked.team else None,
+                'parent_team_logo': tracked.team.logo if tracked.team else None,
+                'window_type': 'Summer',
+                'window_key': None,
+                'is_active': True,
+            })
+
         result['loan_history'] = loan_history
         result['has_multiple_loans'] = len(loan_history) > 1
-        
+
         return jsonify(result)
 
     except Exception as e:
@@ -2113,12 +2200,45 @@ def get_public_player_season_stats(player_id: int):
             loaned = LoanedPlayer.query.filter_by(player_id=player_id).order_by(LoanedPlayer.updated_at.desc()).first()
             all_loans = [loaned] if loaned else []
         
+        # TrackedPlayer fallback for season-stats
+        tracked_for_season = None
         if not all_loans:
-            return jsonify(result)  # Can't get stats without loan teams
-        
+            tracked_for_season = TrackedPlayer.query.filter_by(player_api_id=player_id, is_active=True).first()
+            if tracked_for_season:
+                # If TrackedPlayer links to a LoanedPlayer, use that
+                if tracked_for_season.loaned_player_id:
+                    linked_loan = LoanedPlayer.query.get(tracked_for_season.loaned_player_id)
+                    if linked_loan:
+                        all_loans = [linked_loan]
+                # If on loan with a club but no LoanedPlayer, inject the loan club
+                elif tracked_for_season.loan_club_api_id:
+                    loan_team_record = Team.query.filter_by(team_id=tracked_for_season.loan_club_api_id).first()
+                    if loan_team_record:
+                        # Create a minimal object-like dict for downstream processing
+                        # We'll handle this in the loan_teams_info block below
+                        pass
+
+        if not all_loans:
+            # For non-loan tracked players (academy/first_team), return journey aggregates
+            if tracked_for_season and tracked_for_season.status in ('academy', 'first_team', 'released'):
+                from src.models.journey import PlayerJourney
+                journey = PlayerJourney.query.filter_by(player_api_id=player_id).first()
+                if journey and (journey.total_first_team_apps or journey.total_goals or journey.total_assists):
+                    result['appearances'] = journey.total_first_team_apps or 0
+                    result['goals'] = journey.total_goals or 0
+                    result['assists'] = journey.total_assists or 0
+                    result['source'] = 'journey-aggregate'
+                    result['stats_coverage'] = 'limited'
+                    result['limited_stats_note'] = 'Career aggregate stats from journey data. Match-by-match stats not available.'
+                return jsonify(result)
+            # For on_loan tracked players with a loan club but no LoanedPlayer row,
+            # proceed with loan_teams_info injection below
+            if not (tracked_for_season and tracked_for_season.loan_club_api_id):
+                return jsonify(result)
+
         # 📊 CHECK FOR LIMITED COVERAGE (e.g., National League)
         # If the player has limited stats coverage, use denormalized stats from LoanedPlayer
-        primary_loan = all_loans[0]
+        primary_loan = all_loans[0] if all_loans else None
         if getattr(primary_loan, 'stats_coverage', 'full') == 'limited':
             logger.info(f"Using limited coverage stats for player {player_id} ({primary_loan.player_name})")
             result['appearances'] = primary_loan.appearances or 0
@@ -2168,14 +2288,29 @@ def get_public_player_season_stats(player_id: int):
                     })
                     loan_team_api_ids.append(loan_team.team_id)
         
+        # TrackedPlayer fallback: inject loan club if no LoanedPlayer provided teams
+        if not loan_teams_info and tracked_for_season and tracked_for_season.loan_club_api_id:
+            loan_team_record = Team.query.filter_by(team_id=tracked_for_season.loan_club_api_id).first()
+            if loan_team_record:
+                loan_teams_info.append({
+                    'api_id': loan_team_record.team_id,
+                    'name': loan_team_record.name,
+                    'logo': loan_team_record.logo,
+                    'window_type': 'Summer',
+                    'is_active': True,
+                })
+                loan_team_api_ids.append(loan_team_record.team_id)
+
         result['loan_team'] = loan_teams_info[0]['name'] if loan_teams_info else None
         result['has_multiple_clubs'] = len(loan_teams_info) > 1
-        
+
         # 🔄 VERIFY player ID before fetching season stats
         # This ensures we show correct stats even if player was seeded with wrong ID
         api_client = APIFootballClient()
         player_id_to_use = player_id
         player_name_for_verify = all_loans[0].player_name if all_loans else None
+        if not player_name_for_verify and tracked_for_season:
+            player_name_for_verify = tracked_for_season.player_name
         
         if player_name_for_verify and loan_teams_info:
             verified_id, method = api_client.verify_player_id_via_fixtures(
@@ -5182,12 +5317,10 @@ def admin_update_loan(loan_id: int):
                     raise ValueError('update would duplicate an existing loan row')
                 if kind == 'primary':
                     loan.primary_team_id = new_primary_id
-                    if name:
-                        loan.primary_team_name = name
+                    loan.primary_team_name = name or team.name
                 else:
                     loan.loan_team_id = new_loan_id
-                    if name:
-                        loan.loan_team_name = name
+                    loan.loan_team_name = name or team.name
             elif name:
                 if kind == 'primary':
                     loan.primary_team_name = name
@@ -5306,59 +5439,82 @@ def admin_purge_loans_except():
     Example: { "keep_team_ids": [1], "dry_run": false }
     """
     try:
-        from src.models.weekly import FixturePlayerStats
-        
+        from src.models.weekly import FixturePlayerStats, WeeklyLoanAppearance
+        from src.models.league import AcademyAppearance
+
         data = request.get_json() or {}
         keep_team_ids = data.get('keep_team_ids', [])
         keep_team_api_ids = data.get('keep_team_api_ids', [])
         dry_run = data.get('dry_run', True)
-        
+
         # Convert API IDs to database IDs if needed
         if keep_team_api_ids and not keep_team_ids:
             teams_to_keep = Team.query.filter(Team.team_id.in_(keep_team_api_ids)).all()
             keep_team_ids = [t.id for t in teams_to_keep]
-        
+
         if not keep_team_ids:
             return jsonify({'error': 'Must specify keep_team_ids or keep_team_api_ids'}), 400
-        
+
         # Get loans to delete (where primary_team_id NOT IN keep_team_ids)
         loans_to_delete = LoanedPlayer.query.filter(
             ~LoanedPlayer.primary_team_id.in_(keep_team_ids)
         ).all()
-        
+
+        loan_ids_to_delete = [l.id for l in loans_to_delete]
         player_api_ids = list(set(l.player_id for l in loans_to_delete))
-        
+
         # Get fixture stats to delete
         fixture_stats_count = 0
         if player_api_ids:
             fixture_stats_count = FixturePlayerStats.query.filter(
                 FixturePlayerStats.player_api_id.in_(player_api_ids)
             ).count()
-        
+
+        # Count child rows that reference these loans via FK
+        weekly_appearance_count = 0
+        academy_appearance_count = 0
+        if loan_ids_to_delete:
+            weekly_appearance_count = WeeklyLoanAppearance.query.filter(
+                WeeklyLoanAppearance.loaned_player_id.in_(loan_ids_to_delete)
+            ).count()
+            academy_appearance_count = AcademyAppearance.query.filter(
+                AcademyAppearance.loaned_player_id.in_(loan_ids_to_delete)
+            ).count()
+
         summary = {
             'dry_run': dry_run,
             'keep_team_ids': keep_team_ids,
             'loans_to_delete': len(loans_to_delete),
             'fixture_stats_to_delete': fixture_stats_count,
+            'weekly_appearances_to_delete': weekly_appearance_count,
+            'academy_appearances_to_delete': academy_appearance_count,
             'teams_affected': list(set(l.primary_team_name for l in loans_to_delete)),
         }
-        
+
         if dry_run:
             summary['message'] = 'Dry run - no data was deleted'
             return jsonify(summary)
-        
-        # Actually delete
+
+        # Delete child rows first to avoid FK violations
+        if loan_ids_to_delete:
+            WeeklyLoanAppearance.query.filter(
+                WeeklyLoanAppearance.loaned_player_id.in_(loan_ids_to_delete)
+            ).delete(synchronize_session=False)
+            AcademyAppearance.query.filter(
+                AcademyAppearance.loaned_player_id.in_(loan_ids_to_delete)
+            ).delete(synchronize_session=False)
+
         if player_api_ids:
             FixturePlayerStats.query.filter(
                 FixturePlayerStats.player_api_id.in_(player_api_ids)
             ).delete(synchronize_session=False)
-        
+
         for loan in loans_to_delete:
             db.session.delete(loan)
-        
+
         db.session.commit()
-        
-        summary['message'] = f'Successfully deleted {len(loans_to_delete)} loans and {fixture_stats_count} fixture stats'
+
+        summary['message'] = f'Successfully purged {len(loans_to_delete)} players and associated data'
         return jsonify(summary)
         
     except Exception as e:
@@ -8416,10 +8572,10 @@ def admin_sync_player_fixtures(player_id: int):
         
         logger.info(f"Syncing fixtures for player {player_id} ({loaned.player_name}) at team {loan_team_api_id} ({loan_team.name})")
         
-        fixtures = api_client.get_fixtures_for_team(
-            loan_team_api_id, 
-            season, 
-            season_start, 
+        fixtures = api_client.get_fixtures_for_team_cached(
+            loan_team_api_id,
+            season,
+            season_start,
             season_end
         )
         
@@ -10857,38 +11013,12 @@ def admin_post_newsletter_to_reddit(newsletter_id: int):
 @api_bp.route('/admin/reddit/status', methods=['GET'])
 @require_api_key
 def admin_reddit_status():
-    """Check Reddit integration status and credentials."""
-    try:
-        from src.services.reddit_service import RedditService, RedditAuthenticationError
-        
-        service = RedditService.get_instance()
-        
-        if not service.is_configured():
-            return jsonify({
-                'configured': False,
-                'authenticated': False,
-                'message': 'Reddit credentials not configured'
-            })
-        
-        # Try to authenticate
-        try:
-            reddit = service.authenticate()
-            user = reddit.user.me()
-            return jsonify({
-                'configured': True,
-                'authenticated': True,
-                'username': user.name if user else service.username,
-                'message': 'Reddit connection successful'
-            })
-        except RedditAuthenticationError as e:
-            return jsonify({
-                'configured': True,
-                'authenticated': False,
-                'message': str(e)
-            })
-    except Exception as e:
-        logger.exception('admin_reddit_status failed')
-        return jsonify(_safe_error_payload(e, 'Failed to check Reddit status')), 500
+    """Check Reddit integration status — disabled."""
+    return jsonify({
+        'configured': False,
+        'authenticated': False,
+        'message': 'Reddit integration is disabled'
+    })
 
 
 # Newsletter YouTube Links endpoints
@@ -12256,33 +12386,37 @@ def admin_delete_supplemental_loan(loan_id: int):
 def admin_dashboard_stats():
     """Get overview stats for the admin dashboard."""
     try:
-        from src.models.league import Newsletter, LoanedPlayer, Player
-        
+        # Player stats from TrackedPlayer
+        total_players = TrackedPlayer.query.filter_by(is_active=True).count()
+        academy_count = TrackedPlayer.query.filter_by(is_active=True, status='academy').count()
+        on_loan_count = TrackedPlayer.query.filter_by(is_active=True, status='on_loan').count()
+        first_team_count = TrackedPlayer.query.filter_by(is_active=True, status='first_team').count()
+        released_count = TrackedPlayer.query.filter_by(is_active=True, status='released').count()
+
+        # Team stats
+        tracked_teams = Team.query.filter_by(is_tracked=True).count()
+
         # Newsletter stats
         total_newsletters = Newsletter.query.count()
         published_newsletters = Newsletter.query.filter_by(published=True).count()
         draft_newsletters = total_newsletters - published_newsletters
-        
-        # Loan stats
-        total_loans = LoanedPlayer.query.count()
-        active_loans = LoanedPlayer.query.filter_by(is_active=True).count()
-        
-        # Player stats
-        total_players = Player.query.count()
-        
+
         return jsonify({
+            'players': {
+                'total': total_players,
+                'academy': academy_count,
+                'on_loan': on_loan_count,
+                'first_team': first_team_count,
+                'released': released_count,
+            },
+            'teams': {
+                'tracked': tracked_teams,
+            },
             'newsletters': {
                 'total': total_newsletters,
                 'published': published_newsletters,
                 'drafts': draft_newsletters,
             },
-            'loans': {
-                'total': total_loans,
-                'active': active_loans,
-            },
-            'players': {
-                'total': total_players,
-            }
         })
     except Exception as e:
         logger.exception('admin_dashboard_stats failed')
@@ -12845,8 +12979,53 @@ def get_player_journey_map(player_id: int):
             journey = service.sync_player(player_id)
 
         if not journey:
+            # Fallback: build a minimal journey from TrackedPlayer if available
+            tracked = TrackedPlayer.query.filter_by(player_api_id=player_id, is_active=True).first()
+            if tracked and tracked.team:
+                map_data = {
+                    'player_api_id': player_id,
+                    'player_name': tracked.player_name,
+                    'player_photo': tracked.photo_url,
+                    'stops': [{
+                        'club_id': tracked.team.team_id,
+                        'club_name': tracked.team.name,
+                        'club_logo': tracked.team.logo,
+                        'years': str(datetime.now().year),
+                        'levels': [tracked.current_level or tracked.status or 'Academy'],
+                        'entry_types': ['academy'],
+                        'total_apps': 0,
+                        'total_goals': 0,
+                        'total_assists': 0,
+                        'breakdown': {},
+                        'competitions': [],
+                        'lat': None,
+                        'lng': None,
+                    }],
+                    'path': [],
+                    'source': 'tracked-player',
+                }
+                # Add loan club stop if on loan
+                if tracked.loan_club_api_id:
+                    loan_team = Team.query.filter_by(team_id=tracked.loan_club_api_id).first()
+                    if loan_team:
+                        map_data['stops'].append({
+                            'club_id': tracked.loan_club_api_id,
+                            'club_name': tracked.loan_club_name or loan_team.name,
+                            'club_logo': loan_team.logo,
+                            'years': str(datetime.now().year),
+                            'levels': ['First Team'],
+                            'entry_types': ['loan'],
+                            'total_apps': 0,
+                            'total_goals': 0,
+                            'total_assists': 0,
+                            'breakdown': {},
+                            'competitions': [],
+                            'lat': None,
+                            'lng': None,
+                        })
+                return jsonify(map_data)
             return jsonify({'error': 'Journey not found', 'player_id': player_id}), 404
-        
+
         map_data = journey.to_map_dict()
         
         # Add coordinates for each stop
@@ -13057,3 +13236,716 @@ def admin_add_club_location():
         db.session.rollback()
         logger.exception('Failed to add club location')
         return jsonify(_safe_error_payload(e, 'Failed to add club location')), 500
+
+
+# ====================================================================
+# 📊 API-Football Usage & Cache Admin Endpoints
+# ====================================================================
+
+@api_bp.route('/admin/api-usage', methods=['GET'])
+@require_api_key
+def admin_api_usage():
+    """Return API-Football usage stats: today by endpoint + last 7 days trend."""
+    try:
+        from src.models.api_cache import APIUsageDaily
+        days = request.args.get('days', 7, type=int)
+        summary = APIUsageDaily.usage_summary(days=days)
+        return jsonify(summary)
+    except Exception as e:
+        logger.exception('admin_api_usage failed')
+        return jsonify(_safe_error_payload(e, 'Failed to retrieve API usage')), 500
+
+
+@api_bp.route('/admin/api-cache/stats', methods=['GET'])
+@require_api_key
+def admin_api_cache_stats():
+    """Return cache stats: entry counts by endpoint, oldest/newest entries."""
+    try:
+        from src.models.api_cache import APICache
+        stats = APICache.stats()
+        return jsonify(stats)
+    except Exception as e:
+        logger.exception('admin_api_cache_stats failed')
+        return jsonify(_safe_error_payload(e, 'Failed to retrieve cache stats')), 500
+
+
+@api_bp.route('/admin/api-cache/cleanup', methods=['POST'])
+@require_api_key
+def admin_api_cache_cleanup():
+    """Delete expired cache entries. Returns the number of rows removed."""
+    try:
+        from src.models.api_cache import APICache
+        deleted = APICache.cleanup_expired()
+        return jsonify({'deleted': deleted})
+    except Exception as e:
+        db.session.rollback()
+        logger.exception('admin_api_cache_cleanup failed')
+        return jsonify(_safe_error_payload(e, 'Cache cleanup failed')), 500
+
+
+# ====================================================================
+# Tracked Players CRUD
+# ====================================================================
+
+@api_bp.route('/admin/tracked-players', methods=['GET'])
+@require_api_key
+def admin_list_tracked_players():
+    """List tracked players with filters and pagination."""
+    try:
+        query = TrackedPlayer.query.filter_by(is_active=True)
+
+        # Filters
+        team_id = request.args.get('team_id', type=int)
+        if team_id:
+            query = query.filter_by(team_id=team_id)
+
+        status = request.args.get('status')
+        if status:
+            query = query.filter_by(status=status)
+
+        level = request.args.get('level')
+        if level:
+            query = query.filter_by(current_level=level)
+
+        data_source = request.args.get('data_source')
+        if data_source:
+            query = query.filter_by(data_source=data_source)
+
+        search = request.args.get('search', '').strip()
+        if search:
+            query = query.filter(TrackedPlayer.player_name.ilike(f'%{search}%'))
+
+        # Pagination
+        page = request.args.get('page', 1, type=int)
+        if page < 1:
+            page = 1
+        page_size = request.args.get('page_size', 50, type=int)
+        if page_size < 1:
+            page_size = 1
+        if page_size > 200:
+            page_size = 200
+
+        total = query.count()
+        total_pages = max(1, math.ceil(total / page_size))
+        if page > total_pages:
+            page = total_pages
+
+        offset = (page - 1) * page_size
+        players = query.order_by(TrackedPlayer.player_name).offset(offset).limit(page_size).all()
+
+        return jsonify({
+            'items': [p.to_dict() for p in players],
+            'total': total,
+            'page': page,
+            'page_size': page_size,
+            'total_pages': total_pages,
+        })
+    except Exception as e:
+        logger.exception('admin_list_tracked_players failed')
+        return jsonify(_safe_error_payload(e, 'Failed to list tracked players')), 500
+
+
+@api_bp.route('/admin/tracked-players', methods=['POST'])
+@require_api_key
+def admin_create_tracked_player():
+    """Create a new tracked player."""
+    try:
+        data = request.get_json(force=True)
+        player_name = (data.get('player_name') or '').strip()
+        if not player_name:
+            return jsonify({'error': 'player_name is required'}), 400
+
+        team_id = data.get('team_id')
+        if not team_id:
+            return jsonify({'error': 'team_id is required'}), 400
+
+        # Auto-generate a negative player_api_id for manual entries
+        player_api_id = data.get('player_api_id')
+        if not player_api_id:
+            min_id = db.session.query(func.min(TrackedPlayer.player_api_id)).scalar() or 0
+            player_api_id = min(min_id, 0) - 1
+
+        player = TrackedPlayer(
+            player_api_id=player_api_id,
+            player_name=player_name,
+            team_id=team_id,
+            status=data.get('status', 'academy'),
+            current_level=data.get('current_level'),
+            position=data.get('position'),
+            nationality=data.get('nationality'),
+            age=data.get('age'),
+            loan_club_api_id=data.get('loan_club_api_id'),
+            loan_club_name=data.get('loan_club_name'),
+            data_source=data.get('data_source', 'manual'),
+            notes=data.get('notes'),
+        )
+        db.session.add(player)
+        db.session.commit()
+        return jsonify(player.to_dict()), 201
+    except Exception as e:
+        db.session.rollback()
+        logger.exception('admin_create_tracked_player failed')
+        return jsonify(_safe_error_payload(e, 'Failed to create tracked player')), 500
+
+
+@api_bp.route('/admin/tracked-players/<int:player_id>', methods=['PUT'])
+@require_api_key
+def admin_update_tracked_player(player_id):
+    """Update a tracked player (partial updates)."""
+    try:
+        player = TrackedPlayer.query.get(player_id)
+        if not player:
+            return jsonify({'error': 'Player not found'}), 404
+
+        data = request.get_json(force=True)
+        allowed = ['status', 'current_level', 'loan_club_api_id', 'loan_club_name',
+                    'notes', 'position', 'is_active', 'photo_url']
+        for field in allowed:
+            if field in data:
+                setattr(player, field, data[field])
+
+        db.session.commit()
+        return jsonify(player.to_dict())
+    except Exception as e:
+        db.session.rollback()
+        logger.exception('admin_update_tracked_player failed')
+        return jsonify(_safe_error_payload(e, 'Failed to update tracked player')), 500
+
+
+@api_bp.route('/admin/tracked-players/<int:player_id>', methods=['DELETE'])
+@require_api_key
+def admin_delete_tracked_player(player_id):
+    """Soft-delete a tracked player (set is_active=False)."""
+    try:
+        player = TrackedPlayer.query.get(player_id)
+        if not player:
+            return jsonify({'error': 'Player not found'}), 404
+
+        player.is_active = False
+        db.session.commit()
+        return jsonify({'message': 'Player deactivated', 'id': player_id})
+    except Exception as e:
+        db.session.rollback()
+        logger.exception('admin_delete_tracked_player failed')
+        return jsonify(_safe_error_payload(e, 'Failed to delete tracked player')), 500
+
+
+@api_bp.route('/admin/tracked-players/refresh-statuses', methods=['POST'])
+@require_api_key
+def admin_refresh_tracked_player_statuses():
+    """Re-derive status/loan fields for TrackedPlayers using the academy classifier.
+
+    Body: { team_id?: int, resync_journeys?: bool } — if omitted, refreshes all active TrackedPlayers.
+    When resync_journeys is true, re-syncs each player's journey data from API-Football
+    before re-deriving statuses (fixes stale current_club data).
+    """
+    try:
+        data = request.get_json(force=True) or {}
+        team_id = data.get('team_id')
+        resync_journeys = data.get('resync_journeys', False)
+
+        from src.models.journey import PlayerJourney
+
+        query = TrackedPlayer.query.filter_by(is_active=True)
+        if team_id:
+            query = query.filter_by(team_id=team_id)
+
+        players = query.all()
+        updated = 0
+        journeys_resynced = 0
+
+        # Optionally re-sync journeys first to refresh current_club data
+        journey_svc = None
+        if resync_journeys:
+            from src.services.journey_sync import JourneySyncService
+            journey_svc = JourneySyncService()
+
+        for tp in players:
+            journey = None
+
+            # Re-sync the journey from API-Football if requested
+            if resync_journeys and journey_svc and tp.player_api_id:
+                try:
+                    journey = journey_svc.sync_player(tp.player_api_id, force_full=True)
+                    if journey:
+                        journeys_resynced += 1
+                        # Link journey if not already linked
+                        if not tp.journey_id and journey:
+                            tp.journey_id = journey.id
+                except Exception as sync_err:
+                    logger.warning(
+                        'refresh-statuses: journey resync failed for player %d: %s',
+                        tp.player_api_id, sync_err,
+                    )
+
+            if not journey:
+                if tp.journey_id:
+                    journey = db.session.get(PlayerJourney, tp.journey_id)
+                if not journey:
+                    journey = PlayerJourney.query.filter_by(
+                        player_api_id=tp.player_api_id
+                    ).first()
+
+            if not journey:
+                continue
+
+            # Look up the parent club name from the team row
+            parent_team = Team.query.get(tp.team_id)
+            if not parent_team:
+                continue
+
+            new_status, new_loan_id, new_loan_name = derive_player_status(
+                current_club_api_id=journey.current_club_api_id,
+                current_club_name=journey.current_club_name,
+                current_level=journey.current_level,
+                parent_api_id=parent_team.team_id,
+                parent_club_name=parent_team.name,
+            )
+
+            changed = False
+            if tp.status != new_status:
+                tp.status = new_status
+                changed = True
+            if tp.loan_club_api_id != new_loan_id:
+                tp.loan_club_api_id = new_loan_id
+                changed = True
+            if tp.loan_club_name != new_loan_name:
+                tp.loan_club_name = new_loan_name
+                changed = True
+            if journey.current_level and tp.current_level != journey.current_level:
+                tp.current_level = journey.current_level
+                changed = True
+            if changed:
+                updated += 1
+
+        db.session.commit()
+        result = {
+            'total': len(players),
+            'updated': updated,
+        }
+        if resync_journeys:
+            result['journeys_resynced'] = journeys_resynced
+        return jsonify(result)
+    except Exception as e:
+        db.session.rollback()
+        logger.exception('admin_refresh_tracked_player_statuses failed')
+        return jsonify(_safe_error_payload(e, 'Failed to refresh statuses')), 500
+
+
+@api_bp.route('/admin/tracked-players/seed-team', methods=['POST'])
+@require_api_key
+def admin_seed_tracked_players():
+    """Seed TrackedPlayer records for a team using existing academy identification rules.
+
+    Uses three sources to discover academy players:
+      1. PlayerJourney.academy_club_ids — players whose journey data marks this
+         club as an academy parent.
+      2. API-Football squad — fetches the current squad and runs journey sync for
+         each player to determine academy connection.
+      3. CohortMember records linked to this team.
+
+    Body: { team_id: int (db id), season?: int, max_age?: int, sync_journeys?: bool }
+    """
+    try:
+        data = request.get_json(force=True)
+        team_id = data.get('team_id')
+        if not team_id:
+            return jsonify({'error': 'team_id is required'}), 400
+
+        team = Team.query.get(team_id)
+        if not team:
+            return jsonify({'error': 'Team not found'}), 404
+
+        max_age = data.get('max_age', 23)
+        season = data.get('season') or api_client.current_season_start_year
+        sync_journeys = data.get('sync_journeys', True)
+
+        parent_api_id = team.team_id
+        logger.info(
+            'seed_tracked_players: starting for %s (api_id=%s, season=%s, '
+            'max_age=%s, sync_journeys=%s)',
+            team.name, parent_api_id, season, max_age, sync_journeys,
+        )
+
+        from src.models.journey import PlayerJourney
+        from src.services.journey_sync import JourneySyncService
+        from sqlalchemy import cast
+        from sqlalchemy.dialects.postgresql import JSONB as PG_JSONB
+
+        # ── Source 1: Players already identified as academy products ──
+        known_journeys = PlayerJourney.query.filter(
+            PlayerJourney.academy_club_ids.contains(cast([parent_api_id], PG_JSONB))
+        ).all()
+        candidate_ids = {j.player_api_id: j for j in known_journeys}
+        logger.info(
+            'seed_tracked_players: %d players already have academy_club_ids containing %s',
+            len(candidate_ids), parent_api_id,
+        )
+
+        # ── Source 2: Fetch squads for each season in the window ──
+        # Fetching multiple seasons discovers players who have since left
+        # (e.g. a player in Arsenal's U21 in 2022 who was released in 2023).
+        # Each API call is cached in APICache (7-day TTL) so re-seeding is cheap.
+        years = data.get('years', 4)
+        seasons_to_fetch = range(season - years + 1, season + 1)
+        all_squad_player_ids = set()
+        squad_data = []  # collect all entries for enrichment lookup later
+
+        for fetch_season in seasons_to_fetch:
+            season_squad = api_client.get_team_players(parent_api_id, season=fetch_season)
+            logger.info(
+                'seed_tracked_players: API squad returned %d entries for %s season %d',
+                len(season_squad), team.name, fetch_season,
+            )
+            for entry in season_squad:
+                player_info = (entry or {}).get('player') or {}
+                pid = player_info.get('id')
+                if pid:
+                    all_squad_player_ids.add(int(pid))
+            squad_data.extend(season_squad)
+
+        logger.info(
+            'seed_tracked_players: %d unique players across %d seasons for %s',
+            len(all_squad_player_ids), len(list(seasons_to_fetch)), team.name,
+        )
+
+        journey_svc = JourneySyncService(api_client._resolve()
+                                         if hasattr(api_client, '_resolve')
+                                         else api_client)
+        synced = 0
+        not_academy = 0
+
+        for entry in squad_data:
+            player_info = (entry or {}).get('player') or {}
+            pid = player_info.get('id')
+            if not pid:
+                continue
+            pid = int(pid)
+
+            # Skip if already a known academy product
+            if pid in candidate_ids:
+                continue
+
+            # Age gate — don't bother syncing journeys for senior players
+            age = player_info.get('age')
+            if age and int(age) > max_age:
+                continue
+
+            # Skip if journey already covers the current season
+            existing_journey = PlayerJourney.query.filter_by(player_api_id=pid).first()
+            if existing_journey and season in (existing_journey.seasons_synced or []):
+                if parent_api_id in (existing_journey.academy_club_ids or []):
+                    candidate_ids[pid] = existing_journey
+                continue
+
+            # Sync their journey to compute academy_club_ids
+            if sync_journeys:
+                try:
+                    journey = journey_svc.sync_player(pid)
+                    synced += 1
+                    if journey and parent_api_id in (journey.academy_club_ids or []):
+                        candidate_ids[pid] = journey
+                    else:
+                        not_academy += 1
+                except Exception as sync_err:
+                    logger.warning('seed: journey sync failed for %d: %s', pid, sync_err)
+            else:
+                # Without sync, just check if a journey exists
+                journey = PlayerJourney.query.filter_by(player_api_id=pid).first()
+                if journey and parent_api_id in (journey.academy_club_ids or []):
+                    candidate_ids[pid] = journey
+
+        # ── Source 3: CohortMember records (via AcademyCohort) ──
+        try:
+            from src.models.cohort import AcademyCohort, CohortMember
+            cohort_ids = [c.id for c in AcademyCohort.query.filter_by(
+                team_api_id=parent_api_id
+            ).all()]
+            if cohort_ids:
+                cohort_members = CohortMember.query.filter(
+                    CohortMember.cohort_id.in_(cohort_ids)
+                ).all()
+                for cm in cohort_members:
+                    if cm.player_api_id and cm.player_api_id not in candidate_ids:
+                        journey = PlayerJourney.query.filter_by(
+                            player_api_id=cm.player_api_id
+                        ).first()
+                        candidate_ids[cm.player_api_id] = journey  # may be None
+                logger.info(
+                    'seed_tracked_players: %d cohort members across %d cohorts for api_id=%s',
+                    len(cohort_members), len(cohort_ids), parent_api_id,
+                )
+            else:
+                logger.info('seed_tracked_players: no cohorts found for api_id=%s', parent_api_id)
+        except Exception as cohort_err:
+            logger.warning('seed: cohort lookup failed: %s', cohort_err)
+
+        # ── Build a lookup of squad player info for enrichment ──
+        squad_by_id = {}
+        for entry in squad_data:
+            pi = (entry or {}).get('player') or {}
+            if pi.get('id'):
+                squad_by_id[int(pi['id'])] = entry
+
+        # ── Create TrackedPlayer rows ──
+        created = 0
+        skipped = 0
+        errors = []
+
+        for pid, journey in candidate_ids.items():
+            try:
+                existing = TrackedPlayer.query.filter_by(
+                    player_api_id=pid, team_id=team_id,
+                ).first()
+                if existing:
+                    skipped += 1
+                    continue
+
+                # Gather info from journey + squad data
+                squad_entry = squad_by_id.get(pid) or {}
+                pi = squad_entry.get('player') or {}
+                stats_list = squad_entry.get('statistics') or []
+
+                player_name = (
+                    (journey.player_name if journey else None)
+                    or pi.get('name')
+                    or f'Player {pid}'
+                )
+                photo_url = (journey.player_photo if journey else None) or pi.get('photo')
+                nationality = (journey.nationality if journey else None) or pi.get('nationality')
+                birth_date = (journey.birth_date if journey else None) or (pi.get('birth') or {}).get('date')
+                position = pi.get('position') or ''
+                age = pi.get('age')
+
+                # Determine status using the centralised academy classifier
+                status, loan_club_api_id, loan_club_name = derive_player_status(
+                    current_club_api_id=journey.current_club_api_id if journey else None,
+                    current_club_name=journey.current_club_name if journey else None,
+                    current_level=journey.current_level if journey else None,
+                    parent_api_id=parent_api_id,
+                    parent_club_name=team.name,
+                )
+
+                # Derive level from journey
+                current_level = None
+                if journey and journey.current_level:
+                    current_level = journey.current_level
+
+                tp = TrackedPlayer(
+                    player_api_id=pid,
+                    player_name=player_name,
+                    photo_url=photo_url,
+                    position=position,
+                    nationality=nationality,
+                    birth_date=birth_date,
+                    age=int(age) if age else None,
+                    team_id=team_id,
+                    status=status,
+                    current_level=current_level,
+                    loan_club_api_id=loan_club_api_id,
+                    loan_club_name=loan_club_name,
+                    data_source='api-football',
+                    data_depth='full_stats',
+                    journey_id=journey.id if journey else None,
+                )
+                db.session.add(tp)
+                created += 1
+            except Exception as entry_err:
+                errors.append(f'Player {pid}: {entry_err}')
+                logger.warning('seed_tracked_players: error for player %d: %s', pid, entry_err)
+
+        db.session.commit()
+        logger.info(
+            'seed_tracked_players: done for %s — created=%d, skipped=%d, '
+            'candidates=%d, journeys_synced=%d, not_academy=%d',
+            team.name, created, skipped, len(candidate_ids), synced, not_academy,
+        )
+        result = {
+            'team_id': team_id,
+            'team_name': team.name,
+            'api_team_id': parent_api_id,
+            'season': season,
+            'years': years,
+            'seasons_fetched': list(seasons_to_fetch),
+            'created': created,
+            'skipped': skipped,
+            'candidates_found': len(candidate_ids),
+            'journeys_synced': synced,
+            'not_academy': not_academy,
+            'unique_squad_players': len(all_squad_player_ids),
+        }
+        if errors:
+            result['errors'] = errors[:10]
+        return jsonify(result)
+    except Exception as e:
+        db.session.rollback()
+        logger.exception('admin_seed_tracked_players failed')
+        return jsonify(_safe_error_payload(e, 'Failed to seed tracked players')), 500
+
+
+@api_bp.route('/admin/tracked-players/sync-journeys', methods=['POST'])
+@require_api_key
+def admin_sync_tracked_player_journeys():
+    """Batch-sync PlayerJourney records for all TrackedPlayers missing journey data.
+
+    Two passes:
+      1. Link pass — if a PlayerJourney already exists for the player_api_id,
+         just set TrackedPlayer.journey_id (no API call needed).
+      2. Sync pass — for remaining players, call JourneySyncService.sync_player()
+         to fetch career data from API-Football.
+
+    Returns a summary of what was done.
+    """
+    try:
+        from src.models.journey import PlayerJourney
+        from src.services.journey_sync import JourneySyncService
+
+        unlinked = TrackedPlayer.query.filter(
+            TrackedPlayer.is_active == True,
+            TrackedPlayer.journey_id.is_(None),
+        ).all()
+
+        linked = 0
+        synced = 0
+        failed = 0
+        details = []
+
+        # Pass 1: link existing journeys
+        for tp in unlinked:
+            journey = PlayerJourney.query.filter_by(player_api_id=tp.player_api_id).first()
+            if journey:
+                tp.journey_id = journey.id
+                linked += 1
+                details.append({'player': tp.player_name, 'api_id': tp.player_api_id, 'action': 'linked'})
+
+        db.session.flush()
+
+        # Pass 2: sync missing journeys
+        still_missing = [tp for tp in unlinked if tp.journey_id is None]
+        service = JourneySyncService()
+        for tp in still_missing:
+            try:
+                journey = service.sync_player(tp.player_api_id)
+                if journey:
+                    tp.journey_id = journey.id
+                    synced += 1
+                    details.append({'player': tp.player_name, 'api_id': tp.player_api_id, 'action': 'synced'})
+                else:
+                    failed += 1
+                    details.append({'player': tp.player_name, 'api_id': tp.player_api_id, 'action': 'sync_returned_none'})
+            except Exception as sync_err:
+                failed += 1
+                details.append({'player': tp.player_name, 'api_id': tp.player_api_id, 'action': 'error', 'error': str(sync_err)})
+                logger.warning('sync-journeys: failed for %s (%d): %s', tp.player_name, tp.player_api_id, sync_err)
+
+        db.session.commit()
+        return jsonify({
+            'total_unlinked': len(unlinked),
+            'linked': linked,
+            'synced': synced,
+            'failed': failed,
+            'details': details,
+        })
+    except Exception as e:
+        db.session.rollback()
+        logger.exception('admin_sync_tracked_player_journeys failed')
+        return jsonify(_safe_error_payload(e, 'Failed to sync journeys')), 500
+
+
+# ====================================================================
+# Public: Team Players
+# ====================================================================
+
+@api_bp.route('/teams/<int:team_id>/players', methods=['GET'])
+def get_team_players(team_id):
+    """Return tracked players for a team in loan-compatible shape (public endpoint)."""
+    try:
+        team = Team.query.get(team_id)
+        if not team:
+            return jsonify({'error': 'Team not found'}), 404
+
+        players = TrackedPlayer.query.filter_by(
+            team_id=team_id,
+            is_active=True,
+        ).order_by(TrackedPlayer.player_name).all()
+
+        # Batch-compute parent club appearances from journey entries
+        from src.models.journey import PlayerJourneyEntry
+        journey_ids = [tp.journey_id for tp in players if tp.journey_id]
+        parent_club_apps = {}
+        if journey_ids:
+            # Get all non-international entries for these journeys
+            all_entries = PlayerJourneyEntry.query.filter(
+                PlayerJourneyEntry.journey_id.in_(journey_ids),
+                PlayerJourneyEntry.entry_type != 'international',
+            ).all()
+            for entry in all_entries:
+                # Count entries at parent club (by API ID or youth-suffix name match)
+                if entry.club_api_id == team.team_id or is_same_club(entry.club_name or '', team.name):
+                    parent_club_apps[entry.journey_id] = parent_club_apps.get(entry.journey_id, 0) + (entry.appearances or 0)
+
+        # Enrich with player photos from Player table and loan team logos
+        results = []
+        for tp in players:
+            d = tp.to_public_dict()
+            d['parent_club_appearances'] = parent_club_apps.get(tp.journey_id, 0)
+
+            # Fill in photo if missing
+            if not d.get('player_photo'):
+                player_record = Player.query.filter_by(player_id=tp.player_api_id).first()
+                if player_record and player_record.photo_url:
+                    d['player_photo'] = player_record.photo_url
+
+            # Fill in loan team logo
+            if tp.loan_club_api_id:
+                loan_team = Team.query.filter_by(team_id=tp.loan_club_api_id).first()
+                if loan_team:
+                    d['loan_team_logo'] = loan_team.logo
+
+            # Enrich with international honors from journey entries
+            # Use entry_type='international' to get actual national team duty,
+            # not club entries in international competitions (e.g. Arsenal in UEFA Youth League)
+            if tp.journey_id:
+                from src.models.journey import PlayerJourneyEntry
+                intl_entries = PlayerJourneyEntry.query.filter_by(
+                    journey_id=tp.journey_id,
+                    entry_type='international',
+                ).all()
+                if intl_entries:
+                    # Group by national team, pick the highest level one
+                    teams_map = {}
+                    for ie in intl_entries:
+                        key = ie.club_api_id
+                        if key not in teams_map:
+                            teams_map[key] = {
+                                'team': ie.club_name,
+                                'logo': ie.club_logo,
+                                'caps': 0,
+                                'level': ie.level,
+                            }
+                        teams_map[key]['caps'] += ie.appearances or 0
+                        # Prefer senior level over youth
+                        if ie.level == 'International':
+                            teams_map[key]['level'] = 'International'
+                    # Return only the highest-level national team
+                    level_rank = {'International': 2, 'International Youth': 1}
+                    best = max(teams_map.values(), key=lambda t: (level_rank.get(t['level'], 0), t['caps']))
+                    d['international_team'] = best['team']
+                    d['international_caps'] = best['caps']
+                    d['international_logo'] = best['logo']
+
+            results.append(d)
+
+        return jsonify({
+            'team': {
+                'id': team.id,
+                'team_id': team.team_id,
+                'name': team.name,
+                'logo': team.logo,
+            },
+            'players': results,
+            'total': len(results),
+        })
+    except Exception as e:
+        logger.exception('get_team_players failed')
+        return jsonify(_safe_error_payload(e, 'Failed to fetch team players')), 500

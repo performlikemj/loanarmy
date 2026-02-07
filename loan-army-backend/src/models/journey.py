@@ -6,6 +6,7 @@ including all clubs, levels, and statistics.
 """
 
 from datetime import datetime, timezone
+from sqlalchemy.dialects.postgresql import JSONB
 from src.models.league import db
 
 
@@ -47,6 +48,9 @@ class PlayerJourney(db.Model):
     total_goals = db.Column(db.Integer, default=0)
     total_assists = db.Column(db.Integer, default=0)
     
+    # Academy connections (derived from is_youth entries)
+    academy_club_ids = db.Column(JSONB, default=list)  # [33, 62] = parent API IDs
+
     # Sync tracking
     seasons_synced = db.Column(db.JSON)  # [2019, 2020, 2021, ...]
     last_synced_at = db.Column(db.DateTime)
@@ -95,6 +99,7 @@ class PlayerJourney(db.Model):
                 'goals': self.total_goals,
                 'assists': self.total_assists,
             },
+            'academy_club_ids': self.academy_club_ids or [],
             'seasons_synced': self.seasons_synced,
             'last_synced_at': self.last_synced_at.isoformat() if self.last_synced_at else None,
             'sync_error': self.sync_error,
@@ -122,6 +127,7 @@ class PlayerJourney(db.Model):
                     'club_logo': entry.club_logo,
                     'seasons': [],
                     'levels': set(),
+                    'entry_types': set(),
                     'total_apps': 0,
                     'total_goals': 0,
                     'total_assists': 0,
@@ -132,6 +138,7 @@ class PlayerJourney(db.Model):
             club = clubs_map[club_id]
             club['seasons'].append(entry.season)
             club['levels'].add(entry.level)
+            club['entry_types'].add(entry.entry_type)
             club['total_apps'] += entry.appearances or 0
             club['total_goals'] += entry.goals or 0
             club['total_assists'] += entry.assists or 0
@@ -172,6 +179,7 @@ class PlayerJourney(db.Model):
                 'club_logo': club['club_logo'],
                 'years': years,
                 'levels': sorted(list(club['levels']), key=lambda x: LEVEL_PRIORITY.get(x, 0), reverse=True),
+                'entry_types': sorted(club['entry_types']),
                 'total_apps': club['total_apps'],
                 'total_goals': club['total_goals'],
                 'total_assists': club['total_assists'],
@@ -179,9 +187,20 @@ class PlayerJourney(db.Model):
                 'competitions': sorted(club['competitions'], key=lambda x: x['season'], reverse=True),
             })
         
-        # Sort by earliest season, then by latest transfer date (so most
-        # recent club within the same season comes last → "Current" badge)
-        stops.sort(key=lambda x: (int(x['years'].split('-')[0]), x.get('_max_transfer_date', '')))
+        # Sort by:
+        #  1. Earliest season
+        #  2. Integration stops last within the same year (player arrived
+        #     from another club, so the previous club's stop comes first)
+        #  3. Level priority — youth before senior so academy progression
+        #     reads as promotion not demotion
+        #  4. Latest transfer date (most recent club within same season
+        #     comes last → "Current" badge)
+        stops.sort(key=lambda x: (
+            int(x['years'].split('-')[0]),
+            1 if 'integration' in x.get('entry_types', []) else 0,
+            max(LEVEL_PRIORITY.get(l, 0) for l in x.get('levels', ['First Team'])),
+            x.get('_max_transfer_date', ''),
+        ))
 
         # Remove internal sort key from API response
         for stop in stops:

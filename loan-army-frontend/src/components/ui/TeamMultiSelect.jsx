@@ -111,8 +111,8 @@ export default function TeamMultiSelect({
                       >
                         <CheckCircle className={`h-4 w-4 mr-2 ${active ? 'text-blue-600' : 'opacity-20'}`} />
                         <span className="flex-1">{team.name}</span>
-                        {team.current_loaned_out_count != null && (
-                          <span className="text-xs text-muted-foreground">{team.current_loaned_out_count} loans</span>
+                        {(team.tracked_player_count ?? team.current_loaned_out_count) != null && (
+                          <span className="text-xs text-muted-foreground">{team.tracked_player_count ?? team.current_loaned_out_count} players</span>
                         )}
                       </CommandItem>
                     )

@@ -30,8 +30,10 @@ import {
     RefreshCw,
     GraduationCap,
     Calendar,
-    Users
+    Users,
+    ArrowRight
 } from 'lucide-react'
+import { Link } from 'react-router-dom'
 
 export function AdminAcademy() {
     // Stats
@@ -375,6 +377,29 @@ export function AdminAcademy() {
                         </div>
                     )}
                 </CardContent>
+            </Card>
+
+            {/* Cohorts Link */}
+            <Card>
+                <CardHeader>
+                    <div className="flex items-center justify-between">
+                        <div>
+                            <CardTitle className="flex items-center gap-2">
+                                <Users className="h-5 w-5" />
+                                Alumni Cohorts
+                            </CardTitle>
+                            <CardDescription>
+                                Seed and manage academy player cohorts — track where youth players end up
+                            </CardDescription>
+                        </div>
+                        <Link to="/admin/cohorts">
+                            <Button>
+                                Manage Cohorts
+                                <ArrowRight className="h-4 w-4 ml-2" />
+                            </Button>
+                        </Link>
+                    </div>
+                </CardHeader>
             </Card>
 
             {/* Add League Dialog */}

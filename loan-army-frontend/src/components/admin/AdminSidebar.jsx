@@ -5,31 +5,25 @@ import {
     Mail,
     Users,
     Settings,
-    Trophy,
     LogOut,
     Home,
     Shield,
     Megaphone,
-    MessageCircle,
     MessageSquarePlus,
     GraduationCap,
-    UserPlus
 } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { useAuthUI } from '@/context/AuthContext'
 
 const sidebarItems = [
     { icon: LayoutDashboard, label: 'Dashboard', href: '/admin/dashboard' },
-    { icon: Mail, label: 'Newsletters', href: '/admin/newsletters' },
-    { icon: MessageSquarePlus, label: 'Curation', href: '/admin/curation' },
-    { icon: GraduationCap, label: 'Academy', href: '/admin/academy' },
-    { icon: Users, label: 'Users', href: '/admin/users' },
-    { icon: UserPlus, label: 'Manual Players', href: '/admin/manual-players' },
-    { icon: Trophy, label: 'Loans', href: '/admin/loans' },
     { icon: Users, label: 'Players', href: '/admin/players' },
     { icon: Shield, label: 'Teams', href: '/admin/teams' },
+    { icon: GraduationCap, label: 'Academy', href: '/admin/academy' },
+    { icon: Mail, label: 'Newsletters', href: '/admin/newsletters' },
+    { icon: MessageSquarePlus, label: 'Curation', href: '/admin/curation' },
+    { icon: Users, label: 'Users', href: '/admin/users' },
     { icon: Megaphone, label: 'Sponsors', href: '/admin/sponsors' },
-    { icon: MessageCircle, label: 'Reddit', href: '/admin/reddit' },
     { icon: Settings, label: 'Settings', href: '/admin/settings' },
 ]
 
@@ -56,7 +50,7 @@ export function AdminSidebar({ className, collapsed = false, onNavigate }) {
                         collapsed ? "justify-center" : "justify-start"
                     )}>
                         <div className="h-9 w-9 rounded-lg bg-blue-600 flex items-center justify-center">
-                            <Trophy className="h-5 w-5 text-white" />
+                            <GraduationCap className="h-5 w-5 text-white" />
                         </div>
                         {!collapsed && <h2 className="text-lg font-bold tracking-tight">The Academy Watch</h2>}
                     </div>

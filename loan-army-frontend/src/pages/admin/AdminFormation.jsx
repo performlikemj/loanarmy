@@ -48,35 +48,36 @@ export function AdminFormation() {
     async function load() {
       try {
         setLoading(true)
-        const [loans, formations] = await Promise.all([
-          APIService.getTeamLoans(teamId, { aggregate_stats: 'true', academy_only: 'true' }),
+        const [teamData, formations] = await Promise.all([
+          APIService.getTeamPlayers(teamId),
           APIService.adminGetFormations(teamId),
         ])
 
         if (cancelled) return
 
-        const players = (Array.isArray(loans) ? loans : loans?.items || []).map((loan) => ({
-          player_id: loan.player_id,
-          id: loan.player_id,
-          player_name: loan.player_name,
-          name: loan.player_name,
-          position: loan.position,
-          photo_url: loan.photo_url || loan.player_photo,
-          photo: loan.photo_url || loan.player_photo,
-          loan_team_name: loan.loan_team_name,
-          appearances: loan.appearances,
-          goals: loan.goals,
-          assists: loan.assists,
-          minutes_played: loan.minutes_played,
-          yellows: loan.yellows,
-          reds: loan.reds,
+        const rawPlayers = teamData?.players || []
+        const players = rawPlayers.map((p) => ({
+          player_id: p.player_id,
+          id: p.player_id,
+          player_name: p.player_name,
+          name: p.player_name,
+          position: p.position,
+          photo_url: p.player_photo,
+          photo: p.player_photo,
+          loan_team_name: p.loan_team_name,
+          appearances: p.appearances,
+          goals: p.goals,
+          assists: p.assists,
+          minutes_played: p.minutes_played,
+          yellows: p.yellows,
+          reds: p.reds,
         }))
 
         setAllPlayers(players)
         setSavedFormations(formations)
 
-        if (players.length > 0 && loans[0]?.primary_team_name) {
-          setTeamName(loans[0].primary_team_name)
+        if (teamData?.team?.name) {
+          setTeamName(teamData.team.name)
         }
       } catch (err) {
         if (!cancelled) setError(err.message)

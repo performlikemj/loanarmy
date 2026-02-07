@@ -5,12 +5,16 @@ This blueprint handles:
 - Gameweek information
 - Team listings and details
 - Team loan information
+- Academy network visualization
 """
 
 import logging
+import math
 from datetime import datetime, timezone
 
 from flask import Blueprint, jsonify, request
+from sqlalchemy import cast
+from sqlalchemy.dialects.postgresql import JSONB as PG_JSONB
 from werkzeug.exceptions import NotFound
 
 from src.auth import _safe_error_payload
@@ -23,6 +27,9 @@ from src.models.league import (
     SupplementalLoan,
     _dedupe_loans,
 )
+from src.models.journey import PlayerJourney, PlayerJourneyEntry
+from src.models.tracked_player import TrackedPlayer
+from src.utils.academy_classifier import derive_player_status, is_same_club
 
 logger = logging.getLogger(__name__)
 
@@ -157,6 +164,23 @@ def get_teams():
                 logger.error(f"Lazy sync failed: {sync_ex}")
 
         team_dicts = [team.to_dict() for team in teams]
+
+        # Override loan counts with tracked-player counts
+        team_db_ids = [t.id for t in teams]
+        if team_db_ids:
+            from sqlalchemy import func as sa_func
+            tp_counts = dict(
+                db.session.query(
+                    TrackedPlayer.team_id,
+                    sa_func.count(TrackedPlayer.id),
+                ).filter(
+                    TrackedPlayer.team_id.in_(team_db_ids),
+                    TrackedPlayer.is_active.is_(True),
+                ).group_by(TrackedPlayer.team_id).all()
+            )
+            for td in team_dicts:
+                td['tracked_player_count'] = tp_counts.get(td['id'], 0)
+
         logger.info(f"Returning {len(team_dicts)} team records")
 
         return jsonify(team_dicts)
@@ -230,12 +254,24 @@ def _lazy_sync_european_teams(season: int | None):
 
 @teams_bp.route('/teams/<int:team_id>', methods=['GET'])
 def get_team(team_id):
-    """Get specific team with loan details."""
+    """Get specific team with tracked player summary."""
     try:
         team = Team.query.get_or_404(team_id)
         team_dict = team.to_dict()
 
-        # Add detailed loan information with duplicates removed
+        # Include tracked player count + status breakdown
+        tracked = TrackedPlayer.query.filter_by(
+            team_id=team_id, is_active=True
+        ).all()
+        team_dict['tracked_player_count'] = len(tracked)
+        team_dict['tracked_status_breakdown'] = {}
+        for tp in tracked:
+            status = tp.status or 'unknown'
+            team_dict['tracked_status_breakdown'][status] = (
+                team_dict['tracked_status_breakdown'].get(status, 0) + 1
+            )
+
+        # Keep active_loans for backward compat (e.g. old newsletter code)
         active_loans = team.unique_active_loans()
         team_dict['active_loans'] = [loan.to_dict() for loan in active_loans]
 
@@ -259,6 +295,8 @@ def get_team_loans(team_id):
     - include_supplemental: include supplemental loans (default: false)
     - include_season_context: enrich with season stats (default: false)
     - pathway_status: filter by pathway status (e.g. 'academy', 'on_loan')
+    - academy_only: filter to players with this team in their academy_club_ids (default: false)
+    - aggregate_stats: when deduping, sum stats across all loan spells per player (default: false)
     """
     try:
         team = Team.query.get_or_404(team_id)
@@ -267,6 +305,7 @@ def get_team_loans(team_id):
         season_val = request.args.get('season', type=int)
         direction = request.args.get('direction', 'loaned_from').lower()
         pathway_status = request.args.get('pathway_status', '').strip().lower()
+        academy_only = request.args.get('academy_only', 'false').lower() in ('1', 'true', 'yes', 'on', 'y')
 
         # Filter by direction: loaned_from = parent club, loaned_to = loan destination
         if direction == 'loaned_to':
@@ -280,13 +319,66 @@ def get_team_loans(team_id):
         if pathway_status:
             query = query.filter(LoanedPlayer.pathway_status == pathway_status)
 
+        # Filter to academy products using JSONB @> containment.
+        # Uses outerjoin so players without journey data are kept (not
+        # silently hidden); only players with a journey that *excludes*
+        # this team are filtered out.
+        if academy_only:
+            from src.models.journey import PlayerJourney
+            from sqlalchemy import cast, or_
+            from sqlalchemy.dialects.postgresql import JSONB as PG_JSONB
+
+            query = query.outerjoin(
+                PlayerJourney,
+                LoanedPlayer.player_id == PlayerJourney.player_api_id
+            ).filter(
+                or_(
+                    PlayerJourney.id.is_(None),  # no journey yet — keep
+                    PlayerJourney.academy_club_ids.contains(
+                        cast([team.team_id], PG_JSONB)
+                    ),
+                )
+            )
+
         if season_val:
             slug = f"{season_val}-{str(season_val + 1)[-2:]}"
             query = query.filter(LoanedPlayer.window_key.like(f"{slug}%"))
 
-        loans = query.order_by(LoanedPlayer.updated_at.desc()).all()
+        aggregate_stats = request.args.get('aggregate_stats', 'false').lower() in ('1', 'true', 'yes', 'on', 'y')
+
+        all_loans = query.order_by(LoanedPlayer.updated_at.desc()).all()
         if dedupe:
-            loans = _dedupe_loans(loans)
+            loans = _dedupe_loans(all_loans)
+        else:
+            loans = all_loans
+
+        # Pre-compute aggregated stats for players with multiple loan spells.
+        # Look up ALL same-team loans (including inactive) so full-season stats
+        # are captured even when active_only filters the display list.
+        aggregated_by_player = {}
+        if dedupe and aggregate_stats:
+            player_ids = set(l.player_id for l in all_loans)
+            all_spells_query = LoanedPlayer.query.filter(
+                LoanedPlayer.primary_team_id == team.id,
+                LoanedPlayer.player_id.in_(player_ids),
+            )
+            if season_val:
+                slug = f"{season_val}-{str(season_val + 1)[-2:]}"
+                all_spells_query = all_spells_query.filter(
+                    LoanedPlayer.window_key.like(f"{slug}%")
+                )
+            all_spells = all_spells_query.all()
+            loans_by_player = {}
+            for loan in all_spells:
+                loans_by_player.setdefault(loan.player_id, []).append(loan)
+            _STAT_KEYS = ('appearances', 'goals', 'assists', 'minutes_played', 'saves', 'yellows', 'reds')
+            for pid, spells in loans_by_player.items():
+                totals = {k: 0 for k in _STAT_KEYS}
+                for spell in spells:
+                    computed = spell._compute_stats()
+                    for k in _STAT_KEYS:
+                        totals[k] += computed.get(k, 0)
+                aggregated_by_player[pid] = totals
 
         result = []
         for loan in loans:
@@ -305,6 +397,11 @@ def get_team_loans(team_id):
                 loan_dict['loan_team_logo'] = _get_team_logo(loan_dict['loan_team_api_id'])
             else:
                 loan_dict['loan_team_logo'] = None
+
+            # Override stats with aggregated totals for multi-spell players
+            pid = loan_dict.get('player_id')
+            if pid and pid in aggregated_by_player:
+                loan_dict.update(aggregated_by_player[pid])
 
             # Optionally enrich with season context stats
             include_season_context = request.args.get('include_season_context', 'false').lower() in ('1', 'true', 'yes', 'on', 'y')
@@ -520,6 +617,377 @@ def get_teams_for_season(season):
     except Exception as e:
         logger.error(f"Error fetching teams for season {season}: {e}")
         return jsonify(_safe_error_payload(e, 'An unexpected error occurred. Please try again later.')), 500
+
+
+@teams_bp.route('/teams/<int:team_api_id>/academy-network', methods=['GET'])
+def get_academy_network(team_api_id):
+    """Get academy network data for constellation visualization.
+
+    Returns nodes (clubs) and links (player pathways) for a force-directed graph
+    showing where a club's academy players end up.
+
+    Query params:
+    - years: number of seasons to look back (default 4)
+    """
+    try:
+        years = request.args.get('years', 4, type=int)
+        limit = request.args.get('limit', 200, type=int)
+        now = datetime.now(timezone.utc)
+        current_season = now.year if now.month >= 8 else now.year - 1
+        min_season = current_season - years + 1
+
+        # Find the parent team for name/logo
+        parent_team = Team.query.filter_by(team_id=team_api_id, is_active=True)\
+            .order_by(Team.season.desc()).first()
+        parent_name = parent_team.name if parent_team else f'Team {team_api_id}'
+        parent_logo = parent_team.logo if parent_team else None
+
+        # Query 1: Academy products — prefer TrackedPlayer, fallback to JSONB
+        tp_lookup = {}
+        journey_ids = []
+        journeys = []
+
+        if parent_team:
+            tracked = TrackedPlayer.query.filter_by(
+                team_id=parent_team.id, is_active=True
+            ).all()
+            for tp in tracked:
+                tp_lookup[tp.player_api_id] = tp
+
+        if tp_lookup:
+            # TrackedPlayer is source of truth
+            tp_journey_ids = [tp.journey_id for tp in tp_lookup.values() if tp.journey_id]
+            if tp_journey_ids:
+                journeys = PlayerJourney.query.filter(
+                    PlayerJourney.id.in_(tp_journey_ids)
+                ).all()
+            # Also include TrackedPlayers without journeys (they won't have entries
+            # but will appear in all_players with zero appearances)
+        else:
+            # Fallback: legacy JSONB query (before backfill migration runs)
+            journeys = PlayerJourney.query.filter(
+                PlayerJourney.academy_club_ids.contains(cast([team_api_id], PG_JSONB))
+            ).all()
+
+        if not journeys and not tp_lookup:
+            return jsonify({
+                'team_api_id': team_api_id,
+                'team_name': parent_name,
+                'team_logo': parent_logo,
+                'season_range': [min_season, current_season],
+                'total_academy_players': 0,
+                'summary': {},
+                'nodes': [],
+                'links': [],
+                'all_players': [],
+            })
+
+        journey_ids = [j.id for j in journeys]
+        journey_map = {j.id: j for j in journeys}
+
+        # Query 2: All entries in the season window (exclude internationals)
+        entries = []
+        if journey_ids:
+            entries = PlayerJourneyEntry.query.filter(
+                PlayerJourneyEntry.journey_id.in_(journey_ids),
+                PlayerJourneyEntry.season >= min_season,
+                PlayerJourneyEntry.is_international.is_(False),
+            ).all()
+
+        # Aggregate: group entries by player and destination club
+        # player_clubs[player_api_id][club_api_id] = {stats}
+        player_clubs = {}
+        for entry in entries:
+            journey = journey_map[entry.journey_id]
+            pid = journey.player_api_id
+
+            # Fold same-club youth entries into parent node
+            dest_id = entry.club_api_id
+            dest_name = entry.club_name
+            dest_logo = entry.club_logo
+            if is_same_club(entry.club_name or '', parent_name):
+                dest_id = team_api_id
+                dest_name = parent_name
+                dest_logo = parent_logo
+
+            if pid not in player_clubs:
+                player_clubs[pid] = {}
+
+            if dest_id not in player_clubs[pid]:
+                player_clubs[pid][dest_id] = {
+                    'club_name': dest_name,
+                    'club_logo': dest_logo,
+                    'appearances': 0,
+                    'goals': 0,
+                    'assists': 0,
+                    'entry_types': set(),
+                }
+
+            bucket = player_clubs[pid][dest_id]
+            bucket['appearances'] += entry.appearances or 0
+            bucket['goals'] += entry.goals or 0
+            bucket['assists'] += entry.assists or 0
+            bucket['entry_types'].add(entry.entry_type or 'unknown')
+
+        # Build per-player ordered club path from entries sorted chronologically
+        # (moved before all_players loop so journey_path can be included)
+        player_paths = {}  # pid -> [(club_api_id, entry_type), ...]
+        for entry in sorted(entries, key=lambda e: (e.season, e.transfer_date or '')):
+            journey = journey_map[entry.journey_id]
+            pid = journey.player_api_id
+
+            # Fold same-club youth entries into parent node
+            dest_id = entry.club_api_id
+            if is_same_club(entry.club_name or '', parent_name):
+                dest_id = team_api_id
+
+            if pid not in player_paths:
+                player_paths[pid] = []
+
+            path = player_paths[pid]
+            # Dedupe consecutive same-club stops
+            if not path or path[-1][0] != dest_id:
+                path.append((dest_id, entry.entry_type or 'unknown'))
+
+        # Build club_info lookup for resolving journey paths to names/logos
+        club_info = {team_api_id: {'club_name': parent_name, 'club_logo': parent_logo}}
+        for pid, clubs in player_clubs.items():
+            for cid, cdata in clubs.items():
+                if cid not in club_info:
+                    club_info[cid] = {
+                        'club_name': cdata['club_name'],
+                        'club_logo': cdata['club_logo'],
+                    }
+
+        # Build pid→journey lookup for O(1) access in link building
+        pid_to_journey = {j.player_api_id: j for j in journeys}
+
+        # Derive player statuses and build per-player summary
+        all_players = []
+        status_counts = {}
+        seen_pids = set()
+
+        for journey in journeys:
+            pid = journey.player_api_id
+            seen_pids.add(pid)
+
+            # Derive status: prefer TrackedPlayer, fallback to derive_player_status
+            tp = tp_lookup.get(pid)
+            if tp:
+                status = tp.status
+            else:
+                status, _, _ = derive_player_status(
+                    journey.current_club_api_id,
+                    journey.current_club_name,
+                    journey.current_level,
+                    team_api_id,
+                    parent_name,
+                )
+
+            status_counts[status] = status_counts.get(status, 0) + 1
+
+            # Compute destinations list for this player
+            destinations = []
+            total_apps = 0
+            clubs = player_clubs.get(pid, {})
+            for cid, cdata in clubs.items():
+                if cid == team_api_id:
+                    total_apps += cdata['appearances']
+                    continue
+                destinations.append({
+                    'club_api_id': cid,
+                    'club_name': cdata['club_name'],
+                    'appearances': cdata['appearances'],
+                })
+                total_apps += cdata['appearances']
+
+            # Resolve journey path to club names/logos
+            journey_path = []
+            for cid, _ in player_paths.get(pid, []):
+                info = club_info.get(cid, {})
+                journey_path.append({
+                    'club_api_id': cid,
+                    'club_name': info.get('club_name', f'Club {cid}'),
+                    'club_logo': info.get('club_logo'),
+                })
+
+            parent_apps = clubs.get(team_api_id, {}).get('appearances', 0)
+
+            all_players.append({
+                'player_api_id': pid,
+                'player_name': journey.player_name,
+                'player_photo': journey.player_photo,
+                'status': status,
+                'current_club_name': journey.current_club_name,
+                'total_appearances': total_apps,
+                'parent_club_appearances': parent_apps,
+                'destinations': destinations,
+                'journey_path': journey_path,
+            })
+
+        # Include TrackedPlayers that don't have journeys yet
+        for tp in tp_lookup.values():
+            if tp.player_api_id in seen_pids:
+                continue
+            status_counts[tp.status] = status_counts.get(tp.status, 0) + 1
+            all_players.append({
+                'player_api_id': tp.player_api_id,
+                'player_name': tp.player_name,
+                'player_photo': tp.photo_url,
+                'status': tp.status,
+                'current_club_name': tp.loan_club_name,
+                'total_appearances': 0,
+                'parent_club_appearances': 0,
+                'destinations': [],
+                'journey_path': [],
+            })
+
+        # Build nodes and links
+        club_nodes = {}  # club_api_id -> node data
+        # Parent node always present
+        parent_players_at_home = set()
+        for pid, clubs in player_clubs.items():
+            if team_api_id in clubs:
+                parent_players_at_home.add(pid)
+
+        club_nodes[team_api_id] = {
+            'id': f'club-{team_api_id}',
+            'club_api_id': team_api_id,
+            'club_name': parent_name,
+            'club_logo': parent_logo,
+            'is_parent': True,
+            'player_count': len(parent_players_at_home),
+            'total_appearances': sum(
+                player_clubs.get(pid, {}).get(team_api_id, {}).get('appearances', 0)
+                for pid in parent_players_at_home
+            ),
+            'players': [],
+        }
+
+        # Destination nodes
+        for pid, clubs in player_clubs.items():
+            for cid, cdata in clubs.items():
+                if cid == team_api_id:
+                    continue
+
+                if cid not in club_nodes:
+                    club_nodes[cid] = {
+                        'id': f'club-{cid}',
+                        'club_api_id': cid,
+                        'club_name': cdata['club_name'],
+                        'club_logo': cdata['club_logo'],
+                        'is_parent': False,
+                        'player_count': 0,
+                        'total_appearances': 0,
+                        'link_types': set(),
+                        'players': [],
+                    }
+
+                node = club_nodes[cid]
+                node['player_count'] += 1
+                node['total_appearances'] += cdata['appearances']
+                node['link_types'].update(cdata['entry_types'])
+
+                journey = pid_to_journey.get(pid)
+                if journey:
+                    node['players'].append({
+                        'player_api_id': pid,
+                        'player_name': journey.player_name,
+                        'appearances': cdata['appearances'],
+                        'goals': cdata['goals'],
+                        'assists': cdata['assists'],
+                    })
+
+        # Build lattice links by tracing each player's consecutive club path
+        link_map = {}  # (source_id, target_id) -> link data
+        for pid, path in player_paths.items():
+            for i in range(len(path) - 1):
+                src_cid, _ = path[i]
+                dst_cid, dst_entry_type = path[i + 1]
+
+                # Determine link type from destination entry
+                if dst_entry_type == 'loan':
+                    link_type = 'loan'
+                elif dst_cid == team_api_id:
+                    link_type = 'return'
+                else:
+                    link_type = 'permanent'
+
+                # Canonical key: always smaller id first to avoid duplicate
+                # directional links between the same pair of clubs
+                a, b = f'club-{src_cid}', f'club-{dst_cid}'
+                link_key = (min(a, b), max(a, b))
+
+                if link_key not in link_map:
+                    link_map[link_key] = {
+                        'source': link_key[0],
+                        'target': link_key[1],
+                        'player_count': 0,
+                        'link_types': set(),
+                        'players': {},
+                    }
+                link_map[link_key]['player_count'] += 1
+                link_map[link_key]['link_types'].add(link_type)
+                # Track player identity on this link (deduped by pid)
+                if pid not in link_map[link_key]['players']:
+                    j = pid_to_journey.get(pid)
+                    link_map[link_key]['players'][pid] = j.player_name if j else f'Player {pid}'
+
+        # Serialize nodes — convert sets to lists
+        nodes = []
+        for node in club_nodes.values():
+            n = {**node}
+            if 'link_types' in n:
+                n['link_types'] = sorted(n['link_types'])
+            nodes.append(n)
+
+        links = []
+        for link in link_map.values():
+            # Pick dominant link type: loan > return > permanent
+            types = link['link_types']
+            if 'loan' in types:
+                link_type = 'loan'
+            elif 'return' in types:
+                link_type = 'return'
+            else:
+                link_type = 'permanent'
+            links.append({
+                'source': link['source'],
+                'target': link['target'],
+                'player_count': link['player_count'],
+                'link_type': link_type,
+                'players': [
+                    {'player_api_id': pid, 'player_name': name}
+                    for pid, name in link['players'].items()
+                ],
+            })
+
+        # Sort by appearances and apply limit
+        all_players_sorted = sorted(all_players, key=lambda p: p['total_appearances'], reverse=True)
+        total_academy_players = len(all_players_sorted)
+        if len(all_players_sorted) > limit:
+            # Keep top N players by appearances; drop entries/nodes for the rest
+            kept_pids = {p['player_api_id'] for p in all_players_sorted[:limit]}
+            all_players_sorted = all_players_sorted[:limit]
+        else:
+            kept_pids = None  # no filtering needed
+
+        return jsonify({
+            'team_api_id': team_api_id,
+            'team_name': parent_name,
+            'team_logo': parent_logo,
+            'season_range': [min_season, current_season],
+            'total_academy_players': total_academy_players,
+            'summary': status_counts,
+            'nodes': nodes,
+            'links': links,
+            'all_players': all_players_sorted,
+        })
+    except Exception as e:
+        logger.error(f"Error getting academy network for team {team_api_id}: {e}")
+        import traceback
+        logger.error(traceback.format_exc())
+        return jsonify(_safe_error_payload(e, 'Failed to load academy network data.')), 500
 
 
 @teams_bp.route('/teams/<int:team_id>/api-info', methods=['GET'])

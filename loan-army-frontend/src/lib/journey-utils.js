@@ -70,6 +70,7 @@ export function buildProgressionNodes(stops) {
                     city: stop.city,
                     country: stop.country,
                     levels: stop.levels || [],
+                    entryTypes: stop.entry_types || [],
                     primaryLevel: stop.levels?.[0] || 'First Team',
                     stats: { apps, goals, assists },
                     competitions: comps,
@@ -94,6 +95,7 @@ export function buildProgressionNodes(stops) {
                 city: stop.city,
                 country: stop.country,
                 levels: stop.levels || [],
+                entryTypes: stop.entry_types || [],
                 primaryLevel: stop.levels?.[0] || 'First Team',
                 stats: {
                     apps: stop.total_apps || 0,

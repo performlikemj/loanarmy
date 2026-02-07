@@ -240,9 +240,9 @@ export function MatchDetailDrawer({ open, onOpenChange, match, playerName, posit
                         <div className="mt-4 p-3 bg-orange-50 rounded-lg border border-orange-200">
                             <div className="flex items-center gap-2 text-sm text-orange-700">
                                 <Badge variant="outline" className="bg-orange-100 border-orange-300">
-                                    {match.loan_window} Loan
+                                    {match.loan_window}
                                 </Badge>
-                                <span>Stats from {match.loan_window.toLowerCase()} loan spell</span>
+                                <span>Stats from {match.loan_window.toLowerCase()} window</span>
                             </div>
                         </div>
                     )}
