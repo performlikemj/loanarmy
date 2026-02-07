@@ -12,6 +12,7 @@ from src.routes.journalist import journalist_bp
 from src.routes.newsletter_deadline import newsletter_deadline_bp
 from src.routes.community_takes import community_takes_bp
 from src.routes.academy import academy_bp
+from src.routes.chat import chat_bp
 import logging
 from sqlalchemy.engine.url import make_url, URL
 from flask_migrate import Migrate
@@ -80,6 +81,7 @@ app.register_blueprint(journalist_bp, url_prefix='/api')
 app.register_blueprint(newsletter_deadline_bp, url_prefix='/api')
 app.register_blueprint(community_takes_bp, url_prefix='/api')
 app.register_blueprint(academy_bp, url_prefix='/api')
+app.register_blueprint(chat_bp, url_prefix='/api')
 
 csp = {
     'default-src': ["'self'"],
