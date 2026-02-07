@@ -6,6 +6,7 @@ from flask import Flask, send_from_directory, jsonify
 from src.models.league import db, League, Team, LoanedPlayer, Newsletter, UserSubscription
 import src.models.weekly  # Ensure weekly models are registered with SQLAlchemy
 import src.models.journey  # Ensure journey models are registered with SQLAlchemy
+import src.models.chat  # Ensure chat models are registered with SQLAlchemy
 from src.routes.api import api_bp, require_api_key
 from src.routes.journalist import journalist_bp
 from src.routes.newsletter_deadline import newsletter_deadline_bp
