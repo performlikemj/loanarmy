@@ -9,16 +9,48 @@ import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 import { Textarea } from '@/components/ui/textarea'
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from '@/components/ui/dialog'
-import { Loader2, ArrowLeft, ChevronRight, User, TrendingUp, Users, FileText, Search, X } from 'lucide-react'
+import { Loader2, ArrowLeft, ChevronRight, User, TrendingUp, Share2, Users, FileText, Search, X, Star, ArrowRightLeft, GraduationCap, UserMinus, BadgeDollarSign } from 'lucide-react'
 import { APIService } from '@/lib/api'
 import { AcademyConstellation } from '@/components/constellation/AcademyConstellation'
 import { getStatusLabel } from '@/components/constellation/constellation-utils'
+import { Tooltip, TooltipTrigger, TooltipContent } from '@/components/ui/tooltip'
 
 const STATUS_COLORS = {
     first_team: 'bg-green-100 text-green-800 border-green-200',
     on_loan: 'bg-blue-100 text-blue-800 border-blue-200',
     academy: 'bg-yellow-100 text-yellow-800 border-yellow-200',
     released: 'bg-gray-100 text-gray-800 border-gray-200',
+    sold: 'bg-orange-100 text-orange-800 border-orange-200',
+}
+
+const STATUS_ICONS = {
+    first_team: Star,
+    on_loan: ArrowRightLeft,
+    academy: GraduationCap,
+    released: UserMinus,
+    sold: BadgeDollarSign,
+}
+
+function StatusIndicator({ status, teamName }) {
+    const IconComponent = STATUS_ICONS[status]
+    const colorClass = STATUS_COLORS[status] || 'bg-gray-100 text-gray-600 border-gray-200'
+    const label = getStatusLabel(status, teamName)
+
+    if (!IconComponent) return null
+
+    return (
+        <Tooltip>
+            <TooltipTrigger asChild>
+                <span
+                    className={`inline-flex items-center justify-center h-5 w-5 rounded-full border ${colorClass}`}
+                    aria-label={label}
+                >
+                    <IconComponent className="h-3 w-3" />
+                </span>
+            </TooltipTrigger>
+            <TooltipContent side="top">{label}</TooltipContent>
+        </Tooltip>
+    )
 }
 
 export function TeamDetailPage() {
@@ -256,8 +288,8 @@ export function TeamDetailPage() {
                             Squad
                         </TabsTrigger>
                         <TabsTrigger value="alumni">
-                            <TrendingUp className="h-4 w-4 mr-1.5" />
-                            Alumni
+                            <Share2 className="h-4 w-4 mr-1.5" />
+                            Academy Network
                         </TabsTrigger>
                         <TabsTrigger value="newsletters">
                             <FileText className="h-4 w-4 mr-1.5" />
@@ -345,9 +377,7 @@ export function TeamDetailPage() {
                                                             {name}
                                                         </span>
                                                         {status && (
-                                                            <Badge className={`text-xs ${STATUS_COLORS[status] || 'bg-gray-100 text-gray-800 border-gray-200'}`}>
-                                                                {getStatusLabel(status, team?.name)}
-                                                            </Badge>
+                                                            <StatusIndicator status={status} teamName={team?.name} />
                                                         )}
                                                     </div>
                                                     {loanTeam && (
@@ -398,7 +428,7 @@ export function TeamDetailPage() {
                         )}
                     </TabsContent>
 
-                    {/* Alumni Tab */}
+                    {/* Academy Network Tab */}
                     <TabsContent value="alumni" className="mt-4">
                         <AcademyConstellation teamApiId={team?.team_id || team?.team_api_id} />
                     </TabsContent>
