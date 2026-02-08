@@ -749,6 +749,15 @@ def get_academy_network(team_api_id):
             if not path or path[-1][0] != dest_id:
                 path.append((dest_id, entry.entry_type or 'unknown'))
 
+        # Anchor disconnected players back to parent hub.
+        # When a player's academy entries fall outside the season window,
+        # their path contains only destination clubs. Prepending the parent
+        # ensures a link from the hub to their first visible destination.
+        for pid in player_paths:
+            club_ids_in_path = {cid for cid, _ in player_paths[pid]}
+            if team_api_id not in club_ids_in_path and player_paths[pid]:
+                player_paths[pid].insert(0, (team_api_id, 'academy'))
+
         # Build club_info lookup for resolving journey paths to names/logos
         club_info = {team_api_id: {'club_name': parent_name, 'club_logo': parent_logo}}
         for pid, clubs in player_clubs.items():

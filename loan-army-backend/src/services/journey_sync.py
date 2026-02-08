@@ -172,7 +172,7 @@ class JourneySyncService:
                     db.session.add(entry)
             
             # Update journey aggregates
-            self._update_journey_aggregates(journey)
+            self._update_journey_aggregates(journey, transfers=transfers)
 
             # Auto-geocode missing club locations
             self._auto_geocode_clubs(journey)
@@ -547,7 +547,7 @@ class JourneySyncService:
                     )
                     break
 
-    def _update_journey_aggregates(self, journey: PlayerJourney):
+    def _update_journey_aggregates(self, journey: PlayerJourney, transfers=None):
         """Update aggregate stats on the journey record"""
         entries = PlayerJourneyEntry.query.filter_by(journey_id=journey.id).all()
         
@@ -619,13 +619,13 @@ class JourneySyncService:
         journey.total_assists = sum(e.assists for e in entries)
 
         # Compute academy connections from youth entries
-        self._compute_academy_club_ids(journey, entries)
+        self._compute_academy_club_ids(journey, entries, transfers=transfers)
 
     def _strip_youth_suffix(self, club_name: str) -> str:
         """Strip youth team suffix to get parent club base name."""
         return strip_youth_suffix(club_name)
 
-    def _compute_academy_club_ids(self, journey: PlayerJourney, entries: list | None = None):
+    def _compute_academy_club_ids(self, journey: PlayerJourney, entries: list | None = None, transfers=None):
         """
         Derive academy parent club IDs from youth journey entries.
 
@@ -687,9 +687,9 @@ class JourneySyncService:
         journey.academy_club_ids = sorted(academy_ids)
 
         # Auto-upsert TrackedPlayer rows for each academy connection
-        self._upsert_tracked_players(journey, academy_ids)
+        self._upsert_tracked_players(journey, academy_ids, transfers=transfers)
 
-    def _upsert_tracked_players(self, journey: PlayerJourney, academy_ids: set):
+    def _upsert_tracked_players(self, journey: PlayerJourney, academy_ids: set, transfers=None):
         """Create or update TrackedPlayer rows for discovered academy connections."""
         if not academy_ids:
             return
@@ -716,6 +716,12 @@ class JourneySyncService:
                 parent_club_name=team.name,
             )
 
+            # Upgrade 'on_loan' → 'sold' when the latest departure was permanent
+            if status == 'on_loan' and transfers:
+                dep_type = self._get_latest_departure_type(transfers, academy_api_id)
+                if dep_type and not is_new_loan_transfer(dep_type):
+                    status = 'sold'
+
             if not existing:
                 tp = TrackedPlayer(
                     player_api_id=journey.player_api_id,
@@ -738,6 +744,18 @@ class JourneySyncService:
                 existing.status = status
                 existing.loan_club_api_id = loan_club_api_id
                 existing.loan_club_name = loan_club_name
+
+    @staticmethod
+    def _get_latest_departure_type(transfers, parent_api_id):
+        """Find the type of the most recent transfer away from a parent club."""
+        departures = [
+            t for t in transfers
+            if (t.get('teams', {}).get('out', {}).get('id') == parent_api_id)
+        ]
+        if not departures:
+            return None
+        departures.sort(key=lambda t: t.get('date', ''), reverse=True)
+        return (departures[0].get('type') or '').strip().lower()
 
     def _auto_geocode_clubs(self, journey: PlayerJourney):
         """Create ClubLocation rows for clubs that don't have one yet.
