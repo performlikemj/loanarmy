@@ -347,25 +347,27 @@ export function PlayerPage() {
             {/* Header */}
             <div className="bg-white border-b sticky top-0 z-10">
                 <div className="max-w-6xl mx-auto px-4 py-4">
-                    <div className="flex items-center gap-4">
-                        <Button variant="ghost" size="sm" onClick={handleBack}>
+                    <div className="flex flex-col sm:flex-row sm:items-center gap-3 sm:gap-4">
+                        <Button variant="ghost" size="sm" onClick={handleBack} className="self-start">
                             <ArrowLeft className="mr-2 h-4 w-4" />
                             Back
                         </Button>
-                        <div className="flex items-center gap-4">
+                        <div className="flex items-center gap-3 sm:gap-4 min-w-0">
                             {profile?.photo ? (
-                                <img 
-                                    src={profile.photo} 
+                                <img
+                                    src={profile.photo}
                                     alt={playerName}
-                                    className="w-16 h-16 rounded-full object-cover border-2 border-gray-200 shadow-md"
+                                    width={64}
+                                    height={64}
+                                    className="w-12 h-12 sm:w-16 sm:h-16 rounded-full object-cover border-2 border-gray-200 shadow-md flex-shrink-0"
                                 />
                             ) : (
-                                <div className="w-16 h-16 rounded-full bg-gradient-to-br from-blue-500 to-blue-600 flex items-center justify-center shadow-md">
-                                    <User className="h-8 w-8 text-white" />
+                                <div className="w-12 h-12 sm:w-16 sm:h-16 rounded-full bg-gradient-to-br from-blue-500 to-blue-600 flex items-center justify-center shadow-md flex-shrink-0">
+                                    <User className="h-6 w-6 sm:h-8 sm:w-8 text-white" />
                                 </div>
                             )}
-                            <div>
-                                <h1 className="text-2xl font-bold text-gray-900">{playerName}</h1>
+                            <div className="min-w-0">
+                                <h1 className="text-xl sm:text-2xl font-bold text-gray-900 truncate">{playerName}</h1>
                                 <div className="flex flex-wrap items-center gap-2 mt-1">
                                     <Badge variant="secondary">{position}</Badge>
                                     {profile?.age && (
@@ -489,16 +491,16 @@ export function PlayerPage() {
                             <div className="space-y-6">
                         {/* Season Summary Cards - Position-aware (dimmed when viewing past stop) */}
                         <JourneyDimmer>
-                        <div className="grid grid-cols-2 md:grid-cols-5 gap-4">
+                        <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-5 gap-4">
                             <Card>
                                 <CardContent className="pt-4 text-center">
-                                    <div className="text-3xl font-bold text-gray-900">{seasonTotals.appearances}</div>
+                                    <div className="text-3xl font-bold text-gray-900 tabular-nums">{seasonTotals.appearances}</div>
                                     <div className="text-xs text-gray-500 uppercase tracking-wider mt-1">Appearances</div>
                                 </CardContent>
                             </Card>
                             <Card>
                                 <CardContent className="pt-4 text-center">
-                                    <div className="text-3xl font-bold text-gray-900">{seasonTotals.minutes}</div>
+                                    <div className="text-3xl font-bold text-gray-900 tabular-nums">{seasonTotals.minutes}</div>
                                     <div className="text-xs text-gray-500 uppercase tracking-wider mt-1">Minutes</div>
                                 </CardContent>
                             </Card>
@@ -506,13 +508,13 @@ export function PlayerPage() {
                                 <>
                                     <Card>
                                         <CardContent className="pt-4 text-center">
-                                            <div className="text-3xl font-bold text-blue-600">{seasonTotals.saves}</div>
+                                            <div className="text-3xl font-bold text-blue-600 tabular-nums">{seasonTotals.saves}</div>
                                             <div className="text-xs text-gray-500 uppercase tracking-wider mt-1">Saves</div>
                                         </CardContent>
                                     </Card>
                                     <Card>
                                         <CardContent className="pt-4 text-center">
-                                            <div className="text-3xl font-bold text-orange-600">{seasonTotals.goalsConceded}</div>
+                                            <div className="text-3xl font-bold text-orange-600 tabular-nums">{seasonTotals.goalsConceded}</div>
                                             <div className="text-xs text-gray-500 uppercase tracking-wider mt-1">Conceded</div>
                                         </CardContent>
                                     </Card>
@@ -521,13 +523,13 @@ export function PlayerPage() {
                                 <>
                                     <Card>
                                         <CardContent className="pt-4 text-center">
-                                            <div className="text-3xl font-bold text-blue-600">{seasonTotals.goals}</div>
+                                            <div className="text-3xl font-bold text-blue-600 tabular-nums">{seasonTotals.goals}</div>
                                             <div className="text-xs text-gray-500 uppercase tracking-wider mt-1">Goals</div>
                                         </CardContent>
                                     </Card>
                                     <Card>
                                         <CardContent className="pt-4 text-center">
-                                            <div className="text-3xl font-bold text-green-600">{seasonTotals.assists}</div>
+                                            <div className="text-3xl font-bold text-green-600 tabular-nums">{seasonTotals.assists}</div>
                                             <div className="text-xs text-gray-500 uppercase tracking-wider mt-1">Assists</div>
                                         </CardContent>
                                     </Card>
@@ -535,7 +537,7 @@ export function PlayerPage() {
                             )}
                             <Card>
                                 <CardContent className="pt-4 text-center">
-                                    <div className="text-3xl font-bold text-purple-600">{seasonTotals.avgRating}</div>
+                                    <div className="text-3xl font-bold text-purple-600 tabular-nums">{seasonTotals.avgRating}</div>
                                     <div className="text-xs text-gray-500 uppercase tracking-wider mt-1">Avg Rating</div>
                                 </CardContent>
                             </Card>
@@ -620,7 +622,7 @@ export function PlayerPage() {
                         <Card>
                             <Tabs defaultValue="charts">
                                 <CardHeader className="pb-0">
-                                    <div className="flex items-center justify-between">
+                                    <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-2">
                                         <CardTitle className="flex items-center gap-2">
                                             <TrendingUp className="h-5 w-5" />
                                             Performance Analysis
@@ -646,7 +648,9 @@ export function PlayerPage() {
                                                         <button
                                                             key={opt.key}
                                                             onClick={() => toggleMetric(opt.key)}
-                                                            className={`px-3 py-1.5 rounded-full text-xs font-medium transition-colors border ${selectedMetrics.includes(opt.key)
+                                                            aria-label={`${selectedMetrics.includes(opt.key) ? 'Remove' : 'Add'} ${opt.label} metric`}
+                                                            aria-pressed={selectedMetrics.includes(opt.key)}
+                                                            className={`px-3 py-1.5 rounded-full text-xs font-medium transition-colors border focus-visible:ring-2 focus-visible:ring-blue-500 focus-visible:outline-none ${selectedMetrics.includes(opt.key)
                                                                 ? 'bg-blue-50 border-blue-200 text-blue-700 ring-1 ring-blue-200'
                                                                 : 'bg-white border-gray-200 text-gray-600 hover:bg-gray-50'
                                                                 }`}
@@ -702,7 +706,7 @@ export function PlayerPage() {
                                             <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
                                                 <div>
                                                     <h3 className="text-sm font-medium mb-4 text-gray-700">Match Ratings</h3>
-                                                    <div className="h-[200px] w-full">
+                                                    <div className="h-[250px] sm:h-[200px] w-full">
                                                         <ResponsiveContainer width="100%" height="100%">
                                                             <LineChart data={chartData}>
                                                                 <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="#e5e7eb" />
@@ -718,7 +722,7 @@ export function PlayerPage() {
 
                                                 <div>
                                                     <h3 className="text-sm font-medium mb-4 text-gray-700">Minutes Played</h3>
-                                                    <div className="h-[200px] w-full">
+                                                    <div className="h-[250px] sm:h-[200px] w-full">
                                                         <ResponsiveContainer width="100%" height="100%">
                                                             <BarChart data={chartData}>
                                                                 <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="#e5e7eb" />
@@ -739,32 +743,32 @@ export function PlayerPage() {
                                             <table className="w-full text-sm text-left">
                                                 <thead className="bg-gray-50 sticky top-0 z-10">
                                                     <tr>
-                                                        <th className="p-3 font-medium text-gray-500">Date</th>
-                                                        <th className="p-3 font-medium text-gray-500">Club</th>
-                                                        <th className="p-3 font-medium text-gray-500">Match</th>
-                                                        <th className="p-3 font-medium text-gray-500">Min</th>
-                                                        <th className="p-3 font-medium text-gray-500">Rating</th>
-                                                        <th className="p-3 font-medium text-gray-500">{position === 'Goalkeeper' ? 'Performance' : 'G/A'}</th>
-                                                        <th className="p-3 font-medium text-gray-500">Key Stats</th>
+                                                        <th className="p-2 sm:p-3 font-medium text-gray-500">Date</th>
+                                                        <th className="p-2 sm:p-3 font-medium text-gray-500 hidden sm:table-cell">Club</th>
+                                                        <th className="p-2 sm:p-3 font-medium text-gray-500">Match</th>
+                                                        <th className="p-2 sm:p-3 font-medium text-gray-500">Min</th>
+                                                        <th className="p-2 sm:p-3 font-medium text-gray-500">Rating</th>
+                                                        <th className="p-2 sm:p-3 font-medium text-gray-500">{position === 'Goalkeeper' ? 'Performance' : 'G/A'}</th>
+                                                        <th className="p-2 sm:p-3 font-medium text-gray-500 hidden sm:table-cell">Key Stats</th>
                                                     </tr>
                                                 </thead>
                                                 <tbody className="divide-y">
                                                     {stats.slice().reverse().map((s, i) => (
-                                                        <tr 
-                                                            key={i} 
+                                                        <tr
+                                                            key={i}
                                                             className="hover:bg-blue-50 cursor-pointer transition-colors group"
                                                             onClick={() => {
                                                                 setSelectedMatch(s)
                                                                 setMatchDetailOpen(true)
                                                             }}
                                                         >
-                                                            <td className="p-3 whitespace-nowrap">
-                                                                {s.fixture_date ? format(new Date(s.fixture_date), 'MMM d, yyyy') : '-'}
+                                                            <td className="p-2 sm:p-3 text-xs sm:text-sm">
+                                                                {s.fixture_date ? format(new Date(s.fixture_date), 'MMM d') : '-'}
                                                             </td>
-                                                            <td className="p-3">
+                                                            <td className="p-2 sm:p-3 hidden sm:table-cell">
                                                                 <div className="flex items-center gap-1.5">
                                                                     {s.loan_team_logo && (
-                                                                        <img src={s.loan_team_logo} alt="" className="w-4 h-4 rounded-full" />
+                                                                        <img src={s.loan_team_logo} alt="" width={16} height={16} className="w-4 h-4 rounded-full" />
                                                                     )}
                                                                     <span className="text-xs text-gray-600 font-medium truncate max-w-[80px]">
                                                                         {s.loan_team_name || 'Unknown'}
@@ -776,32 +780,32 @@ export function PlayerPage() {
                                                                     </Badge>
                                                                 )}
                                                             </td>
-                                                            <td className="p-3">
-                                                                <div className="flex items-center gap-2">
-                                                                    <div>
-                                                                        <div className="font-medium group-hover:text-blue-700 transition-colors">{s.opponent}</div>
-                                                                        <div className="text-xs text-gray-500">{s.competition}</div>
+                                                            <td className="p-2 sm:p-3">
+                                                                <div className="flex items-center gap-2 min-w-0">
+                                                                    <div className="min-w-0">
+                                                                        <div className="font-medium group-hover:text-blue-700 transition-colors truncate">{s.opponent}</div>
+                                                                        <div className="text-xs text-gray-500 truncate">{s.competition}</div>
                                                                     </div>
-                                                                    <ExternalLink className="h-3.5 w-3.5 text-gray-300 group-hover:text-blue-500 transition-colors opacity-0 group-hover:opacity-100" />
+                                                                    <ExternalLink className="h-3.5 w-3.5 text-gray-300 group-hover:text-blue-500 transition-colors opacity-0 group-hover:opacity-100 flex-shrink-0" />
                                                                 </div>
                                                             </td>
-                                                            <td className="p-3">{s.minutes}'</td>
-                                                            <td className="p-3">
-                                                                <span className={`px-2 py-1 rounded text-xs font-medium ${parseFloat(s.rating) >= 7.5 ? 'bg-green-100 text-green-700' :
+                                                            <td className="p-2 sm:p-3 tabular-nums">{s.minutes}'</td>
+                                                            <td className="p-2 sm:p-3">
+                                                                <span className={`px-1.5 sm:px-2 py-1 rounded text-xs font-medium tabular-nums ${parseFloat(s.rating) >= 7.5 ? 'bg-green-100 text-green-700' :
                                                                     parseFloat(s.rating) >= 6.0 ? 'bg-gray-100 text-gray-700' :
                                                                         'bg-red-50 text-red-700'
                                                                     }`}>
                                                                     {s.rating || '-'}
                                                                 </span>
                                                             </td>
-                                                            <td className="p-3">
+                                                            <td className="p-2 sm:p-3">
                                                                 {position === 'Goalkeeper' ? (
                                                                     <div className="flex flex-col gap-0.5">
                                                                         {(s.saves > 0 || s.saves === 0) && (
                                                                             <span className="text-blue-600 text-xs font-medium">{s.saves} {s.saves === 1 ? 'save' : 'saves'}</span>
                                                                         )}
                                                                         {s.goals_conceded === 0 && (
-                                                                            <span className="text-green-600 text-xs font-medium">Clean sheet ✓</span>
+                                                                            <span className="text-green-600 text-xs font-medium">Clean sheet</span>
                                                                         )}
                                                                         {s.goals_conceded > 0 && (
                                                                             <span className="text-orange-600 text-xs">{s.goals_conceded} conceded</span>
@@ -816,7 +820,7 @@ export function PlayerPage() {
                                                                     </>
                                                                 )}
                                                             </td>
-                                                            <td className="p-3 text-xs text-gray-500">
+                                                            <td className="p-2 sm:p-3 text-xs text-gray-500 hidden sm:table-cell">
                                                                 {position === 'Goalkeeper' ? (
                                                                     <>
                                                                         {s.passes?.total > 0 && <div>{s.passes.total} Passes</div>}

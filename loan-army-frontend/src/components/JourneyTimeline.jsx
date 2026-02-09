@@ -116,7 +116,7 @@ export function JourneyTimeline({ journeyData, loading, error }) {
                                             </div>
 
                                             {/* Content card */}
-                                            <div className={`p-3 rounded-lg border transition-all duration-300 ${
+                                            <div className={`p-3 rounded-lg border transition-[background-color,border-color,box-shadow] duration-300 ${
                                                 isSelected
                                                     ? 'bg-blue-50 border-blue-500 shadow-sm ring-1 ring-blue-200'
                                                     : isLast

@@ -25,26 +25,27 @@ export function SeasonStatsPanel() {
                     transition={{ duration: 0.25, ease: 'easeInOut' }}
                     className="overflow-hidden"
                 >
-                    <div className="bg-blue-50 border border-blue-200 rounded-lg p-4 mb-4">
+                    <div className="bg-blue-50 border border-blue-200 rounded-lg p-3 sm:p-4 mb-4">
                         {/* Header row */}
-                        <div className="flex items-center justify-between mb-3">
+                        <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-2 mb-3">
                             <button
                                 onClick={() => selectNode(null)}
-                                className="flex items-center gap-1 text-sm text-blue-600 hover:text-blue-800 transition-colors"
+                                aria-label="Back to present"
+                                className="flex items-center gap-1 text-sm text-blue-600 hover:text-blue-800 transition-colors focus-visible:ring-2 focus-visible:ring-blue-500 focus-visible:outline-none rounded"
                             >
                                 <ArrowLeft className="h-4 w-4" />
                                 Back to Present
                             </button>
-                            <div className="flex items-center gap-2">
+                            <div className="flex items-center gap-2 flex-wrap">
                                 <span className="text-sm font-semibold text-gray-900">
                                     {selectedNode.years}
                                 </span>
                                 <span className="text-sm text-gray-500">at</span>
-                                <div className="flex items-center gap-1.5">
+                                <div className="flex items-center gap-1.5 min-w-0">
                                     {selectedNode.clubLogo && (
-                                        <img src={selectedNode.clubLogo} alt="" className="w-5 h-5 rounded-full object-cover" />
+                                        <img src={selectedNode.clubLogo} alt="" width={20} height={20} className="w-5 h-5 rounded-full object-cover" />
                                     )}
-                                    <span className="text-sm font-medium text-gray-900">
+                                    <span className="text-sm font-medium text-gray-900 truncate">
                                         {selectedNode.clubName}
                                     </span>
                                 </div>
@@ -58,17 +59,17 @@ export function SeasonStatsPanel() {
                         </div>
 
                         {/* Stats summary */}
-                        <div className="grid grid-cols-3 gap-4 mb-3">
+                        <div className="grid grid-cols-3 gap-2 sm:gap-4 mb-3">
                             <div className="text-center p-2 bg-white rounded-lg">
-                                <div className="text-xl font-bold text-gray-900">{selectedNode.stats.apps}</div>
+                                <div className="text-xl font-bold text-gray-900 tabular-nums">{selectedNode.stats.apps}</div>
                                 <div className="text-xs text-gray-500">Apps</div>
                             </div>
                             <div className="text-center p-2 bg-white rounded-lg">
-                                <div className="text-xl font-bold text-blue-600">{selectedNode.stats.goals}</div>
+                                <div className="text-xl font-bold text-blue-600 tabular-nums">{selectedNode.stats.goals}</div>
                                 <div className="text-xs text-gray-500">Goals</div>
                             </div>
                             <div className="text-center p-2 bg-white rounded-lg">
-                                <div className="text-xl font-bold text-green-600">{selectedNode.stats.assists}</div>
+                                <div className="text-xl font-bold text-green-600 tabular-nums">{selectedNode.stats.assists}</div>
                                 <div className="text-xs text-gray-500">Assists</div>
                             </div>
                         </div>

@@ -72,13 +72,13 @@ function FixtureCard({ fixture }) {
         </div>
 
         {/* Score Display */}
-        <div className="flex items-center justify-center gap-4">
-          <div className="flex items-center gap-2 flex-1 justify-end">
+        <div className="flex items-center justify-center gap-2 sm:gap-4">
+          <div className="flex items-center gap-2 flex-1 justify-end min-w-0">
             {home_team.logo && (
-              <img src={home_team.logo} alt={home_team.name} className="h-8 w-8 object-contain" />
+              <img src={home_team.logo} alt={home_team.name} width={32} height={32} className="h-6 w-6 sm:h-8 sm:w-8 object-contain flex-shrink-0" />
             )}
             <span className={cn(
-              'font-semibold text-sm truncate',
+              'font-semibold text-xs sm:text-sm truncate',
               is_home && 'text-white',
               !is_home && 'text-gray-300'
             )}>
@@ -86,22 +86,22 @@ function FixtureCard({ fixture }) {
             </span>
           </div>
 
-          <div className="flex items-center gap-2 px-4">
-            <span className="text-2xl font-bold">{home_team.score ?? '-'}</span>
+          <div className="flex items-center gap-1.5 sm:gap-2 px-2 sm:px-4 flex-shrink-0">
+            <span className="text-xl sm:text-2xl font-bold tabular-nums">{home_team.score ?? '-'}</span>
             <span className="text-gray-400">-</span>
-            <span className="text-2xl font-bold">{away_team.score ?? '-'}</span>
+            <span className="text-xl sm:text-2xl font-bold tabular-nums">{away_team.score ?? '-'}</span>
           </div>
 
-          <div className="flex items-center gap-2 flex-1">
+          <div className="flex items-center gap-2 flex-1 min-w-0">
             <span className={cn(
-              'font-semibold text-sm truncate',
+              'font-semibold text-xs sm:text-sm truncate',
               !is_home && 'text-white',
               is_home && 'text-gray-300'
             )}>
               {away_team.name}
             </span>
             {away_team.logo && (
-              <img src={away_team.logo} alt={away_team.name} className="h-8 w-8 object-contain" />
+              <img src={away_team.logo} alt={away_team.name} width={32} height={32} className="h-6 w-6 sm:h-8 sm:w-8 object-contain flex-shrink-0" />
             )}
           </div>
         </div>
@@ -469,7 +469,7 @@ export function WriteupPage() {
               // Legacy locked content
               <div className="relative">
                 <div
-                  className="prose prose-gray max-w-none blur-sm select-none line-clamp-4"
+                  className="prose prose-gray max-w-full break-words blur-sm select-none line-clamp-4"
                   dangerouslySetInnerHTML={{ __html: formatTextToHtml(data.content) }}
                 />
                 <div className="absolute inset-0 flex flex-col items-center justify-center bg-gradient-to-t from-white via-white/95 to-transparent">
@@ -488,7 +488,7 @@ export function WriteupPage() {
             ) : (
               // Legacy unlocked content
               <div
-                className="prose prose-gray max-w-none
+                className="prose prose-gray max-w-full break-words
                   prose-headings:text-gray-900 prose-headings:font-bold
                   prose-p:text-gray-700 prose-p:leading-relaxed prose-p:my-2
                   prose-ul:my-2 prose-ul:pl-5 prose-li:my-1
@@ -504,8 +504,9 @@ export function WriteupPage() {
                 <button
                   onClick={handleApplause}
                   disabled={hasApplauded}
+                  aria-label={hasApplauded ? `Applauded (${applauseCount})` : 'Applaud this writeup'}
                   className={cn(
-                    'flex items-center gap-2 px-4 py-2 rounded-full transition-all',
+                    'flex items-center gap-2 px-4 py-2 rounded-full transition-colors focus-visible:ring-2 focus-visible:ring-violet-500 focus-visible:outline-none',
                     hasApplauded
                       ? 'bg-violet-100 text-violet-700'
                       : 'bg-gray-100 text-gray-600 hover:bg-violet-50 hover:text-violet-600'
