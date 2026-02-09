@@ -162,6 +162,7 @@ class Team(db.Model):
             'season': self.season,
             'league_name': self.league.name if self.league else None,
             'current_loaned_out_count': len(current_loans),
+            'slug': getattr(self, '_slug', None),
             'created_at': self.created_at.isoformat() if self.created_at else None,
             'updated_at': self.updated_at.isoformat() if self.updated_at else None
         }
@@ -400,6 +401,7 @@ class TeamProfile(db.Model):
     venue_capacity = db.Column(db.Integer)
     venue_surface = db.Column(db.String(80))
     venue_image = db.Column(db.String(255))
+    slug = db.Column(db.String(200), unique=True, index=True, nullable=True)
     created_at = db.Column(db.DateTime, default=datetime.now(timezone.utc))
     updated_at = db.Column(db.DateTime, default=datetime.now(timezone.utc), onupdate=datetime.now(timezone.utc))
 
@@ -419,6 +421,7 @@ class TeamProfile(db.Model):
             'venue_capacity': self.venue_capacity,
             'venue_surface': self.venue_surface,
             'venue_image': self.venue_image,
+            'slug': self.slug,
             'created_at': self.created_at.isoformat() if self.created_at else None,
             'updated_at': self.updated_at.isoformat() if self.updated_at else None,
         }

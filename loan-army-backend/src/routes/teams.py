@@ -22,6 +22,7 @@ from src.models.league import (
     db,
     League,
     Team,
+    TeamProfile,
     LoanedPlayer,
     Player,
     SupplementalLoan,
@@ -30,6 +31,7 @@ from src.models.league import (
 from src.models.journey import PlayerJourney, PlayerJourneyEntry
 from src.models.tracked_player import TrackedPlayer
 from src.utils.academy_classifier import derive_player_status, is_same_club
+from src.utils.slug import resolve_team_by_identifier
 
 logger = logging.getLogger(__name__)
 
@@ -40,6 +42,23 @@ teams_bp = Blueprint('teams', __name__)
 def _get_api_client():
     from src.routes.api import api_client
     return api_client
+
+
+def _inject_slugs(team_dicts: list[dict], teams: list) -> None:
+    """Batch-fetch slugs from TeamProfile and inject into team dicts."""
+    api_ids = list({t.team_id for t in teams})
+    if not api_ids:
+        return
+    profiles = TeamProfile.query.filter(TeamProfile.team_id.in_(api_ids)).all()
+    slug_map = {p.team_id: p.slug for p in profiles}
+    for td in team_dicts:
+        td['slug'] = slug_map.get(td['team_id'])
+
+
+def _get_team_slug(team) -> str | None:
+    """Get slug for a single team from its TeamProfile."""
+    profile = TeamProfile.query.filter_by(team_id=team.team_id).first()
+    return profile.slug if profile else None
 
 
 # Expose api_client as a module-level attribute for patching in tests
@@ -181,6 +200,7 @@ def get_teams():
             for td in team_dicts:
                 td['tracked_player_count'] = tp_counts.get(td['id'], 0)
 
+        _inject_slugs(team_dicts, teams)
         logger.info(f"Returning {len(team_dicts)} team records")
 
         return jsonify(team_dicts)
@@ -252,16 +272,17 @@ def _lazy_sync_european_teams(season: int | None):
     logger.info("Lazy sync complete")
 
 
-@teams_bp.route('/teams/<int:team_id>', methods=['GET'])
-def get_team(team_id):
+@teams_bp.route('/teams/<team_identifier>', methods=['GET'])
+def get_team(team_identifier):
     """Get specific team with tracked player summary."""
     try:
-        team = Team.query.get_or_404(team_id)
+        team = resolve_team_by_identifier(team_identifier)
         team_dict = team.to_dict()
+        team_dict['slug'] = _get_team_slug(team)
 
         # Include tracked player count + status breakdown
         tracked = TrackedPlayer.query.filter_by(
-            team_id=team_id, is_active=True
+            team_id=team.id, is_active=True
         ).all()
         team_dict['tracked_player_count'] = len(tracked)
         team_dict['tracked_status_breakdown'] = {}
@@ -282,8 +303,8 @@ def get_team(team_id):
         return jsonify(_safe_error_payload(e, 'An unexpected error occurred. Please try again later.')), 500
 
 
-@teams_bp.route('/teams/<int:team_id>/loans', methods=['GET'])
-def get_team_loans(team_id):
+@teams_bp.route('/teams/<team_identifier>/loans', methods=['GET'])
+def get_team_loans(team_identifier):
     """Get loans for a specific team.
 
     Query params:
@@ -299,7 +320,7 @@ def get_team_loans(team_id):
     - aggregate_stats: when deduping, sum stats across all loan spells per player (default: false)
     """
     try:
-        team = Team.query.get_or_404(team_id)
+        team = resolve_team_by_identifier(team_identifier)
         active_only = request.args.get('active_only', 'true').lower() in ('1', 'true', 'yes', 'on', 'y')
         dedupe = request.args.get('dedupe', 'true').lower() in ('1', 'true', 'yes', 'on', 'y')
         season_val = request.args.get('season', type=int)
@@ -579,11 +600,11 @@ def _get_supplemental_loans(team_id: int, season_val: int | None) -> list[dict]:
     return result
 
 
-@teams_bp.route('/teams/<int:team_id>/loans/season/<int:season>', methods=['GET'])
-def get_team_loans_by_season(team_id: int, season: int):
+@teams_bp.route('/teams/<team_identifier>/loans/season/<int:season>', methods=['GET'])
+def get_team_loans_by_season(team_identifier: str, season: int):
     """Get loans for a specific team in a specific season (by window_key prefix)."""
     try:
-        team = Team.query.get_or_404(team_id)
+        team = resolve_team_by_identifier(team_identifier)
         slug = f"{season}-{str(season + 1)[-2:]}"
         active_only = request.args.get('active_only', 'false').lower() in ('true', '1', 'yes', 'y')
 
@@ -619,8 +640,8 @@ def get_teams_for_season(season):
         return jsonify(_safe_error_payload(e, 'An unexpected error occurred. Please try again later.')), 500
 
 
-@teams_bp.route('/teams/<int:team_api_id>/academy-network', methods=['GET'])
-def get_academy_network(team_api_id):
+@teams_bp.route('/teams/<team_identifier>/academy-network', methods=['GET'])
+def get_academy_network(team_identifier):
     """Get academy network data for constellation visualization.
 
     Returns nodes (clubs) and links (player pathways) for a force-directed graph
@@ -630,6 +651,9 @@ def get_academy_network(team_api_id):
     - years: number of seasons to look back (default 4)
     """
     try:
+        resolved_team = resolve_team_by_identifier(team_identifier)
+        team_api_id = resolved_team.team_id
+
         years = request.args.get('years', 4, type=int)
         limit = request.args.get('limit', 200, type=int)
         now = datetime.now(timezone.utc)
@@ -999,22 +1023,25 @@ def get_academy_network(team_api_id):
         return jsonify(_safe_error_payload(e, 'Failed to load academy network data.')), 500
 
 
-@teams_bp.route('/teams/<int:team_id>/api-info', methods=['GET'])
-def get_team_api_info(team_id):
+@teams_bp.route('/teams/<team_identifier>/api-info', methods=['GET'])
+def get_team_api_info(team_identifier):
     """Get team information from API-Football by ID."""
     try:
+        team = resolve_team_by_identifier(team_identifier)
         real_client = _get_api_client()
         season = request.args.get('season', real_client.current_season_start_year)
-        team_data = real_client.get_team_by_id(team_id)
+        team_data = real_client.get_team_by_id(team.team_id)
 
         if not team_data:
-            return jsonify({'error': f'Team {team_id} not found'}), 404
+            return jsonify({'error': f'Team {team_identifier} not found'}), 404
 
         return jsonify({
-            'team_id': team_id,
+            'team_id': team.team_id,
             'season': season,
             'data': team_data
         })
+    except NotFound:
+        raise
     except Exception as e:
-        logger.error(f"Error fetching team {team_id} from API: {e}")
+        logger.error(f"Error fetching team {team_identifier} from API: {e}")
         return jsonify(_safe_error_payload(e, 'An unexpected error occurred. Please try again later.')), 500

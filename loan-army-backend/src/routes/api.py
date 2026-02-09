@@ -36,6 +36,7 @@ from src.extensions import limiter
 from src.utils.sanitize import sanitize_comment_body, sanitize_plain_text, sanitize_commentary_html
 from src.agents.errors import NoActiveLoaneesError
 from src.models.tracked_player import TrackedPlayer
+from src.utils.slug import resolve_team_by_identifier, generate_unique_team_slug
 from src.utils.academy_classifier import derive_player_status, is_same_club
 from src.utils.newsletter_slug import compose_newsletter_public_slug
 from src.services.email_service import email_service
@@ -754,14 +755,20 @@ def resolve_team_name_and_logo(team_api_id: int, season: int = None) -> tuple[st
                 if not existing_profile:
                     team_data = team_info.get('team', {})
                     venue_data = team_info.get('venue', {})
+                    country = team_data.get('country')
+                    existing_slugs = set(
+                        row[0] for row in db.session.query(TeamProfile.slug).filter(TeamProfile.slug.isnot(None)).all()
+                    )
+                    slug = generate_unique_team_slug(team_name, country, team_api_id, existing_slugs)
                     new_profile = TeamProfile(
                         team_id=team_api_id,
                         name=team_name,
                         code=team_data.get('code'),
-                        country=team_data.get('country'),
+                        country=country,
                         founded=team_data.get('founded'),
                         is_national=team_data.get('national'),
                         logo_url=team_logo,
+                        slug=slug,
                         venue_id=venue_data.get('id'),
                         venue_name=venue_data.get('name'),
                         venue_address=venue_data.get('address'),
@@ -9795,22 +9802,23 @@ def admin_update_tracking_request(request_id: int):
 
 # --- Public: Team Tracking Requests ---
 
-@api_bp.route('/teams/<int:team_id>/request-tracking', methods=['POST'])
-def submit_tracking_request(team_id: int):
+@api_bp.route('/teams/<team_identifier>/request-tracking', methods=['POST'])
+def submit_tracking_request(team_identifier: str):
     """
     Submit a request to track a team.
-    
+
     Body: { "email": "optional@email.com", "reason": "Why you want this team tracked" }
-    
+
     Rate limited to prevent abuse.
     """
     try:
-        team = Team.query.get_or_404(team_id)
-        
+        team = resolve_team_by_identifier(team_identifier)
+        team_id = team.id
+
         # Check if team is already tracked
         if team.is_tracked:
             return jsonify({'error': 'This team is already being tracked'}), 400
-        
+
         # Check for recent pending request for same team (prevent duplicates)
         recent_cutoff = datetime.now(timezone.utc) - timedelta(hours=24)
         existing = TeamTrackingRequest.query.filter(
@@ -9855,19 +9863,20 @@ def submit_tracking_request(team_id: int):
         return jsonify(_safe_error_payload(e, 'Failed to submit tracking request')), 500
 
 
-@api_bp.route('/teams/<int:team_id>/tracking-status', methods=['GET'])
-def get_team_tracking_status(team_id: int):
+@api_bp.route('/teams/<team_identifier>/tracking-status', methods=['GET'])
+def get_team_tracking_status(team_identifier: str):
     """
     Get tracking status for a team, including any pending requests.
     """
     try:
-        team = Team.query.get_or_404(team_id)
-        
+        team = resolve_team_by_identifier(team_identifier)
+        team_id = team.id
+
         pending_request = TeamTrackingRequest.query.filter(
             TeamTrackingRequest.team_id == team_id,
             TeamTrackingRequest.status == 'pending'
         ).first()
-        
+
         return jsonify({
             'team_id': team.id,
             'team_name': team.name,
@@ -13856,13 +13865,12 @@ def admin_sync_tracked_player_journeys():
 # Public: Team Players
 # ====================================================================
 
-@api_bp.route('/teams/<int:team_id>/players', methods=['GET'])
-def get_team_players(team_id):
+@api_bp.route('/teams/<team_identifier>/players', methods=['GET'])
+def get_team_players(team_identifier):
     """Return tracked players for a team in loan-compatible shape (public endpoint)."""
     try:
-        team = Team.query.get(team_id)
-        if not team:
-            return jsonify({'error': 'Team not found'}), 404
+        team = resolve_team_by_identifier(team_identifier)
+        team_id = team.id
 
         players = TrackedPlayer.query.filter_by(
             team_id=team_id,

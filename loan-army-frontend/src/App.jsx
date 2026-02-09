@@ -7883,7 +7883,7 @@ function TeamsPage() {
   const renderTeamCard = (team) => (
     <Link
       key={team.id}
-      to={`/teams/${team.id}`}
+      to={`/teams/${team.slug || team.id}`}
       className="flex items-center gap-3 p-3 rounded-lg border bg-white text-left transition-all w-full border-gray-200 hover:border-gray-300 hover:shadow-sm"
     >
       <Avatar className="h-9 w-9 shrink-0">
@@ -10751,7 +10751,7 @@ function AppRoutes() {
     <Routes>
       <Route path="/" element={<HomePage />} />
       <Route path="/teams" element={<TeamsPage />} />
-      <Route path="/teams/:teamId" element={<TeamDetailPage />} />
+      <Route path="/teams/:teamSlug" element={<TeamDetailPage />} />
       <Route path="/dream-team" element={<PublicFormationBuilder />} />
       <Route path="/newsletters" element={<NewslettersPage />} />
       <Route path="/newsletters/:newsletterId" element={<NewslettersPage />} />

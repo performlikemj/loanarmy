@@ -3,20 +3,11 @@
 from __future__ import annotations
 
 from datetime import date
-import re
-import unicodedata
 from typing import Optional
 
+from src.utils.slug import slugify_label as _slugify_label
+
 __all__ = ["compose_newsletter_public_slug"]
-
-
-def _slugify_label(value: Optional[str]) -> str:
-    if not value:
-        return ""
-    normalized = unicodedata.normalize("NFKD", value)
-    ascii_value = normalized.encode("ascii", "ignore").decode("ascii")
-    cleaned = re.sub(r"[^a-zA-Z0-9]+", "-", ascii_value)
-    return cleaned.strip("-").lower()
 
 
 def compose_newsletter_public_slug(

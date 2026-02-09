@@ -54,7 +54,7 @@ function StatusIndicator({ status, teamName }) {
 }
 
 export function TeamDetailPage() {
-    const { teamId } = useParams()
+    const { teamSlug: teamId } = useParams()
     const navigate = useNavigate()
     const [searchParams] = useSearchParams()
 
