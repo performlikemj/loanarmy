@@ -430,7 +430,7 @@ export function TeamDetailPage() {
 
                     {/* Academy Network Tab */}
                     <TabsContent value="alumni" className="mt-4">
-                        <AcademyConstellation teamApiId={team?.team_id || team?.team_api_id} />
+                        <AcademyConstellation teamApiId={teamId} />
                     </TabsContent>
 
                     {/* Newsletters Tab */}
