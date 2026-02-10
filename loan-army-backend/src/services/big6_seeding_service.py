@@ -116,7 +116,7 @@ def run_big6_seed(job_id, seasons=None, team_ids=None, league_ids=None):
                 season=season
             ).first()
 
-            if existing and existing.sync_status == 'complete':
+            if existing and existing.sync_status in ('complete', 'seeded'):
                 cohort_ids.append(existing.id)
                 continue
 
@@ -135,6 +135,13 @@ def run_big6_seed(job_id, seasons=None, team_ids=None, league_ids=None):
             continue
 
     # ── Phase 2: Journey sync ──
+    # Pre-load cohort parent context for status derivation
+    cohort_context = {}
+    for cid in cohort_ids:
+        c = db.session.get(AcademyCohort, cid)
+        if c:
+            cohort_context[cid] = (c.team_api_id, c.team_name or '')
+
     # Collect all unique player IDs across cohorts
     all_members = CohortMember.query.filter(
         CohortMember.cohort_id.in_(cohort_ids),
@@ -179,7 +186,12 @@ def run_big6_seed(job_id, seasons=None, team_ids=None, league_ids=None):
                     pm.first_team_debut_season = journey.first_team_debut_season
                     pm.total_first_team_apps = journey.total_first_team_apps
                     pm.total_clubs = journey.total_clubs
-                    pm.current_status = CohortService._derive_status(journey, current_year)
+                    parent_api_id, parent_club_name = cohort_context.get(pm.cohort_id, (0, ''))
+                    pm.current_status = CohortService._derive_status(
+                        journey, current_year,
+                        parent_api_id=parent_api_id,
+                        parent_club_name=parent_club_name,
+                    )
                     pm.journey_synced = True
                     pm.journey_sync_error = None
 

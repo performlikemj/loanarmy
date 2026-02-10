@@ -7,6 +7,7 @@ Handles:
 from flask import Blueprint, request, jsonify, copy_current_request_context
 from src.models.league import db
 from src.models.cohort import AcademyCohort, CohortMember
+from src.models.journey import PlayerJourney
 from src.routes.api import require_api_key
 from src.services.cohort_service import CohortService
 from src.utils.background_jobs import create_background_job, update_job, get_job
@@ -142,6 +143,73 @@ def admin_delete_cohort(cohort_id):
     db.session.delete(cohort)
     db.session.commit()
     return '', 204
+
+
+@cohort_bp.route('/admin/cohorts/re-derive-statuses', methods=['POST'])
+@require_api_key
+def admin_re_derive_statuses():
+    """Re-derive current_status for all synced cohort members.
+
+    Fixes data produced by the bug where _derive_status was called
+    without parent club context. Iterates all members with
+    journey_synced=True, re-runs status derivation with the correct
+    parent club from their cohort, then refreshes aggregate stats.
+
+    Body (optional): {cohort_ids: [1, 2, 3]}
+    """
+    data = request.get_json() or {}
+    target_cohort_ids = data.get('cohort_ids')
+
+    service = CohortService()
+    current_year = datetime.now().year
+
+    query = CohortMember.query.filter(CohortMember.journey_synced == True)
+    if target_cohort_ids:
+        query = query.filter(CohortMember.cohort_id.in_(target_cohort_ids))
+
+    members = query.all()
+    updated = 0
+    errors = []
+
+    for member in members:
+        try:
+            if not member.journey_id:
+                continue
+
+            journey = db.session.get(PlayerJourney, member.journey_id)
+            if not journey:
+                continue
+
+            cohort = db.session.get(AcademyCohort, member.cohort_id)
+            if not cohort:
+                continue
+
+            new_status = CohortService._derive_status(
+                journey, current_year,
+                parent_api_id=cohort.team_api_id,
+                parent_club_name=cohort.team_name or '',
+            )
+
+            if member.current_status != new_status:
+                member.current_status = new_status
+                updated += 1
+
+        except Exception as e:
+            errors.append(f"Player {member.player_api_id}: {e}")
+
+    db.session.commit()
+
+    # Refresh stats for affected cohorts
+    affected_cohort_ids = target_cohort_ids or list(set(m.cohort_id for m in members))
+    for cid in affected_cohort_ids:
+        service.refresh_cohort_stats(cid)
+
+    return jsonify({
+        'members_checked': len(members),
+        'statuses_updated': updated,
+        'cohorts_refreshed': len(affected_cohort_ids),
+        'errors': errors[:20],
+    })
 
 
 # =============================================================================

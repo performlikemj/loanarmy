@@ -157,7 +157,7 @@ class CohortService:
             if not cohort.league_name and fallback_league_name:
                 cohort.league_name = fallback_league_name
             cohort.seeded_at = datetime.now(timezone.utc)
-            cohort.sync_status = 'complete'
+            cohort.sync_status = 'seeded'
             db.session.commit()
 
             logger.info(f"Discovered cohort id={cohort.id}: {players_added} players")
@@ -270,7 +270,7 @@ class CohortService:
         cohort.players_first_team = sum(1 for m in members if m.current_status == 'first_team')
         cohort.players_on_loan = sum(1 for m in members if m.current_status == 'on_loan')
         cohort.players_still_academy = sum(1 for m in members if m.current_status == 'academy')
-        cohort.players_released = sum(1 for m in members if m.current_status == 'released')
+        cohort.players_released = sum(1 for m in members if m.current_status in ('released', 'sold'))
 
         db.session.commit()
         logger.info(f"Refreshed stats for cohort {cohort_id}: {cohort.total_players} players")
