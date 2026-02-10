@@ -37,7 +37,7 @@ from src.utils.sanitize import sanitize_comment_body, sanitize_plain_text, sanit
 from src.agents.errors import NoActiveLoaneesError
 from src.models.tracked_player import TrackedPlayer
 from src.utils.slug import resolve_team_by_identifier, generate_unique_team_slug
-from src.utils.academy_classifier import derive_player_status, is_same_club
+from src.utils.academy_classifier import derive_player_status, is_same_club, upgrade_status_from_transfers
 from src.utils.newsletter_slug import compose_newsletter_public_slug
 from src.services.email_service import email_service
 import threading
@@ -13729,6 +13729,27 @@ def admin_seed_tracked_players():
                     player_api_id=pid, team_id=team_id,
                 ).first()
                 if existing:
+                    # Refresh status on re-seed so stale statuses get corrected
+                    new_status, new_loan_id, new_loan_name = derive_player_status(
+                        current_club_api_id=journey.current_club_api_id if journey else None,
+                        current_club_name=journey.current_club_name if journey else None,
+                        current_level=journey.current_level if journey else None,
+                        parent_api_id=parent_api_id,
+                        parent_club_name=team.name,
+                    )
+                    if new_status == 'on_loan' and journey:
+                        try:
+                            player_transfers = []
+                            raw = api_client.get_player_transfers(pid)
+                            for block in raw:
+                                player_transfers.extend(block.get('transfers', []))
+                            new_status = upgrade_status_from_transfers(new_status, player_transfers, parent_api_id)
+                        except Exception as tx_err:
+                            logger.warning('seed: transfer check failed for %d: %s', pid, tx_err)
+                    if existing.status != new_status or existing.loan_club_api_id != new_loan_id:
+                        existing.status = new_status
+                        existing.loan_club_api_id = new_loan_id
+                        existing.loan_club_name = new_loan_name
                     skipped += 1
                     continue
 
@@ -13758,6 +13779,17 @@ def admin_seed_tracked_players():
                     parent_api_id=parent_api_id,
                     parent_club_name=team.name,
                 )
+
+                # Upgrade on_loan → sold/released using transfer history
+                if status == 'on_loan' and journey:
+                    try:
+                        player_transfers = []
+                        raw = api_client.get_player_transfers(pid)
+                        for block in raw:
+                            player_transfers.extend(block.get('transfers', []))
+                        status = upgrade_status_from_transfers(status, player_transfers, parent_api_id)
+                    except Exception as tx_err:
+                        logger.warning('seed: transfer check failed for %d: %s', pid, tx_err)
 
                 # Derive level from journey
                 current_level = None

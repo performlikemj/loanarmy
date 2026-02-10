@@ -701,7 +701,11 @@ class JourneySyncService:
         if entries is None:
             entries = PlayerJourneyEntry.query.filter_by(journey_id=journey.id).all()
 
-        youth_entries = [e for e in entries if e.is_youth and not e.is_international]
+        youth_entries = [
+            e for e in entries
+            if e.is_youth and not e.is_international
+            and e.entry_type in ('academy', 'development')
+        ]
         if not youth_entries:
             journey.academy_club_ids = []
             return
@@ -777,11 +781,9 @@ class JourneySyncService:
                 parent_club_name=team.name,
             )
 
-            # Upgrade 'on_loan' → 'sold' when the latest departure was permanent
-            if status == 'on_loan' and transfers:
-                dep_type = self._get_latest_departure_type(transfers, academy_api_id)
-                if dep_type and not is_new_loan_transfer(dep_type):
-                    status = 'sold'
+            # Upgrade 'on_loan' → 'sold'/'released' when the latest departure was permanent
+            from src.utils.academy_classifier import upgrade_status_from_transfers
+            status = upgrade_status_from_transfers(status, transfers or [], academy_api_id)
 
             if not existing:
                 tp = TrackedPlayer(

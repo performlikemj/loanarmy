@@ -174,6 +174,36 @@ def derive_player_status(
     return ('on_loan', current_club_api_id, current_club_name)
 
 
+def upgrade_status_from_transfers(
+    status: str,
+    transfers: list,
+    parent_api_id: int,
+) -> str:
+    """Upgrade 'on_loan' → 'sold'/'released' when latest departure was permanent."""
+    if status != 'on_loan' or not transfers:
+        return status
+
+    from src.api_football_client import is_new_loan_transfer
+
+    departures = [
+        t for t in transfers
+        if (t.get('teams', {}).get('out', {}).get('id') == parent_api_id)
+    ]
+    if not departures:
+        return status
+
+    departures.sort(key=lambda t: t.get('date', ''), reverse=True)
+    dep_type = (departures[0].get('type') or '').strip().lower()
+
+    if not dep_type or is_new_loan_transfer(dep_type):
+        return status  # still a loan
+
+    # Permanent departure: free agent → 'released', else → 'sold'
+    if dep_type in ('free agent', 'free', 'n/a'):
+        return 'released'
+    return 'sold'
+
+
 # ─── internal ──────────────────────────────────────────────────────────
 
 def _base_status(current_level: Optional[str]) -> str:

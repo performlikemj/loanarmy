@@ -725,5 +725,215 @@ class TestJourneyIntegration:
         assert 'count' in data
 
 
+class TestUpgradeStatusFromTransfers:
+    """Test the upgrade_status_from_transfers shared utility"""
+
+    def test_non_loan_status_unchanged(self):
+        """Non-loan statuses pass through unchanged"""
+        from src.utils.academy_classifier import upgrade_status_from_transfers
+        assert upgrade_status_from_transfers('academy', [], 33) == 'academy'
+        assert upgrade_status_from_transfers('first_team', [], 33) == 'first_team'
+        assert upgrade_status_from_transfers('sold', [], 33) == 'sold'
+
+    def test_on_loan_no_transfers_unchanged(self):
+        """on_loan with no transfers stays on_loan"""
+        from src.utils.academy_classifier import upgrade_status_from_transfers
+        assert upgrade_status_from_transfers('on_loan', [], 33) == 'on_loan'
+
+    def test_on_loan_with_loan_transfer_stays_loan(self):
+        """on_loan with a loan departure stays on_loan"""
+        from src.utils.academy_classifier import upgrade_status_from_transfers
+        transfers = [{
+            'type': 'Loan',
+            'date': '2024-08-01',
+            'teams': {'out': {'id': 33}, 'in': {'id': 62}},
+        }]
+        assert upgrade_status_from_transfers('on_loan', transfers, 33) == 'on_loan'
+
+    def test_permanent_transfer_becomes_sold(self):
+        """Permanent transfer departure upgrades to sold"""
+        from src.utils.academy_classifier import upgrade_status_from_transfers
+        transfers = [{
+            'type': 'Transfer',
+            'date': '2025-01-15',
+            'teams': {'out': {'id': 33}, 'in': {'id': 100}},
+        }]
+        assert upgrade_status_from_transfers('on_loan', transfers, 33) == 'sold'
+
+    def test_free_agent_becomes_released(self):
+        """Free agent departure upgrades to released"""
+        from src.utils.academy_classifier import upgrade_status_from_transfers
+        transfers = [{
+            'type': 'Free Agent',
+            'date': '2026-01-14',
+            'teams': {'out': {'id': 33}, 'in': {'id': 200}},
+        }]
+        assert upgrade_status_from_transfers('on_loan', transfers, 33) == 'released'
+
+    def test_free_lowercase_becomes_released(self):
+        """'free' departure type also upgrades to released"""
+        from src.utils.academy_classifier import upgrade_status_from_transfers
+        transfers = [{
+            'type': 'free',
+            'date': '2026-01-14',
+            'teams': {'out': {'id': 33}, 'in': {'id': 200}},
+        }]
+        assert upgrade_status_from_transfers('on_loan', transfers, 33) == 'released'
+
+    def test_na_becomes_released(self):
+        """N/A departure type upgrades to released"""
+        from src.utils.academy_classifier import upgrade_status_from_transfers
+        transfers = [{
+            'type': 'N/A',
+            'date': '2025-06-30',
+            'teams': {'out': {'id': 33}, 'in': {'id': 200}},
+        }]
+        assert upgrade_status_from_transfers('on_loan', transfers, 33) == 'released'
+
+    def test_latest_departure_wins(self):
+        """When multiple departures exist, the latest one determines status"""
+        from src.utils.academy_classifier import upgrade_status_from_transfers
+        transfers = [
+            {
+                'type': 'Loan',
+                'date': '2023-08-01',
+                'teams': {'out': {'id': 33}, 'in': {'id': 62}},
+            },
+            {
+                'type': 'Free Agent',
+                'date': '2026-01-14',
+                'teams': {'out': {'id': 33}, 'in': {'id': 200}},
+            },
+        ]
+        assert upgrade_status_from_transfers('on_loan', transfers, 33) == 'released'
+
+    def test_no_departures_from_parent_unchanged(self):
+        """Transfers from other clubs don't affect status"""
+        from src.utils.academy_classifier import upgrade_status_from_transfers
+        transfers = [{
+            'type': 'Transfer',
+            'date': '2025-01-15',
+            'teams': {'out': {'id': 99}, 'in': {'id': 33}},
+        }]
+        assert upgrade_status_from_transfers('on_loan', transfers, 33) == 'on_loan'
+
+    def test_empty_type_unchanged(self):
+        """Empty departure type doesn't change status"""
+        from src.utils.academy_classifier import upgrade_status_from_transfers
+        transfers = [{
+            'type': '',
+            'date': '2025-01-15',
+            'teams': {'out': {'id': 33}, 'in': {'id': 100}},
+        }]
+        assert upgrade_status_from_transfers('on_loan', transfers, 33) == 'on_loan'
+
+
+class TestComputeAcademyClubIdsExcludesIntegration:
+    """Test that _compute_academy_club_ids excludes integration entries"""
+
+    def _make_entry(self, **kwargs):
+        entry = MagicMock()
+        entry.is_youth = kwargs.get('is_youth', True)
+        entry.is_international = kwargs.get('is_international', False)
+        entry.entry_type = kwargs.get('entry_type', 'academy')
+        entry.club_name = kwargs.get('club_name', 'Arsenal U21')
+        entry.club_api_id = kwargs.get('club_api_id', 1234)
+        return entry
+
+    def test_academy_entries_included(self):
+        """Academy entries are included in academy ID computation"""
+        from src.services.journey_sync import JourneySyncService
+
+        service = JourneySyncService(api_client=Mock())
+
+        academy_entry = self._make_entry(
+            is_youth=True, entry_type='academy',
+            club_name='Arsenal U21', club_api_id=1234,
+        )
+        senior_entry = self._make_entry(
+            is_youth=False, entry_type='first_team',
+            club_name='Arsenal', club_api_id=42,
+        )
+
+        mock_journey = MagicMock()
+        mock_journey.id = 1
+        mock_journey.player_api_id = 999
+
+        with patch('src.services.journey_sync.PlayerJourneyEntry'):
+            with patch('src.services.journey_sync.TeamProfile') as MockTP:
+                MockTP.query.filter.return_value.first.return_value = None
+                with patch('src.services.journey_sync.Team') as MockTeam:
+                    MockTeam.query.filter.return_value.first.return_value = None
+                    with patch.object(service, '_upsert_tracked_players'):
+                        service._compute_academy_club_ids(
+                            mock_journey, entries=[academy_entry, senior_entry]
+                        )
+
+        # Arsenal (42) should be in academy_club_ids via senior_name_to_id lookup
+        assert 42 in mock_journey.academy_club_ids
+
+    def test_integration_entries_excluded(self):
+        """Integration entries should NOT be counted for academy ID computation"""
+        from src.services.journey_sync import JourneySyncService
+
+        service = JourneySyncService(api_client=Mock())
+
+        # Heaven scenario: integration entry at Man Utd U21
+        integration_entry = self._make_entry(
+            is_youth=True, entry_type='integration',
+            club_name='Manchester United U21', club_api_id=5678,
+        )
+        senior_entry = self._make_entry(
+            is_youth=False, entry_type='first_team',
+            club_name='Manchester United', club_api_id=33,
+        )
+
+        mock_journey = MagicMock()
+        mock_journey.id = 1
+        mock_journey.player_api_id = 999
+
+        with patch('src.services.journey_sync.PlayerJourneyEntry'):
+            with patch.object(service, '_upsert_tracked_players'):
+                service._compute_academy_club_ids(
+                    mock_journey, entries=[integration_entry, senior_entry]
+                )
+
+        # Man Utd (33) should NOT be in academy_club_ids because the youth
+        # entry is entry_type='integration', not 'academy' or 'development'
+        assert mock_journey.academy_club_ids == []
+
+    def test_development_entries_included(self):
+        """Development entries (genuine academy + first team at same club) ARE included"""
+        from src.services.journey_sync import JourneySyncService
+
+        service = JourneySyncService(api_client=Mock())
+
+        dev_entry = self._make_entry(
+            is_youth=True, entry_type='development',
+            club_name='Manchester United U19', club_api_id=9999,
+        )
+        senior_entry = self._make_entry(
+            is_youth=False, entry_type='first_team',
+            club_name='Manchester United', club_api_id=33,
+        )
+
+        mock_journey = MagicMock()
+        mock_journey.id = 1
+        mock_journey.player_api_id = 999
+
+        with patch('src.services.journey_sync.PlayerJourneyEntry'):
+            with patch('src.services.journey_sync.TeamProfile') as MockTP:
+                MockTP.query.filter.return_value.first.return_value = None
+                with patch('src.services.journey_sync.Team') as MockTeam:
+                    MockTeam.query.filter.return_value.first.return_value = None
+                    with patch.object(service, '_upsert_tracked_players'):
+                        service._compute_academy_club_ids(
+                            mock_journey, entries=[dev_entry, senior_entry]
+                        )
+
+        # Man Utd (33) should be included because development entries are genuine academy
+        assert 33 in mock_journey.academy_club_ids
+
+
 if __name__ == '__main__':
     pytest.main([__file__, '-v'])
