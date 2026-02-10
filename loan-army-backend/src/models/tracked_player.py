@@ -92,13 +92,8 @@ class TrackedPlayer(db.Model):
         }
 
     def to_public_dict(self):
-        """Return a public-facing dict with fields expected by the frontend."""
-        # Compute stats from linked LoanedPlayer if available
-        stats = {'appearances': 0, 'goals': 0, 'assists': 0,
-                 'minutes_played': 0, 'saves': 0, 'yellows': 0, 'reds': 0}
-        if self.loaned_player:
-            stats = self.loaned_player._compute_stats()
-
+        """Return a public-facing dict with fields expected by the frontend.
+        Stats default to 0 here — the endpoint enriches them via batch query."""
         return {
             'id': self.id,
             'player_id': self.player_api_id,
@@ -119,13 +114,13 @@ class TrackedPlayer(db.Model):
             'current_level': self.current_level,
             'data_source': self.data_source,
             'data_depth': self.data_depth,
-            'appearances': stats.get('appearances', 0),
-            'goals': stats.get('goals', 0),
-            'assists': stats.get('assists', 0),
-            'minutes_played': stats.get('minutes_played', 0),
-            'saves': stats.get('saves', 0),
-            'yellows': stats.get('yellows', 0),
-            'reds': stats.get('reds', 0),
+            'appearances': 0,
+            'goals': 0,
+            'assists': 0,
+            'minutes_played': 0,
+            'saves': 0,
+            'yellows': 0,
+            'reds': 0,
             'created_at': self.created_at.isoformat() if self.created_at else None,
             'updated_at': self.updated_at.isoformat() if self.updated_at else None,
         }

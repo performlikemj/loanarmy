@@ -6097,6 +6097,28 @@ def _run_seed_top5_logic(data: dict, job_id: str = None) -> dict:
                     details.append({'player_id': player_id, 'status': 'skip_missing_teams'})
                     continue
 
+                # For multi-team-only candidates (no direct transfer data),
+                # verify the player is actually on loan — not a permanent transfer.
+                # Without this, mid-season permanent transfers (e.g. Elanga: Forest→Newcastle)
+                # create false LoanedPlayer records.
+                if not d:
+                    try:
+                        analysis = api_client.analyze_transfer_type(
+                            player_id, multi_team, window_key, season
+                        )
+                        if not analysis.get('is_likely_loan'):
+                            skipped += 1
+                            details.append({
+                                'player_id': player_id,
+                                'status': 'skip_not_loan',
+                                'confidence': analysis.get('loan_confidence', 0),
+                                'indicators': analysis.get('permanent_indicators', []),
+                            })
+                            continue
+                    except Exception as analysis_err:
+                        logger.warning(f"Transfer analysis failed for {player_id}: {analysis_err}")
+                        # On failure, fall through and process normally
+
                 # Fetch player info (name)
                 info = api_client.get_player_by_id(player_id) or {}
                 player_info = info.get('player') or {}
@@ -13892,23 +13914,74 @@ def get_team_players(team_identifier):
                 if entry.club_api_id == team.team_id or is_same_club(entry.club_name or '', team.name):
                     parent_club_apps[entry.journey_id] = parent_club_apps.get(entry.journey_id, 0) + (entry.appearances or 0)
 
-        # Enrich with player photos from Player table and loan team logos
+        # Batch-compute loan stats from FixturePlayerStats (1 query)
+        from src.models.weekly import FixturePlayerStats
+        from sqlalchemy import func as sa_func
+
+        player_api_ids_on_loan = [tp.player_api_id for tp in players if tp.loan_club_api_id]
+        player_stats_map = {}
+        if player_api_ids_on_loan:
+            stats_rows = db.session.query(
+                FixturePlayerStats.player_api_id,
+                sa_func.count().label('appearances'),
+                sa_func.coalesce(sa_func.sum(FixturePlayerStats.goals), 0).label('goals'),
+                sa_func.coalesce(sa_func.sum(FixturePlayerStats.assists), 0).label('assists'),
+                sa_func.coalesce(sa_func.sum(FixturePlayerStats.minutes), 0).label('minutes_played'),
+                sa_func.coalesce(sa_func.sum(FixturePlayerStats.saves), 0).label('saves'),
+                sa_func.coalesce(sa_func.sum(FixturePlayerStats.yellows), 0).label('yellows'),
+                sa_func.coalesce(sa_func.sum(FixturePlayerStats.reds), 0).label('reds'),
+            ).filter(
+                FixturePlayerStats.player_api_id.in_(player_api_ids_on_loan),
+            ).group_by(FixturePlayerStats.player_api_id).all()
+
+            for row in stats_rows:
+                player_stats_map[row.player_api_id] = {
+                    'appearances': row.appearances or 0,
+                    'goals': int(row.goals or 0),
+                    'assists': int(row.assists or 0),
+                    'minutes_played': int(row.minutes_played or 0),
+                    'saves': int(row.saves or 0),
+                    'yellows': int(row.yellows or 0),
+                    'reds': int(row.reds or 0),
+                }
+
+        # Batch-fetch Player records for photo and position enrichment (1 query)
+        all_player_api_ids = [tp.player_api_id for tp in players]
+        player_records_map = {}
+        if all_player_api_ids:
+            player_records = Player.query.filter(Player.player_id.in_(all_player_api_ids)).all()
+            player_records_map = {pr.player_id: pr for pr in player_records}
+
+        # Batch-fetch loan team logos (1 query)
+        loan_club_api_ids = list({tp.loan_club_api_id for tp in players if tp.loan_club_api_id})
+        loan_team_logos = {}
+        if loan_club_api_ids:
+            loan_teams = Team.query.filter(Team.team_id.in_(loan_club_api_ids)).all()
+            loan_team_logos = {lt.team_id: lt.logo for lt in loan_teams}
+
+        # Build results with batch-enriched data
         results = []
         for tp in players:
             d = tp.to_public_dict()
             d['parent_club_appearances'] = parent_club_apps.get(tp.journey_id, 0)
 
-            # Fill in photo if missing
-            if not d.get('player_photo'):
-                player_record = Player.query.filter_by(player_id=tp.player_api_id).first()
-                if player_record and player_record.photo_url:
-                    d['player_photo'] = player_record.photo_url
+            # Enrich stats from batch query
+            if tp.player_api_id in player_stats_map:
+                d.update(player_stats_map[tp.player_api_id])
+
+            # Enrich photo and position from Player table
+            pr = player_records_map.get(tp.player_api_id)
+            if pr:
+                if not d.get('player_photo') and pr.photo_url:
+                    d['player_photo'] = pr.photo_url
+                if not d.get('position') and pr.position:
+                    d['position'] = pr.position
 
             # Fill in loan team logo
             if tp.loan_club_api_id:
-                loan_team = Team.query.filter_by(team_id=tp.loan_club_api_id).first()
-                if loan_team:
-                    d['loan_team_logo'] = loan_team.logo
+                logo = loan_team_logos.get(tp.loan_club_api_id)
+                if logo:
+                    d['loan_team_logo'] = logo
 
             # Enrich with international honors from journey entries
             # Use entry_type='international' to get actual national team duty,
