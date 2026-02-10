@@ -1627,6 +1627,17 @@ export class APIService {
         return this.request('/gol/suggestions')
     }
 
+    static async streamChat(message, history, sessionId, signal) {
+        const headers = { 'Content-Type': 'application/json' }
+        if (this.userToken) headers['Authorization'] = `Bearer ${this.userToken}`
+        return fetch(`${API_BASE_URL}/gol/chat`, {
+            method: 'POST',
+            headers,
+            body: JSON.stringify({ message, history, session_id: sessionId }),
+            signal,
+        })
+    }
+
     // ==========================================================================
     // Academy Network
     // ==========================================================================

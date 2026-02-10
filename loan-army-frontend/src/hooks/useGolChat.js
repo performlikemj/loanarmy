@@ -1,4 +1,5 @@
 import { useState, useCallback, useRef } from 'react'
+import { APIService } from '@/lib/api'
 
 export function useGolChat() {
   const [messages, setMessages] = useState([])
@@ -21,12 +22,12 @@ export function useGolChat() {
       // Build history from existing messages (only role + content for API)
       const history = messages.map(m => ({ role: m.role, content: m.content }))
 
-      const response = await fetch('/api/gol/chat', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ message: content, history, session_id: sessionId }),
-        signal: controller.signal,
-      })
+      const response = await APIService.streamChat(content, history, sessionId, controller.signal)
+
+      if (!response.ok) {
+        const errorText = await response.text().catch(() => 'Unknown error')
+        throw new Error(`Chat request failed (${response.status}): ${errorText}`)
+      }
 
       const reader = response.body.getReader()
       const decoder = new TextDecoder()
