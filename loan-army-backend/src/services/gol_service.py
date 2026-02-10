@@ -1,125 +1,212 @@
 """
-GOL Assistant Service
+GOL Analytics Wizard Service
 
-AI-powered chat service using OpenAI GPT-4.1-mini with tool calling
-for querying the Go On Loan database and providing football insights.
+AI-powered analytics assistant using OpenAI GPT-4.1-mini with a pandas
+code-interpreter tool for querying the Go On Loan database.
 """
 
 import json
 import logging
 import os
-from typing import Generator, Optional
+from typing import Generator
 
 from openai import OpenAI
 from sqlalchemy import func
 
-from src.models.league import db, LoanedPlayer, Team, CommunityTake
-from src.models.weekly import Fixture, FixturePlayerStats
-from src.models.journey import PlayerJourney, PlayerJourneyEntry
-from src.models.cohort import AcademyCohort, CohortMember
+from src.models.league import db, LoanedPlayer
+from src.services.gol_dataframes import DataFrameCache
+from src.services.gol_sandbox import execute_analysis
 
 logger = logging.getLogger(__name__)
 
-SYSTEM_PROMPT = """You are the GOL Assistant — a knowledgeable football scout and analyst \
+SYSTEM_PROMPT = """\
+You are the GOL Analytics Wizard — a knowledgeable football scout and analyst \
 for the Go On Loan platform. You help users explore loan players, academy pathways, \
-and career journeys across European football.
+and career journeys across European football using data analysis.
 
-Rules:
-- Only reference data returned by your tools. Never fabricate player stats or facts.
-- When you have data from a tool call, present it clearly with context and analysis.
-- Use the data_card protocol: after tool calls, the system will display rich cards \
-with the data inline in the conversation.
-- Be conversational but precise. Use football terminology naturally.
-- If you're unsure, say so rather than guessing.
+## Tools
+
+You have two tools:
+1. **run_analysis** — Execute pandas code against GOL DataFrames. Your code MUST \
+assign the final result to a variable called `result`. Choose the best `display` \
+format for the data. `pd` (pandas) and `np` (numpy) are pre-loaded. NEVER use \
+`import` statements — they are blocked by the sandbox and will fail.
+2. **search_web** — Search the web for recent football news.
+
+## Available DataFrames
+
+### `players` (active loan spells — roster ONLY, NO stats)
+Columns: player_id (int, API-Football ID), player_name (str), age (int), \
+nationality (str), primary_team_id (int, FK to teams.id), \
+primary_team_name (str, parent club), loan_team_id (int, FK to teams.id), \
+loan_team_name (str, where on loan), \
+pathway_status (str: academy/on_loan/first_team/released), \
+current_level (str: U18/U21/U23/Reserve/Senior), \
+stats_coverage (str: full/limited/none), window_key (str), is_active (bool)
+**This table has NO stats columns.** For goals, assists, appearances, minutes, \
+use `fixture_stats` (per-match) or `journey_entries` (season aggregates).
+
+### `teams` (clubs — current season only)
+Columns: id (int, internal PK), team_id (int, API-Football ID), name (str), \
+country (str), league_name (str or null), is_tracked (bool), season (int)
+**Note:** `teams` contains only the current season. Each team has one row.
+
+### `tracked` (academy-tracked players)
+Columns: player_api_id (int), player_name (str), position (str: Goalkeeper/Defender/Midfielder/Attacker), \
+nationality (str), age (int), team_id (int, FK to teams.id), \
+status (str: academy/on_loan/first_team/released/sold), \
+current_level (str), loan_club_name (str or null), data_source (str), is_active (bool)
+
+### `journeys` (career summaries)
+Columns: player_api_id (int), player_name (str), nationality (str), \
+birth_date (str), origin_club_name (str), origin_year (int), \
+current_club_name (str), current_level (str), \
+first_team_debut_season (int or null), first_team_debut_club (str or null), \
+total_clubs (int), total_first_team_apps (int), total_youth_apps (int), \
+total_loan_apps (int), total_goals (int), total_assists (int), \
+academy_club_ids (list of int, API-Football team IDs)
+
+### `journey_entries` (season-by-season career rows)
+Columns: journey_id (int), player_api_id (int), season (int), \
+club_api_id (int), club_name (str), league_name (str), \
+level (str: U18/U19/U21/U23/Reserve/First Team), \
+entry_type (str: academy/first_team/loan/permanent/international), \
+is_youth (bool), appearances (int), goals (int), assists (int), minutes (int)
+
+### `cohorts` (academy cohort metadata)
+Columns: id (int), team_api_id (int), team_name (str), league_name (str), \
+league_level (str), season (int), total_players (int), \
+players_first_team (int), players_on_loan (int), \
+players_still_academy (int), players_released (int), sync_status (str)
+
+### `cohort_members` (academy graduates with current status)
+Columns: cohort_id (int, FK to cohorts.id), player_api_id (int), \
+player_name (str), position (str), nationality (str), \
+current_club_name (str), current_level (str), \
+current_status (str: first_team/on_loan/academy/released/unknown), \
+appearances_in_cohort (int), goals_in_cohort (int), \
+first_team_debut_season (int or null), total_first_team_apps (int), \
+total_clubs (int), total_loan_spells (int)
+
+### `fixtures` (match data)
+Columns: id (int, internal PK), fixture_id_api (int), date_utc (datetime), \
+season (int), competition_name (str), home_team_api_id (int), \
+away_team_api_id (int), home_goals (int), away_goals (int)
+
+### `fixture_stats` (per-match player performance)
+Columns: fixture_id (int, FK to fixtures.id), player_api_id (int), \
+team_api_id (int), season (int, from fixtures), date_utc (datetime, from fixtures), \
+minutes (int), position (str: G/D/M/F), \
+rating (float), goals (int), assists (int), saves (int), \
+yellows (int), reds (int), shots_total (int), shots_on (int), \
+passes_total (int), passes_key (int), tackles_total (int), \
+tackles_blocks (int), tackles_interceptions (int), \
+duels_total (int), duels_won (int), \
+dribbles_success (int), fouls_drawn (int), fouls_committed (int)
+
+## Joining DataFrames
+
+Key relationships:
+- `players.primary_team_id` → `teams.id` (parent club)
+- `players.loan_team_id` → `teams.id` (loan club)
+- `players.player_id` → `journeys.player_api_id`
+- `journeys.player_api_id` → `journey_entries.player_api_id`
+- `cohort_members.cohort_id` → `cohorts.id`
+- `tracked.team_id` → `teams.id`
+- `fixture_stats.player_api_id` → `players.player_id` (**INNER join only** — fixture_stats \
+has ALL players in every fixture, not just loaned ones)
+- `fixture_stats.fixture_id` → `fixtures.id` (internal PK, NOT fixture_id_api)
+- `teams.team_id` (API ID) joins to `cohorts.team_api_id`, `tracked` columns, etc.
+- To find a team by name: `teams[teams['name'].str.contains('Arsenal', case=False)]`
+
+## Big 6 Clubs (English Premier League)
+Arsenal, Chelsea, Liverpool, Manchester United, Manchester City, Tottenham Hotspur
+
+## Display Formats
+Choose the best `display` for each query:
+- `"bar_chart"` — comparisons between groups (e.g., goals by team, academy output rankings)
+- `"line_chart"` — trends over time (e.g., appearances per season)
+- `"number"` — single stats (e.g., total tracked players, average rating)
+- `"table"` — detailed player lists or multi-column data
+- `"list"` — simple ordered lists
+
+## Data Tips (MUST READ before writing code)
+- **CRITICAL — Getting player stats:** The `players` table has NO stats columns. \
+You MUST use `fixture_stats` for per-match data or `journey_entries` for season \
+aggregates. Standard pattern for loan player stats:
+  ```
+  fs = fixture_stats[fixture_stats['season'] == fixture_stats['season'].max()]
+  agg = fs.groupby('player_api_id')[['goals','assists','minutes']].sum().reset_index()
+  result = players[['player_id','player_name','loan_team_name']].merge(agg, left_on='player_id', right_on='player_api_id', how='inner')
+  ```
+- **Season filtering:** When aggregating `fixture_stats`, always filter by season \
+first: `fixture_stats[fixture_stats['season'] == fixture_stats['season'].max()]`. This avoids \
+counting stats from previous seasons. Unless the user explicitly asks about multiple seasons, \
+default to the current season only.
+- **Loaned player performance:** `fixture_stats` contains stats for ALL \
+players in every fixture, not just loaned players. To query loan player performance, \
+always start from `players` and INNER merge to `fixture_stats`. \
+Never LEFT join from fixture_stats to players — non-loaned players will have null names.
+- **Player name lookup:** `players` has names for active loans only. For broader lookups, \
+use `journeys` (player_api_id → player_name) which covers all known players.
+- **"How is X doing?":** Filter `fixture_stats` to current season, then group by player and \
+aggregate goals, assists, minutes, avg rating.
+- **Career history:** Use `journey_entries` for a player's full season-by-season career path.
+- **Academy analysis:** Use `cohorts` for academy metadata. Note: `cohort_members` may be \
+empty — in that case, use `tracked` + `journeys` as alternatives.
+- **Finding players by name:** Use `.str.contains('Name', case=False)` on player_name columns.
+- **Finding teams by name:** `teams[teams['name'].str.contains('Arsenal', case=False)]`
+
+## Rules
+- Only use data from the DataFrames. Never fabricate stats or facts.
+- Always assign your final answer to `result`.
+- For tabular answers, return a DataFrame. For single values, return a scalar (int/float/str).
+- Keep code concise. Use `.head(20)` for large result sets.
+- If a query requires external info not in the data, use search_web.
+- Present results conversationally with analysis after receiving data.
 - Keep responses concise — 2-3 paragraphs max unless the user asks for detail.
-- When comparing players or analyzing trends, ground observations in the data."""
+- When comparing groups, prefer bar_chart. When showing trends, prefer line_chart.
+- For questions about a single number, use display "number".
+- NEVER use `import` statements in run_analysis code. `pd` and `np` are pre-loaded.
+- If an analysis tool call fails, silently retry with a different approach. NEVER mention \
+internal errors, code issues, sandbox limitations, or technical details to the user. \
+Simply say you couldn't find the data or ask the user to rephrase.
+"""
 
 TOOL_SCHEMAS = [
     {
         "type": "function",
         "function": {
-            "name": "search_players",
-            "description": "Search for players by name. Returns top 5 matches with basic info and current loan status.",
+            "name": "run_analysis",
+            "description": (
+                "Execute pandas code against the GOL database to answer questions "
+                "about players, academies, loans, and performance. "
+                "Code MUST assign its result to a variable called `result`. "
+                "Available DataFrames are described in the system prompt."
+            ),
             "parameters": {
                 "type": "object",
                 "properties": {
-                    "query": {"type": "string", "description": "Player name to search for"}
+                    "code": {
+                        "type": "string",
+                        "description": "Python/pandas code. Must assign to `result`.",
+                    },
+                    "description": {
+                        "type": "string",
+                        "description": "Brief description of what this analysis does",
+                    },
+                    "display": {
+                        "type": "string",
+                        "enum": ["table", "bar_chart", "line_chart", "number", "list"],
+                        "description": (
+                            "How to display the result. Use bar_chart/line_chart for "
+                            "comparisons, number for single values, table for detailed data."
+                        ),
+                    },
                 },
-                "required": ["query"]
-            }
-        }
-    },
-    {
-        "type": "function",
-        "function": {
-            "name": "get_player_journey",
-            "description": "Get a player's complete career journey — all clubs, levels, and statistics from academy through first team.",
-            "parameters": {
-                "type": "object",
-                "properties": {
-                    "player_api_id": {"type": "integer", "description": "API-Football player ID"}
-                },
-                "required": ["player_api_id"]
-            }
-        }
-    },
-    {
-        "type": "function",
-        "function": {
-            "name": "get_player_stats",
-            "description": "Get recent match-by-match statistics for a player.",
-            "parameters": {
-                "type": "object",
-                "properties": {
-                    "player_api_id": {"type": "integer", "description": "API-Football player ID"},
-                    "limit": {"type": "integer", "description": "Number of recent matches (default 5)", "default": 5}
-                },
-                "required": ["player_api_id"]
-            }
-        }
-    },
-    {
-        "type": "function",
-        "function": {
-            "name": "get_community_takes",
-            "description": "Get approved fan commentary and opinions about a player.",
-            "parameters": {
-                "type": "object",
-                "properties": {
-                    "player_api_id": {"type": "integer", "description": "API-Football player ID"}
-                },
-                "required": ["player_api_id"]
-            }
-        }
-    },
-    {
-        "type": "function",
-        "function": {
-            "name": "get_team_loans",
-            "description": "Get all active loan players for a club.",
-            "parameters": {
-                "type": "object",
-                "properties": {
-                    "team_api_id": {"type": "integer", "description": "API-Football team ID"}
-                },
-                "required": ["team_api_id"]
-            }
-        }
-    },
-    {
-        "type": "function",
-        "function": {
-            "name": "get_cohort",
-            "description": "Get an academy cohort — players who were in a club's youth setup for a given season, with 'where are they now' data.",
-            "parameters": {
-                "type": "object",
-                "properties": {
-                    "team_api_id": {"type": "integer", "description": "API-Football team ID"},
-                    "season": {"type": "integer", "description": "Season year (e.g. 2022)"}
-                },
-                "required": ["team_api_id"]
-            }
-        }
+                "required": ["code", "display"],
+            },
+        },
     },
     {
         "type": "function",
@@ -129,17 +216,19 @@ TOOL_SCHEMAS = [
             "parameters": {
                 "type": "object",
                 "properties": {
-                    "query": {"type": "string", "description": "Search query"}
+                    "query": {"type": "string", "description": "Search query"},
                 },
-                "required": ["query"]
-            }
-        }
+                "required": ["query"],
+            },
+        },
     },
 ]
 
 
 class GolService:
-    """AI chat service with tool-calling for football data queries."""
+    """AI analytics service with code-interpreter for football data queries."""
+
+    _df_cache = None  # Class-level singleton
 
     def __init__(self):
         api_key = os.getenv('OPENAI_API_KEY')
@@ -147,6 +236,9 @@ class GolService:
             raise RuntimeError("OPENAI_API_KEY not configured")
         self.client = OpenAI(api_key=api_key)
         self.model = 'gpt-4.1-mini'
+        if GolService._df_cache is None:
+            GolService._df_cache = DataFrameCache()
+        self.df_cache = GolService._df_cache
 
     def chat(self, message: str, history: list, session_id: str) -> Generator[dict, None, None]:
         """
@@ -161,7 +253,6 @@ class GolService:
             Dict events: {event: str, data: dict}
         """
         try:
-            # Build messages with system prompt
             messages = [{"role": "system", "content": SYSTEM_PROMPT}]
 
             # Add history (cap at 20 messages = 10 turns)
@@ -170,7 +261,6 @@ class GolService:
 
             messages.append({"role": "user", "content": message})
 
-            # Initial completion
             yield from self._run_completion(messages)
 
         except Exception as e:
@@ -190,7 +280,6 @@ class GolService:
             stream=True,
         )
 
-        # Collect stream chunks
         content_buffer = ""
         tool_calls_buffer = {}
 
@@ -213,7 +302,7 @@ class GolService:
                     if idx not in tool_calls_buffer:
                         tool_calls_buffer[idx] = {
                             "id": "",
-                            "function": {"name": "", "arguments": ""}
+                            "function": {"name": "", "arguments": ""},
                         }
                     if tc.id:
                         tool_calls_buffer[idx]["id"] = tc.id
@@ -225,10 +314,6 @@ class GolService:
 
             # Handle finish
             if finish_reason == "tool_calls":
-                # Process all tool calls
-                if content_buffer:
-                    messages.append({"role": "assistant", "content": content_buffer})
-
                 # Build the assistant message with tool_calls
                 assistant_tool_calls = []
                 for idx in sorted(tool_calls_buffer.keys()):
@@ -236,13 +321,13 @@ class GolService:
                     assistant_tool_calls.append({
                         "id": tc["id"],
                         "type": "function",
-                        "function": tc["function"]
+                        "function": tc["function"],
                     })
 
                 messages.append({
                     "role": "assistant",
                     "content": content_buffer or None,
-                    "tool_calls": assistant_tool_calls
+                    "tool_calls": assistant_tool_calls,
                 })
 
                 for idx in sorted(tool_calls_buffer.keys()):
@@ -258,14 +343,18 @@ class GolService:
                     # Execute tool
                     result = self._execute_tool(func_name, args)
 
-                    # Emit data card
-                    yield {"event": "data_card", "data": {"type": func_name, "payload": result}}
+                    # Only emit data card for successful results
+                    if result.get('result_type') != 'error':
+                        yield {"event": "data_card", "data": {"type": "analysis_result", "payload": result}}
 
-                    # Add tool result to messages
+                    # Sanitize error details before sending to LLM
+                    llm_result = self._sanitize_for_llm(result) if result.get('result_type') == 'error' else result
+
+                    # Add tool result to messages for LLM context
                     messages.append({
                         "role": "tool",
                         "tool_call_id": tc["id"],
-                        "content": json.dumps(result)
+                        "content": json.dumps(llm_result),
                     })
 
                 # Continue with next completion round
@@ -276,147 +365,39 @@ class GolService:
                 yield {"event": "done", "data": {}}
                 return
 
+    @staticmethod
+    def _sanitize_for_llm(result: dict) -> dict:
+        """Sanitize error for LLM context — helpful enough to retry, no raw stacktraces."""
+        raw = result.get('error', '')
+        if 'import' in raw.lower():
+            hint = "Import statements are not allowed. pd and np are already available."
+        elif 'KeyError' in raw or 'not in index' in raw.lower():
+            hint = "A column name was not found. Check available columns in the DataFrame descriptions."
+        elif 'merge' in raw.lower() or 'join' in raw.lower():
+            hint = "Merge/join failed. Check that join keys exist in both DataFrames."
+        elif 'timed out' in raw.lower():
+            hint = "The query took too long. Simplify the analysis or reduce the data scope."
+        else:
+            hint = "The code could not be executed. Try a simpler approach."
+        return {"result_type": "error", "error": hint}
+
     def _execute_tool(self, name: str, args: dict) -> dict:
         """Execute a tool and return the result."""
         try:
-            if name == "search_players":
-                return self._tool_search_players(args.get("query", ""))
-            elif name == "get_player_journey":
-                return self._tool_get_player_journey(args.get("player_api_id"))
-            elif name == "get_player_stats":
-                return self._tool_get_player_stats(args.get("player_api_id"), args.get("limit", 5))
-            elif name == "get_community_takes":
-                return self._tool_get_community_takes(args.get("player_api_id"))
-            elif name == "get_team_loans":
-                return self._tool_get_team_loans(args.get("team_api_id"))
-            elif name == "get_cohort":
-                return self._tool_get_cohort(args.get("team_api_id"), args.get("season"))
+            if name == "run_analysis":
+                from flask import current_app
+                code = args.get("code", "")
+                display = args.get("display", "table")
+                description = args.get("description", "")
+                frames = self.df_cache.get_frames(current_app._get_current_object())
+                return execute_analysis(code, frames, display, description=description)
             elif name == "search_web":
                 return self._tool_search_web(args.get("query", ""))
             else:
                 return {"error": f"Unknown tool: {name}"}
         except Exception as e:
             logger.error(f"Tool {name} failed: {e}")
-            return {"error": str(e)}
-
-    def _tool_search_players(self, query: str) -> dict:
-        """Search for players by name."""
-        players = LoanedPlayer.query.filter(
-            LoanedPlayer.player_name.ilike(f"%{query}%"),
-            LoanedPlayer.is_active == True
-        ).limit(5).all()
-
-        return {
-            "players": [{
-                "player_id": p.player_id,
-                "player_name": p.player_name,
-                "age": p.age,
-                "nationality": p.nationality,
-                "parent_club": p.primary_team_name,
-                "loan_club": p.loan_team_name,
-                "appearances": p.appearances,
-                "goals": p.goals,
-                "assists": p.assists,
-            } for p in players],
-            "total": len(players)
-        }
-
-    def _tool_get_player_journey(self, player_api_id: int) -> dict:
-        """Get full career journey for a player."""
-        journey = PlayerJourney.query.filter_by(player_api_id=player_api_id).first()
-        if not journey:
-            return {"error": "No journey data found for this player"}
-        return journey.to_dict(include_entries=True)
-
-    def _tool_get_player_stats(self, player_api_id: int, limit: int = 5) -> dict:
-        """Get recent match stats for a player."""
-        stats = db.session.query(FixturePlayerStats, Fixture).join(
-            Fixture, FixturePlayerStats.fixture_id == Fixture.id
-        ).filter(
-            FixturePlayerStats.player_api_id == player_api_id
-        ).order_by(Fixture.date_utc.desc()).limit(limit).all()
-
-        return {
-            "matches": [{
-                "date": f.date_utc.isoformat() if f.date_utc else None,
-                "competition": f.competition_name,
-                "minutes": s.minutes,
-                "goals": s.goals,
-                "assists": s.assists,
-                "rating": s.rating,
-                "shots_on": s.shots_on,
-                "passes_key": s.passes_key,
-                "tackles": s.tackles_total,
-                "dribbles_success": s.dribbles_success,
-            } for s, f in stats],
-            "total": len(stats)
-        }
-
-    def _tool_get_community_takes(self, player_api_id: int) -> dict:
-        """Get approved community takes for a player."""
-        takes = CommunityTake.query.filter_by(
-            player_id=player_api_id,
-            status='approved'
-        ).order_by(CommunityTake.curated_at.desc()).limit(5).all()
-
-        return {
-            "takes": [{
-                "content": t.content,
-                "author": t.source_author,
-                "source": t.source_type,
-                "platform": t.source_platform,
-                "upvotes": t.upvotes,
-            } for t in takes],
-            "total": len(takes)
-        }
-
-    def _tool_get_team_loans(self, team_api_id: int) -> dict:
-        """Get all active loans for a team."""
-        # Find team by API ID
-        team = Team.query.filter_by(api_team_id=team_api_id).first()
-        if not team:
-            # Try searching by parent team
-            loans = LoanedPlayer.query.filter(
-                LoanedPlayer.is_active == True,
-                LoanedPlayer.team_ids.like(f"%{team_api_id}%")
-            ).all()
-        else:
-            loans = LoanedPlayer.query.filter(
-                LoanedPlayer.is_active == True,
-                db.or_(
-                    LoanedPlayer.primary_team_id == team.id,
-                    LoanedPlayer.loan_team_id == team.id
-                )
-            ).all()
-
-        return {
-            "loans": [{
-                "player_id": l.player_id,
-                "player_name": l.player_name,
-                "age": l.age,
-                "parent_club": l.primary_team_name,
-                "loan_club": l.loan_team_name,
-                "appearances": l.appearances,
-                "goals": l.goals,
-                "assists": l.assists,
-                "pathway_status": l.pathway_status,
-            } for l in loans],
-            "total": len(loans)
-        }
-
-    def _tool_get_cohort(self, team_api_id: int, season: Optional[int] = None) -> dict:
-        """Get academy cohort data."""
-        query = AcademyCohort.query.filter_by(team_api_id=team_api_id)
-        if season:
-            query = query.filter_by(season=season)
-
-        cohorts = query.order_by(AcademyCohort.season.desc()).limit(3).all()
-        if not cohorts:
-            return {"error": "No cohort data found for this team"}
-
-        return {
-            "cohorts": [c.to_dict(include_members=True) for c in cohorts]
-        }
+            return {"result_type": "error", "error": str(e)}
 
     def _tool_search_web(self, query: str) -> dict:
         """Search the web using Brave Search API."""
@@ -431,7 +412,7 @@ class GolService:
                 'https://api.search.brave.com/res/v1/web/search',
                 headers={'X-Subscription-Token': api_key, 'Accept': 'application/json'},
                 params={'q': query, 'count': 3},
-                timeout=10
+                timeout=10,
             )
             resp.raise_for_status()
             data = resp.json()
@@ -454,20 +435,16 @@ class GolService:
         """Generate conversation starter suggestions based on recent data."""
         suggestions = []
 
-        # Recent active loan players
         recent_players = LoanedPlayer.query.filter_by(
             is_active=True
-        ).order_by(func.random()).limit(4).all()
+        ).order_by(func.random()).limit(2).all()
 
         for p in recent_players:
             suggestions.append(f"How is {p.player_name} doing at {p.loan_team_name}?")
 
-        if not suggestions:
-            suggestions = [
-                "Which Big 6 academy is producing the most first-team players?",
-                "Show me all players on loan from Arsenal",
-                "Who are the top-performing loan players this season?",
-                "Tell me about Chelsea's academy pipeline",
-            ]
+        suggestions.extend([
+            "Which Big 6 academy is producing the most first-team players?",
+            "Who are the top-performing loan players this season?",
+        ])
 
         return suggestions[:4]

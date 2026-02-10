@@ -18,11 +18,11 @@ export function GolChatWindow({ messages, isStreaming, sendMessage, clearChat, s
 
   return (
     <div className="flex flex-col flex-1 min-h-0">
-      <ScrollArea className="flex-1 px-4 py-3">
+      <ScrollArea className="flex-1 px-4 py-3 [&>[data-slot=scroll-area-viewport]>div]:!block">
         {messages.length === 0 ? (
           <GolSuggestions onSelect={sendMessage} />
         ) : (
-          <div className="space-y-4">
+          <div className="space-y-4 min-w-0">
             {messages.map(msg => (
               <GolMessage key={msg.id} message={msg} />
             ))}

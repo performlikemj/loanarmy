@@ -1,3 +1,4 @@
+import { AnalysisResultCard } from './cards/AnalysisResultCard'
 import { PlayerStatsCard } from './cards/PlayerStatsCard'
 import { PlayerJourneyMini } from './cards/PlayerJourneyMini'
 import { CohortGrid } from './cards/CohortGrid'
@@ -8,6 +9,8 @@ export function GolDataCard({ card }) {
   const { type, payload } = card
 
   switch (type) {
+    case 'analysis_result':
+      return <AnalysisResultCard data={payload} />
     case 'search_players':
     case 'get_player_stats':
     case 'get_team_loans':

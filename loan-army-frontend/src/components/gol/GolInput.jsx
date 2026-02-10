@@ -29,7 +29,7 @@ export function GolInput({ onSend, isStreaming, onStop }) {
         value={text}
         onChange={e => setText(e.target.value)}
         onKeyDown={handleKeyDown}
-        placeholder="Ask about any player or team\u2026"
+        placeholder="Ask about any player or team…"
         disabled={isStreaming}
         className="flex-1 rounded-md border border-input bg-background px-3 py-2 text-sm ring-offset-background placeholder:text-muted-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
       />

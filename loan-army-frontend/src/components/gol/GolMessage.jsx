@@ -2,6 +2,11 @@ import { Avatar, AvatarFallback } from '@/components/ui/avatar'
 import { GolDataCard } from './GolDataCard'
 import { Loader2 } from 'lucide-react'
 
+const TOOL_LABELS = {
+  'run_analysis': 'Analysing data',
+  'search_web': 'Searching the web',
+}
+
 export function GolMessage({ message }) {
   const isUser = message.role === 'user'
 
@@ -21,14 +26,14 @@ export function GolMessage({ message }) {
         }`}>
           {message.content || (message.toolCall && (
             <span className="flex items-center gap-2 text-muted-foreground">
-              <Loader2 className="h-3 w-3 animate-spin motion-reduce:animate-none" />
-              Looking up {message.toolCall}\u2026
+              <Loader2 className="h-3 w-3 animate-spin motion-reduce:animate-none" aria-hidden="true" />
+              {TOOL_LABELS[message.toolCall] || `Looking up ${message.toolCall}`}{'\u2026'}
             </span>
           ))}
         </div>
 
         {message.dataCards?.length > 0 && (
-          <div className="mt-2 space-y-2">
+          <div className="mt-2 space-y-2 text-left">
             {message.dataCards.map((card, i) => (
               <GolDataCard key={i} card={card} />
             ))}
