@@ -146,6 +146,10 @@ class JourneySyncService:
             # Classify loan entries based on transfer history
             self._apply_loan_classification(all_entries, loan_timeline)
 
+            # Fill in transfer_date from permanent transfers for entries that
+            # don't already have one (ensures current-club tiebreaker works)
+            self._apply_permanent_transfer_dates(all_entries, transfers)
+
             # Reclassify youth entries as 'development' where the player
             # already had first-team appearances at the same parent club
             self._apply_development_classification(all_entries)
@@ -493,6 +497,63 @@ class JourneySyncService:
                     entry.entry_type = 'loan'
                     entry.transfer_date = loan.get('start_date')
                     break
+
+    def _apply_permanent_transfer_dates(self, entries: list, transfers: list):
+        """
+        Fill in transfer_date from permanent transfers for entries that don't
+        already have one (loan entries keep their existing dates from
+        _apply_loan_classification).
+
+        This ensures the current-club tiebreaker in _update_journey_aggregates
+        correctly picks the most recent club when multiple First Team entries
+        share the same season and sort_priority.
+
+        For each entry without a transfer_date, find the most recent transfer
+        where team_in.id matches the entry's club_api_id and the transfer date
+        falls within or before that season.
+        """
+        if not transfers:
+            return
+
+        # Build list of (date, destination_club_id) from ALL transfers
+        all_moves = []
+        for transfer in transfers:
+            transfer_date = transfer.get('date')
+            teams = transfer.get('teams', {})
+            team_in = teams.get('in', {})
+            dest_id = team_in.get('id')
+            if transfer_date and dest_id:
+                all_moves.append((transfer_date, dest_id))
+
+        if not all_moves:
+            return
+
+        # Sort by date ascending so we can find the best match
+        all_moves.sort(key=lambda x: x[0])
+
+        for entry in entries:
+            if entry.transfer_date:
+                continue  # Already set by loan classification
+            if entry.is_international:
+                continue
+
+            # Find the most recent transfer TO this club up to the end of
+            # the summer transfer window after the season.  API-Football
+            # sometimes records mid-season moves with a summer date (e.g.
+            # Elanga: Forest→Newcastle recorded as 2025-07-10 but played for
+            # Newcastle in the 2024 season), so we extend to Sep 30.
+            window_end = f"{entry.season + 1}-09-30"
+            best_date = None
+            for move_date, dest_id in all_moves:
+                if dest_id == entry.club_api_id and move_date <= window_end:
+                    best_date = move_date  # Keep updating — last match wins (latest)
+
+            if best_date:
+                entry.transfer_date = best_date
+                logger.debug(
+                    f"Set transfer_date={best_date} for {entry.club_name} "
+                    f"season {entry.season} (from permanent transfer)"
+                )
 
     def _apply_development_classification(self, entries: list):
         """
