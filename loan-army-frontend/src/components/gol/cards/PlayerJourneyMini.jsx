@@ -35,7 +35,7 @@ export function PlayerJourneyMini({ data }) {
             const years = seasons.length === 1 ? String(seasons[0]) : `${seasons[0]}-${seasons[seasons.length - 1]}`
             return (
               <div key={i} className="flex items-center gap-2 py-1 border-b last:border-0">
-                {club.logo && <img src={club.logo} alt="" className="h-5 w-5" />}
+                {club.logo && <img src={club.logo} alt="" className="h-5 w-5" width={20} height={20} />}
                 <div className="flex-1">
                   <span className="font-medium">{club.name}</span>
                   <span className="text-muted-foreground ml-2">{years}</span>

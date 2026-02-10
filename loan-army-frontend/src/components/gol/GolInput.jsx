@@ -25,19 +25,20 @@ export function GolInput({ onSend, isStreaming, onStop }) {
       <input
         ref={inputRef}
         type="text"
+        autoComplete="off"
         value={text}
         onChange={e => setText(e.target.value)}
         onKeyDown={handleKeyDown}
-        placeholder="Ask about any player or team..."
+        placeholder="Ask about any player or team\u2026"
         disabled={isStreaming}
         className="flex-1 rounded-md border border-input bg-background px-3 py-2 text-sm ring-offset-background placeholder:text-muted-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
       />
       {isStreaming ? (
-        <Button size="icon" variant="destructive" onClick={onStop}>
+        <Button size="icon" variant="destructive" onClick={onStop} aria-label="Stop generating">
           <Square className="h-4 w-4" />
         </Button>
       ) : (
-        <Button size="icon" onClick={handleSend} disabled={!text.trim()}>
+        <Button size="icon" onClick={handleSend} disabled={!text.trim()} aria-label="Send message">
           <Send className="h-4 w-4" />
         </Button>
       )}

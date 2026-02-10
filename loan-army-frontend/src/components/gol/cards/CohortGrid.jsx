@@ -32,7 +32,7 @@ export function CohortGrid({ data }) {
             <div className="grid grid-cols-2 gap-1">
               {(cohort.members || []).slice(0, 8).map((m, i) => (
                 <div key={i} className="flex items-center gap-1 py-0.5">
-                  {m.player_photo && <img src={m.player_photo} alt="" className="h-4 w-4 rounded-full" />}
+                  {m.player_photo && <img src={m.player_photo} alt="" className="h-4 w-4 rounded-full" width={16} height={16} />}
                   <span className="truncate">{m.player_name}</span>
                   <Badge className={`text-[10px] px-1 ${STATUS_COLORS[m.current?.status] || STATUS_COLORS.unknown}`}>
                     {m.current?.status || '?'}

@@ -13,7 +13,7 @@ export function GolMessage({ message }) {
         </AvatarFallback>
       </Avatar>
 
-      <div className={`flex-1 max-w-[85%] ${isUser ? 'text-right' : ''}`}>
+      <div className={`flex-1 min-w-0 max-w-[85%] ${isUser ? 'text-right' : ''}`}>
         <div className={`inline-block rounded-lg px-3 py-2 text-sm ${
           isUser
             ? 'bg-blue-600 text-white'
@@ -21,13 +21,12 @@ export function GolMessage({ message }) {
         }`}>
           {message.content || (message.toolCall && (
             <span className="flex items-center gap-2 text-muted-foreground">
-              <Loader2 className="h-3 w-3 animate-spin" />
-              Looking up {message.toolCall}...
+              <Loader2 className="h-3 w-3 animate-spin motion-reduce:animate-none" />
+              Looking up {message.toolCall}\u2026
             </span>
           ))}
         </div>
 
-        {/* Data cards */}
         {message.dataCards?.length > 0 && (
           <div className="mt-2 space-y-2">
             {message.dataCards.map((card, i) => (

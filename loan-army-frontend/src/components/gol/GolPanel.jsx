@@ -1,5 +1,5 @@
 import { useState } from 'react'
-import { Sheet, SheetContent, SheetHeader, SheetTitle } from '@/components/ui/sheet'
+import { Sheet, SheetContent, SheetHeader, SheetTitle, SheetDescription } from '@/components/ui/sheet'
 import { Button } from '@/components/ui/button'
 import { MessageCircle, LogIn } from 'lucide-react'
 import { GolChatWindow } from './GolChatWindow'
@@ -8,16 +8,16 @@ import { useAuth, useAuthUI } from '@/context/AuthContext'
 
 export function GolPanel() {
   const [open, setOpen] = useState(false)
-  const chat = useGolChat()
   const { token } = useAuth()
   const { openLoginModal } = useAuthUI()
+  const chat = useGolChat()
 
   return (
     <>
-      {/* Floating trigger button */}
       <Button
         onClick={() => setOpen(true)}
-        className="fixed bottom-6 right-6 z-50 h-14 w-14 rounded-full shadow-lg bg-blue-600 hover:bg-blue-700"
+        aria-label="Open GOL Assistant chat"
+        className="fixed bottom-6 right-6 z-50 h-14 w-14 rounded-full shadow-lg bg-blue-600 hover:bg-blue-700 pb-[env(safe-area-inset-bottom)]"
         size="icon"
       >
         <MessageCircle className="h-6 w-6 text-white" />
@@ -27,6 +27,9 @@ export function GolPanel() {
         <SheetContent side="right" className="w-full sm:w-[440px] p-0 flex flex-col">
           <SheetHeader className="px-4 py-3 border-b">
             <SheetTitle className="text-lg font-semibold">GOL Assistant</SheetTitle>
+            <SheetDescription className="sr-only">
+              Chat with the GOL Assistant to search for academy player data and loan information.
+            </SheetDescription>
           </SheetHeader>
           {token ? (
             <GolChatWindow {...chat} />

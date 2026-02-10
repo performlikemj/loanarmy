@@ -40,7 +40,7 @@ export function PlayerStatsCard({ data, type }) {
           {matches.map((m, i) => (
             <div key={i} className="flex items-center justify-between py-1 border-b last:border-0">
               <div className="text-muted-foreground">
-                {m.date ? new Date(m.date).toLocaleDateString() : 'N/A'}
+                {m.date ? new Intl.DateTimeFormat(undefined, { dateStyle: 'medium' }).format(new Date(m.date)) : 'N/A'}
                 <span className="ml-2">{m.competition}</span>
               </div>
               <div className="flex gap-1">

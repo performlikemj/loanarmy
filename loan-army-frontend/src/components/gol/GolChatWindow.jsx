@@ -8,9 +8,12 @@ import { Trash2 } from 'lucide-react'
 
 export function GolChatWindow({ messages, isStreaming, sendMessage, clearChat, stopStreaming }) {
   const bottomRef = useRef(null)
+  const prefersReducedMotion = useRef(
+    typeof window !== 'undefined' && window.matchMedia?.('(prefers-reduced-motion: reduce)').matches
+  )
 
   useEffect(() => {
-    bottomRef.current?.scrollIntoView({ behavior: 'smooth' })
+    bottomRef.current?.scrollIntoView({ behavior: prefersReducedMotion.current ? 'instant' : 'smooth' })
   }, [messages])
 
   return (

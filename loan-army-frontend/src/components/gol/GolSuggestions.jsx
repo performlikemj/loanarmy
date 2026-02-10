@@ -1,6 +1,5 @@
 import { useState, useEffect } from 'react'
 import { APIService } from '@/lib/api'
-import { Card, CardContent } from '@/components/ui/card'
 import { MessageCircle } from 'lucide-react'
 
 export function GolSuggestions({ onSelect }) {
@@ -13,7 +12,7 @@ export function GolSuggestions({ onSelect }) {
         "Which Big 6 academy is producing the most first-team players?",
         "Show me all academy players from Arsenal",
         "Who are the top-performing academy players this season?",
-        "Tell me about Chelsea's academy pipeline",
+        "Tell me about Chelsea\u2019s academy pipeline",
       ]))
   }, [])
 
@@ -26,13 +25,14 @@ export function GolSuggestions({ onSelect }) {
       </p>
       <div className="grid gap-2 w-full max-w-sm">
         {suggestions.map((s, i) => (
-          <Card
+          <button
             key={i}
-            className="cursor-pointer hover:bg-muted/50 transition-colors"
+            type="button"
             onClick={() => onSelect(s)}
+            className="w-full rounded-lg border bg-card text-card-foreground shadow-sm cursor-pointer hover:bg-muted/50 transition-colors p-3 text-sm text-left"
           >
-            <CardContent className="p-3 text-sm">{s}</CardContent>
-          </Card>
+            {s}
+          </button>
         ))}
       </div>
     </div>
