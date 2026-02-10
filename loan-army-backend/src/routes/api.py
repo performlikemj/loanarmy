@@ -3389,10 +3389,10 @@ def get_overview_stats():
         if not current_season_slug and season_start_year:
             current_season_slug = f"{season_start_year}-{str(season_start_year + 1)[-2:]}"
 
-        # Distinct teams with active loans (use correct column name)
+        # Distinct teams with active tracked players
         teams_with_active_loans = (
-            db.session.query(LoanedPlayer.primary_team_id)
-            .filter(LoanedPlayer.is_active.is_(True))
+            db.session.query(TrackedPlayer.team_id)
+            .filter(TrackedPlayer.is_active.is_(True))
             .distinct()
             .count()
         )
@@ -3413,7 +3413,7 @@ def get_overview_stats():
         stats = {
             'total_teams': unique_team_count,
             'european_leagues': League.query.filter_by(is_european_top_league=True).count(),
-            'total_active_loans': LoanedPlayer.query.filter_by(is_active=True).count(),
+            'total_active_loans': TrackedPlayer.query.filter_by(is_active=True).count(),
             'season_loans': season_loans_count,
             'early_terminations': 0,
             'teams_with_loans': teams_with_active_loans,
@@ -13587,7 +13587,7 @@ def admin_seed_tracked_players():
         if not team:
             return jsonify({'error': 'Team not found'}), 404
 
-        max_age = data.get('max_age', 23)
+        max_age = data.get('max_age', 30)
         season = data.get('season') or api_client.current_season_start_year
         sync_journeys = data.get('sync_journeys', True)
 
@@ -13746,6 +13746,8 @@ def admin_seed_tracked_players():
                 nationality = (journey.nationality if journey else None) or pi.get('nationality')
                 birth_date = (journey.birth_date if journey else None) or (pi.get('birth') or {}).get('date')
                 position = pi.get('position') or ''
+                if not position and stats_list:
+                    position = (stats_list[0].get('games') or {}).get('position') or ''
                 age = pi.get('age')
 
                 # Determine status using the centralised academy classifier
@@ -13952,6 +13954,24 @@ def get_team_players(team_identifier):
             player_records = Player.query.filter(Player.player_id.in_(all_player_api_ids)).all()
             player_records_map = {pr.player_id: pr for pr in player_records}
 
+        # Batch-fetch position from FixturePlayerStats as final fallback (1 query)
+        players_needing_pos = [
+            tp for tp in players
+            if not tp.position and not getattr(player_records_map.get(tp.player_api_id), 'position', None)
+        ]
+        fps_position_map = {}
+        if players_needing_pos:
+            pos_api_ids = [tp.player_api_id for tp in players_needing_pos]
+            pos_rows = db.session.query(
+                FixturePlayerStats.player_api_id,
+                FixturePlayerStats.position,
+            ).filter(
+                FixturePlayerStats.player_api_id.in_(pos_api_ids),
+                FixturePlayerStats.position.isnot(None),
+            ).distinct().all()
+            for row in pos_rows:
+                fps_position_map.setdefault(row.player_api_id, row.position)
+
         # Batch-fetch loan team logos (1 query)
         loan_club_api_ids = list({tp.loan_club_api_id for tp in players if tp.loan_club_api_id})
         loan_team_logos = {}
@@ -13976,6 +13996,13 @@ def get_team_players(team_identifier):
                     d['player_photo'] = pr.photo_url
                 if not d.get('position') and pr.position:
                     d['position'] = pr.position
+
+            # Final fallback: position from FixturePlayerStats (G/D/M/F)
+            if not d.get('position'):
+                fps_pos = fps_position_map.get(tp.player_api_id)
+                if fps_pos:
+                    POSITION_MAP = {'G': 'Goalkeeper', 'D': 'Defender', 'M': 'Midfielder', 'F': 'Attacker'}
+                    d['position'] = POSITION_MAP.get(fps_pos, fps_pos)
 
             # Fill in loan team logo
             if tp.loan_club_api_id:
