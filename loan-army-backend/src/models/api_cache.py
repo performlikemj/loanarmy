@@ -102,6 +102,22 @@ class APICache(db.Model):
                 db.session.commit()
 
     @classmethod
+    def invalidate_cached(cls, endpoint: str, params: dict | None = None) -> int:
+        """Delete cache entries for an endpoint.
+
+        If *params* is given, delete only the exact (endpoint, params_hash) row.
+        Otherwise delete ALL rows for the endpoint.
+        Returns the count of deleted rows.
+        """
+        if params is not None:
+            h = cls._hash_params(params)
+            count = cls.query.filter_by(endpoint=endpoint, params_hash=h).delete()
+        else:
+            count = cls.query.filter_by(endpoint=endpoint).delete()
+        db.session.commit()
+        return count
+
+    @classmethod
     def cleanup_expired(cls) -> int:
         """Delete all expired rows.  Returns count of deleted rows."""
         now = datetime.now(timezone.utc)

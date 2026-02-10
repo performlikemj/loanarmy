@@ -51,8 +51,14 @@ class CohortService:
         ).first()
 
         if existing and existing.sync_status != 'failed':
-            logger.info(f"Cohort already exists (id={existing.id}, status={existing.sync_status})")
-            return existing
+            # Allow re-seeding if cohort has no members (API may have
+            # returned nothing on a previous attempt due to rate limits
+            # or transient errors).
+            member_count = CohortMember.query.filter_by(cohort_id=existing.id).count()
+            if member_count > 0:
+                logger.info(f"Cohort already exists (id={existing.id}, status={existing.sync_status})")
+                return existing
+            logger.info(f"Re-seeding empty cohort id={existing.id}")
 
         try:
             # Create or reset cohort
@@ -150,7 +156,7 @@ class CohortService:
 
                 page += 1
 
-            cohort.total_players = players_added
+            cohort.total_players = CohortMember.query.filter_by(cohort_id=cohort.id).count()
             # Apply fallback names if the API didn't return any data
             if not cohort.team_name and fallback_team_name:
                 cohort.team_name = fallback_team_name

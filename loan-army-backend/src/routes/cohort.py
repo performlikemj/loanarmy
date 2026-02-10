@@ -40,6 +40,14 @@ def admin_seed_cohort():
         return jsonify({'error': 'team_api_id, league_api_id, and season are required'}), 400
 
     try:
+        # Clear stale cache that may contain empty API responses
+        from src.models.api_cache import APICache
+        for page in range(1, 11):
+            APICache.invalidate_cached('players', {
+                'team': int(team_api_id), 'league': int(league_api_id),
+                'season': int(season), 'page': page,
+            })
+
         service = CohortService()
         cohort = service.discover_cohort(int(team_api_id), int(league_api_id), int(season))
         return jsonify(cohort.to_dict(include_members=True)), 201
@@ -400,6 +408,9 @@ def admin_full_rebuild():
                         model.query.delete()
                         db.session.commit()
                     deleted[name] = count
+                # Also clear cached API responses so discovery gets fresh data
+                from src.models.api_cache import APICache
+                deleted['players_cache'] = APICache.invalidate_cached('players')
                 results['deleted'] = deleted
                 results['stages_completed'].append('clean')
             else:

@@ -331,6 +331,8 @@ class APIFootballClient:
 
         # --- Player profiles / seasons ---
         if endpoint in ("players", "players/seasons"):
+            if response.get("results", 0) == 0:
+                return 5 * 60  # 5 min for empty responses — retry soon
             return 7 * 24 * 3600  # 7 days
 
         # --- Default fallback ---

@@ -102,6 +102,21 @@ def run_big6_seed(job_id, seasons=None, team_ids=None, league_ids=None):
     update_job(job_id, total=total_combos, progress=0)
     logger.info(f"Big 6 seed: {total_combos} cohort combos to discover")
 
+    # Clear stale cache entries that may contain empty API responses,
+    # so discovery fetches fresh data from the live API.
+    try:
+        from src.models.api_cache import APICache
+        for t in team_ids:
+            for l in league_ids:
+                for s in seasons:
+                    for page in range(1, 11):
+                        APICache.invalidate_cached('players', {
+                            'team': t, 'league': l, 'season': s, 'page': page,
+                        })
+        logger.info("Cleared stale players cache for %d combos", len(combos))
+    except Exception as e:
+        logger.warning("Cache clearing failed (non-fatal): %s", e)
+
     # ── Phase 1: Discovery ──
     cohort_ids = []
     for idx, (team_id, league_id, season) in enumerate(combos):
@@ -117,8 +132,11 @@ def run_big6_seed(job_id, seasons=None, team_ids=None, league_ids=None):
             ).first()
 
             if existing and existing.sync_status in ('complete', 'seeded'):
-                cohort_ids.append(existing.id)
-                continue
+                member_count = CohortMember.query.filter_by(cohort_id=existing.id).count()
+                if member_count > 0:
+                    cohort_ids.append(existing.id)
+                    continue
+                # Empty cohort — fall through to re-discover
 
             update_job(job_id, progress=idx,
                        current_player=f"Discovering {team_name} {league_name} {season}")
@@ -209,6 +227,19 @@ def run_big6_seed(job_id, seasons=None, team_ids=None, league_ids=None):
             cohort_service.refresh_cohort_stats(cohort_id)
         except Exception as e:
             logger.warning(f"Failed to refresh stats for cohort {cohort_id}: {e}")
+
+    # Mark cohorts with members as 'complete' so the analytics
+    # endpoint (which filters on sync_status='complete') picks them up.
+    now = datetime.now(timezone.utc)
+    for cohort_id in cohort_ids:
+        try:
+            c = db.session.get(AcademyCohort, cohort_id)
+            if c and c.total_players > 0 and c.sync_status != 'complete':
+                c.sync_status = 'complete'
+                c.journeys_synced_at = now
+        except Exception as e:
+            logger.warning(f"Failed to mark cohort {cohort_id} complete: {e}")
+    db.session.commit()
 
     logger.info(f"Big 6 seed complete: {len(cohort_ids)} cohorts, {total_players} players")
     return {
