@@ -935,5 +935,128 @@ class TestComputeAcademyClubIdsExcludesIntegration:
         assert 33 in mock_journey.academy_club_ids
 
 
+class TestUpsertTrackedPlayersDeactivatesStaleRows:
+    """Test that _upsert_tracked_players deactivates rows when academy connection is removed"""
+
+    def test_stale_row_deactivated_when_academy_id_removed(self):
+        """TrackedPlayer row is deactivated when its team is no longer in academy_ids"""
+        from src.services.journey_sync import JourneySyncService
+
+        service = JourneySyncService(api_client=Mock())
+
+        # Existing active TrackedPlayer for Man Utd (team_id=33)
+        stale_tp = MagicMock()
+        stale_tp.is_active = True
+        stale_tp.data_source = 'journey-sync'
+        stale_tp.team = MagicMock()
+        stale_tp.team.team_id = 33  # API-Football ID
+
+        mock_journey = MagicMock()
+        mock_journey.player_api_id = 999
+
+        with patch('src.models.tracked_player.TrackedPlayer') as MockTP, \
+             patch('src.utils.academy_classifier.derive_player_status'):
+            MockTP.query.filter_by.return_value.all.return_value = [stale_tp]
+            # academy_ids is empty → Man Utd row should be deactivated
+            service._upsert_tracked_players(mock_journey, academy_ids=set())
+
+        assert stale_tp.is_active is False
+
+    def test_valid_row_not_deactivated(self):
+        """TrackedPlayer row is kept active when its team is still in academy_ids"""
+        from src.services.journey_sync import JourneySyncService
+
+        service = JourneySyncService(api_client=Mock())
+
+        valid_tp = MagicMock()
+        valid_tp.is_active = True
+        valid_tp.data_source = 'journey-sync'
+        valid_tp.team = MagicMock()
+        valid_tp.team.team_id = 42  # Arsenal API-Football ID
+
+        mock_journey = MagicMock()
+        mock_journey.player_api_id = 999
+
+        with patch('src.models.tracked_player.TrackedPlayer') as MockTP, \
+             patch('src.utils.academy_classifier.derive_player_status', return_value=('academy', None, None)), \
+             patch('src.utils.academy_classifier.upgrade_status_from_transfers', return_value='academy'), \
+             patch('src.services.journey_sync.Team') as MockTeam:
+            MockTP.query.filter_by.return_value.all.return_value = [valid_tp]
+            # Arsenal still in academy_ids
+            mock_team_row = MagicMock()
+            mock_team_row.id = 1
+            mock_team_row.name = 'Arsenal'
+            MockTeam.query.filter_by.return_value.order_by.return_value.first.return_value = mock_team_row
+            MockTP.query.filter_by.return_value.first.return_value = MagicMock()  # existing row
+
+            service._upsert_tracked_players(mock_journey, academy_ids={42})
+
+        assert valid_tp.is_active is True
+
+    def test_non_journey_sync_rows_untouched(self):
+        """Rows with data_source != 'journey-sync' are not affected"""
+        from src.services.journey_sync import JourneySyncService
+
+        service = JourneySyncService(api_client=Mock())
+
+        # This row was created by api-football seed, not journey-sync
+        seed_tp = MagicMock()
+        seed_tp.is_active = True
+        seed_tp.data_source = 'api-football'
+        seed_tp.team = MagicMock()
+        seed_tp.team.team_id = 33
+
+        mock_journey = MagicMock()
+        mock_journey.player_api_id = 999
+
+        with patch('src.models.tracked_player.TrackedPlayer') as MockTP, \
+             patch('src.utils.academy_classifier.derive_player_status'):
+            # filter_by uses data_source='journey-sync', so seed row won't appear
+            MockTP.query.filter_by.return_value.all.return_value = []
+            service._upsert_tracked_players(mock_journey, academy_ids=set())
+
+        # Seed row's is_active should never have been touched
+        assert seed_tp.is_active is True
+
+    def test_shrinking_academy_ids_deactivates_removed_only(self):
+        """When academy_ids shrinks, only removed teams get deactivated"""
+        from src.services.journey_sync import JourneySyncService
+
+        service = JourneySyncService(api_client=Mock())
+
+        # Two existing rows: Arsenal (42) and Man Utd (33)
+        arsenal_tp = MagicMock()
+        arsenal_tp.is_active = True
+        arsenal_tp.data_source = 'journey-sync'
+        arsenal_tp.team = MagicMock()
+        arsenal_tp.team.team_id = 42
+
+        manutd_tp = MagicMock()
+        manutd_tp.is_active = True
+        manutd_tp.data_source = 'journey-sync'
+        manutd_tp.team = MagicMock()
+        manutd_tp.team.team_id = 33
+
+        mock_journey = MagicMock()
+        mock_journey.player_api_id = 999
+
+        with patch('src.models.tracked_player.TrackedPlayer') as MockTP, \
+             patch('src.utils.academy_classifier.derive_player_status', return_value=('academy', None, None)), \
+             patch('src.utils.academy_classifier.upgrade_status_from_transfers', return_value='academy'), \
+             patch('src.services.journey_sync.Team') as MockTeam:
+            MockTP.query.filter_by.return_value.all.return_value = [arsenal_tp, manutd_tp]
+            # Only Arsenal remains in academy_ids
+            mock_team_row = MagicMock()
+            mock_team_row.id = 1
+            mock_team_row.name = 'Arsenal'
+            MockTeam.query.filter_by.return_value.order_by.return_value.first.return_value = mock_team_row
+            MockTP.query.filter_by.return_value.first.return_value = MagicMock()
+
+            service._upsert_tracked_players(mock_journey, academy_ids={42})
+
+        assert arsenal_tp.is_active is True
+        assert manutd_tp.is_active is False
+
+
 if __name__ == '__main__':
     pytest.main([__file__, '-v'])

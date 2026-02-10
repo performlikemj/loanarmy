@@ -756,11 +756,21 @@ class JourneySyncService:
 
     def _upsert_tracked_players(self, journey: PlayerJourney, academy_ids: set, transfers=None):
         """Create or update TrackedPlayer rows for discovered academy connections."""
-        if not academy_ids:
-            return
-
         from src.models.tracked_player import TrackedPlayer
         from src.utils.academy_classifier import derive_player_status
+
+        # Deactivate journey-sync rows whose academy connection no longer holds
+        stale_rows = TrackedPlayer.query.filter_by(
+            player_api_id=journey.player_api_id,
+            data_source='journey-sync',
+            is_active=True,
+        ).all()
+        for tp in stale_rows:
+            if tp.team and tp.team.team_id not in academy_ids:
+                tp.is_active = False
+
+        if not academy_ids:
+            return
 
         for academy_api_id in academy_ids:
             team = Team.query.filter_by(team_id=academy_api_id, is_active=True)\
