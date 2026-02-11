@@ -12,9 +12,14 @@ from collections import deque
 
 from src.models.league import db
 from src.models.cohort import AcademyCohort, CohortMember
-from src.models.journey import PlayerJourney, YOUTH_LEVELS
 from src.services.cohort_service import CohortService
 from src.services.journey_sync import JourneySyncService
+from src.services.youth_competition_resolver import (
+    get_default_youth_league_map,
+    resolve_team_name,
+    resolve_youth_leagues,
+    resolve_youth_team_for_parent,
+)
 from src.utils.background_jobs import update_job
 
 logger = logging.getLogger(__name__)
@@ -28,14 +33,7 @@ BIG_6 = {
     47: 'Tottenham',
 }
 
-YOUTH_LEAGUES = {
-    703: 'U18 PL',
-    706: 'PL2 Div 1',
-    707: 'PL2 Div 2',
-    708: 'PDL',
-    718: 'FA Youth Cup',
-    775: 'UEFA Youth League',
-}
+YOUTH_LEAGUES = get_default_youth_league_map()
 
 SEASONS = [2020, 2021, 2022, 2023, 2024]
 
@@ -90,40 +88,75 @@ def run_big6_seed(job_id, seasons=None, team_ids=None, league_ids=None):
     """
     seasons = seasons or SEASONS
     team_ids = team_ids or list(BIG_6.keys())
+    provided_league_ids = league_ids
     league_ids = league_ids or list(YOUTH_LEAGUES.keys())
 
     cohort_service = CohortService()
     journey_service = JourneySyncService()
+    api_client = cohort_service.api
 
-    # Calculate total combos
-    combos = [(t, l, s) for t in team_ids for l in league_ids for s in seasons]
+    # Resolve youth competitions dynamically (with static fallback).
+    resolved_leagues = resolve_youth_leagues(
+        api_client=api_client,
+        explicit_league_ids=provided_league_ids,
+    )
+    if not resolved_leagues:
+        resolved_leagues = [
+            {'league_id': lid, 'name': YOUTH_LEAGUES.get(lid, str(lid))}
+            for lid in league_ids
+        ]
+
+    # Calculate total combos (team x resolved league x season)
+    combos = [(t, lg, s) for t in team_ids for lg in resolved_leagues for s in seasons]
     total_combos = len(combos)
 
     update_job(job_id, total=total_combos, progress=0)
-    logger.info(f"Big 6 seed: {total_combos} cohort combos to discover")
+    logger.info(
+        "Big 6 seed: %d combos across %d resolved youth leagues",
+        total_combos,
+        len(resolved_leagues),
+    )
 
-    # Clear stale cache entries that may contain empty API responses,
-    # so discovery fetches fresh data from the live API.
-    try:
-        from src.models.api_cache import APICache
-        for t in team_ids:
-            for l in league_ids:
-                for s in seasons:
-                    for page in range(1, 11):
-                        APICache.invalidate_cached('players', {
-                            'team': t, 'league': l, 'season': s, 'page': page,
-                        })
-        logger.info("Cleared stale players cache for %d combos", len(combos))
-    except Exception as e:
-        logger.warning("Cache clearing failed (non-fatal): %s", e)
+    parent_names = {
+        team_id: resolve_team_name(api_client, team_id, fallback_name=BIG_6.get(team_id))
+        for team_id in team_ids
+    }
+    teams_cache = {}
+    skipped_no_youth_team = 0
+    skipped_empty_cohorts = 0
 
     # ── Phase 1: Discovery ──
     cohort_ids = []
-    for idx, (team_id, league_id, season) in enumerate(combos):
-        team_name = BIG_6.get(team_id, str(team_id))
-        league_name = YOUTH_LEAGUES.get(league_id, str(league_id))
+    for idx, (team_id, league_meta, season) in enumerate(combos):
+        league_id = int(league_meta.get('league_id'))
+        league_name = league_meta.get('name') or YOUTH_LEAGUES.get(league_id, str(league_id))
+        team_name = parent_names.get(team_id, str(team_id))
 
         try:
+            update_job(
+                job_id,
+                progress=idx,
+                current_player=f"Discovering {team_name} {league_name} {season}",
+            )
+
+            # Resolve the youth-team API ID for this parent team in this league/season.
+            query_team_id, query_team_name = resolve_youth_team_for_parent(
+                api_client=api_client,
+                league_id=league_id,
+                season=season,
+                parent_team_name=team_name,
+                teams_cache=teams_cache,
+            )
+            if not query_team_id:
+                skipped_no_youth_team += 1
+                logger.info(
+                    "Skipping combo: no youth team found for parent='%s' league=%s season=%s",
+                    team_name,
+                    league_name,
+                    season,
+                )
+                continue
+
             # Skip if already complete
             existing = AcademyCohort.query.filter_by(
                 team_api_id=team_id,
@@ -131,26 +164,61 @@ def run_big6_seed(job_id, seasons=None, team_ids=None, league_ids=None):
                 season=season
             ).first()
 
-            if existing and existing.sync_status in ('complete', 'seeded'):
+            if existing and existing.sync_status != 'failed':
                 member_count = CohortMember.query.filter_by(cohort_id=existing.id).count()
                 if member_count > 0:
                     cohort_ids.append(existing.id)
                     continue
                 # Empty cohort — fall through to re-discover
 
-            update_job(job_id, progress=idx,
-                       current_player=f"Discovering {team_name} {league_name} {season}")
+            # Clear stale cache entries that may contain empty API responses.
+            try:
+                from src.models.api_cache import APICache
+                for page in range(1, 11):
+                    APICache.invalidate_cached('players', {
+                        'team': int(query_team_id),
+                        'league': int(league_id),
+                        'season': int(season),
+                        'page': page,
+                    })
+            except Exception as cache_err:
+                logger.warning("Cache clearing failed for combo %s/%s/%s: %s", team_name, league_name, season, cache_err)
 
             cohort = cohort_service.discover_cohort(
                 team_id, league_id, season,
                 fallback_team_name=team_name,
-                fallback_league_name=league_name
+                fallback_league_name=league_name,
+                query_team_api_id=int(query_team_id),
             )
-            cohort_ids.append(cohort.id)
+
+            if cohort.total_players > 0:
+                cohort_ids.append(cohort.id)
+            else:
+                skipped_empty_cohorts += 1
+                logger.info(
+                    "Skipping empty cohort id=%s (%s/%s/%s, query_team=%s %s)",
+                    cohort.id,
+                    team_name,
+                    league_name,
+                    season,
+                    query_team_id,
+                    query_team_name,
+                )
 
         except Exception as e:
             logger.error(f"Failed to discover cohort {team_name}/{league_name}/{season}: {e}")
             continue
+
+    if not cohort_ids:
+        logger.warning("Big 6 seed produced no populated cohorts")
+        return {
+            'cohorts_created': 0,
+            'players_synced': 0,
+            'combos_attempted': total_combos,
+            'combos_skipped_no_youth_team': skipped_no_youth_team,
+            'combos_skipped_empty_cohort': skipped_empty_cohorts,
+            'resolved_leagues': [l.get('league_id') for l in resolved_leagues],
+        }
 
     # ── Phase 2: Journey sync ──
     # Pre-load cohort parent context for status derivation
@@ -214,10 +282,19 @@ def run_big6_seed(job_id, seasons=None, team_ids=None, league_ids=None):
                     pm.journey_sync_error = None
 
                 db.session.commit()
+            else:
+                all_player_members = CohortMember.query.filter_by(
+                    player_api_id=member.player_api_id
+                ).all()
+                for pm in all_player_members:
+                    pm.journey_synced = False
+                    pm.journey_sync_error = "Journey sync returned no data"
+                db.session.commit()
 
         except Exception as e:
             logger.warning(f"Failed journey sync for player {member.player_api_id}: {e}")
             member.journey_sync_error = str(e)
+            member.journey_synced = False
             db.session.commit()
 
     # ── Phase 3: Refresh stats ──
@@ -228,14 +305,28 @@ def run_big6_seed(job_id, seasons=None, team_ids=None, league_ids=None):
         except Exception as e:
             logger.warning(f"Failed to refresh stats for cohort {cohort_id}: {e}")
 
-    # Mark cohorts with members as 'complete' so the analytics
-    # endpoint (which filters on sync_status='complete') picks them up.
+    # Mark cohorts by actual sync coverage.
     now = datetime.now(timezone.utc)
     for cohort_id in cohort_ids:
         try:
             c = db.session.get(AcademyCohort, cohort_id)
-            if c and c.total_players > 0 and c.sync_status != 'complete':
+            if not c:
+                continue
+            total_members = CohortMember.query.filter_by(cohort_id=cohort_id).count()
+            synced_members = CohortMember.query.filter_by(
+                cohort_id=cohort_id,
+                journey_synced=True,
+            ).count()
+
+            if total_members == 0:
+                c.sync_status = 'no_data'
+            elif synced_members == total_members:
                 c.sync_status = 'complete'
+                c.journeys_synced_at = now
+            elif synced_members == 0:
+                c.sync_status = 'failed'
+            else:
+                c.sync_status = 'partial'
                 c.journeys_synced_at = now
         except Exception as e:
             logger.warning(f"Failed to mark cohort {cohort_id} complete: {e}")
@@ -245,4 +336,8 @@ def run_big6_seed(job_id, seasons=None, team_ids=None, league_ids=None):
     return {
         'cohorts_created': len(cohort_ids),
         'players_synced': total_players,
+        'combos_attempted': total_combos,
+        'combos_skipped_no_youth_team': skipped_no_youth_team,
+        'combos_skipped_empty_cohort': skipped_empty_cohorts,
+        'resolved_leagues': [l.get('league_id') for l in resolved_leagues],
     }

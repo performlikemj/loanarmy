@@ -8,12 +8,14 @@ and calculates "where are they now" analytics.
 import logging
 from datetime import datetime, timezone
 from typing import Optional
+from sqlalchemy import or_
 
 from src.models.league import db
 from src.models.cohort import AcademyCohort, CohortMember
-from src.models.journey import PlayerJourney, PlayerJourneyEntry, YOUTH_LEVELS
+from src.models.journey import PlayerJourney, PlayerJourneyEntry
 from src.api_football_client import APIFootballClient
 from src.services.journey_sync import JourneySyncService
+from src.utils.academy_classifier import strip_youth_suffix
 from src.utils.academy_classifier import derive_player_status
 
 logger = logging.getLogger(__name__)
@@ -25,8 +27,15 @@ class CohortService:
     def __init__(self, api_client: Optional[APIFootballClient] = None):
         self.api = api_client or APIFootballClient()
 
-    def discover_cohort(self, team_api_id: int, league_api_id: int, season: int,
-                        fallback_team_name: str = None, fallback_league_name: str = None) -> AcademyCohort:
+    def discover_cohort(
+        self,
+        team_api_id: int,
+        league_api_id: int,
+        season: int,
+        fallback_team_name: str = None,
+        fallback_league_name: str = None,
+        query_team_api_id: int | None = None,
+    ) -> AcademyCohort:
         """
         Discover players in a youth league/season for a team.
 
@@ -41,7 +50,14 @@ class CohortService:
         Returns:
             AcademyCohort record
         """
-        logger.info(f"Discovering cohort: team={team_api_id} league={league_api_id} season={season}")
+        query_team_id = int(query_team_api_id or team_api_id)
+        logger.info(
+            "Discovering cohort: parent_team=%s query_team=%s league=%s season=%s",
+            team_api_id,
+            query_team_id,
+            league_api_id,
+            season,
+        )
 
         # Check for existing cohort (idempotent)
         existing = AcademyCohort.query.filter_by(
@@ -83,7 +99,7 @@ class CohortService:
 
             while page <= total_pages:
                 response = self.api._make_request('players', {
-                    'team': team_api_id,
+                    'team': query_team_id,
                     'league': league_api_id,
                     'season': season,
                     'page': page
@@ -157,12 +173,36 @@ class CohortService:
                 page += 1
 
             cohort.total_players = CohortMember.query.filter_by(cohort_id=cohort.id).count()
+            if cohort.team_name:
+                cohort.team_name = strip_youth_suffix(cohort.team_name)
+
+            # Preserve parent club display naming when querying youth teams.
+            if query_team_id != team_api_id and fallback_team_name:
+                cohort.team_name = fallback_team_name
+
             # Apply fallback names if the API didn't return any data
             if not cohort.team_name and fallback_team_name:
                 cohort.team_name = fallback_team_name
             if not cohort.league_name and fallback_league_name:
                 cohort.league_name = fallback_league_name
             cohort.seeded_at = datetime.now(timezone.utc)
+            if cohort.total_players == 0:
+                cohort.sync_status = 'no_data'
+                cohort.sync_error = (
+                    f"No cohort players returned for query_team={query_team_id}, "
+                    f"league={league_api_id}, season={season}"
+                )
+                db.session.commit()
+                logger.warning(
+                    "Empty cohort discovered id=%s parent=%s query_team=%s league=%s season=%s",
+                    cohort.id,
+                    team_api_id,
+                    query_team_id,
+                    league_api_id,
+                    season,
+                )
+                return cohort
+
             cohort.sync_status = 'seeded'
             db.session.commit()
 
@@ -211,9 +251,9 @@ class CohortService:
         db.session.commit()
 
         journey_service = JourneySyncService(self.api)
-        members = CohortMember.query.filter_by(
-            cohort_id=cohort_id,
-            journey_synced=False
+        members = CohortMember.query.filter(
+            CohortMember.cohort_id == cohort_id,
+            or_(CohortMember.journey_synced == False, CohortMember.journey_id.is_(None)),
         ).all()
 
         current_year = datetime.now().year
@@ -245,20 +285,34 @@ class CohortService:
                         parent_club_name=cohort.team_name or '',
                     )
 
-                member.journey_synced = True
-                member.journey_sync_error = None
+                    member.journey_synced = True
+                    member.journey_sync_error = None
+                else:
+                    member.journey_synced = False
+                    member.journey_sync_error = "Journey sync returned no data"
                 db.session.commit()
 
             except Exception as e:
                 logger.warning(f"Failed to sync journey for player {member.player_api_id}: {e}")
+                member.journey_synced = False
                 member.journey_sync_error = str(e)
                 db.session.commit()
 
         # Refresh aggregates
         self.refresh_cohort_stats(cohort_id)
 
-        cohort.sync_status = 'complete'
-        cohort.journeys_synced_at = datetime.now(timezone.utc)
+        total_members = CohortMember.query.filter_by(cohort_id=cohort_id).count()
+        synced_members = CohortMember.query.filter_by(cohort_id=cohort_id, journey_synced=True).count()
+        if total_members == 0:
+            cohort.sync_status = 'no_data'
+        elif synced_members == total_members:
+            cohort.sync_status = 'complete'
+            cohort.journeys_synced_at = datetime.now(timezone.utc)
+        elif synced_members == 0:
+            cohort.sync_status = 'failed'
+        else:
+            cohort.sync_status = 'partial'
+            cohort.journeys_synced_at = datetime.now(timezone.utc)
         db.session.commit()
 
         logger.info(f"Journey sync complete for cohort {cohort_id}")

@@ -179,6 +179,8 @@ export function AdminCohorts() {
             seeding: 'bg-blue-100 text-blue-800',
             syncing_journeys: 'bg-blue-100 text-blue-800',
             complete: 'bg-green-100 text-green-800',
+            partial: 'bg-amber-100 text-amber-800',
+            no_data: 'bg-slate-100 text-slate-800',
             failed: 'bg-red-100 text-red-800',
         }
         return (

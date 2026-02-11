@@ -51,6 +51,13 @@ Go On Loan — Football loan tracking platform with AI-powered newsletters and j
     - Input sanitization via bleach
     - Email format validation
     - Duplicate content detection (24h window)
+- Cohort ingestion remediation (implementation complete)
+  - Dynamic API-Football youth league resolution with static fallback defaults
+  - Dynamic parent-club -> youth-team ID resolution for seeding combos
+  - Full Rebuild stage-2 academy league rows now seeded/updated from dynamic resolver
+  - Cohort discovery now supports separate query team ID (`query_team_api_id`)
+  - Sync-state hardening for `journey_synced` and cohort `complete/partial/failed/no_data`
+  - Targeted tests passed (`test_youth_competition_resolver.py`)
 
 ### Now
 - Player Journey feature (complete - needs migration and testing)
@@ -64,6 +71,9 @@ Go On Loan — Football loan tracking platform with AI-powered newsletters and j
   - E2E tests: `e2e/journey.spec.js`
   - Backend tests: `tests/test_journey.py`
 - **See `ledgers/ACADEMY_WATCH_IMPLEMENTATION_PLAN.md` for detailed status**
+- Cohort ingestion remediation (in progress)
+  - Validate Full Rebuild end-to-end against live DB/API environment
+  - **See `ledgers/CONTINUITY_cohort-dynamic-resolution.md`**
 
 ### Next
 - Run migration: `flask db upgrade`
@@ -77,6 +87,7 @@ Go On Loan — Football loan tracking platform with AI-powered newsletters and j
 ```
 CONTINUITY.md
   └─ ledgers/CONTINUITY_plan-example.md (template - rename for actual work)
+  └─ ledgers/CONTINUITY_cohort-dynamic-resolution.md (in-progress)
 ```
 
 ## Active Ledgers
@@ -86,6 +97,7 @@ CONTINUITY.md
 | ACADEMY_WATCH_REFACTOR_PLAN.md | complete | — | Phases 1-4 done |
 | ACADEMY_WATCH_IMPLEMENTATION_PLAN.md | in-progress | — | Phases 1-5 done, Phase 6 ready |
 | ACADEMY_WATCH_JOURNEY_REDESIGN.md | complete | — | Design doc for journey feature |
+| CONTINUITY_cohort-dynamic-resolution.md | in-progress | codex | pending live Full Rebuild validation |
 
 ## Trivial Log
 

@@ -283,7 +283,7 @@ def cohort_teams():
 def cohort_analytics():
     """Cross-club comparison analytics."""
     cohorts = AcademyCohort.query.filter(
-        AcademyCohort.sync_status == 'complete'
+        AcademyCohort.sync_status.in_(('complete', 'partial'))
     ).all()
 
     # Group by team
@@ -355,6 +355,7 @@ def admin_full_rebuild():
     from src.models.tracked_player import TrackedPlayer
     from src.models.journey import PlayerJourney, PlayerJourneyEntry, ClubLocation
     from src.services.big6_seeding_service import run_big6_seed, BIG_6, SEASONS
+    from src.services.youth_competition_resolver import build_academy_league_seed_rows
     from src.utils.academy_classifier import derive_player_status
     from src.api_football_client import APIFootballClient
     from src.services.journey_sync import JourneySyncService, seed_club_locations
@@ -368,15 +369,6 @@ def admin_full_rebuild():
     skip_cohorts = data.get('skip_cohorts', False)
 
     job_id = create_background_job('full_rebuild')
-
-    YOUTH_LEAGUES_DATA = [
-        {'api_league_id': 706, 'name': 'Premier League 2 - Division One', 'country': 'England', 'level': 'U23', 'season': 2024},
-        {'api_league_id': 707, 'name': 'Premier League 2 - Division Two', 'country': 'England', 'level': 'U23', 'season': 2024},
-        {'api_league_id': 703, 'name': 'U18 Premier League', 'country': 'England', 'level': 'U18', 'season': 2024},
-        {'api_league_id': 708, 'name': 'Professional Development League', 'country': 'England', 'level': 'U21', 'season': 2024},
-        {'api_league_id': 775, 'name': 'UEFA Youth League', 'country': 'Europe', 'level': 'U21', 'season': 2024},
-        {'api_league_id': 718, 'name': 'FA Youth Cup', 'country': 'England', 'level': 'U18', 'season': 2024},
-    ]
 
     @copy_current_request_context
     def run_in_background():
@@ -419,8 +411,14 @@ def admin_full_rebuild():
             # ── Stage 2: Seed academy leagues ──
             stage = 'seed_leagues'
             update_job(job_id, progress=1, total=total_stages, current_player='Stage 2: Seeding academy leagues...')
+            api_client_for_leagues = APIFootballClient()
+            youth_league_rows = build_academy_league_seed_rows(
+                api_client=api_client_for_leagues,
+                season=max(seasons),
+            )
             leagues_created = 0
-            for ld in YOUTH_LEAGUES_DATA:
+            leagues_updated = 0
+            for ld in youth_league_rows:
                 existing = AcademyLeague.query.filter_by(api_league_id=ld['api_league_id']).first()
                 if not existing:
                     league = AcademyLeague(
@@ -436,9 +434,33 @@ def admin_full_rebuild():
                     )
                     db.session.add(league)
                     leagues_created += 1
-            if leagues_created:
+                else:
+                    changed = False
+                    if existing.name != ld['name']:
+                        existing.name = ld['name']
+                        changed = True
+                    if existing.country != ld['country']:
+                        existing.country = ld['country']
+                        changed = True
+                    if existing.level != ld['level']:
+                        existing.level = ld['level']
+                        changed = True
+                    if ld.get('season') and existing.season != ld.get('season'):
+                        existing.season = ld.get('season')
+                        changed = True
+                    if not existing.is_active:
+                        existing.is_active = True
+                        changed = True
+                    if not existing.sync_enabled:
+                        existing.sync_enabled = True
+                        changed = True
+                    if changed:
+                        existing.updated_at = datetime.now(timezone.utc)
+                        leagues_updated += 1
+            if leagues_created or leagues_updated:
                 db.session.commit()
             results['leagues_created'] = leagues_created
+            results['leagues_updated'] = leagues_updated
             results['stages_completed'].append('seed_leagues')
 
             # ── Stage 3: Cohort discovery + journey sync ──
