@@ -80,6 +80,7 @@ def admin_seed_big6():
                        completed_at=datetime.now(timezone.utc).isoformat())
         except Exception as e:
             logger.exception(f'Big 6 seed job {job_id} failed')
+            db.session.rollback()
             update_job(job_id, status='failed', error=str(e),
                        completed_at=datetime.now(timezone.utc).isoformat())
 
@@ -389,8 +390,8 @@ def admin_full_rebuild():
                 for name, model in [
                     ('tracked_players', TrackedPlayer),
                     ('journey_entries', PlayerJourneyEntry),
-                    ('journeys', PlayerJourney),
                     ('cohort_members', CohortMember),
+                    ('journeys', PlayerJourney),
                     ('cohorts', AcademyCohort),
                     ('loaned_players', LoanedPlayer),
                     ('club_locations', ClubLocation),
@@ -675,6 +676,7 @@ def admin_full_rebuild():
 
         except Exception as e:
             logger.exception(f'Full rebuild job {job_id} failed at stage: {stage}')
+            db.session.rollback()
             update_job(job_id, status='failed', error=f'Failed at {stage}: {e}',
                        completed_at=datetime.now(timezone.utc).isoformat())
 
