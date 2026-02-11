@@ -12,6 +12,7 @@ import TeamMultiSelect from '@/components/ui/TeamMultiSelect.jsx'
 import TeamSelect from '@/components/ui/TeamSelect.jsx'
 import { JournalistList } from '@/components/JournalistList.jsx'
 import { BuyMeCoffeeButton } from '@/components/BuyMeCoffeeButton.jsx'
+import SyncBanner from '@/components/SyncBanner.jsx'
 import { CommentaryManager } from '@/components/CommentaryManager.jsx'
 import { Accordion, AccordionContent, AccordionItem, AccordionTrigger } from '@/components/ui/accordion.jsx'
 import { Alert, AlertDescription } from '@/components/ui/alert.jsx'
@@ -10723,6 +10724,7 @@ function AppWithRouter() {
     <GlobalSearchContext.Provider value={globalSearch}>
       <div className="min-h-screen bg-gray-50">
         <Navigation />
+        <SyncBanner />
         <GlobalSearchDialog
           open={globalSearch.isOpen}
           onOpenChange={globalSearch.setIsOpen}

@@ -441,6 +441,37 @@ def health_check():
         }
     })
 
+@api_bp.route('/sync-status', methods=['GET'])
+def public_sync_status():
+    """Public endpoint: returns whether a major background sync is running."""
+    STALE_THRESHOLD = timedelta(minutes=30)
+    MAJOR_JOB_TYPES = ('full_rebuild', 'seed_big6')
+    now = datetime.now(timezone.utc)
+
+    running = BackgroundJob.query.filter(
+        BackgroundJob.status == 'running',
+        BackgroundJob.job_type.in_(MAJOR_JOB_TYPES),
+    ).all()
+
+    syncing = False
+    for job in running:
+        last_active = job.updated_at or job.started_at or job.created_at
+        if last_active:
+            elapsed = now - last_active.replace(tzinfo=timezone.utc)
+            if elapsed > STALE_THRESHOLD:
+                job.status = 'failed'
+                job.error = f'Stale job auto-failed (no update in {elapsed}).'
+                job.completed_at = now
+                db.session.commit()
+                continue
+        syncing = True
+
+    payload = {'syncing': syncing}
+    if syncing:
+        payload['message'] = "We're currently updating player data. Some information may be temporarily unavailable."
+    return jsonify(payload)
+
+
 @api_bp.route('/options', methods=['OPTIONS'])
 def handle_options():
     return '', 200
