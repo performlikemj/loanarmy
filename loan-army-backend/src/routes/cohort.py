@@ -267,25 +267,45 @@ def get_cohort(cohort_id):
 @cohort_bp.route('/cohorts/teams', methods=['GET'])
 def cohort_teams():
     """Get distinct teams that have cohort data."""
+    from src.models.league import TeamProfile
+
     results = db.session.query(
         AcademyCohort.team_api_id,
-        AcademyCohort.team_name,
-        AcademyCohort.team_logo
-    ).distinct().order_by(AcademyCohort.team_name).all()
+        db.func.max(AcademyCohort.team_name).label('team_name'),
+    ).filter(
+        AcademyCohort.total_players > 0,
+    ).group_by(AcademyCohort.team_api_id).order_by(
+        db.func.max(AcademyCohort.team_name)
+    ).all()
 
-    teams = [
-        {'team_api_id': r.team_api_id, 'team_name': r.team_name, 'team_logo': r.team_logo}
-        for r in results
-    ]
+    # Resolve correct parent club logos from TeamProfile
+    team_ids = [r.team_api_id for r in results]
+    profiles = {p.team_id: p.logo_url for p in
+                TeamProfile.query.filter(TeamProfile.team_id.in_(team_ids)).all()}
+
+    teams = [{
+        'team_api_id': r.team_api_id,
+        'team_name': r.team_name,
+        'team_logo': profiles.get(r.team_api_id),
+    } for r in results]
+
     return jsonify({'teams': teams})
 
 
 @cohort_bp.route('/cohorts/analytics', methods=['GET'])
 def cohort_analytics():
     """Cross-club comparison analytics."""
+    from src.models.league import TeamProfile
+
     cohorts = AcademyCohort.query.filter(
-        AcademyCohort.sync_status.in_(('complete', 'partial'))
+        AcademyCohort.sync_status.in_(('complete', 'partial', 'seeded')),
+        AcademyCohort.total_players > 0,
     ).all()
+
+    # Build logo lookup from TeamProfile
+    team_ids = list(set(c.team_api_id for c in cohorts))
+    profiles = {p.team_id: p.logo_url for p in
+                TeamProfile.query.filter(TeamProfile.team_id.in_(team_ids)).all()}
 
     # Group by team
     team_data = {}
@@ -295,7 +315,7 @@ def cohort_analytics():
             team_data[tid] = {
                 'team_api_id': tid,
                 'team_name': c.team_name,
-                'team_logo': c.team_logo,
+                'team_logo': profiles.get(tid),
                 'total_players': 0,
                 'players_first_team': 0,
                 'players_on_loan': 0,
