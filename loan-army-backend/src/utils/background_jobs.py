@@ -98,8 +98,9 @@ def get_job(job_id: str) -> dict | None:
     try:
         job = db.session.get(BackgroundJob, job_id)
         if job:
-            if job.status == 'running' and job.started_at:
-                elapsed = datetime.now(timezone.utc) - job.started_at.replace(tzinfo=timezone.utc)
+            if job.status == 'running':
+                last_active = (job.updated_at or job.started_at or job.created_at)
+                elapsed = datetime.now(timezone.utc) - last_active.replace(tzinfo=timezone.utc)
                 if elapsed > STALE_JOB_TIMEOUT:
                     logger.warning(
                         f'Job {job_id} stale ({elapsed}), auto-marking failed. '

@@ -5,9 +5,11 @@ import { Navigate } from 'react-router-dom'
 import { Menu, PanelLeftClose, PanelLeftOpen } from 'lucide-react'
 
 import { AdminSidebar } from '@/components/admin/AdminSidebar'
+import { SyncOverlay } from '@/components/admin/SyncOverlay'
 import { Button } from '@/components/ui/button'
 import { Sheet, SheetContent, SheetHeader, SheetTitle } from '@/components/ui/sheet'
 import { useAuth } from '@/context/AuthContext'
+import { BackgroundJobsProvider } from '@/context/BackgroundJobsContext'
 
 const SIDEBAR_COLLAPSE_KEY = 'loan_army_admin_sidebar_collapsed'
 
@@ -39,61 +41,66 @@ export function AdminLayout() {
     }
 
     return (
-        <div className="flex min-h-screen bg-gray-50">
-            <AdminSidebar
-                collapsed={collapsed}
-                className="hidden lg:flex"
-            />
+        <BackgroundJobsProvider>
+            <div className="flex min-h-screen bg-gray-50">
+                <AdminSidebar
+                    collapsed={collapsed}
+                    className="hidden lg:flex"
+                />
 
-            <Sheet open={mobileSidebarOpen} onOpenChange={setMobileSidebarOpen}>
-                <SheetContent
-                    side="left"
-                    className="p-0 w-72 sm:w-80 lg:hidden"
-                    data-testid="admin-sidebar-sheet"
-                >
-                    <SheetHeader className="sr-only">
-                        <SheetTitle>Admin menu</SheetTitle>
-                    </SheetHeader>
-                    <AdminSidebar onNavigate={() => setMobileSidebarOpen(false)} />
-                </SheetContent>
-            </Sheet>
+                <Sheet open={mobileSidebarOpen} onOpenChange={setMobileSidebarOpen}>
+                    <SheetContent
+                        side="left"
+                        className="p-0 w-72 sm:w-80 lg:hidden"
+                        data-testid="admin-sidebar-sheet"
+                    >
+                        <SheetHeader className="sr-only">
+                            <SheetTitle>Admin menu</SheetTitle>
+                        </SheetHeader>
+                        <AdminSidebar onNavigate={() => setMobileSidebarOpen(false)} />
+                    </SheetContent>
+                </Sheet>
 
-            <div className="flex-1 min-w-0">
-                <header className="sticky top-0 z-20 h-16 border-b bg-white/90 backdrop-blur flex items-center px-4 sm:px-6 justify-between gap-4">
-                    <div className="flex items-center gap-3 min-w-0">
-                        <Button
-                            data-testid="admin-menu-toggle"
-                            className="md:hidden"
-                            variant="ghost"
-                            size="icon"
-                            aria-label="Open admin menu"
-                            onClick={() => setMobileSidebarOpen(true)}
-                        >
-                            <Menu className="h-5 w-5" />
-                        </Button>
-                        <Button
-                            data-testid="admin-collapse-toggle"
-                            className="hidden lg:inline-flex"
-                            variant="ghost"
-                            size="icon"
-                            aria-label={collapsed ? "Expand sidebar" : "Collapse sidebar"}
-                            onClick={() => setCollapsed((prev) => !prev)}
-                        >
-                            {collapsed ? <PanelLeftOpen className="h-5 w-5" /> : <PanelLeftClose className="h-5 w-5" />}
-                        </Button>
-                        <div className="min-w-0">
-                            <h1 className="text-lg sm:text-xl font-semibold text-gray-900 truncate">Admin Dashboard</h1>
-                            <p className="text-xs text-gray-500 hidden sm:block">Control center for journalists, loans, and newsletters</p>
+                <div className="flex-1 min-w-0 flex flex-col">
+                    <header className="sticky top-0 z-20 h-16 border-b bg-white/90 backdrop-blur flex items-center px-4 sm:px-6 justify-between gap-4">
+                        <div className="flex items-center gap-3 min-w-0">
+                            <Button
+                                data-testid="admin-menu-toggle"
+                                className="md:hidden"
+                                variant="ghost"
+                                size="icon"
+                                aria-label="Open admin menu"
+                                onClick={() => setMobileSidebarOpen(true)}
+                            >
+                                <Menu className="h-5 w-5" />
+                            </Button>
+                            <Button
+                                data-testid="admin-collapse-toggle"
+                                className="hidden lg:inline-flex"
+                                variant="ghost"
+                                size="icon"
+                                aria-label={collapsed ? "Expand sidebar" : "Collapse sidebar"}
+                                onClick={() => setCollapsed((prev) => !prev)}
+                            >
+                                {collapsed ? <PanelLeftOpen className="h-5 w-5" /> : <PanelLeftClose className="h-5 w-5" />}
+                            </Button>
+                            <div className="min-w-0">
+                                <h1 className="text-lg sm:text-xl font-semibold text-gray-900 truncate">Admin Dashboard</h1>
+                                <p className="text-xs text-gray-500 hidden sm:block">Control center for journalists, loans, and newsletters</p>
+                            </div>
                         </div>
+                        <div className="flex items-center gap-4 text-sm text-gray-600">
+                            <span className="hidden sm:inline">Logged in as Admin</span>
+                        </div>
+                    </header>
+                    <div className="relative flex-1">
+                        <SyncOverlay />
+                        <main className="p-4 sm:p-6">
+                            <Outlet />
+                        </main>
                     </div>
-                    <div className="flex items-center gap-4 text-sm text-gray-600">
-                        <span className="hidden sm:inline">Logged in as Admin</span>
-                    </div>
-                </header>
-                <main className="p-4 sm:p-6">
-                    <Outlet />
-                </main>
+                </div>
             </div>
-        </div>
+        </BackgroundJobsProvider>
     )
 }

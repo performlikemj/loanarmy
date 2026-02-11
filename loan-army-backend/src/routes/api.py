@@ -7315,6 +7315,33 @@ def admin_fix_midseason_transfer():
         return jsonify(_safe_error_payload(e, 'Failed to fix mid-season transfer')), 500
 
 
+@api_bp.route('/admin/jobs/active', methods=['GET'])
+@require_api_key
+def list_active_jobs():
+    """List all currently running background jobs."""
+    STALE_THRESHOLD = timedelta(hours=5)
+    now = datetime.now(timezone.utc)
+
+    running = BackgroundJob.query.filter_by(status='running').order_by(
+        BackgroundJob.started_at.desc()
+    ).all()
+
+    results = []
+    for job in running:
+        last_active = (job.updated_at or job.started_at or job.created_at)
+        if last_active:
+            elapsed = now - last_active.replace(tzinfo=timezone.utc)
+            if elapsed > STALE_THRESHOLD:
+                job.status = 'failed'
+                job.error = f'Stale job auto-failed (no update in {elapsed}).'
+                job.completed_at = now
+                db.session.commit()
+                continue
+        results.append(job.to_dict())
+
+    return jsonify({'jobs': results})
+
+
 @api_bp.route('/admin/jobs/<job_id>', methods=['GET'])
 @require_api_key
 def get_job_status(job_id: str):

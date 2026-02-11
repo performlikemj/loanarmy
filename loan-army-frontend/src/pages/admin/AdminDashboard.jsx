@@ -5,6 +5,7 @@ import { Mail, Users, Shield, Settings, GraduationCap, UserPlus, FileText, Loade
 import { Link } from 'react-router-dom'
 import { Button } from '@/components/ui/button'
 import { APIService } from '@/lib/api'
+import { useBackgroundJobs } from '@/context/BackgroundJobsContext'
 
 export function AdminDashboard() {
     const [stats, setStats] = useState({
@@ -13,12 +14,15 @@ export function AdminDashboard() {
         newsletters: { total: 0, published: 0, drafts: 0 },
     })
 
+    const { isBlocking, refresh: refreshJobs } = useBackgroundJobs()
+
     // Full rebuild state
-    const [rebuildRunning, setRebuildRunning] = useState(false)
-    const [rebuildJob, setRebuildJob] = useState(null)
+    const [rebuildJobId, setRebuildJobId] = useState(null)
     const [rebuildMessage, setRebuildMessage] = useState(null)
     const [confirmOpen, setConfirmOpen] = useState(false)
-    const pollRef = useRef(null)
+    const wasBlockingRef = useRef(false)
+
+    const rebuildRunning = isBlocking
 
     const loadStats = useCallback(async () => {
         try {
@@ -31,58 +35,52 @@ export function AdminDashboard() {
 
     useEffect(() => {
         loadStats()
-        return () => {
-            if (pollRef.current) clearInterval(pollRef.current)
-        }
     }, [loadStats])
 
-    const pollJobStatus = useCallback((jobId) => {
-        pollRef.current = setInterval(async () => {
-            try {
-                const job = await APIService.request(`/admin/jobs/${jobId}`, {}, { admin: true })
-                if (job) {
-                    setRebuildJob(job)
-                    if (job.status === 'completed' || job.status === 'failed') {
-                        clearInterval(pollRef.current)
-                        pollRef.current = null
-                        setRebuildRunning(false)
-                        if (job.status === 'completed') {
-                            const r = job.results || {}
-                            setRebuildMessage({
-                                type: 'success',
-                                text: `Rebuild complete! Created ${r.total_created || 0} tracked players, synced ${r.players_synced || 0} journeys, linked ${r.journeys_linked || 0} orphans.`
-                            })
-                            loadStats()
-                        } else {
-                            setRebuildMessage({
-                                type: 'error',
-                                text: `Rebuild failed: ${job.error || 'Unknown error'}`
-                            })
-                        }
-                    }
-                }
-            } catch (err) {
-                console.error('Failed to poll rebuild job:', err)
+    // Detect when a rebuild completes and fetch final results
+    useEffect(() => {
+        if (isBlocking) {
+            wasBlockingRef.current = true
+            return
+        }
+        if (!wasBlockingRef.current || !rebuildJobId) return
+        wasBlockingRef.current = false
+
+        // Rebuild just finished - fetch final status
+        APIService.adminGetJobStatus(rebuildJobId).then(job => {
+            setRebuildJobId(null)
+            if (!job) return
+            if (job.status === 'completed') {
+                const r = job.results || {}
+                setRebuildMessage({
+                    type: 'success',
+                    text: `Rebuild complete! Created ${r.total_created || 0} tracked players, synced ${r.players_synced || 0} journeys, linked ${r.journeys_linked || 0} orphans.`
+                })
+                loadStats()
+            } else if (job.status === 'failed') {
+                setRebuildMessage({
+                    type: 'error',
+                    text: `Rebuild failed: ${job.error || 'Unknown error'}`
+                })
             }
-        }, 3000)
-    }, [loadStats])
+        }).catch(() => {
+            setRebuildJobId(null)
+        })
+    }, [isBlocking, rebuildJobId, loadStats])
 
     const handleRebuild = async (skipClean = false) => {
         setConfirmOpen(false)
-        setRebuildRunning(true)
-        setRebuildJob(null)
         setRebuildMessage(null)
 
         try {
             const res = await APIService.adminFullRebuild({ skip_clean: skipClean })
             if (res.job_id) {
-                setRebuildJob({ status: 'running', progress: 0, total: 7 })
-                pollJobStatus(res.job_id)
+                setRebuildJobId(res.job_id)
+                refreshJobs()
             }
         } catch (error) {
             console.error('Failed to start rebuild:', error)
             setRebuildMessage({ type: 'error', text: `Failed to start: ${error.message || 'Unknown error'}` })
-            setRebuildRunning(false)
         }
     }
 
@@ -130,10 +128,6 @@ export function AdminDashboard() {
             color: 'gray'
         },
     ]
-
-    const rebuildProgress = rebuildJob
-        ? Math.round(((rebuildJob.progress || 0) / (rebuildJob.total || 7)) * 100)
-        : 0
 
     return (
         <div className="space-y-6">
@@ -238,21 +232,12 @@ export function AdminDashboard() {
                     </CardContent>
                 )}
 
-                {rebuildRunning && rebuildJob && (
-                    <CardContent className="space-y-3">
-                        <div className="flex items-center gap-2 text-sm">
+                {rebuildRunning && (
+                    <CardContent>
+                        <div className="flex items-center gap-2 text-sm text-muted-foreground">
                             <Loader2 className="h-4 w-4 animate-spin" />
-                            <span className="font-medium">{rebuildJob.current_player || 'Starting...'}</span>
+                            <span>Rebuild in progress — see overlay for details</span>
                         </div>
-                        <div className="h-2 bg-gray-200 rounded-full overflow-hidden">
-                            <div
-                                className="h-full bg-blue-600 rounded-full transition-all duration-500"
-                                style={{ width: `${rebuildProgress}%` }}
-                            />
-                        </div>
-                        <p className="text-xs text-muted-foreground">
-                            Stage {rebuildJob.progress || 0} of {rebuildJob.total || 7}
-                        </p>
                     </CardContent>
                 )}
 

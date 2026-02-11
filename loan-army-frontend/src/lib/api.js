@@ -1587,6 +1587,10 @@ export class APIService {
         return this.request(`/admin/jobs/${jobId}`, {}, { admin: true })
     }
 
+    static async adminGetActiveJobs() {
+        return this.request('/admin/jobs/active', {}, { admin: true })
+    }
+
     // ==========================================================================
     // Formations
     // ==========================================================================
