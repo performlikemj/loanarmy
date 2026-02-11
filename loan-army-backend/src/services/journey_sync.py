@@ -179,7 +179,10 @@ class JourneySyncService:
             self._update_journey_aggregates(journey, transfers=transfers)
 
             # Auto-geocode missing club locations
-            self._auto_geocode_clubs(journey)
+            try:
+                self._auto_geocode_clubs(journey)
+            except Exception as e:
+                logger.warning(f"_auto_geocode_clubs failed for player {player_api_id}: {e}")
 
             # Update sync tracking
             journey.seasons_synced = sorted(set((journey.seasons_synced or []) + seasons_to_sync))
@@ -194,16 +197,17 @@ class JourneySyncService:
         except Exception as e:
             logger.error(f"Failed to sync journey for player {player_api_id}: {e}")
             db.session.rollback()
-            
+
             # Try to save error state
             try:
                 journey = PlayerJourney.query.filter_by(player_api_id=player_api_id).first()
                 if journey:
                     journey.sync_error = str(e)
                     db.session.commit()
-            except:
-                pass
-            
+            except Exception as save_err:
+                logger.error(f"Failed to save sync_error for player {player_api_id}: {save_err}")
+                db.session.rollback()
+
             return None
     
     def _get_player_seasons(self, player_api_id: int) -> List[int]:
@@ -752,7 +756,11 @@ class JourneySyncService:
         journey.academy_club_ids = sorted(academy_ids)
 
         # Auto-upsert TrackedPlayer rows for each academy connection
-        self._upsert_tracked_players(journey, academy_ids, transfers=transfers)
+        try:
+            self._upsert_tracked_players(journey, academy_ids, transfers=transfers)
+        except Exception as e:
+            logger.error(f"_upsert_tracked_players failed for player {journey.player_api_id}: {e}")
+            db.session.rollback()
 
     def _upsert_tracked_players(self, journey: PlayerJourney, academy_ids: set, transfers=None):
         """Create or update TrackedPlayer rows for discovered academy connections."""

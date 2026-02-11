@@ -6,12 +6,14 @@ gunicorn workers by storing job state in the database.
 
 import json
 import logging
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from uuid import uuid4
 
 from src.models.league import db, BackgroundJob
 
 logger = logging.getLogger(__name__)
+
+STALE_JOB_TIMEOUT = timedelta(minutes=30)
 
 
 def create_background_job(job_type: str) -> str:
@@ -85,6 +87,8 @@ def update_job(job_id: str, **kwargs) -> None:
 def get_job(job_id: str) -> dict | None:
     """Get a background job's status from the database.
 
+    Auto-fails jobs stuck in 'running' longer than STALE_JOB_TIMEOUT.
+
     Args:
         job_id: The UUID of the job to retrieve
 
@@ -94,9 +98,25 @@ def get_job(job_id: str) -> dict | None:
     try:
         job = db.session.get(BackgroundJob, job_id)
         if job:
+            if job.status == 'running' and job.started_at:
+                elapsed = datetime.now(timezone.utc) - job.started_at.replace(tzinfo=timezone.utc)
+                if elapsed > STALE_JOB_TIMEOUT:
+                    logger.warning(
+                        f'Job {job_id} stale ({elapsed}), auto-marking failed. '
+                        f'Last progress: {job.progress}/{job.total} on {job.current_player}'
+                    )
+                    job.status = 'failed'
+                    job.error = (
+                        f'Stale job auto-failed after {elapsed}. '
+                        f'Worker likely died at {job.current_player} '
+                        f'(progress {job.progress}/{job.total}).'
+                    )
+                    job.completed_at = datetime.now(timezone.utc)
+                    db.session.commit()
             return job.to_dict()
     except Exception as e:
         logger.error(f'Failed to get background job {job_id}: {e}')
+        db.session.rollback()
     return None
 
 
