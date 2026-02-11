@@ -7319,7 +7319,7 @@ def admin_fix_midseason_transfer():
 @require_api_key
 def list_active_jobs():
     """List all currently running background jobs."""
-    STALE_THRESHOLD = timedelta(hours=5)
+    STALE_THRESHOLD = timedelta(minutes=30)
     now = datetime.now(timezone.utc)
 
     running = BackgroundJob.query.filter_by(status='running').order_by(
