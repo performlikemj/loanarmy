@@ -91,16 +91,6 @@ def _run_full_rebuild(job_id, config):
             stage = 'clean'
             update_job(job_id, progress=0, total=total_stages, current_player='Stage 1: Cleaning data...')
             deleted = {}
-            # Delete orphaned tables (no model) that may FK to loaned_players
-            from sqlalchemy import text
-            for orphan_table in ['journey_submissions', 'journey_milestones']:
-                try:
-                    result = db.session.execute(text(f'DELETE FROM {orphan_table}'))
-                    deleted[orphan_table] = result.rowcount
-                    db.session.commit()
-                except Exception:
-                    db.session.rollback()
-                    deleted[orphan_table] = 0
             # Delete tables with models in FK-safe order
             for name, model in [
                 ('tracked_players', TrackedPlayer),
