@@ -156,6 +156,15 @@ aggregate goals, assists, minutes, avg rating.
 prefer the helper functions or `tracked` DataFrame — these use live journey-derived statuses. \
 `cohorts.players_first_team` is only accurate for cohorts with `sync_status = 'complete'`. \
 `cohort_members` contains only journey-synced members with validated career data.
+- **Active vs. historical academy queries:** For "how is academy X doing?" or current-state \
+questions, use `active_academy_pipeline()` — it excludes released/sold players and focuses on \
+the live pathway (academy, on_loan, first_team). For "what has academy X produced?" or full \
+historical breakdowns, use `academy_comparison()` or `player_status_breakdown()` which include \
+all statuses.
+- **Multi-academy players:** A player who was in multiple academies (e.g., Liverpool then \
+Manchester United) appears as a separate tracked row for each academy, with status relative to \
+that club. This is correct — both academies can claim the player. The status field prevents \
+double-counting in active queries (e.g., `released` for Liverpool but `on_loan` for Man United).
 - **Finding players by name:** Use `.str.contains('Name', case=False)` on player_name columns.
 - **Finding teams by name:** `teams[teams['name'].str.contains('Arsenal', case=False)]`
 
@@ -175,12 +184,14 @@ internal errors, code issues, sandbox limitations, or technical details to the u
 Simply say you couldn't find the data or ask the user to rephrase.
 
 ## Helper Functions (pre-loaded, call directly in run_analysis code)
-- `academy_comparison()` → Big 6 academy status breakdown (first_team/on_loan/academy/released per club). Returns a DataFrame.
+- `academy_comparison()` → Big 6 academy status breakdown (first_team/on_loan/academy/released per club). Includes ALL statuses. Returns a DataFrame.
+- `active_academy_pipeline(team_name=None)` → Players currently in an active pathway (academy/on_loan/first_team only — excludes released/sold). Optional team filter (partial match); defaults to Big 6. Best for "how is academy X doing?" questions. Returns a DataFrame.
 - `first_team_graduates(team_name=None)` → Players who reached first team, optionally filtered by club name (partial match). Returns a DataFrame.
-- `player_status_breakdown(team_name)` → Status distribution for one team's tracked players. Returns a DataFrame.
+- `player_status_breakdown(team_name)` → Status distribution for one team's tracked players. Includes all statuses. Returns a DataFrame.
 
 Use these for academy questions — they handle the correct joins and filters automatically.
-Example: `result = academy_comparison()` with display "bar_chart"
+Example: `result = active_academy_pipeline('Liverpool')` with display "table" (current academy health)
+Example: `result = academy_comparison()` with display "bar_chart" (full historical breakdown)
 Example: `result = first_team_graduates('Arsenal')` with display "table"
 """
 

@@ -110,10 +110,32 @@ def _build_helpers(dataframes: dict) -> dict:
                 .sort_values('count', ascending=False)
                 .reset_index(drop=True))
 
+    def active_academy_pipeline(team_name=None):
+        """Players currently in an active academy pathway (excludes released/sold).
+
+        Optional team_name filter (partial match). Without a filter, defaults to Big 6.
+        """
+        tracked = dataframes.get('tracked', pd.DataFrame())
+        teams = dataframes.get('teams', pd.DataFrame())
+        if tracked.empty or teams.empty:
+            return pd.DataFrame(columns=['player_name', 'team', 'status', 'position', 'loan_club_name', 'age'])
+
+        active = tracked[tracked['status'].isin(['academy', 'on_loan', 'first_team'])]
+        merged = active.merge(teams[['id', 'name']], left_on='team_id', right_on='id', how='inner')
+        if team_name:
+            merged = merged[merged['name'].str.contains(team_name, case=False, na=False)]
+        else:
+            merged = merged[merged['name'].isin(BIG_6)]
+        return (merged[['player_name', 'name', 'status', 'position', 'loan_club_name', 'age']]
+                .rename(columns={'name': 'team'})
+                .sort_values(['team', 'status', 'player_name'])
+                .reset_index(drop=True))
+
     return {
         'academy_comparison': academy_comparison,
         'first_team_graduates': first_team_graduates,
         'player_status_breakdown': player_status_breakdown,
+        'active_academy_pipeline': active_academy_pipeline,
     }
 
 
