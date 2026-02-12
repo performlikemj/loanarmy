@@ -470,6 +470,13 @@ def public_sync_status():
     payload = {'syncing': syncing}
     if syncing:
         payload['message'] = "We're currently updating player data. Some information may be temporarily unavailable."
+        # Find the most recently updated active job for progress info
+        active = [j for j in running if j.status == 'running']
+        if active:
+            job = max(active, key=lambda j: j.updated_at or j.created_at)
+            payload['stage'] = job.current_player
+            payload['progress'] = job.progress
+            payload['total'] = job.total
     return jsonify(payload)
 
 

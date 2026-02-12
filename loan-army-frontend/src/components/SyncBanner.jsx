@@ -2,11 +2,12 @@ import { useState, useEffect, useRef } from 'react'
 import { RefreshCw, X } from 'lucide-react'
 
 const DISMISS_KEY = 'sync_banner_dismissed'
-const POLL_INTERVAL = 60_000
+const POLL_INTERVAL = 10_000
 
 export default function SyncBanner() {
   const [syncing, setSyncing] = useState(false)
   const [message, setMessage] = useState('')
+  const [progress, setProgress] = useState(null)
   const [dismissed, setDismissed] = useState(
     () => sessionStorage.getItem(DISMISS_KEY) === '1',
   )
@@ -20,6 +21,11 @@ export default function SyncBanner() {
           const data = await res.json()
           setSyncing(data.syncing)
           setMessage(data.message || '')
+          setProgress(
+            data.syncing
+              ? { stage: data.stage, current: data.progress, total: data.total }
+              : null,
+          )
           if (!data.syncing) {
             sessionStorage.removeItem(DISMISS_KEY)
             setDismissed(false)
@@ -42,7 +48,15 @@ export default function SyncBanner() {
       <div className="max-w-6xl mx-auto flex items-center justify-between gap-3 text-sm text-amber-800">
         <div className="flex items-center gap-2">
           <RefreshCw className="h-4 w-4 animate-spin flex-shrink-0" />
-          <span>{message}</span>
+          <span>
+            {message}
+            {progress?.stage && (
+              <span className="ml-1.5 text-amber-600">
+                — {progress.stage}
+                {progress.total > 0 && ` (${progress.current}/${progress.total})`}
+              </span>
+            )}
+          </span>
         </div>
         <button
           onClick={() => {
