@@ -61,14 +61,15 @@ class JourneySyncService:
         """Initialize with optional API client"""
         self.api = api_client or APIFootballClient()
     
-    def sync_player(self, player_api_id: int, force_full: bool = False) -> Optional[PlayerJourney]:
+    def sync_player(self, player_api_id: int, force_full: bool = False, heartbeat_fn=None) -> Optional[PlayerJourney]:
         """
         Sync complete journey for a player.
-        
+
         Args:
             player_api_id: API-Football player ID
             force_full: If True, re-sync all seasons even if already synced
-            
+            heartbeat_fn: Optional callable invoked between API stages to signal liveness
+
         Returns:
             PlayerJourney record or None if sync failed
         """
@@ -94,9 +95,12 @@ class JourneySyncService:
                 journey.sync_error = "No seasons found for player"
                 db.session.commit()
                 return journey
-            
+
+            if heartbeat_fn:
+                heartbeat_fn()
+
             logger.info(f"Found {len(seasons)} seasons for player {player_api_id}: {seasons}")
-            
+
             # Determine which seasons to sync
             already_synced = set(journey.seasons_synced or [])
             if force_full:
@@ -113,11 +117,14 @@ class JourneySyncService:
             transfers = self._get_player_transfers(player_api_id)
             loan_timeline = self._build_transfer_timeline(transfers)
 
+            if heartbeat_fn:
+                heartbeat_fn()
+
             # Fetch and process each season
             all_entries = []
             player_info = None
 
-            for season in sorted(seasons_to_sync):
+            for season_idx, season in enumerate(sorted(seasons_to_sync)):
                 try:
                     player_data = self._get_player_season_data(player_api_id, season)
                     if not player_data:
@@ -139,6 +146,9 @@ class JourneySyncService:
                 except Exception as e:
                     logger.warning(f"Failed to fetch season {season} for player {player_api_id}: {e}")
                     continue
+
+                if heartbeat_fn and (season_idx + 1) % 3 == 0:
+                    heartbeat_fn()
 
             # Deduplicate entries with identical stat fingerprints
             all_entries = self._deduplicate_entries(all_entries)

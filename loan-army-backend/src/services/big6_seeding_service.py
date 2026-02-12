@@ -41,11 +41,12 @@ SEASONS = [2020, 2021, 2022, 2023, 2024]
 class RateLimiter:
     """Simple rate limiter tracking per-minute and per-day API usage."""
 
-    def __init__(self, per_minute_cap=280, per_day_cap=7000):
+    def __init__(self, per_minute_cap=280, per_day_cap=7000, heartbeat_fn=None):
         self.per_minute_cap = per_minute_cap
         self.per_day_cap = per_day_cap
         self.minute_calls = deque()
         self.day_calls = 0
+        self.heartbeat_fn = heartbeat_fn
 
     def wait_if_needed(self):
         """Block if rate limits would be exceeded."""
@@ -60,6 +61,8 @@ class RateLimiter:
             sleep_until = self.minute_calls[0] + 60
             sleep_time = sleep_until - now
             if sleep_time > 0:
+                if self.heartbeat_fn:
+                    self.heartbeat_fn()
                 logger.info(f"Rate limit: sleeping {sleep_time:.1f}s (minute cap)")
                 time.sleep(sleep_time)
 
@@ -125,6 +128,9 @@ def run_big6_seed(job_id, seasons=None, team_ids=None, league_ids=None):
     skipped_no_youth_team = 0
     skipped_empty_cohorts = 0
 
+    def phase1_heartbeat():
+        update_job(job_id, current_player="Phase 1: discovering cohorts...")
+
     # ── Phase 1: Discovery ──
     cohort_ids = []
     for idx, (team_id, league_meta, season) in enumerate(combos):
@@ -189,6 +195,7 @@ def run_big6_seed(job_id, seasons=None, team_ids=None, league_ids=None):
                 fallback_team_name=team_name,
                 fallback_league_name=league_name,
                 query_team_api_id=int(query_team_id),
+                heartbeat_fn=phase1_heartbeat,
             )
 
             if cohort.total_players > 0:
@@ -250,7 +257,11 @@ def run_big6_seed(job_id, seasons=None, team_ids=None, league_ids=None):
                current_player="Starting journey sync")
 
     current_year = datetime.now().year
-    rate_limiter = RateLimiter()  # 280 req/min, 7000 req/day
+
+    def heartbeat():
+        update_job(job_id, current_player=f"Heartbeat ({synced_count} synced)")
+
+    rate_limiter = RateLimiter(heartbeat_fn=heartbeat)  # 280 req/min, 7000 req/day
     quota_exhausted = False
     synced_count = 0
 
@@ -264,7 +275,7 @@ def run_big6_seed(job_id, seasons=None, team_ids=None, league_ids=None):
             update_job(job_id, progress=total_combos + idx,
                        current_player=f"Journey: {member.player_name}")
 
-            journey = journey_service.sync_player(member.player_api_id)
+            journey = journey_service.sync_player(member.player_api_id, heartbeat_fn=heartbeat)
 
             if journey and not journey.sync_error:
                 # Update ALL members with this player_api_id

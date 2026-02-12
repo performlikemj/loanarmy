@@ -35,6 +35,7 @@ class CohortService:
         fallback_team_name: str = None,
         fallback_league_name: str = None,
         query_team_api_id: int | None = None,
+        heartbeat_fn=None,
     ) -> AcademyCohort:
         """
         Discover players in a youth league/season for a team.
@@ -170,6 +171,8 @@ class CohortService:
                     db.session.add(member)
                     players_added += 1
 
+                if heartbeat_fn:
+                    heartbeat_fn()
                 page += 1
 
             cohort.total_players = CohortMember.query.filter_by(cohort_id=cohort.id).count()
