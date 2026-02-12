@@ -199,6 +199,27 @@ def run_big6_seed(job_id, seasons=None, team_ids=None, league_ids=None):
             )
 
             if cohort.total_players > 0:
+                # Check for near-duplicate cohorts (different league IDs, same players)
+                existing_cohorts = AcademyCohort.query.filter(
+                    AcademyCohort.team_api_id == team_id,
+                    AcademyCohort.season == season,
+                    AcademyCohort.id != cohort.id,
+                    AcademyCohort.sync_status.in_(['complete', 'seeding', 'seeded', 'partial']),
+                ).all()
+                is_dup = False
+                new_pids = {m.player_api_id for m in CohortMember.query.filter_by(cohort_id=cohort.id).all()}
+                for ec in existing_cohorts:
+                    ec_pids = {m.player_api_id for m in CohortMember.query.filter_by(cohort_id=ec.id).all()}
+                    if ec_pids and new_pids:
+                        overlap = len(new_pids & ec_pids) / min(len(new_pids), len(ec_pids))
+                        if overlap > 0.8:
+                            is_dup = True
+                            break
+                if is_dup:
+                    cohort.sync_status = 'duplicate'
+                    db.session.commit()
+                    logger.info("Skipping duplicate cohort id=%s (>80%% overlap)", cohort.id)
+                    continue
                 cohort_ids.append(cohort.id)
             else:
                 skipped_empty_cohorts += 1

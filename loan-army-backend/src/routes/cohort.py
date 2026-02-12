@@ -571,14 +571,17 @@ def admin_full_rebuild():
                     except Exception:
                         pass
 
-                # Source 3: CohortMember records
-                cohort_ids = [c.id for c in AcademyCohort.query.filter_by(team_api_id=parent_api_id).all()]
+                # Source 3: CohortMember records (skip duplicate cohorts)
+                cohort_ids = [c.id for c in AcademyCohort.query.filter_by(team_api_id=parent_api_id).filter(
+                    AcademyCohort.sync_status != 'duplicate'
+                ).all()]
                 if cohort_ids:
                     cohort_members = CohortMember.query.filter(CohortMember.cohort_id.in_(cohort_ids)).all()
                     for cm in cohort_members:
                         if cm.player_api_id and cm.player_api_id not in candidate_ids:
                             journey = PlayerJourney.query.filter_by(player_api_id=cm.player_api_id).first()
-                            candidate_ids[cm.player_api_id] = journey
+                            if journey and parent_api_id in (journey.academy_club_ids or []):
+                                candidate_ids[cm.player_api_id] = journey
 
                 # Build squad lookup
                 squad_by_id = {}
