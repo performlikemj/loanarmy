@@ -7,6 +7,7 @@ Premier League Big 6 clubs across multiple youth leagues and seasons.
 
 import logging
 import time
+from concurrent.futures import ThreadPoolExecutor, TimeoutError as FuturesTimeoutError
 from datetime import datetime, timezone
 from collections import deque
 
@@ -36,6 +37,9 @@ BIG_6 = {
 YOUTH_LEAGUES = get_default_youth_league_map()
 
 SEASONS = [2020, 2021, 2022, 2023, 2024]
+
+# Max time (seconds) for a single discover_cohort call before skipping
+COHORT_DISCOVER_TIMEOUT = 120
 
 
 class RateLimiter:
@@ -131,6 +135,9 @@ def run_big6_seed(job_id, seasons=None, team_ids=None, league_ids=None):
     def phase1_heartbeat():
         update_job(job_id, current_player="Phase 1: discovering cohorts...")
 
+    from flask import current_app
+    _app = current_app._get_current_object()
+
     # ── Phase 1: Discovery ──
     cohort_ids = []
     for idx, (team_id, league_meta, season) in enumerate(combos):
@@ -190,13 +197,39 @@ def run_big6_seed(job_id, seasons=None, team_ids=None, league_ids=None):
             except Exception as cache_err:
                 logger.warning("Cache clearing failed for combo %s/%s/%s: %s", team_name, league_name, season, cache_err)
 
-            cohort = cohort_service.discover_cohort(
-                team_id, league_id, season,
-                fallback_team_name=team_name,
-                fallback_league_name=league_name,
-                query_team_api_id=int(query_team_id),
-                heartbeat_fn=phase1_heartbeat,
+            # Run discover_cohort with a timeout so one hung API call
+            # can't kill the entire rebuild.
+            _discover_args = dict(
+                team_api_id=team_id, league_api_id=league_id, season=season,
+                fallback_team_name=team_name, fallback_league_name=league_name,
+                query_team_api_id=int(query_team_id), heartbeat_fn=phase1_heartbeat,
             )
+
+            def _discover_in_context():
+                with _app.app_context():
+                    c = cohort_service.discover_cohort(**_discover_args)
+                    # Return just the id — the ORM object can't cross threads
+                    return c.id if c else None
+
+            with ThreadPoolExecutor(max_workers=1) as executor:
+                future = executor.submit(_discover_in_context)
+                try:
+                    cohort_id_result = future.result(timeout=COHORT_DISCOVER_TIMEOUT)
+                except FuturesTimeoutError:
+                    logger.warning(
+                        "Cohort discovery timed out after %ds: %s/%s/%s — skipping",
+                        COHORT_DISCOVER_TIMEOUT, team_name, league_name, season,
+                    )
+                    continue
+
+            if not cohort_id_result:
+                skipped_empty_cohorts += 1
+                continue
+
+            # Re-fetch cohort in the main thread's session
+            cohort = db.session.get(AcademyCohort, cohort_id_result)
+            if not cohort:
+                continue
 
             if cohort.total_players > 0:
                 # Check for near-duplicate cohorts (different league IDs, same players)
