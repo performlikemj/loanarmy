@@ -1591,6 +1591,10 @@ export class APIService {
         return this.request('/admin/jobs/active', {}, { admin: true })
     }
 
+    static async adminCancelJob(jobId) {
+        return this.request(`/admin/jobs/${jobId}/cancel`, { method: 'POST' }, { admin: true })
+    }
+
     // ==========================================================================
     // Formations
     // ==========================================================================

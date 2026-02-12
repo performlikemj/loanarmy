@@ -1,6 +1,8 @@
-import { Loader2, X } from 'lucide-react'
+import { useState } from 'react'
+import { Loader2, X, CircleStop } from 'lucide-react'
 import { Progress } from '@/components/ui/progress'
 import { useBackgroundJobs } from '@/context/BackgroundJobsContext'
+import { APIService } from '@/lib/api'
 
 const JOB_TYPE_LABELS = {
     full_rebuild: 'Full Academy Rebuild',
@@ -12,7 +14,20 @@ const JOB_TYPE_LABELS = {
 }
 
 export function SyncOverlay() {
-    const { activeJobs, isBlocking, bannerJobs, dismiss } = useBackgroundJobs()
+    const { activeJobs, isBlocking, bannerJobs, dismiss, refresh } = useBackgroundJobs()
+    const [cancelling, setCancelling] = useState(null)
+
+    async function handleCancel(jobId) {
+        setCancelling(jobId)
+        try {
+            await APIService.adminCancelJob(jobId)
+            refresh()
+        } catch {
+            // Will clear on next poll
+        } finally {
+            setCancelling(null)
+        }
+    }
 
     if (!isBlocking && bannerJobs.length === 0) return null
 
@@ -44,6 +59,18 @@ export function SyncOverlay() {
                         <p className="text-xs text-amber-700 bg-amber-50 rounded p-2">
                             Data is being rebuilt. Other admin pages may show incomplete or empty results until this completes.
                         </p>
+                        <button
+                            onClick={() => handleCancel(blockingJob.id)}
+                            disabled={cancelling === blockingJob.id}
+                            className="w-full flex items-center justify-center gap-2 px-4 py-2 text-sm font-medium text-red-700 bg-red-50 hover:bg-red-100 border border-red-200 rounded-lg transition-colors disabled:opacity-50"
+                        >
+                            {cancelling === blockingJob.id ? (
+                                <Loader2 className="h-4 w-4 animate-spin" />
+                            ) : (
+                                <CircleStop className="h-4 w-4" />
+                            )}
+                            {cancelling === blockingJob.id ? 'Cancelling...' : 'Cancel Rebuild'}
+                        </button>
                     </div>
                 </div>
             )}
