@@ -63,6 +63,7 @@ from src.utils.background_jobs import (
     create_background_job as _create_background_job,
     update_job as _update_job,
     get_job as _get_job,
+    STALE_JOB_TIMEOUT,
 )
 
 logger = logging.getLogger(__name__)
@@ -444,7 +445,7 @@ def health_check():
 @api_bp.route('/sync-status', methods=['GET'])
 def public_sync_status():
     """Public endpoint: returns whether a major background sync is running."""
-    STALE_THRESHOLD = timedelta(minutes=30)
+    STALE_THRESHOLD = STALE_JOB_TIMEOUT
     MAJOR_JOB_TYPES = ('full_rebuild', 'seed_big6')
     now = datetime.now(timezone.utc)
 
@@ -7350,7 +7351,7 @@ def admin_fix_midseason_transfer():
 @require_api_key
 def list_active_jobs():
     """List all currently running background jobs."""
-    STALE_THRESHOLD = timedelta(minutes=30)
+    STALE_THRESHOLD = STALE_JOB_TIMEOUT
     now = datetime.now(timezone.utc)
 
     running = BackgroundJob.query.filter_by(status='running').order_by(
