@@ -32,7 +32,7 @@ const CHART_COLORS = [
   'var(--chart-5, #8b5cf6)',
 ]
 
-export function AnalysisResultCard({ data }) {
+export function AnalysisResultCard({ data, expanded }) {
   if (!data) return null
 
   const { result_type, display } = data
@@ -43,10 +43,10 @@ export function AnalysisResultCard({ data }) {
 
   // Route to the right renderer based on display hint
   if (display === 'bar_chart' && result_type === 'table') {
-    return <BarChartCard data={data} />
+    return <BarChartCard data={data} expanded={expanded} />
   }
   if (display === 'line_chart' && result_type === 'table') {
-    return <LineChartCard data={data} />
+    return <LineChartCard data={data} expanded={expanded} />
   }
   if (display === 'number' || result_type === 'scalar') {
     return <NumberCard data={data} />
@@ -120,6 +120,8 @@ function TableCard({ data }) {
     )
   }
 
+  const isTall = rows.length > 15
+
   return (
     <Card>
       <CardContent className="p-0">
@@ -131,9 +133,15 @@ function TableCard({ data }) {
           {canScrollRight && (
             <div className="absolute right-0 top-0 bottom-0 w-6 bg-gradient-to-l from-background to-transparent z-10 pointer-events-none rounded-r-lg" />
           )}
-          <div ref={scrollRef} className="overflow-x-auto">
+          <div
+            ref={scrollRef}
+            className={cn(
+              'overflow-x-auto overflow-y-hidden overscroll-x-contain',
+              isTall && 'max-h-[400px] !overflow-y-auto',
+            )}
+          >
             <Table>
-              <TableHeader>
+              <TableHeader className={cn(isTall && 'sticky top-0 z-20')}>
                 <TableRow className="bg-muted/50">
                   {columns.map((col) => (
                     <TableHead key={col} className="text-xs font-semibold whitespace-nowrap">
@@ -176,7 +184,7 @@ function TableCard({ data }) {
 
 /* ─── Bar Chart ───────────────────────────────────────────────────── */
 
-function BarChartCard({ data }) {
+function BarChartCard({ data, expanded }) {
   const { columns = [], rows = [] } = data
 
   if (!rows.length || columns.length < 2) {
@@ -193,12 +201,13 @@ function BarChartCard({ data }) {
 
   const labelKey = columns[0]
   const dataKeys = columns.slice(1)
+  const chartHeight = expanded ? 350 : 250
 
   return (
     <Card>
       <MetaBar data={data} />
       <CardContent className="p-3">
-        <div className="h-[250px] w-full">
+        <div className="w-full" style={{ height: chartHeight }}>
           <ResponsiveContainer width="100%" height="100%">
             <BarChart data={chartData} margin={{ top: 8, right: 8, left: 0, bottom: 0 }}>
               <CartesianGrid strokeDasharray="3 3" className="stroke-border/50" />
@@ -249,7 +258,7 @@ function BarChartCard({ data }) {
 
 /* ─── Line Chart ──────────────────────────────────────────────────── */
 
-function LineChartCard({ data }) {
+function LineChartCard({ data, expanded }) {
   const { columns = [], rows = [] } = data
 
   if (!rows.length || columns.length < 2) {
@@ -266,12 +275,13 @@ function LineChartCard({ data }) {
 
   const labelKey = columns[0]
   const dataKeys = columns.slice(1)
+  const chartHeight = expanded ? 350 : 250
 
   return (
     <Card>
       <MetaBar data={data} />
       <CardContent className="p-3">
-        <div className="h-[250px] w-full">
+        <div className="w-full" style={{ height: chartHeight }}>
           <ResponsiveContainer width="100%" height="100%">
             <LineChart data={chartData} margin={{ top: 8, right: 8, left: 0, bottom: 0 }}>
               <CartesianGrid strokeDasharray="3 3" className="stroke-border/50" />

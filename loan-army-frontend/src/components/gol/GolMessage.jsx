@@ -7,7 +7,7 @@ const TOOL_LABELS = {
   'search_web': 'Searching the web',
 }
 
-export function GolMessage({ message }) {
+export function GolMessage({ message, expanded }) {
   const isUser = message.role === 'user'
 
   return (
@@ -18,8 +18,8 @@ export function GolMessage({ message }) {
         </AvatarFallback>
       </Avatar>
 
-      <div className={`flex-1 min-w-0 max-w-[85%] ${isUser ? 'text-right' : ''}`}>
-        <div className={`inline-block rounded-lg px-3 py-2 text-sm ${
+      <div className={`flex-1 min-w-0 ${isUser ? 'text-right' : ''}`}>
+        <div className={`inline-block max-w-[85%] rounded-lg px-3 py-2 text-sm ${
           isUser
             ? 'bg-blue-600 text-white'
             : 'bg-muted text-foreground'
@@ -35,7 +35,7 @@ export function GolMessage({ message }) {
         {message.dataCards?.length > 0 && (
           <div className="mt-2 space-y-2 text-left">
             {message.dataCards.map((card, i) => (
-              <GolDataCard key={i} card={card} />
+              <GolDataCard key={i} card={card} expanded={expanded} />
             ))}
           </div>
         )}

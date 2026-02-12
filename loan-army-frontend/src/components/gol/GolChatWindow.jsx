@@ -1,12 +1,12 @@
 import { useEffect, useRef } from 'react'
-import { ScrollArea } from '@/components/ui/scroll-area'
 import { GolMessage } from './GolMessage'
 import { GolInput } from './GolInput'
 import { GolSuggestions } from './GolSuggestions'
 import { Button } from '@/components/ui/button'
 import { Trash2 } from 'lucide-react'
 
-export function GolChatWindow({ messages, isStreaming, sendMessage, clearChat, stopStreaming }) {
+export function GolChatWindow({ messages, isStreaming, sendMessage, clearChat, stopStreaming, expanded }) {
+  const scrollRef = useRef(null)
   const bottomRef = useRef(null)
   const prefersReducedMotion = useRef(
     typeof window !== 'undefined' && window.matchMedia?.('(prefers-reduced-motion: reduce)').matches
@@ -18,18 +18,21 @@ export function GolChatWindow({ messages, isStreaming, sendMessage, clearChat, s
 
   return (
     <div className="flex flex-col flex-1 min-h-0">
-      <ScrollArea className="flex-1 px-4 py-3 [&>[data-slot=scroll-area-viewport]>div]:!block">
+      <div
+        ref={scrollRef}
+        className="flex-1 min-h-0 overflow-y-auto overflow-x-hidden overscroll-contain px-4 py-3"
+      >
         {messages.length === 0 ? (
           <GolSuggestions onSelect={sendMessage} />
         ) : (
           <div className="space-y-4 min-w-0">
             {messages.map(msg => (
-              <GolMessage key={msg.id} message={msg} />
+              <GolMessage key={msg.id} message={msg} expanded={expanded} />
             ))}
             <div ref={bottomRef} />
           </div>
         )}
-      </ScrollArea>
+      </div>
 
       <div className="border-t px-4 py-3">
         {messages.length > 0 && (
