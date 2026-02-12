@@ -144,7 +144,12 @@ def run_big6_seed(job_id, seasons=None, team_ids=None, league_ids=None):
     from src.main import app as _app
 
     def _run_with_timeout(task_fn, timeout_seconds):
-        """Run a callable in a worker thread with a hard timeout."""
+        """Run a callable in a worker thread with a hard timeout.
+
+        NOTE: Only used for Phase 1 (cohort discovery) which has fewer
+        iterations.  Phase 2 (journey sync) calls sync_player directly
+        to avoid leaking DB connections from abandoned threads.
+        """
         executor = ThreadPoolExecutor(max_workers=1)
         future = executor.submit(task_fn)
         timed_out = False
@@ -365,41 +370,40 @@ def run_big6_seed(job_id, seasons=None, team_ids=None, league_ids=None):
             update_job(job_id, progress=total_combos + idx,
                        current_player=f"Journey: {member.player_name}")
 
-            _sync_args = dict(player_api_id=member.player_api_id, heartbeat_fn=heartbeat)
-
-            def _sync_in_context():
-                with _app.app_context():
-                    journey_result = journey_service.sync_player(**_sync_args)
-                    if not journey_result:
-                        return None
-                    return {
-                        "journey_id": journey_result.id,
-                        "sync_error": journey_result.sync_error,
-                    }
-
-            sync_result, timed_out = _run_with_timeout(_sync_in_context, PLAYER_SYNC_TIMEOUT)
-            if timed_out:
-                timeout_msg = f"Timed out after {PLAYER_SYNC_TIMEOUT}s"
+            # Call sync_player directly in the subprocess thread.
+            # Previous approach used ThreadPoolExecutor for timeout, but
+            # timed-out threads leaked DB connections from the pool, eventually
+            # exhausting it and hanging the entire subprocess.  The API client
+            # already has per-request HTTP timeouts (15s), so individual calls
+            # are bounded.
+            t0 = time.time()
+            journey = None
+            sync_error = None
+            try:
+                journey = journey_service.sync_player(
+                    player_api_id=member.player_api_id,
+                    heartbeat_fn=heartbeat,
+                )
+                if journey:
+                    sync_error = journey.sync_error
+            except Exception as sync_exc:
+                elapsed = time.time() - t0
                 logger.warning(
-                    "Journey sync timed out for player %s after %ds — skipping",
-                    member.player_api_id,
-                    PLAYER_SYNC_TIMEOUT,
+                    "Journey sync failed for player %s after %.1fs: %s",
+                    member.player_api_id, elapsed, sync_exc,
                 )
                 db.session.rollback()
-                _mark_player_sync_failure(member.player_api_id, timeout_msg)
+                _mark_player_sync_failure(member.player_api_id, str(sync_exc))
                 continue
 
-            journey = None
-            if sync_result and sync_result.get("journey_id"):
-                journey = db.session.get(PlayerJourney, sync_result["journey_id"])
-                if not journey:
-                    _mark_player_sync_failure(
-                        member.player_api_id,
-                        "Journey sync returned stale journey id",
-                    )
-                    continue
+            elapsed = time.time() - t0
+            if elapsed > PLAYER_SYNC_TIMEOUT:
+                logger.warning(
+                    "Journey sync slow for player %s: %.1fs (limit %ds)",
+                    member.player_api_id, elapsed, PLAYER_SYNC_TIMEOUT,
+                )
 
-            if journey and not sync_result.get("sync_error"):
+            if journey and not sync_error:
                 # Update ALL members with this player_api_id
                 all_player_members = CohortMember.query.filter_by(
                     player_api_id=member.player_api_id
@@ -424,11 +428,10 @@ def run_big6_seed(job_id, seasons=None, team_ids=None, league_ids=None):
 
                 db.session.commit()
                 synced_count += 1
-            elif journey and sync_result.get("sync_error"):
-                # Journey exists but had a sync error — don't mark as synced
+            elif journey and sync_error:
                 _mark_player_sync_failure(
                     member.player_api_id,
-                    sync_result.get("sync_error") or "Journey sync returned error",
+                    sync_error or "Journey sync returned error",
                     journey_id=journey.id,
                 )
             else:

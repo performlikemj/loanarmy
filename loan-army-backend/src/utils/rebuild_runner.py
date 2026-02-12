@@ -17,6 +17,18 @@ def run_rebuild_process(job_id, rebuild_type, kwargs):
     Creates its own Flask app context and DB connections, completely
     independent of any gunicorn worker.
     """
+    import sys
+
+    # Ensure subprocess logging goes to stdout/stderr so container logs
+    # capture it.  multiprocessing.Process inherits the parent's FDs but
+    # the logging configuration may not propagate.
+    logging.basicConfig(
+        stream=sys.stderr,
+        level=logging.INFO,
+        format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
+        force=True,
+    )
+
     from src.main import app
 
     with app.app_context():

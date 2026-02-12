@@ -477,6 +477,12 @@ def public_sync_status():
             payload['stage'] = job.current_player
             payload['progress'] = job.progress
             payload['total'] = job.total
+        # Include tracked team logos for the public banner animation
+        tracked = Team.query.filter_by(is_tracked=True).all()
+        payload['teams'] = [
+            {'name': t.name, 'logo': t.logo, 'team_id': t.team_id}
+            for t in tracked if t.logo
+        ]
     return jsonify(payload)
 
 
