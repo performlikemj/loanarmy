@@ -14,7 +14,7 @@ class WeeklyLoanReport(db.Model):
     week_start_date = db.Column(db.Date, nullable=False)
     week_end_date = db.Column(db.Date, nullable=False)
     include_team_stats = db.Column(db.Boolean, default=False)
-    generated_at = db.Column(db.DateTime, default=datetime.now(timezone.utc))
+    generated_at = db.Column(db.DateTime, default=lambda: datetime.now(timezone.utc))
     meta_json = db.Column(db.Text)
     __table_args__ = (
         db.UniqueConstraint('parent_team_id', 'week_start_date', 'week_end_date',

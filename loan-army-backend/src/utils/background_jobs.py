@@ -78,6 +78,8 @@ def update_job(job_id: str, **kwargs) -> None:
                     job.completed_at = datetime.fromisoformat(completed.replace('Z', '+00:00'))
                 else:
                     job.completed_at = completed
+            # Always bump updated_at so stale-job detection sees recent activity
+            job.updated_at = datetime.now(timezone.utc)
             db.session.commit()
     except Exception as e:
         logger.error(f'Failed to update background job {job_id}: {e}')

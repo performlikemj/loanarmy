@@ -55,8 +55,8 @@ class League(db.Model):
     flag = db.Column(db.String(255))
     season = db.Column(db.Integer, nullable=False, default=2024)
     is_european_top_league = db.Column(db.Boolean, default=False)
-    created_at = db.Column(db.DateTime, default=datetime.now(timezone.utc))
-    updated_at = db.Column(db.DateTime, default=datetime.now(timezone.utc), onupdate=datetime.now(timezone.utc))
+    created_at = db.Column(db.DateTime, default=lambda: datetime.now(timezone.utc))
+    updated_at = db.Column(db.DateTime, default=lambda: datetime.now(timezone.utc), onupdate=lambda: datetime.now(timezone.utc))
     
     # Relationships
     teams = db.relationship('Team', backref='league', lazy=True)
@@ -84,8 +84,8 @@ class LeagueLocalization(db.Model):
     country = db.Column(db.String(2), nullable=False)
     search_lang = db.Column(db.String(5), nullable=False)
     ui_lang = db.Column(db.String(10), nullable=False)
-    created_at = db.Column(db.DateTime, default=datetime.now(timezone.utc))
-    updated_at = db.Column(db.DateTime, default=datetime.now(timezone.utc), onupdate=datetime.now(timezone.utc))
+    created_at = db.Column(db.DateTime, default=lambda: datetime.now(timezone.utc))
+    updated_at = db.Column(db.DateTime, default=lambda: datetime.now(timezone.utc), onupdate=lambda: datetime.now(timezone.utc))
 
     def to_dict(self):
         return {
@@ -118,8 +118,8 @@ class Team(db.Model):
     newsletters_active = db.Column(db.Boolean, default=False)
     is_tracked = db.Column(db.Boolean, default=False)  # Whether we're actively tracking this team's loans
     league_id = db.Column(db.Integer, db.ForeignKey('leagues.id'), nullable=True)
-    created_at = db.Column(db.DateTime, default=datetime.now(timezone.utc))
-    updated_at = db.Column(db.DateTime, default=datetime.now(timezone.utc), onupdate=datetime.now(timezone.utc))
+    created_at = db.Column(db.DateTime, default=lambda: datetime.now(timezone.utc))
+    updated_at = db.Column(db.DateTime, default=lambda: datetime.now(timezone.utc), onupdate=lambda: datetime.now(timezone.utc))
     season = db.Column(db.Integer, nullable=False)  
     
     __table_args__ = (
@@ -200,8 +200,8 @@ class LoanedPlayer(db.Model):
     stats_coverage = db.Column(db.String(20), nullable=False, default='full')
     # Timestamp when API data confirmed this manual entry (for manual loans that API later matches)
     api_confirmed_at = db.Column(db.DateTime, nullable=True)
-    created_at = db.Column(db.DateTime, default=datetime.now(timezone.utc))
-    updated_at = db.Column(db.DateTime, default=datetime.now(timezone.utc), onupdate=datetime.now(timezone.utc))
+    created_at = db.Column(db.DateTime, default=lambda: datetime.now(timezone.utc))
+    updated_at = db.Column(db.DateTime, default=lambda: datetime.now(timezone.utc), onupdate=lambda: datetime.now(timezone.utc))
 
     # Pathway tracking columns for Academy Watch
     pathway_status = db.Column(db.String(20), nullable=False, default='on_loan')
@@ -361,8 +361,8 @@ class SupplementalLoan(db.Model):
     source_url = db.Column(db.String(255))
     wiki_title = db.Column(db.String(255))
     is_verified = db.Column(db.Boolean, default=False)
-    created_at = db.Column(db.DateTime, default=datetime.now(timezone.utc))
-    updated_at = db.Column(db.DateTime, default=datetime.now(timezone.utc), onupdate=datetime.now(timezone.utc))
+    created_at = db.Column(db.DateTime, default=lambda: datetime.now(timezone.utc))
+    updated_at = db.Column(db.DateTime, default=lambda: datetime.now(timezone.utc), onupdate=lambda: datetime.now(timezone.utc))
 
     parent_team = db.relationship('Team', foreign_keys=[parent_team_id], lazy=True)
     loan_team = db.relationship('Team', foreign_keys=[loan_team_id], lazy=True)
@@ -402,8 +402,8 @@ class TeamProfile(db.Model):
     venue_surface = db.Column(db.String(80))
     venue_image = db.Column(db.String(255))
     slug = db.Column(db.String(200), unique=True, index=True, nullable=True)
-    created_at = db.Column(db.DateTime, default=datetime.now(timezone.utc))
-    updated_at = db.Column(db.DateTime, default=datetime.now(timezone.utc), onupdate=datetime.now(timezone.utc))
+    created_at = db.Column(db.DateTime, default=lambda: datetime.now(timezone.utc))
+    updated_at = db.Column(db.DateTime, default=lambda: datetime.now(timezone.utc), onupdate=lambda: datetime.now(timezone.utc))
 
     def to_dict(self):
         return {
@@ -441,8 +441,8 @@ class Player(db.Model):
     position = db.Column(db.String(80))
     photo_url = db.Column(db.String(255))
     sofascore_id = db.Column(db.Integer, unique=True)
-    created_at = db.Column(db.DateTime, default=datetime.now(timezone.utc))
-    updated_at = db.Column(db.DateTime, default=datetime.now(timezone.utc), onupdate=datetime.now(timezone.utc))
+    created_at = db.Column(db.DateTime, default=lambda: datetime.now(timezone.utc))
+    updated_at = db.Column(db.DateTime, default=lambda: datetime.now(timezone.utc), onupdate=lambda: datetime.now(timezone.utc))
 
     def to_dict(self):
         return {
@@ -479,9 +479,9 @@ class Newsletter(db.Model):
     email_sent = db.Column(db.Boolean, default=False)
     email_sent_date = db.Column(db.DateTime)
     subscriber_count = db.Column(db.Integer, default=0)
-    generated_date = db.Column(db.DateTime, default=datetime.now(timezone.utc))
-    created_at = db.Column(db.DateTime, default=datetime.now(timezone.utc))
-    updated_at = db.Column(db.DateTime, default=datetime.now(timezone.utc), onupdate=datetime.now(timezone.utc))
+    generated_date = db.Column(db.DateTime, default=lambda: datetime.now(timezone.utc))
+    created_at = db.Column(db.DateTime, default=lambda: datetime.now(timezone.utc))
+    updated_at = db.Column(db.DateTime, default=lambda: datetime.now(timezone.utc), onupdate=lambda: datetime.now(timezone.utc))
 
     __table_args__ = (
         db.UniqueConstraint(
@@ -529,8 +529,8 @@ class UserSubscription(db.Model):
     last_email_sent = db.Column(db.DateTime)
     bounce_count = db.Column(db.Integer, default=0)
     email_bounced = db.Column(db.Boolean, default=False)
-    created_at = db.Column(db.DateTime, default=datetime.now(timezone.utc))
-    updated_at = db.Column(db.DateTime, default=datetime.now(timezone.utc), onupdate=datetime.now(timezone.utc))
+    created_at = db.Column(db.DateTime, default=lambda: datetime.now(timezone.utc))
+    updated_at = db.Column(db.DateTime, default=lambda: datetime.now(timezone.utc), onupdate=lambda: datetime.now(timezone.utc))
     
     def to_dict(self):
         return {
@@ -558,7 +558,7 @@ class EmailToken(db.Model):
     expires_at = db.Column(db.DateTime, nullable=False)
     used_at = db.Column(db.DateTime)
     metadata_json = db.Column(db.Text)  # optional JSON payload
-    created_at = db.Column(db.DateTime, default=datetime.now(timezone.utc))
+    created_at = db.Column(db.DateTime, default=lambda: datetime.now(timezone.utc))
 
     def is_valid(self) -> bool:
         now = datetime.now(timezone.utc)
@@ -593,7 +593,7 @@ class LoanFlag(db.Model):
     user_agent = db.Column(db.String(512))
     status = db.Column(db.String(20), default='pending')  # pending|resolved
     admin_note = db.Column(db.Text)
-    created_at = db.Column(db.DateTime, default=datetime.now(timezone.utc))
+    created_at = db.Column(db.DateTime, default=lambda: datetime.now(timezone.utc))
     resolved_at = db.Column(db.DateTime)
 
 
@@ -615,7 +615,7 @@ class TeamTrackingRequest(db.Model):
     user_agent = db.Column(db.String(512))
     status = db.Column(db.String(20), default='pending')  # pending|approved|rejected
     admin_note = db.Column(db.Text)
-    created_at = db.Column(db.DateTime, default=datetime.now(timezone.utc))
+    created_at = db.Column(db.DateTime, default=lambda: datetime.now(timezone.utc))
     resolved_at = db.Column(db.DateTime)
 
     team = db.relationship('Team', backref='tracking_requests', lazy=True)
@@ -643,7 +643,7 @@ class AdminSetting(db.Model):
     id = db.Column(db.Integer, primary_key=True)
     key = db.Column(db.String(100), unique=True, nullable=False)
     value_json = db.Column(db.Text, nullable=True)
-    updated_at = db.Column(db.DateTime, default=datetime.now(timezone.utc), onupdate=datetime.now(timezone.utc))
+    updated_at = db.Column(db.DateTime, default=lambda: datetime.now(timezone.utc), onupdate=lambda: datetime.now(timezone.utc))
 
     def to_dict(self):
         return {
@@ -662,8 +662,8 @@ class UserAccount(db.Model):
     display_name_lower = db.Column(db.String(80), unique=True, nullable=False)
     display_name_confirmed = db.Column(db.Boolean, default=False)
     can_author_commentary = db.Column(db.Boolean, default=False, nullable=False)
-    created_at = db.Column(db.DateTime, default=datetime.now(timezone.utc))
-    updated_at = db.Column(db.DateTime, default=datetime.now(timezone.utc), onupdate=datetime.now(timezone.utc))
+    created_at = db.Column(db.DateTime, default=lambda: datetime.now(timezone.utc))
+    updated_at = db.Column(db.DateTime, default=lambda: datetime.now(timezone.utc), onupdate=lambda: datetime.now(timezone.utc))
     last_login_at = db.Column(db.DateTime)
     last_display_name_change_at = db.Column(db.DateTime)
 
@@ -748,8 +748,8 @@ class NewsletterComment(db.Model):
     author_name = db.Column(db.String(120))
     author_name_legacy = db.Column(db.String(120))
     body = db.Column(db.Text, nullable=False)
-    created_at = db.Column(db.DateTime, default=datetime.now(timezone.utc))
-    updated_at = db.Column(db.DateTime, default=datetime.now(timezone.utc), onupdate=datetime.now(timezone.utc))
+    created_at = db.Column(db.DateTime, default=lambda: datetime.now(timezone.utc))
+    updated_at = db.Column(db.DateTime, default=lambda: datetime.now(timezone.utc), onupdate=lambda: datetime.now(timezone.utc))
     is_deleted = db.Column(db.Boolean, default=False)
 
     user = db.relationship('UserAccount', back_populates='comments')
@@ -799,8 +799,8 @@ class NewsletterPlayerYoutubeLink(db.Model):
     player_id = db.Column(db.Integer, nullable=False)  # Player ID: positive for tracked, negative for manual players
     player_name = db.Column(db.String(120), nullable=False)  # For display/reference
     youtube_link = db.Column(db.String(500), nullable=False)
-    created_at = db.Column(db.DateTime, default=datetime.now(timezone.utc))
-    updated_at = db.Column(db.DateTime, default=datetime.now(timezone.utc), onupdate=datetime.now(timezone.utc))
+    created_at = db.Column(db.DateTime, default=lambda: datetime.now(timezone.utc))
+    updated_at = db.Column(db.DateTime, default=lambda: datetime.now(timezone.utc), onupdate=lambda: datetime.now(timezone.utc))
 
     newsletter = db.relationship('Newsletter', backref='youtube_links', lazy=True)
 
@@ -855,8 +855,8 @@ class NewsletterCommentary(db.Model):
     week_start_date = db.Column(db.Date, nullable=True)
     week_end_date = db.Column(db.Date, nullable=True)
     
-    created_at = db.Column(db.DateTime, default=datetime.now(timezone.utc))
-    updated_at = db.Column(db.DateTime, default=datetime.now(timezone.utc), onupdate=datetime.now(timezone.utc))
+    created_at = db.Column(db.DateTime, default=lambda: datetime.now(timezone.utc))
+    updated_at = db.Column(db.DateTime, default=lambda: datetime.now(timezone.utc), onupdate=lambda: datetime.now(timezone.utc))
     
     # Relationships
     newsletter = db.relationship('Newsletter', backref='commentaries', lazy=True)
@@ -933,7 +933,7 @@ class CommentaryApplause(db.Model):
     commentary_id = db.Column(db.Integer, db.ForeignKey('newsletter_commentary.id', ondelete='CASCADE'), nullable=False)
     user_id = db.Column(db.Integer, db.ForeignKey('user_accounts.id'), nullable=True)
     session_id = db.Column(db.String(100), nullable=True)  # For anonymous tracking
-    created_at = db.Column(db.DateTime, default=datetime.now(timezone.utc))
+    created_at = db.Column(db.DateTime, default=lambda: datetime.now(timezone.utc))
 
     def to_dict(self):
         return {
@@ -976,8 +976,8 @@ class JournalistSubscription(db.Model):
     subscriber_user_id = db.Column(db.Integer, db.ForeignKey('user_accounts.id'), nullable=False)
     journalist_user_id = db.Column(db.Integer, db.ForeignKey('user_accounts.id'), nullable=False)
     is_active = db.Column(db.Boolean, default=True, nullable=False)
-    created_at = db.Column(db.DateTime, default=datetime.now(timezone.utc))
-    updated_at = db.Column(db.DateTime, default=datetime.now(timezone.utc), onupdate=datetime.now(timezone.utc))
+    created_at = db.Column(db.DateTime, default=lambda: datetime.now(timezone.utc))
+    updated_at = db.Column(db.DateTime, default=lambda: datetime.now(timezone.utc), onupdate=lambda: datetime.now(timezone.utc))
 
     __table_args__ = (
         db.UniqueConstraint('subscriber_user_id', 'journalist_user_id', name='uq_journalist_subscription'),
@@ -1000,7 +1000,7 @@ class JournalistTeamAssignment(db.Model):
     id = db.Column(db.Integer, primary_key=True)
     user_id = db.Column(db.Integer, db.ForeignKey('user_accounts.id'), nullable=False)
     team_id = db.Column(db.Integer, db.ForeignKey('teams.id'), nullable=False)
-    assigned_at = db.Column(db.DateTime, default=datetime.now(timezone.utc))
+    assigned_at = db.Column(db.DateTime, default=lambda: datetime.now(timezone.utc))
     assigned_by = db.Column(db.Integer, db.ForeignKey('user_accounts.id'), nullable=True)
 
     # Relationships
@@ -1038,7 +1038,7 @@ class JournalistLoanTeamAssignment(db.Model):
     user_id = db.Column(db.Integer, db.ForeignKey('user_accounts.id'), nullable=False)
     loan_team_name = db.Column(db.String(100), nullable=False)  # Always stored for display
     loan_team_id = db.Column(db.Integer, db.ForeignKey('teams.id'), nullable=True)  # Nullable for custom teams
-    assigned_at = db.Column(db.DateTime, default=datetime.now(timezone.utc))
+    assigned_at = db.Column(db.DateTime, default=lambda: datetime.now(timezone.utc))
     assigned_by = db.Column(db.Integer, db.ForeignKey('user_accounts.id'), nullable=True)
 
     # Relationships
@@ -1082,7 +1082,7 @@ class WriterCoverageRequest(db.Model):
     status = db.Column(db.String(20), nullable=False, default='pending')  # 'pending' | 'approved' | 'denied'
     request_message = db.Column(db.Text, nullable=True)  # Why they want coverage
     denial_reason = db.Column(db.Text, nullable=True)  # Admin's reason for denial
-    requested_at = db.Column(db.DateTime, default=datetime.now(timezone.utc))
+    requested_at = db.Column(db.DateTime, default=lambda: datetime.now(timezone.utc))
     reviewed_at = db.Column(db.DateTime, nullable=True)
     reviewed_by = db.Column(db.Integer, db.ForeignKey('user_accounts.id'), nullable=True)
 
@@ -1134,8 +1134,8 @@ class StripeConnectedAccount(db.Model):
     payouts_enabled = db.Column(db.Boolean, default=False, nullable=False)
     charges_enabled = db.Column(db.Boolean, default=False, nullable=False)
     details_submitted = db.Column(db.Boolean, default=False, nullable=False)
-    created_at = db.Column(db.DateTime, default=datetime.now(timezone.utc))
-    updated_at = db.Column(db.DateTime, default=datetime.now(timezone.utc), onupdate=datetime.now(timezone.utc))
+    created_at = db.Column(db.DateTime, default=lambda: datetime.now(timezone.utc))
+    updated_at = db.Column(db.DateTime, default=lambda: datetime.now(timezone.utc), onupdate=lambda: datetime.now(timezone.utc))
 
     # Relationship
     journalist = db.relationship('UserAccount', foreign_keys=[journalist_user_id], backref=db.backref('stripe_account', uselist=False))
@@ -1165,8 +1165,8 @@ class StripeSubscriptionPlan(db.Model):
     price_amount = db.Column(db.Integer, nullable=False)  # in cents
     currency = db.Column(db.String(3), default='usd', nullable=False)
     is_active = db.Column(db.Boolean, default=True, nullable=False)
-    created_at = db.Column(db.DateTime, default=datetime.now(timezone.utc))
-    updated_at = db.Column(db.DateTime, default=datetime.now(timezone.utc), onupdate=datetime.now(timezone.utc))
+    created_at = db.Column(db.DateTime, default=lambda: datetime.now(timezone.utc))
+    updated_at = db.Column(db.DateTime, default=lambda: datetime.now(timezone.utc), onupdate=lambda: datetime.now(timezone.utc))
 
     # Relationship
     journalist = db.relationship('UserAccount', foreign_keys=[journalist_user_id], backref=db.backref('subscription_plans', lazy=True))
@@ -1199,8 +1199,8 @@ class StripeSubscription(db.Model):
     current_period_start = db.Column(db.DateTime)
     current_period_end = db.Column(db.DateTime)
     cancel_at_period_end = db.Column(db.Boolean, default=False)
-    created_at = db.Column(db.DateTime, default=datetime.now(timezone.utc))
-    updated_at = db.Column(db.DateTime, default=datetime.now(timezone.utc), onupdate=datetime.now(timezone.utc))
+    created_at = db.Column(db.DateTime, default=lambda: datetime.now(timezone.utc))
+    updated_at = db.Column(db.DateTime, default=lambda: datetime.now(timezone.utc), onupdate=lambda: datetime.now(timezone.utc))
 
     __table_args__ = (
         db.UniqueConstraint('subscriber_user_id', 'journalist_user_id', name='uq_stripe_subscription'),
@@ -1236,7 +1236,7 @@ class StripePlatformRevenue(db.Model):
     total_revenue_cents = db.Column(db.Integer, default=0, nullable=False)  # Total subscriptions processed
     platform_fee_cents = db.Column(db.Integer, default=0, nullable=False)  # 10% collected
     subscription_count = db.Column(db.Integer, default=0, nullable=False)
-    created_at = db.Column(db.DateTime, default=datetime.now(timezone.utc))
+    created_at = db.Column(db.DateTime, default=lambda: datetime.now(timezone.utc))
 
     def to_dict(self):
         return {
@@ -1260,7 +1260,7 @@ class NewsletterDigestQueue(db.Model):
     user_id = db.Column(db.Integer, db.ForeignKey('user_accounts.id'), nullable=False)
     newsletter_id = db.Column(db.Integer, db.ForeignKey('newsletters.id'), nullable=False)
     week_key = db.Column(db.String(20), nullable=False)  # e.g., '2025-W48' for grouping
-    queued_at = db.Column(db.DateTime, default=datetime.now(timezone.utc), nullable=False)
+    queued_at = db.Column(db.DateTime, default=lambda: datetime.now(timezone.utc), nullable=False)
     sent = db.Column(db.Boolean, default=False, nullable=False)
     sent_at = db.Column(db.DateTime, nullable=True)
 
@@ -1301,10 +1301,10 @@ class BackgroundJob(db.Model):
     current_player = db.Column(db.String(200))
     results_json = db.Column(db.Text)  # JSON serialized results
     error = db.Column(db.Text)
-    started_at = db.Column(db.DateTime, default=datetime.now(timezone.utc))
+    started_at = db.Column(db.DateTime, default=lambda: datetime.now(timezone.utc))
     completed_at = db.Column(db.DateTime)
-    created_at = db.Column(db.DateTime, default=datetime.now(timezone.utc))
-    updated_at = db.Column(db.DateTime, default=datetime.now(timezone.utc), onupdate=datetime.now(timezone.utc))
+    created_at = db.Column(db.DateTime, default=lambda: datetime.now(timezone.utc))
+    updated_at = db.Column(db.DateTime, default=lambda: datetime.now(timezone.utc), onupdate=lambda: datetime.now(timezone.utc))
 
     __table_args__ = (
         db.Index('ix_background_jobs_status', 'status'),
@@ -1347,8 +1347,8 @@ class TeamSubreddit(db.Model):
     subreddit_name = db.Column(db.String(50), nullable=False)  # e.g., "reddevils" without r/
     post_format = db.Column(db.String(20), nullable=False, default='full')  # 'full' or 'compact'
     is_active = db.Column(db.Boolean, default=True, nullable=False)
-    created_at = db.Column(db.DateTime, default=datetime.now(timezone.utc))
-    updated_at = db.Column(db.DateTime, default=datetime.now(timezone.utc), onupdate=datetime.now(timezone.utc))
+    created_at = db.Column(db.DateTime, default=lambda: datetime.now(timezone.utc))
+    updated_at = db.Column(db.DateTime, default=lambda: datetime.now(timezone.utc), onupdate=lambda: datetime.now(timezone.utc))
 
     # Relationships
     team = db.relationship('Team', backref=db.backref('subreddits', lazy=True))
@@ -1389,8 +1389,8 @@ class RedditPost(db.Model):
     status = db.Column(db.String(20), nullable=False, default='pending')  # 'pending', 'success', 'failed', 'deleted'
     error_message = db.Column(db.Text)  # Error details if posting failed
     posted_at = db.Column(db.DateTime)
-    created_at = db.Column(db.DateTime, default=datetime.now(timezone.utc))
-    updated_at = db.Column(db.DateTime, default=datetime.now(timezone.utc), onupdate=datetime.now(timezone.utc))
+    created_at = db.Column(db.DateTime, default=lambda: datetime.now(timezone.utc))
+    updated_at = db.Column(db.DateTime, default=lambda: datetime.now(timezone.utc), onupdate=lambda: datetime.now(timezone.utc))
 
     # Relationships
     newsletter = db.relationship('Newsletter', backref=db.backref('reddit_posts', lazy=True))
@@ -1423,8 +1423,8 @@ class TeamAlias(db.Model):
     canonical_name = db.Column(db.String(100), nullable=False)
     alias = db.Column(db.String(100), nullable=False, index=True)
     team_id = db.Column(db.Integer, db.ForeignKey('teams.id'), nullable=True)
-    created_at = db.Column(db.DateTime, default=datetime.now(timezone.utc))
-    updated_at = db.Column(db.DateTime, default=datetime.now(timezone.utc), onupdate=datetime.now(timezone.utc))
+    created_at = db.Column(db.DateTime, default=lambda: datetime.now(timezone.utc))
+    updated_at = db.Column(db.DateTime, default=lambda: datetime.now(timezone.utc), onupdate=lambda: datetime.now(timezone.utc))
 
     team = db.relationship('Team', backref='aliases', lazy=True)
 
@@ -1452,8 +1452,8 @@ class ManualPlayerSubmission(db.Model):
     notes = db.Column(db.Text, nullable=True)
     status = db.Column(db.String(20), nullable=False, default='pending')  # pending, approved, rejected
     admin_notes = db.Column(db.Text, nullable=True)
-    created_at = db.Column(db.DateTime, default=datetime.now(timezone.utc))
-    updated_at = db.Column(db.DateTime, default=datetime.now(timezone.utc), onupdate=datetime.now(timezone.utc))
+    created_at = db.Column(db.DateTime, default=lambda: datetime.now(timezone.utc))
+    updated_at = db.Column(db.DateTime, default=lambda: datetime.now(timezone.utc), onupdate=lambda: datetime.now(timezone.utc))
     reviewed_at = db.Column(db.DateTime, nullable=True)
     reviewed_by = db.Column(db.Integer, db.ForeignKey('user_accounts.id'), nullable=True)
 
@@ -1503,8 +1503,8 @@ class AcademyLeague(db.Model):
     last_synced_at = db.Column(db.DateTime, nullable=True)
     sync_enabled = db.Column(db.Boolean, default=True)
 
-    created_at = db.Column(db.DateTime, default=datetime.now(timezone.utc))
-    updated_at = db.Column(db.DateTime, default=datetime.now(timezone.utc), onupdate=datetime.now(timezone.utc))
+    created_at = db.Column(db.DateTime, default=lambda: datetime.now(timezone.utc))
+    updated_at = db.Column(db.DateTime, default=lambda: datetime.now(timezone.utc), onupdate=lambda: datetime.now(timezone.utc))
 
     # Relationships
     parent_team = db.relationship('Team', backref=db.backref('academy_leagues', lazy=True))
@@ -1565,7 +1565,7 @@ class AcademyAppearance(db.Model):
     lineup_data = db.Column(db.JSON, nullable=True)
     events_data = db.Column(db.JSON, nullable=True)
 
-    created_at = db.Column(db.DateTime, default=datetime.now(timezone.utc))
+    created_at = db.Column(db.DateTime, default=lambda: datetime.now(timezone.utc))
 
     # Relationships
     academy_league = db.relationship('AcademyLeague', backref=db.backref('appearances', lazy=True))
@@ -1642,8 +1642,8 @@ class CommunityTake(db.Model):
     original_posted_at = db.Column(db.DateTime, nullable=True)  # When it was originally posted
     upvotes = db.Column(db.Integer, default=0)  # From Reddit/Twitter engagement
 
-    created_at = db.Column(db.DateTime, default=datetime.now(timezone.utc))
-    updated_at = db.Column(db.DateTime, default=datetime.now(timezone.utc), onupdate=datetime.now(timezone.utc))
+    created_at = db.Column(db.DateTime, default=lambda: datetime.now(timezone.utc))
+    updated_at = db.Column(db.DateTime, default=lambda: datetime.now(timezone.utc), onupdate=lambda: datetime.now(timezone.utc))
 
     # Relationships
     team = db.relationship('Team', backref=db.backref('community_takes', lazy=True))
@@ -1717,8 +1717,8 @@ class QuickTakeSubmission(db.Model):
     ip_hash = db.Column(db.String(64), nullable=True)  # SHA-256 hash of IP
     user_agent = db.Column(db.String(512), nullable=True)
 
-    created_at = db.Column(db.DateTime, default=datetime.now(timezone.utc))
-    updated_at = db.Column(db.DateTime, default=datetime.now(timezone.utc), onupdate=datetime.now(timezone.utc))
+    created_at = db.Column(db.DateTime, default=lambda: datetime.now(timezone.utc))
+    updated_at = db.Column(db.DateTime, default=lambda: datetime.now(timezone.utc), onupdate=lambda: datetime.now(timezone.utc))
 
     # Relationships
     team = db.relationship('Team', backref=db.backref('quick_take_submissions', lazy=True))
@@ -1766,8 +1766,8 @@ class ContributorProfile(db.Model):
     attribution_name = db.Column(db.String(120), nullable=True)
     created_by_id = db.Column(db.Integer, db.ForeignKey('user_accounts.id'), nullable=False)
     is_active = db.Column(db.Boolean, default=True, nullable=False)
-    created_at = db.Column(db.DateTime, default=datetime.now(timezone.utc))
-    updated_at = db.Column(db.DateTime, default=datetime.now(timezone.utc), onupdate=datetime.now(timezone.utc))
+    created_at = db.Column(db.DateTime, default=lambda: datetime.now(timezone.utc))
+    updated_at = db.Column(db.DateTime, default=lambda: datetime.now(timezone.utc), onupdate=lambda: datetime.now(timezone.utc))
 
     # Relationships
     created_by = db.relationship('UserAccount', foreign_keys=[created_by_id],
