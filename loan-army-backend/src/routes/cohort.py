@@ -402,6 +402,11 @@ def admin_full_rebuild():
                 'errors': [],
             }
 
+            def _check_cancelled():
+                from src.utils.background_jobs import is_job_cancelled
+                if is_job_cancelled(job_id):
+                    raise InterruptedError(f'Job cancelled at stage: {stage}')
+
             # ── Stage 1: Clean slate ──
             if not skip_clean:
                 stage = 'clean'
@@ -430,6 +435,7 @@ def admin_full_rebuild():
                 results['stages_completed'].append('clean (skipped)')
 
             # ── Stage 2: Seed academy leagues ──
+            _check_cancelled()
             stage = 'seed_leagues'
             update_job(job_id, progress=1, total=total_stages, current_player='Stage 2: Seeding academy leagues...')
             api_client_for_leagues = APIFootballClient()
@@ -485,6 +491,7 @@ def admin_full_rebuild():
             results['stages_completed'].append('seed_leagues')
 
             # ── Stage 3: Cohort discovery + journey sync ──
+            _check_cancelled()
             if not skip_cohorts:
                 stage = 'cohorts'
                 update_job(job_id, progress=2, total=total_stages, current_player='Stage 3: Discovering cohorts + syncing journeys...')
@@ -507,6 +514,7 @@ def admin_full_rebuild():
                 results['stages_completed'].append('cohorts (skipped)')
 
             # ── Stage 4: Create TrackedPlayers ──
+            _check_cancelled()
             stage = 'tracked_players'
             update_job(job_id, progress=4, total=total_stages, current_player='Stage 4: Creating TrackedPlayer records...')
             api_client = APIFootballClient()
@@ -652,6 +660,7 @@ def admin_full_rebuild():
             results['stages_completed'].append('tracked_players')
 
             # ── Stage 5: Link orphaned journeys ──
+            _check_cancelled()
             stage = 'link_journeys'
             update_job(job_id, progress=5, total=total_stages, current_player='Stage 5: Linking orphaned journeys...')
             unlinked = TrackedPlayer.query.filter(
@@ -670,6 +679,7 @@ def admin_full_rebuild():
             results['stages_completed'].append('link_journeys')
 
             # ── Stage 6: Refresh statuses ──
+            _check_cancelled()
             stage = 'refresh_statuses'
             update_job(job_id, progress=6, total=total_stages, current_player='Stage 6: Refreshing statuses...')
             tracked = TrackedPlayer.query.filter(TrackedPlayer.is_active == True).all()
@@ -699,6 +709,7 @@ def admin_full_rebuild():
             results['stages_completed'].append('refresh_statuses')
 
             # ── Stage 7: Seed club locations ──
+            _check_cancelled()
             stage = 'locations'
             update_job(job_id, progress=7, total=total_stages, current_player='Stage 7: Seeding club locations...')
             locations_added = seed_club_locations()
@@ -708,6 +719,12 @@ def admin_full_rebuild():
             update_job(job_id, status='completed', results=results,
                        completed_at=datetime.now(timezone.utc).isoformat())
 
+        except InterruptedError as e:
+            logger.info('Full rebuild job %s cancelled at stage: %s', job_id, stage)
+            results['stages_completed'].append(f'{stage} (cancelled)')
+            update_job(job_id, status='cancelled', results=results,
+                       error=str(e),
+                       completed_at=datetime.now(timezone.utc).isoformat())
         except Exception as e:
             logger.exception(f'Full rebuild job {job_id} failed at stage: {stage}')
             db.session.rollback()

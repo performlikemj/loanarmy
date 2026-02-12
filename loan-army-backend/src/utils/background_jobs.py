@@ -123,6 +123,46 @@ def get_job(job_id: str) -> dict | None:
     return None
 
 
+def cancel_job(job_id: str) -> bool:
+    """Cancel a running background job.
+
+    Sets the job status to 'cancelled' so background loops can detect it
+    and exit gracefully on their next iteration.
+
+    Returns True if the job was running and is now cancelled.
+    """
+    try:
+        job = db.session.get(BackgroundJob, job_id)
+        if job and job.status == 'running':
+            job.status = 'cancelled'
+            job.error = 'Cancelled by admin'
+            job.completed_at = datetime.now(timezone.utc)
+            db.session.commit()
+            logger.info('Job %s cancelled', job_id)
+            return True
+        return False
+    except Exception as e:
+        logger.error('Failed to cancel job %s: %s', job_id, e)
+        db.session.rollback()
+        return False
+
+
+def is_job_cancelled(job_id: str) -> bool:
+    """Check whether a job has been cancelled.
+
+    Uses a fresh DB read (expunges cached state) so cancellation
+    signals are picked up promptly by long-running loops.
+    """
+    try:
+        job = db.session.get(BackgroundJob, job_id)
+        if job:
+            db.session.refresh(job)
+            return job.status == 'cancelled'
+    except Exception:
+        pass
+    return False
+
+
 # Aliases for backward compatibility with api.py internal naming
 _create_background_job = create_background_job
 _update_job = update_job

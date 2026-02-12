@@ -22,7 +22,7 @@ from src.services.youth_competition_resolver import (
     resolve_youth_leagues,
     resolve_youth_team_for_parent,
 )
-from src.utils.background_jobs import update_job
+from src.utils.background_jobs import update_job, is_job_cancelled
 
 logger = logging.getLogger(__name__)
 
@@ -158,6 +158,10 @@ def run_big6_seed(job_id, seasons=None, team_ids=None, league_ids=None):
     # ── Phase 1: Discovery ──
     cohort_ids = []
     for idx, (team_id, league_meta, season) in enumerate(combos):
+        if is_job_cancelled(job_id):
+            logger.info("Big 6 seed cancelled during Phase 1 at combo %d/%d", idx, total_combos)
+            return {'cancelled': True, 'phase': 'discovery', 'cohorts_created': len(cohort_ids)}
+
         league_id = int(league_meta.get('league_id'))
         league_name = league_meta.get('name') or YOUTH_LEAGUES.get(league_id, str(league_id))
         team_name = parent_names.get(team_id, str(team_id))
@@ -349,6 +353,9 @@ def run_big6_seed(job_id, seasons=None, team_ids=None, league_ids=None):
     for idx, member in enumerate(unique_members):
         if quota_exhausted:
             break
+        if idx % 10 == 0 and is_job_cancelled(job_id):
+            logger.info("Big 6 seed cancelled during Phase 2 at player %d/%d (%d synced)", idx, total_players, synced_count)
+            return {'cancelled': True, 'phase': 'journey_sync', 'players_synced': synced_count, 'cohorts_created': len(cohort_ids)}
 
         try:
             rate_limiter.wait_if_needed()

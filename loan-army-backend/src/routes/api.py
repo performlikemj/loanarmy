@@ -7391,6 +7391,16 @@ def get_job_status(job_id: str):
     return jsonify(job)
 
 
+@api_bp.route('/admin/jobs/<job_id>/cancel', methods=['POST'])
+@require_api_key
+def cancel_job_endpoint(job_id: str):
+    """Cancel a running background job."""
+    from src.utils.background_jobs import cancel_job
+    if cancel_job(job_id):
+        return jsonify({'message': 'Job cancelled', 'job_id': job_id})
+    return jsonify({'error': 'Job not found or not running'}), 404
+
+
 @api_bp.route('/admin/loans/sync-denormalized-stats', methods=['POST'])
 @require_api_key
 def admin_sync_denormalized_stats():
