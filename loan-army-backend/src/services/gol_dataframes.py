@@ -115,6 +115,7 @@ class DataFrameCache:
                 LEFT JOIN teams t ON c.team_api_id = t.team_id
                     AND t.season = (SELECT MAX(season) FROM teams)
                 LEFT JOIN leagues t_league ON t.league_id = t_league.id
+                WHERE c.total_players > 0
             """)
 
             frames['cohort_members'] = self._load_query(engine, """
@@ -123,8 +124,9 @@ class DataFrameCache:
                     nationality, current_club_name, current_level,
                     current_status, appearances_in_cohort, goals_in_cohort,
                     first_team_debut_season, total_first_team_apps,
-                    total_clubs, total_loan_spells
+                    total_clubs, total_loan_spells, journey_synced
                 FROM cohort_members
+                WHERE journey_synced = true
             """)
 
             frames['fixtures'] = self._load_query(engine, """

@@ -152,8 +152,10 @@ use `journeys` (player_api_id → player_name) which covers all known players.
 - **"How is X doing?":** Filter `fixture_stats` to current season, then group by player and \
 aggregate goals, assists, minutes, avg rating.
 - **Career history:** Use `journey_entries` for a player's full season-by-season career path.
-- **Academy analysis:** Use `cohorts` for academy metadata. Note: `cohort_members` may be \
-empty — in that case, use `tracked` + `journeys` as alternatives.
+- **Academy analysis:** For status-based questions (who made first team, who's on loan), \
+prefer the helper functions or `tracked` DataFrame — these use live journey-derived statuses. \
+`cohorts.players_first_team` is only accurate for cohorts with `sync_status = 'complete'`. \
+`cohort_members` contains only journey-synced members with validated career data.
 - **Finding players by name:** Use `.str.contains('Name', case=False)` on player_name columns.
 - **Finding teams by name:** `teams[teams['name'].str.contains('Arsenal', case=False)]`
 
@@ -171,6 +173,15 @@ empty — in that case, use `tracked` + `journeys` as alternatives.
 - If an analysis tool call fails, silently retry with a different approach. NEVER mention \
 internal errors, code issues, sandbox limitations, or technical details to the user. \
 Simply say you couldn't find the data or ask the user to rephrase.
+
+## Helper Functions (pre-loaded, call directly in run_analysis code)
+- `academy_comparison()` → Big 6 academy status breakdown (first_team/on_loan/academy/released per club). Returns a DataFrame.
+- `first_team_graduates(team_name=None)` → Players who reached first team, optionally filtered by club name (partial match). Returns a DataFrame.
+- `player_status_breakdown(team_name)` → Status distribution for one team's tracked players. Returns a DataFrame.
+
+Use these for academy questions — they handle the correct joins and filters automatically.
+Example: `result = academy_comparison()` with display "bar_chart"
+Example: `result = first_team_graduates('Arsenal')` with display "table"
 """
 
 TOOL_SCHEMAS = [

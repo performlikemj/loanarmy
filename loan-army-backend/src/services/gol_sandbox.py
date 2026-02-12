@@ -52,6 +52,71 @@ ALLOWED_BUILTINS = {
 }
 
 
+BIG_6 = ['Arsenal', 'Chelsea', 'Liverpool', 'Manchester United',
+         'Manchester City', 'Tottenham Hotspur']
+
+
+def _build_helpers(dataframes: dict) -> dict:
+    """Build helper functions that operate on the loaded DataFrames.
+
+    These run as normal Python (not RestrictedPython), so pandas is unrestricted.
+    """
+
+    def academy_comparison():
+        """Big 6 academy status breakdown: first_team/on_loan/academy/released per club."""
+        tracked = dataframes.get('tracked', pd.DataFrame())
+        teams = dataframes.get('teams', pd.DataFrame())
+        if tracked.empty or teams.empty:
+            return pd.DataFrame(columns=['team', 'first_team', 'on_loan', 'academy', 'released'])
+
+        merged = tracked.merge(teams[['id', 'name']], left_on='team_id', right_on='id', how='inner')
+        merged = merged[merged['name'].isin(BIG_6)]
+        if merged.empty:
+            return pd.DataFrame(columns=['team', 'first_team', 'on_loan', 'academy', 'released'])
+
+        pivot = merged.groupby(['name', 'status']).size().unstack(fill_value=0).reset_index()
+        pivot = pivot.rename(columns={'name': 'team'})
+        if 'first_team' in pivot.columns:
+            pivot = pivot.sort_values('first_team', ascending=False)
+        return pivot
+
+    def first_team_graduates(team_name=None):
+        """Players who reached the first team. Optional team_name filter (partial match)."""
+        tracked = dataframes.get('tracked', pd.DataFrame())
+        teams = dataframes.get('teams', pd.DataFrame())
+        if tracked.empty or teams.empty:
+            return pd.DataFrame(columns=['player_name', 'team', 'position', 'nationality', 'age'])
+
+        ft = tracked[tracked['status'] == 'first_team']
+        merged = ft.merge(teams[['id', 'name']], left_on='team_id', right_on='id', how='inner')
+        if team_name:
+            merged = merged[merged['name'].str.contains(team_name, case=False, na=False)]
+        return (merged[['player_name', 'name', 'position', 'nationality', 'age']]
+                .rename(columns={'name': 'team'})
+                .sort_values(['team', 'player_name'])
+                .reset_index(drop=True))
+
+    def player_status_breakdown(team_name):
+        """Status distribution for one team's tracked players."""
+        tracked = dataframes.get('tracked', pd.DataFrame())
+        teams = dataframes.get('teams', pd.DataFrame())
+        if tracked.empty or teams.empty:
+            return pd.DataFrame(columns=['status', 'count'])
+
+        merged = tracked.merge(teams[['id', 'name']], left_on='team_id', right_on='id', how='inner')
+        merged = merged[merged['name'].str.contains(team_name, case=False, na=False)]
+        return (merged.groupby('status').size()
+                .reset_index(name='count')
+                .sort_values('count', ascending=False)
+                .reset_index(drop=True))
+
+    return {
+        'academy_comparison': academy_comparison,
+        'first_team_graduates': first_team_graduates,
+        'player_status_breakdown': player_status_breakdown,
+    }
+
+
 def execute_analysis(code: str, dataframes: dict, display: str = 'table', description: str = '') -> dict:
     """
     Execute pandas code in a restricted sandbox.
@@ -88,6 +153,7 @@ def execute_analysis(code: str, dataframes: dict, display: str = 'table', descri
         'pd': pd,
         'np': np,
         **dataframes,
+        **_build_helpers(dataframes),
     }
 
     local_ns = {}
