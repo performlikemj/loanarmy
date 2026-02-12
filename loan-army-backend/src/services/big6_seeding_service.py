@@ -138,8 +138,10 @@ def run_big6_seed(job_id, seasons=None, team_ids=None, league_ids=None):
     def phase1_heartbeat():
         update_job(job_id, current_player="Phase 1: discovering cohorts...")
 
-    from flask import current_app
-    _app = current_app._get_current_object()
+    # Get the app object for pushing app context in ThreadPoolExecutor
+    # worker threads (thread-local contexts don't propagate to new threads).
+    # We use a deferred import to avoid circular imports at module level.
+    from src.main import app as _app
 
     def _run_with_timeout(task_fn, timeout_seconds):
         """Run a callable in a worker thread with a hard timeout."""
