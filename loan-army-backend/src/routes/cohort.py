@@ -488,9 +488,20 @@ def admin_full_rebuild():
             if not skip_cohorts:
                 stage = 'cohorts'
                 update_job(job_id, progress=2, total=total_stages, current_player='Stage 3: Discovering cohorts + syncing journeys...')
-                seed_result = run_big6_seed(job_id, seasons=seasons, team_ids=team_ids)
-                results['cohorts_created'] = seed_result.get('cohorts_created', 0)
-                results['players_synced'] = seed_result.get('players_synced', 0)
+                try:
+                    seed_result = run_big6_seed(job_id, seasons=seasons, team_ids=team_ids)
+                    results['cohorts_created'] = seed_result.get('cohorts_created', 0)
+                    results['players_synced'] = seed_result.get('players_synced', 0)
+                except Exception as stage3_err:
+                    logger.warning('Stage 3 (cohort seed) failed, continuing to remaining stages: %s', stage3_err)
+                    results['errors'].append(f'Stage 3 partial failure: {stage3_err}')
+
+                # Report how many cohorts still need journey sync
+                seeded_only = AcademyCohort.query.filter_by(sync_status='seeded').count()
+                if seeded_only:
+                    logger.warning('%d cohorts still at "seeded" status (journey sync incomplete)', seeded_only)
+                    results['cohorts_pending_sync'] = seeded_only
+
                 results['stages_completed'].append('cohorts')
             else:
                 results['stages_completed'].append('cohorts (skipped)')

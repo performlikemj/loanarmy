@@ -250,15 +250,23 @@ def run_big6_seed(job_id, seasons=None, team_ids=None, league_ids=None):
                current_player="Starting journey sync")
 
     current_year = datetime.now().year
+    rate_limiter = RateLimiter()  # 280 req/min, 7000 req/day
+    quota_exhausted = False
+    synced_count = 0
 
     for idx, member in enumerate(unique_members):
+        if quota_exhausted:
+            break
+
         try:
+            rate_limiter.wait_if_needed()
+
             update_job(job_id, progress=total_combos + idx,
                        current_player=f"Journey: {member.player_name}")
 
             journey = journey_service.sync_player(member.player_api_id)
 
-            if journey:
+            if journey and not journey.sync_error:
                 # Update ALL members with this player_api_id
                 all_player_members = CohortMember.query.filter_by(
                     player_api_id=member.player_api_id
@@ -282,6 +290,17 @@ def run_big6_seed(job_id, seasons=None, team_ids=None, league_ids=None):
                     pm.journey_sync_error = None
 
                 db.session.commit()
+                synced_count += 1
+            elif journey and journey.sync_error:
+                # Journey exists but had a sync error — don't mark as synced
+                all_player_members = CohortMember.query.filter_by(
+                    player_api_id=member.player_api_id
+                ).all()
+                for pm in all_player_members:
+                    pm.journey_id = journey.id
+                    pm.journey_synced = False
+                    pm.journey_sync_error = journey.sync_error
+                db.session.commit()
             else:
                 all_player_members = CohortMember.query.filter_by(
                     player_api_id=member.player_api_id
@@ -291,11 +310,39 @@ def run_big6_seed(job_id, seasons=None, team_ids=None, league_ids=None):
                     pm.journey_sync_error = "Journey sync returned no data"
                 db.session.commit()
 
+        except RuntimeError as e:
+            err_msg = str(e).lower()
+            if 'daily api call limit' in err_msg or 'daily quota' in err_msg:
+                logger.warning(
+                    "Daily API limit reached at player %d/%d (%d synced so far), saving progress",
+                    idx + 1, total_players, synced_count,
+                )
+                quota_exhausted = True
+                break
+            logger.warning(f"Failed journey sync for player {member.player_api_id}: {e}")
+            member.journey_sync_error = str(e)
+            member.journey_synced = False
+            db.session.commit()
         except Exception as e:
             logger.warning(f"Failed journey sync for player {member.player_api_id}: {e}")
             member.journey_sync_error = str(e)
             member.journey_synced = False
             db.session.commit()
+
+        if (idx + 1) % 50 == 0:
+            logger.info(
+                "Journey sync progress: %d/%d (%.0f%%), %d synced",
+                idx + 1, total_players, (idx + 1) / total_players * 100, synced_count,
+            )
+
+    if quota_exhausted:
+        remaining = total_players - (idx + 1)
+        logger.warning(
+            "Journey sync stopped early: %d/%d completed, %d remaining (re-run to continue)",
+            synced_count, total_players, remaining,
+        )
+    else:
+        logger.info("Journey sync complete: %d/%d synced", synced_count, total_players)
 
     # ── Phase 3: Refresh stats ──
     update_job(job_id, current_player="Refreshing cohort stats")
@@ -332,10 +379,16 @@ def run_big6_seed(job_id, seasons=None, team_ids=None, league_ids=None):
             logger.warning(f"Failed to mark cohort {cohort_id} complete: {e}")
     db.session.commit()
 
-    logger.info(f"Big 6 seed complete: {len(cohort_ids)} cohorts, {total_players} players")
+    logger.info(
+        "Big 6 seed complete: %d cohorts, %d/%d players synced%s",
+        len(cohort_ids), synced_count, total_players,
+        " (quota exhausted)" if quota_exhausted else "",
+    )
     return {
         'cohorts_created': len(cohort_ids),
-        'players_synced': total_players,
+        'players_synced': synced_count,
+        'players_total': total_players,
+        'quota_exhausted': quota_exhausted,
         'combos_attempted': total_combos,
         'combos_skipped_no_youth_team': skipped_no_youth_team,
         'combos_skipped_empty_cohort': skipped_empty_cohorts,

@@ -41,7 +41,7 @@ export function GolPanel() {
   const handleOpen = useCallback(() => setOpen(true), [])
 
   const headerContent = (
-    <div className="flex items-center justify-between w-full">
+    <div className="flex items-center justify-between w-full pr-8">
       <span className="text-lg font-semibold">GOL Assistant</span>
       <Button
         variant="ghost"

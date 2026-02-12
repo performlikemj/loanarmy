@@ -101,6 +101,8 @@ CONTINUITY.md
 
 ## Trivial Log
 
+- 2026-02-12: Academy data audit — all Big 6 teams show 0% conversion due to journey sync never completing
+- 2026-02-12: Fixed Full Rebuild journey sync: added RateLimiter, quota-exceeded break, non-fatal Stage 3, empty-journey bug fix
 - 2026-01-10: Fixed agent protocol - made AGENTS.md reading mandatory in CLAUDE.md
 
 ## Open Questions
