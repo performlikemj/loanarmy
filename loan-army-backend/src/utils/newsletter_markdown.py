@@ -359,7 +359,7 @@ def convert_newsletter_to_markdown(
     lines = []
     
     # Header
-    title = content.get('title') or newsletter.get('title') or 'Loan Watch'
+    title = content.get('title') or newsletter.get('title') or 'Academy Pipeline Update'
     lines.append(f"# {title}")
     lines.append('')
     
@@ -512,7 +512,7 @@ def convert_newsletter_to_compact_markdown(newsletter: dict) -> str:
     lines = []
     
     # Header
-    title = content.get('title') or newsletter.get('title') or 'Loan Watch'
+    title = content.get('title') or newsletter.get('title') or 'Academy Pipeline Update'
     lines.append(f"# {title}")
     lines.append('')
     
@@ -596,7 +596,7 @@ def generate_post_title(newsletter: dict, team_name: str) -> str:
     else:
         date_str = datetime.now().strftime('%-d %b %Y')
     
-    return f"[Loan Watch] {team_name} Loan Report | {date_str}"
+    return f"[Academy Watch] {team_name} Pipeline Update | {date_str}"
 
 
 

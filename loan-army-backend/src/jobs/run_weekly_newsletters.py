@@ -1,15 +1,18 @@
 import os
 from datetime import date, datetime, timezone
-from src.models.league import db, Team, LoanedPlayer, AdminSetting
+from src.models.league import db, Team, AdminSetting
+from src.models.tracked_player import TrackedPlayer
 from src.agents.weekly_newsletter_agent import generate_team_weekly_newsletter
 from src.agents.errors import NoActiveLoaneesError
 from src.main import app
 
-def teams_with_active_loans(season: int | None = None) -> list[int]:
-    q = db.session.query(Team.id).join(LoanedPlayer, LoanedPlayer.primary_team_id == Team.id)\
-         .filter(LoanedPlayer.is_active.is_(True)).distinct()
-    if season:
-        q = q.filter(Team.season == season)
+
+def teams_with_active_tracked_players() -> list[int]:
+    """Return team DB IDs that have active TrackedPlayers (excluding released/sold)."""
+    q = db.session.query(TrackedPlayer.team_id).filter(
+        TrackedPlayer.is_active.is_(True),
+        TrackedPlayer.status.notin_(['released', 'sold']),
+    ).distinct()
     return [t[0] for t in q.all()]
 
 def run_for_date(target_date: date):
@@ -18,7 +21,6 @@ def run_for_date(target_date: date):
         db.session.rollback()
     except Exception:
         pass
-    # Narrow to teams with active loans; you can also choose a curated list
     def _runs_paused() -> bool:
         try:
             # Defensive rollback before metadata reads
@@ -41,7 +43,7 @@ def run_for_date(target_date: date):
         db.session.rollback()
     except Exception:
         pass
-    team_ids = teams_with_active_loans()
+    team_ids = teams_with_active_tracked_players()
     results = []
     for team_db_id in team_ids:
         if _runs_paused():

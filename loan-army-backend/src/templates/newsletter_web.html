@@ -4,7 +4,7 @@
 <head>
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
-  {% set page_title = (social_meta.title if social_meta and social_meta.title else (title or 'Weekly Loan Update')) %}
+  {% set page_title = (social_meta.title if social_meta and social_meta.title else (title or 'Academy Pipeline Update')) %}
   <title>{{ page_title }}</title>
   {% if social_meta %}
   {% if social_meta.description %}
@@ -961,7 +961,14 @@
                 <img class="team-logo" src="{{ it.loan_team_logo }}"
                   alt="{{ (it.loan_team or it.loan_team_name) }} logo" loading="lazy" />
                 {% endif %}
+                {% set pstatus = it.get('pathway_status', '') if it.get is defined else '' %}
+                {% if pstatus == 'first_team' %}
+                <span>{{ it.loan_team or it.loan_team_name }} (First Team)</span>
+                {% elif pstatus == 'academy' %}
+                <span>{{ it.get('current_level', 'Academy') if it.get is defined else 'Academy' }} · {{ it.loan_team or it.loan_team_name }}</span>
+                {% else %}
                 <span>{{ it.loan_team or it.loan_team_name }}</span>
+                {% endif %}
               </div>
             </div>
           </div>

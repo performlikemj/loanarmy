@@ -17,6 +17,8 @@ try:  # Optional Groq dependency for newsletter summaries
 except ImportError:  # pragma: no cover
     Groq = None
 from src.models.league import db, Team, LoanedPlayer, Newsletter, AdminSetting, NewsletterCommentary
+from src.models.tracked_player import TrackedPlayer
+from src.models.journey import PlayerJourney, PlayerJourneyEntry, derive_journey_context
 from src.api_football_client import APIFootballClient
 from src.agents.weekly_agent import (
     lint_and_enrich as legacy_lint_and_enrich,
@@ -916,13 +918,22 @@ def _media_spotlight_sentence(player_name: str, links: list[dict[str, str]]) -> 
 
 
 PLAYER_SUMMARY_SYSTEM_PROMPT = (
-    "You are a football journalist writing engaging weekly loan reports. "
+    "You are a football journalist writing engaging weekly academy pipeline reports. "
+    "The player may be on loan at another club, in the parent club's first team, or in the academy. "
+    "Adapt your language to their pathway_status:\n"
+    "- 'on_loan': Frame as a loan report—mention the loan club, how they performed away from the parent club\n"
+    "- 'first_team': Frame as a first-team graduate update—they've made it to the senior squad\n"
+    "- 'academy': Frame as an academy prospect update—focus on development and season progress\n\n"
     "Write in a warm, narrative style—like a knowledgeable fan updating friends at the pub. "
     "You receive stats and a 'draft_summary' with the raw facts. Transform this into compelling prose that:\n"
     "- Weaves stats naturally into sentences (not just listing them)\n"
     "- Uses vivid verbs: 'bagged', 'delivered', 'anchored', 'orchestrated', 'struggled'\n"
     "- Contextualizes performances using ONLY the provided stats\n"
     "- Varies sentence rhythm—mix short punchy lines with flowing observations\n\n"
+    "JOURNEY CONTEXT:\n"
+    "- If 'journey_context' is provided, weave it naturally into the narrative\n"
+    "- Examples: 'promoted from U21', 'on second loan spell', 'first-team graduate'\n"
+    "- This adds depth about the player's development pathway\n\n"
     "ROLE DATA (CRITICAL for accuracy - determines how player entered the match):\n"
     "- Each match includes 'role' showing how the player was selected:\n"
     "  - 'startXI' = Player STARTED the match (was in starting lineup)\n"
@@ -950,7 +961,8 @@ PLAYER_SUMMARY_SYSTEM_PROMPT = (
 )
 
 TEAM_SUMMARY_SYSTEM_PROMPT = (
-    "You are a football journalist writing the opening hook for a weekly loan watch newsletter. "
+    "You are a football journalist writing the opening hook for a weekly academy pipeline newsletter. "
+    "The newsletter covers three categories of players: first-team graduates, players out on loan, and academy prospects. "
     "Capture the week's story in 2–3 punchy sentences that make readers want to dive into the player details. "
     "Use the provided player summaries to highlight standout performers, surprising results, or emerging themes. "
     "Keep every stat and fact accurate—do not invent or embellish. "
@@ -987,6 +999,7 @@ def _summarize_player_with_groq(
             "name": loanee.get("player_full_name") or loanee.get("player_name"),
             "loan_team": loanee.get("loan_team_name") or loanee.get("loan_team"),
             "position": stats.get("position"),  # Most recent/primary position
+            "pathway_status": loanee.get("pathway_status", "on_loan"),
         },
         "matches": matches_data,  # Per-match breakdown with positions
         "week": stats,
@@ -995,6 +1008,8 @@ def _summarize_player_with_groq(
         "recent_form": (season_context or {}).get("recent_form"),
         "media_links": links or [],
     }
+    if loanee.get("journey_context"):
+        payload["journey_context"] = loanee["journey_context"]
     if draft_summary:
         payload["draft_summary"] = draft_summary
     player_meta = {
@@ -1350,7 +1365,7 @@ def _build_player_report_item(loanee: dict, hits: list[dict[str, Any]], *, week_
 
 def _compose_team_summary_from_player_items(team_name: str, week_range: list[str] | tuple[str, str], player_items: list[dict[str, Any]]) -> str:
     if not player_items:
-        return f"No active loan updates for {team_name} this week."
+        return f"No academy pipeline updates for {team_name} this week."
 
     start, end = week_range
     sentences: list[str] = []
@@ -1364,7 +1379,7 @@ def _compose_team_summary_from_player_items(team_name: str, week_range: list[str
             sentences.append(_ensure_period(summary))
 
     key_players = sentences[:3]
-    summary_text = f"{team_name} loan watch ({start} to {end}): " + " ".join(key_players)
+    summary_text = f"{team_name} academy pipeline update ({start} to {end}): " + " ".join(key_players)
 
     total_goals = sum(_to_int(item.get("stats", {}).get("goals")) for item in player_items)
     total_assists = sum(_to_int(item.get("stats", {}).get("assists")) for item in player_items)
@@ -1603,50 +1618,392 @@ def _monday_range(target: date) -> tuple[date, date]:
     end = start + timedelta(days=6)
     return start, end
 
-def fetch_weekly_report_tool(parent_team_db_id: int, season_start_year: int, start: date, end: date) -> Dict[str, Any]:
-    # Resolve API id and name from DB
+def fetch_pipeline_report_tool(parent_team_db_id: int, season_start_year: int, start: date, end: date) -> Dict[str, Any]:
+    """Fetch a grouped report from TrackedPlayer.
+
+    Returns a report dict with:
+      - groups.first_team, groups.on_loan, groups.academy  (player dicts)
+      - parent_team, season, range, has_tracked_players
+    """
+    from src.models.weekly import Fixture, FixturePlayerStats
+
     team = Team.query.get(parent_team_db_id)
     if not team:
         raise ValueError(f"Team DB id {parent_team_db_id} not found")
 
-    # Make sure API client season matches
     api_client.set_season_year(season_start_year)
     api_client._prime_team_cache(season_start_year)
 
-    # Find active loanees exist; if none, we’ll still generate a short “No loans” issue
-    has_loans = (
-        db.session.query(LoanedPlayer)
-        .filter(LoanedPlayer.primary_team_id == parent_team_db_id, LoanedPlayer.is_active.is_(True))
-        .count()
-        > 0
-    )
+    # Query all currently-signed academy products
+    tracked = TrackedPlayer.query.filter(
+        TrackedPlayer.team_id == parent_team_db_id,
+        TrackedPlayer.is_active.is_(True),
+        TrackedPlayer.status.notin_(['released', 'sold']),
+    ).all()
 
-    _nl_dbg(
-        "API-Football summarize_parent_loans_week params:",
-        {
-            "parent_team_db_id": team.id,
-            "parent_team_api_id": team.team_id,
-            "season": season_start_year,
-            "week_start": start.isoformat(),
-            "week_end": end.isoformat(),
+    groups: Dict[str, list] = {'first_team': [], 'on_loan': [], 'academy': []}
+
+    for tp in tracked:
+        player_dict = {
+            'player_api_id': tp.player_api_id,
+            'player_id': tp.player_api_id,
+            'player_name': tp.player_name,
+            'player_full_name': tp.player_name,
+            'photo_url': tp.photo_url,
+            'position': tp.position,
+            'nationality': tp.nationality,
+            'age': tp.age,
+            'pathway_status': tp.status,
+            'current_level': tp.current_level,
+            'parent_team_name': team.name,
+            'parent_team_api_id': team.team_id,
+            'can_fetch_stats': tp.data_depth == 'full_stats',
+            'journey_id': tp.journey_id,
+            'journey_context': derive_journey_context(tp.journey_id, tp.status) if tp.journey_id else None,
         }
-    )
 
-    report = api_client.summarize_parent_loans_week(
-        parent_team_db_id=team.id,
-        parent_team_api_id=team.team_id,
-        season=season_start_year,
-        week_start=start,
-        week_end=end,
-        include_team_stats=True,
-        db_session=db.session,
-    )
+        if tp.status == 'on_loan':
+            player_dict['loan_team_name'] = tp.loan_club_name
+            player_dict['loan_team_api_id'] = tp.loan_club_api_id
+            player_dict['loan_team'] = tp.loan_club_name
+            # Delegate to existing loan stats pipeline via LoanedPlayer bridge
+            if tp.loaned_player_id:
+                lp = LoanedPlayer.query.get(tp.loaned_player_id)
+                if lp:
+                    player_dict['can_fetch_stats'] = bool(lp.can_fetch_stats)
+                    player_dict['sofascore_player_id'] = getattr(lp, 'sofascore_player_id', None)
+            # Get weekly stats from FixturePlayerStats
+            _enrich_on_loan_stats(player_dict, tp, start, end, season_start_year)
+            groups['on_loan'].append(player_dict)
 
-    # Normalize parent team payload
-    report["parent_team"] = {"db_id": team.id, "id": team.team_id, "name": team.name}
+        elif tp.status == 'first_team':
+            player_dict['loan_team_name'] = team.name  # They play for the parent club
+            player_dict['loan_team'] = team.name
+            player_dict['loan_team_api_id'] = team.team_id
+            _enrich_first_team_stats(player_dict, tp, team, start, end, season_start_year)
+            groups['first_team'].append(player_dict)
+
+        elif tp.status == 'academy':
+            player_dict['loan_team_name'] = f"{team.name} {tp.current_level or 'Academy'}"
+            player_dict['loan_team'] = player_dict['loan_team_name']
+            _enrich_academy_stats(player_dict, tp, season_start_year)
+            groups['academy'].append(player_dict)
+
+    has_active = len(tracked) > 0
+
+    report = {
+        'parent_team': {'db_id': team.id, 'id': team.team_id, 'name': team.name},
+        'season': season_start_year,
+        'range': [start.isoformat(), end.isoformat()],
+        'has_tracked_players': has_active,
+        'groups': groups,
+    }
     db.session.commit()
-    report["has_active_loans"] = has_loans
     return report
+
+
+def _enrich_on_loan_stats(player_dict: dict, tp: "TrackedPlayer", start: date, end: date, season: int) -> None:
+    """Enrich an on-loan player dict with weekly FixturePlayerStats."""
+    from src.models.weekly import Fixture, FixturePlayerStats
+
+    try:
+        stats_rows = db.session.query(FixturePlayerStats).join(
+            Fixture, FixturePlayerStats.fixture_id == Fixture.id
+        ).filter(
+            FixturePlayerStats.player_api_id == tp.player_api_id,
+            Fixture.date >= start,
+            Fixture.date <= end,
+        ).all()
+
+        totals = {'minutes': 0, 'goals': 0, 'assists': 0, 'yellows': 0, 'reds': 0, 'saves': 0}
+        matches = []
+        for row in stats_rows:
+            totals['minutes'] += row.minutes or 0
+            totals['goals'] += row.goals or 0
+            totals['assists'] += row.assists or 0
+            totals['yellows'] += row.yellow_cards or 0
+            totals['reds'] += row.red_cards or 0
+            totals['saves'] += getattr(row, 'saves', 0) or 0
+            fixture = row.fixture
+            if fixture:
+                is_home = fixture.home_team_api_id == tp.loan_club_api_id
+                opp_name = fixture.away_team_name if is_home else fixture.home_team_name
+                opp_id = fixture.away_team_api_id if is_home else fixture.home_team_api_id
+                matches.append({
+                    'opponent': opp_name,
+                    'opponent_id': opp_id,
+                    'competition': getattr(fixture, 'league_name', None),
+                    'date': fixture.date.isoformat() if fixture.date else None,
+                    'home': is_home,
+                    'score': {'home': fixture.home_goals, 'away': fixture.away_goals},
+                    'played': (row.minutes or 0) > 0,
+                    'role': getattr(row, 'role', None),
+                    'player': {
+                        'position': getattr(row, 'position', None),
+                        'goals': row.goals or 0,
+                        'assists': row.assists or 0,
+                        'minutes': row.minutes or 0,
+                    },
+                })
+        player_dict['totals'] = totals
+        player_dict['matches'] = matches
+    except Exception as e:
+        _nl_dbg('_enrich_on_loan_stats error:', str(e))
+        player_dict['totals'] = {}
+        player_dict['matches'] = []
+
+
+def _enrich_first_team_stats(player_dict: dict, tp: "TrackedPlayer", team: "Team", start: date, end: date, season: int) -> None:
+    """Enrich a first-team player dict with parent club FixturePlayerStats."""
+    from src.models.weekly import Fixture, FixturePlayerStats
+
+    try:
+        stats_rows = db.session.query(FixturePlayerStats).join(
+            Fixture, FixturePlayerStats.fixture_id == Fixture.id
+        ).filter(
+            FixturePlayerStats.player_api_id == tp.player_api_id,
+            Fixture.date >= start,
+            Fixture.date <= end,
+            db.or_(
+                Fixture.home_team_api_id == team.team_id,
+                Fixture.away_team_api_id == team.team_id,
+            ),
+        ).all()
+
+        totals = {'minutes': 0, 'goals': 0, 'assists': 0, 'yellows': 0, 'reds': 0, 'saves': 0}
+        matches = []
+        for row in stats_rows:
+            totals['minutes'] += row.minutes or 0
+            totals['goals'] += row.goals or 0
+            totals['assists'] += row.assists or 0
+            totals['yellows'] += row.yellow_cards or 0
+            totals['reds'] += row.red_cards or 0
+            totals['saves'] += getattr(row, 'saves', 0) or 0
+            fixture = row.fixture
+            if fixture:
+                is_home = fixture.home_team_api_id == team.team_id
+                opp_name = fixture.away_team_name if is_home else fixture.home_team_name
+                opp_id = fixture.away_team_api_id if is_home else fixture.home_team_api_id
+                matches.append({
+                    'opponent': opp_name,
+                    'opponent_id': opp_id,
+                    'competition': getattr(fixture, 'league_name', None),
+                    'date': fixture.date.isoformat() if fixture.date else None,
+                    'home': is_home,
+                    'score': {'home': fixture.home_goals, 'away': fixture.away_goals},
+                    'played': (row.minutes or 0) > 0,
+                    'role': getattr(row, 'role', None),
+                    'player': {
+                        'position': getattr(row, 'position', None),
+                        'goals': row.goals or 0,
+                        'assists': row.assists or 0,
+                        'minutes': row.minutes or 0,
+                    },
+                })
+        player_dict['totals'] = totals
+        player_dict['matches'] = matches
+    except Exception as e:
+        _nl_dbg('_enrich_first_team_stats error:', str(e))
+        player_dict['totals'] = {}
+        player_dict['matches'] = []
+
+    # Fallback: season-level stats from journey entries
+    if not player_dict.get('totals', {}).get('minutes') and tp.journey_id:
+        try:
+            entries = PlayerJourneyEntry.query.filter(
+                PlayerJourneyEntry.journey_id == tp.journey_id,
+                PlayerJourneyEntry.season == season,
+                PlayerJourneyEntry.entry_type == 'first_team',
+            ).all()
+            if entries:
+                player_dict['totals'] = {
+                    'minutes': sum(e.minutes or 0 for e in entries),
+                    'goals': sum(e.goals or 0 for e in entries),
+                    'assists': sum(e.assists or 0 for e in entries),
+                    'yellows': 0,
+                    'reds': 0,
+                    'saves': 0,
+                }
+                player_dict['_stats_source'] = 'journey_season'
+        except Exception:
+            pass
+
+
+def _enrich_academy_stats(player_dict: dict, tp: "TrackedPlayer", season: int) -> None:
+    """Enrich an academy player dict with season-level stats from journey entries."""
+    player_dict['totals'] = {'minutes': 0, 'goals': 0, 'assists': 0, 'yellows': 0, 'reds': 0, 'saves': 0}
+    player_dict['matches'] = []
+    player_dict['_stats_source'] = 'journey_season'
+
+    if not tp.journey_id:
+        return
+
+    try:
+        entries = PlayerJourneyEntry.query.filter(
+            PlayerJourneyEntry.journey_id == tp.journey_id,
+            PlayerJourneyEntry.season == season,
+            PlayerJourneyEntry.is_youth.is_(True),
+        ).all()
+        if entries:
+            player_dict['totals'] = {
+                'minutes': sum(e.minutes or 0 for e in entries),
+                'goals': sum(e.goals or 0 for e in entries),
+                'assists': sum(e.assists or 0 for e in entries),
+                'yellows': 0,
+                'reds': 0,
+                'saves': 0,
+            }
+    except Exception as e:
+        _nl_dbg('_enrich_academy_stats error:', str(e))
+
+
+def _build_first_team_report_item(player: dict, hits: list[dict[str, Any]], *, week_start: date, week_end: date) -> dict:
+    """Build a report item for a first-team graduate. Same dict shape as loan items."""
+    display_name = to_initial_last(_strip_text(player.get("player_full_name")) or _strip_text(player.get("player_name"))) or _strip_text(player.get("player_name")) or ""
+    full_name = _strip_text(player.get("player_full_name")) or display_name
+    parent_team = _strip_text(player.get("parent_team_name") or player.get("loan_team") or "the first team")
+    stats_src = player.get("totals") or {}
+
+    stats: dict[str, Any] = {
+        "minutes": _to_int(stats_src.get("minutes")),
+        "goals": _to_int(stats_src.get("goals")),
+        "assists": _to_int(stats_src.get("assists")),
+        "yellows": _to_int(stats_src.get("yellows")),
+        "reds": _to_int(stats_src.get("reds")),
+    }
+    for key, value in (stats_src or {}).items():
+        if key in stats and stats[key]:
+            continue
+        stats[key] = value
+
+    minutes = _to_int(stats.get("minutes"))
+    matches = player.get("matches") if isinstance(player, dict) else []
+    match_count = len(matches or [])
+    links = _build_links_from_hits(hits)
+    paragraphs: list[str] = []
+
+    if minutes > 0:
+        if match_count > 1:
+            action = f"made {match_count} appearances for {parent_team}, playing {minutes} minutes"
+        else:
+            action = f"featured for {parent_team}, logging {minutes} minutes"
+        stat_phrases = _stat_highlights(stats_src)
+        sentence = f"{display_name} {action}"
+        if stat_phrases:
+            sentence += f", finishing with {_combine_phrases(stat_phrases)}"
+        paragraphs.append(_ensure_period(sentence))
+    elif minutes == 0 and match_count > 0:
+        paragraphs.append(_ensure_period(f"{display_name} was in the matchday squad for {parent_team} but did not feature"))
+    else:
+        paragraphs.append(_ensure_period(f"{display_name} is part of the {parent_team} first team squad"))
+
+    journey_ctx = player.get("journey_context")
+    if journey_ctx:
+        paragraphs.append(_ensure_period(journey_ctx))
+
+    week_summary = "\n\n".join(paragraphs)
+    if links:
+        week_summary += "\n\n" + _ensure_period(f"Latest coverage: {links[0]['title']}")
+
+    item: dict[str, Any] = {
+        "player_name": display_name or full_name,
+        "player_full_name": full_name,
+        "loan_team": parent_team,
+        "loan_team_name": parent_team,
+        "player_id": player.get("player_api_id") or player.get("player_id"),
+        "player_api_id": player.get("player_api_id"),
+        "loan_team_api_id": player.get("parent_team_api_id"),
+        "can_fetch_stats": player.get("can_fetch_stats", True),
+        "pathway_status": "first_team",
+        "stats": stats,
+        "week_summary": week_summary,
+        "links": links,
+        "matches": _format_matches_for_item(matches),
+    }
+    return item
+
+
+def _build_academy_report_item(player: dict, hits: list[dict[str, Any]], *, week_start: date, week_end: date) -> dict:
+    """Build a lightweight report item for an academy player (season-level stats)."""
+    display_name = to_initial_last(_strip_text(player.get("player_full_name")) or _strip_text(player.get("player_name"))) or _strip_text(player.get("player_name")) or ""
+    full_name = _strip_text(player.get("player_full_name")) or display_name
+    level = player.get("current_level") or "Academy"
+    parent_team = _strip_text(player.get("parent_team_name") or "the academy")
+    stats_src = player.get("totals") or {}
+
+    stats: dict[str, Any] = {
+        "minutes": _to_int(stats_src.get("minutes")),
+        "goals": _to_int(stats_src.get("goals")),
+        "assists": _to_int(stats_src.get("assists")),
+        "yellows": _to_int(stats_src.get("yellows")),
+        "reds": _to_int(stats_src.get("reds")),
+    }
+
+    appearances = _to_int(stats.get("minutes")) // 90 if stats.get("minutes") else 0
+    paragraphs: list[str] = []
+
+    if stats.get("minutes"):
+        sentence = f"{display_name} ({level}) — {stats['minutes']} minutes this season at {parent_team}"
+        goals = _to_int(stats.get("goals"))
+        assists = _to_int(stats.get("assists"))
+        if goals or assists:
+            sentence += f" with {goals}G {assists}A"
+        paragraphs.append(_ensure_period(sentence))
+    else:
+        paragraphs.append(_ensure_period(f"{display_name} ({level}) is progressing through the {parent_team} academy"))
+
+    journey_ctx = player.get("journey_context")
+    if journey_ctx:
+        paragraphs.append(_ensure_period(journey_ctx))
+
+    links = _build_links_from_hits(hits)
+    week_summary = "\n\n".join(paragraphs)
+
+    item: dict[str, Any] = {
+        "player_name": display_name or full_name,
+        "player_full_name": full_name,
+        "loan_team": f"{parent_team} {level}",
+        "loan_team_name": f"{parent_team} {level}",
+        "player_id": player.get("player_api_id") or player.get("player_id"),
+        "player_api_id": player.get("player_api_id"),
+        "can_fetch_stats": False,  # Academy stats are season-level only
+        "pathway_status": "academy",
+        "current_level": level,
+        "stats": stats,
+        "week_summary": week_summary,
+        "links": links,
+        "matches": [],
+    }
+    return item
+
+
+def _format_matches_for_item(matches: list | None) -> list[dict]:
+    """Format raw match dicts for inclusion in a report item."""
+    if not matches:
+        return []
+    formatted = []
+    for match in (matches or [])[:3]:
+        if not isinstance(match, dict):
+            continue
+        player_stats = match.get("player") or {}
+        formatted.append({
+            "opponent": match.get("opponent"),
+            "opponent_id": match.get("opponent_id"),
+            "opponent_logo": match.get("opponent_logo"),
+            "competition": match.get("competition"),
+            "date": match.get("date"),
+            "home": match.get("home"),
+            "score": match.get("score"),
+            "result": match.get("result"),
+            "played": match.get("played"),
+            "role": match.get("role"),
+            "position": player_stats.get("position"),
+            "goals": player_stats.get("goals", 0),
+            "assists": player_stats.get("assists", 0),
+            "minutes": player_stats.get("minutes", 0),
+        })
+    return formatted
+
 
 def brave_context_for_team_and_loans(team_name: str, report: Dict[str, Any], *, default_loc: Dict[str, str]) -> Dict[str, List[Dict[str, Any]]]:
     # Build a small set of targeted queries for context enrichment.
@@ -1656,8 +2013,10 @@ def brave_context_for_team_and_loans(team_name: str, report: Dict[str, Any], *, 
     queries = set()
 
     safe_team = f'"{team_name}"'
-    queries.add(f"{safe_team} loan watch")
-    queries.add(f"{safe_team} loan players")
+    queries.add(f"{safe_team} academy pipeline")
+    queries.add(f"{safe_team} youth players")
+
+    groups = report.get("groups", {})
 
     q_meta: Dict[str, Dict[str, str]] = {}
     flags = _get_flags()
@@ -1665,7 +2024,11 @@ def brave_context_for_team_and_loans(team_name: str, report: Dict[str, Any], *, 
     site_boost = flags['site_boost']
     use_cup_syns = flags['cup_synonyms']
     strict_range = flags['strict_range']
-    for loanee in report.get("loanees", []):
+
+    # Search for on_loan + first_team players (skip academy — minimal web coverage)
+    search_players = groups.get("on_loan", []) + groups.get("first_team", [])
+
+    for loanee in search_players:
         pname = _strip_text(loanee.get("player_name"))
         loan_team = _strip_text(loanee.get("loan_team_name"))
         loan_country = _strip_text(loanee.get("loan_team_country"))
@@ -1726,7 +2089,7 @@ def brave_context_for_team_and_loans(team_name: str, report: Dict[str, Any], *, 
                     }
 
     results: Dict[str, List[Dict[str, Any]]] = {}
-    _nl_dbg(f"Brave context week start={start} end={end} loanees={len(report.get('loanees', []))} queries={len(queries)}")
+    _nl_dbg(f"Brave context week start={start} end={end} players={len(search_players)} queries={len(queries)}")
 
     loc_cache: Dict[str, Dict[str, str]] = {}
 
@@ -1996,7 +2359,7 @@ def persist_newsletter(team_db_id: int, content_json_str: str, week_start: date,
         pass
 
     parsed = json.loads(content_json_str)
-    title = parsed.get("title") or "Weekly Loan Update"
+    title = parsed.get("title") or "Academy Pipeline Update"
 
     # Get team info for rendering
     team = Team.query.get(team_db_id)
@@ -2110,24 +2473,24 @@ def compose_team_weekly_newsletter(team_db_id: int, target_date: date, force_ref
         pass
     api_client._prime_team_cache(season_start_year)
 
-    # Fetch report via tool for the inferred season
+    # Fetch report via pipeline tool
     _nl_dbg("Compose for team:", team_db_id, "week:", week_start, week_end, "season:", season_start_year)
-    report = fetch_weekly_report_tool(team_db_id, season_start_year, week_start, week_end)
+    report = fetch_pipeline_report_tool(team_db_id, season_start_year, week_start, week_end)
     try:
         _nl_dbg(
             "Report summary:",
             {
                 "report.season": report.get("season"),
                 "report.range": report.get("range"),
-                "loanees": len(report.get("loanees", [])),
+                "has_tracked_players": report.get("has_tracked_players"),
             }
         )
     except Exception:
-        _nl_dbg("Report loanees:", len(report.get("loanees", [])))
+        pass
 
-    loanees = report.get("loanees") or []
-    has_loanees = len(loanees) > 0
-    if not has_loanees:
+    has_any_players = report.get("has_tracked_players", False)
+    groups = report.get("groups", {})
+    if not has_any_players:
         _llm_dbg(
             "compose.empty",
             {
@@ -2141,7 +2504,7 @@ def compose_team_weekly_newsletter(team_db_id: int, target_date: date, force_ref
             "compose.start",
             {
                 "team_db_id": team_db_id,
-                "loanees": len(loanees),
+                "tracked_players": sum(len(v) for v in groups.values()),
                 "groq_enabled": ENV_ENABLE_GROQ_SUMMARIES,
             },
         )
@@ -2167,30 +2530,36 @@ def compose_team_weekly_newsletter(team_db_id: int, target_date: date, force_ref
             return
         loanee_meta_by_key[key] = meta
 
+    all_players = groups.get("on_loan", []) + groups.get("first_team", []) + groups.get("academy", [])
+
     player_items: list[dict[str, Any]] = []
+    first_team_items: list[dict[str, Any]] = []
+    on_loan_items: list[dict[str, Any]] = []
+    academy_items: list[dict[str, Any]] = []
     brave_ctx: dict[str, Any] = {}
-    if has_loanees:
-        for loanee in loanees:
-            pid = loanee.get("player_api_id") or loanee.get("player_id")
+
+    if has_any_players:
+        for player in all_players:
+            pid = player.get("player_api_id") or player.get("player_id")
             entry = None
             if pid:
                 entry = {
                     "player_id": int(pid),
-                    "loan_team_api_id": loanee.get("loan_team_api_id") or loanee.get("loan_team_id"),
-                    "loan_team_id": loanee.get("loan_team_db_id") or loanee.get("loan_team_id"),
-                    "loan_team_name": loanee.get("loan_team_name") or loanee.get("loan_team"),
+                    "loan_team_api_id": player.get("loan_team_api_id") or player.get("loan_team_id"),
+                    "loan_team_id": player.get("loan_team_db_id") or player.get("loan_team_id"),
+                    "loan_team_name": player.get("loan_team_name") or player.get("loan_team"),
                 }
             meta_entry = {
-                "can_fetch_stats": bool(loanee.get("can_fetch_stats", True)),
-                "sofascore_player_id": loanee.get("sofascore_player_id"),
+                "can_fetch_stats": bool(player.get("can_fetch_stats", True)),
+                "sofascore_player_id": player.get("sofascore_player_id"),
             }
             if pid:
                 try:
                     loanee_meta_by_pid[int(pid)] = meta_entry
                 except Exception:
                     pass
-            primary_name = loanee.get("player_name") or loanee.get("name")
-            full_name = loanee.get("player_full_name")
+            primary_name = player.get("player_name") or player.get("name")
+            full_name = player.get("player_full_name")
             display = to_initial_last(primary_name or full_name or "")
             if entry:
                 _register_alias(primary_name, entry)
@@ -2215,10 +2584,27 @@ def compose_team_weekly_newsletter(team_db_id: int, target_date: date, force_ref
             pass
 
         hits_by_player = _hits_by_player(brave_ctx)
-        for loanee in loanees:
-            hits = _extract_hits_for_loanee(loanee, hits_by_player)
-            item = _build_player_report_item(loanee, hits, week_start=week_start, week_end=week_end)
-            player_items.append(item)
+
+        # Build items per group using the appropriate builder
+        for player in groups.get("on_loan", []):
+            hits = _extract_hits_for_loanee(player, hits_by_player)
+            item = _build_player_report_item(player, hits, week_start=week_start, week_end=week_end)
+            item["pathway_status"] = "on_loan"
+            on_loan_items.append(item)
+
+        for player in groups.get("first_team", []):
+            hits = _extract_hits_for_loanee(player, hits_by_player)
+            item = _build_first_team_report_item(player, hits, week_start=week_start, week_end=week_end)
+            first_team_items.append(item)
+
+        for player in groups.get("academy", []):
+            hits = _extract_hits_for_loanee(player, hits_by_player)
+            item = _build_academy_report_item(player, hits, week_start=week_start, week_end=week_end)
+            academy_items.append(item)
+
+        # Flat list for summary generation and post-processing
+        player_items = first_team_items + on_loan_items + academy_items
+
         missing_summaries = sum(1 for item in player_items if not _strip_text(item.get("week_summary")))
         _nl_dbg(
             "compose.player_items",
@@ -2238,7 +2624,7 @@ def compose_team_weekly_newsletter(team_db_id: int, target_date: date, force_ref
     else:
         _set_latest_player_lookup({})
 
-    team_name = report.get("parent_team", {}).get("name") or "Loan Watch"
+    team_name = report.get("parent_team", {}).get("name") or "Academy Pipeline"
     range_window = report.get("range") or [week_start.isoformat(), week_end.isoformat()]
     summary_text = _compose_team_summary_from_player_items(team_name, range_window, player_items)
 
@@ -2324,15 +2710,25 @@ def compose_team_weekly_newsletter(team_db_id: int, target_date: date, force_ref
                     item["commentary_title"] = coms[0].get("title")
                     print(f"[DEBUG] Injected commentary for player {pid} ({item.get('player_name')})")
 
+    # Build multi-section content grouped by pathway status
+    sections: list[dict[str, Any]] = []
+    if first_team_items:
+        sections.append({"title": "First Team Graduates", "items": first_team_items})
+    if on_loan_items:
+        sections.append({"title": "On Loan", "items": on_loan_items})
+    if academy_items:
+        sections.append({"title": "Academy Rising", "items": academy_items})
+    if not sections:
+        sections.append({"title": "Player Reports", "items": []})
+    newsletter_title = f"{team_name} Academy Pipeline Update"
+
     content_payload: dict[str, Any] = {
-        "title": f"{team_name} Loan Watch",
+        "title": newsletter_title,
         "summary": summary_text,
         "season": report.get("season"),
         "range": range_window,
         "highlights": [],
-        "sections": [
-            {"title": "Player Reports", "items": player_items},
-        ],
+        "sections": sections,
         "intro_commentary": intro_commentary,
         "summary_commentary": summary_commentary,
         "player_commentary_map": player_commentary_map,
@@ -2341,7 +2737,7 @@ def compose_team_weekly_newsletter(team_db_id: int, target_date: date, force_ref
     try:
         content_payload, _ = _apply_player_lookup(content_payload, player_lookup)
         content_payload = legacy_lint_and_enrich(content_payload)
-        if has_loanees:
+        if has_any_players:
             content_payload = _enforce_loanee_metadata(content_payload, loanee_meta_by_pid, loanee_meta_by_key)
     except Exception as enrich_error:
         _nl_dbg("lint-and-enrich failed:", str(enrich_error))

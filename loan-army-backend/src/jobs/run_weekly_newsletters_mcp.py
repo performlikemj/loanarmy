@@ -1,19 +1,22 @@
 from datetime import date, datetime, timezone
-from src.models.league import db, Team, LoanedPlayer
+from src.models.league import db, Team
+from src.models.tracked_player import TrackedPlayer
 from src.agents.weekly_agent import generate_weekly_newsletter_with_mcp_sync
 from src.agents.errors import NoActiveLoaneesError
 
-def teams_with_active_loans() -> list[int]:
-    q = db.session.query(Team.id)\
-        .join(LoanedPlayer, LoanedPlayer.primary_team_id == Team.id)\
-        .filter(LoanedPlayer.is_active.is_(True))\
-        .distinct()
+
+def teams_with_active_tracked_players() -> list[int]:
+    """Return team DB IDs that have active TrackedPlayers (excluding released/sold)."""
+    q = db.session.query(TrackedPlayer.team_id).filter(
+        TrackedPlayer.is_active.is_(True),
+        TrackedPlayer.status.notin_(['released', 'sold']),
+    ).distinct()
     return [t[0] for t in q.all()]
 
 def run_for_date(target: date, max_failures: int = 0):
     results = []
     failures = 0
-    for team_db_id in teams_with_active_loans():
+    for team_db_id in teams_with_active_tracked_players():
         try:
             out = generate_weekly_newsletter_with_mcp_sync(team_db_id, target)
             results.append({"team_id": team_db_id, "status": "ok", "run": out})

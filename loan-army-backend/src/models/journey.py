@@ -331,6 +331,80 @@ class ClubLocation(db.Model):
         }
 
 
+def derive_journey_context(journey_id: int, current_status: str) -> str | None:
+    """Derive a human-readable progression sentence from a player's journey.
+
+    Returns a short sentence like "Promoted from U21 to first team this season"
+    or None if no meaningful progression can be determined.
+    """
+    if not journey_id:
+        return None
+
+    journey = PlayerJourney.query.get(journey_id)
+    if not journey:
+        return None
+
+    entries = journey.entries.all()
+    if not entries:
+        return None
+
+    # Sort by season desc, then by sort_priority desc
+    entries.sort(key=lambda e: (e.season, e.sort_priority or 0), reverse=True)
+
+    # Get the most recent season
+    latest_season = entries[0].season
+    latest_entries = [e for e in entries if e.season == latest_season and not e.is_international]
+    prior_entries = [e for e in entries if e.season < latest_season and not e.is_international]
+
+    latest_types = {e.entry_type for e in latest_entries}
+    latest_levels = {e.level for e in latest_entries}
+    prior_types = {e.entry_type for e in prior_entries}
+    prior_levels = {e.level for e in prior_entries}
+
+    # Detect first team promotion from academy
+    if current_status == 'first_team':
+        if 'first_team' in latest_types and prior_types & {'academy', 'development'}:
+            prior_youth = sorted(
+                [e for e in prior_entries if e.is_youth],
+                key=lambda e: e.season, reverse=True,
+            )
+            if prior_youth:
+                return f"Promoted from {prior_youth[0].level or 'academy'} to first team this season"
+        if 'first_team' in latest_types and 'loan' in prior_types:
+            prior_loans = [e for e in prior_entries if e.entry_type == 'loan']
+            if prior_loans:
+                return f"Recalled from loan at {prior_loans[0].club_name} into the first team"
+
+    # Detect first loan from academy
+    if current_status == 'on_loan':
+        prior_loan_count = len([e for e in prior_entries if e.entry_type == 'loan'])
+        if prior_loan_count == 0 and prior_types & {'academy', 'development'}:
+            return "Out on first senior loan after progressing through the academy"
+        if prior_loan_count >= 1:
+            prior_loans = sorted(
+                [e for e in prior_entries if e.entry_type == 'loan'],
+                key=lambda e: e.season, reverse=True,
+            )
+            return f"On loan spell #{prior_loan_count + 1} — previously at {prior_loans[0].club_name}"
+
+    # Detect academy level progression (e.g. U18 → U21)
+    if current_status == 'academy':
+        if prior_levels and latest_levels:
+            youth_order = ['U18', 'U19', 'U21', 'U23', 'Reserve']
+            latest_highest = max(
+                (youth_order.index(l) for l in latest_levels if l in youth_order),
+                default=-1,
+            )
+            prior_highest = max(
+                (youth_order.index(l) for l in prior_levels if l in youth_order),
+                default=-1,
+            )
+            if latest_highest > prior_highest >= 0:
+                return f"Progressed from {youth_order[prior_highest]} to {youth_order[latest_highest]} this season"
+
+    return None
+
+
 # Priority mapping for level sorting
 LEVEL_PRIORITY = {
     'First Team': 100,

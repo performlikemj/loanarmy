@@ -13,6 +13,7 @@ from collections import deque
 
 from src.models.league import db
 from src.models.cohort import AcademyCohort, CohortMember
+from src.models.journey import PlayerJourney
 from src.services.cohort_service import CohortService
 from src.services.journey_sync import JourneySyncService
 from src.services.youth_competition_resolver import (
@@ -40,6 +41,8 @@ SEASONS = [2020, 2021, 2022, 2023, 2024]
 
 # Max time (seconds) for a single discover_cohort call before skipping
 COHORT_DISCOVER_TIMEOUT = 120
+# Max time (seconds) for a single sync_player call before skipping
+PLAYER_SYNC_TIMEOUT = 90
 
 
 class RateLimiter:
@@ -138,6 +141,20 @@ def run_big6_seed(job_id, seasons=None, team_ids=None, league_ids=None):
     from flask import current_app
     _app = current_app._get_current_object()
 
+    def _run_with_timeout(task_fn, timeout_seconds):
+        """Run a callable in a worker thread with a hard timeout."""
+        executor = ThreadPoolExecutor(max_workers=1)
+        future = executor.submit(task_fn)
+        timed_out = False
+        try:
+            return future.result(timeout=timeout_seconds), False
+        except FuturesTimeoutError:
+            timed_out = True
+            future.cancel()
+            return None, True
+        finally:
+            executor.shutdown(wait=not timed_out, cancel_futures=timed_out)
+
     # ── Phase 1: Discovery ──
     cohort_ids = []
     for idx, (team_id, league_meta, season) in enumerate(combos):
@@ -211,16 +228,16 @@ def run_big6_seed(job_id, seasons=None, team_ids=None, league_ids=None):
                     # Return just the id — the ORM object can't cross threads
                     return c.id if c else None
 
-            with ThreadPoolExecutor(max_workers=1) as executor:
-                future = executor.submit(_discover_in_context)
-                try:
-                    cohort_id_result = future.result(timeout=COHORT_DISCOVER_TIMEOUT)
-                except FuturesTimeoutError:
-                    logger.warning(
-                        "Cohort discovery timed out after %ds: %s/%s/%s — skipping",
-                        COHORT_DISCOVER_TIMEOUT, team_name, league_name, season,
-                    )
-                    continue
+            cohort_id_result, timed_out = _run_with_timeout(
+                _discover_in_context,
+                COHORT_DISCOVER_TIMEOUT,
+            )
+            if timed_out:
+                logger.warning(
+                    "Cohort discovery timed out after %ds: %s/%s/%s — skipping",
+                    COHORT_DISCOVER_TIMEOUT, team_name, league_name, season,
+                )
+                continue
 
             if not cohort_id_result:
                 skipped_empty_cohorts += 1
@@ -315,6 +332,16 @@ def run_big6_seed(job_id, seasons=None, team_ids=None, league_ids=None):
     def heartbeat():
         update_job(job_id, current_player=f"Heartbeat ({synced_count} synced)")
 
+    def _mark_player_sync_failure(player_api_id: int, sync_error: str, journey_id: int | None = None):
+        """Persist journey sync failure for all cohort members of a player."""
+        members = CohortMember.query.filter_by(player_api_id=player_api_id).all()
+        for pm in members:
+            if journey_id is not None:
+                pm.journey_id = journey_id
+            pm.journey_synced = False
+            pm.journey_sync_error = sync_error
+        db.session.commit()
+
     rate_limiter = RateLimiter(heartbeat_fn=heartbeat)  # 280 req/min, 7000 req/day
     quota_exhausted = False
     synced_count = 0
@@ -329,9 +356,41 @@ def run_big6_seed(job_id, seasons=None, team_ids=None, league_ids=None):
             update_job(job_id, progress=total_combos + idx,
                        current_player=f"Journey: {member.player_name}")
 
-            journey = journey_service.sync_player(member.player_api_id, heartbeat_fn=heartbeat)
+            _sync_args = dict(player_api_id=member.player_api_id, heartbeat_fn=heartbeat)
 
-            if journey and not journey.sync_error:
+            def _sync_in_context():
+                with _app.app_context():
+                    journey_result = journey_service.sync_player(**_sync_args)
+                    if not journey_result:
+                        return None
+                    return {
+                        "journey_id": journey_result.id,
+                        "sync_error": journey_result.sync_error,
+                    }
+
+            sync_result, timed_out = _run_with_timeout(_sync_in_context, PLAYER_SYNC_TIMEOUT)
+            if timed_out:
+                timeout_msg = f"Timed out after {PLAYER_SYNC_TIMEOUT}s"
+                logger.warning(
+                    "Journey sync timed out for player %s after %ds — skipping",
+                    member.player_api_id,
+                    PLAYER_SYNC_TIMEOUT,
+                )
+                db.session.rollback()
+                _mark_player_sync_failure(member.player_api_id, timeout_msg)
+                continue
+
+            journey = None
+            if sync_result and sync_result.get("journey_id"):
+                journey = db.session.get(PlayerJourney, sync_result["journey_id"])
+                if not journey:
+                    _mark_player_sync_failure(
+                        member.player_api_id,
+                        "Journey sync returned stale journey id",
+                    )
+                    continue
+
+            if journey and not sync_result.get("sync_error"):
                 # Update ALL members with this player_api_id
                 all_player_members = CohortMember.query.filter_by(
                     player_api_id=member.player_api_id
@@ -356,24 +415,18 @@ def run_big6_seed(job_id, seasons=None, team_ids=None, league_ids=None):
 
                 db.session.commit()
                 synced_count += 1
-            elif journey and journey.sync_error:
+            elif journey and sync_result.get("sync_error"):
                 # Journey exists but had a sync error — don't mark as synced
-                all_player_members = CohortMember.query.filter_by(
-                    player_api_id=member.player_api_id
-                ).all()
-                for pm in all_player_members:
-                    pm.journey_id = journey.id
-                    pm.journey_synced = False
-                    pm.journey_sync_error = journey.sync_error
-                db.session.commit()
+                _mark_player_sync_failure(
+                    member.player_api_id,
+                    sync_result.get("sync_error") or "Journey sync returned error",
+                    journey_id=journey.id,
+                )
             else:
-                all_player_members = CohortMember.query.filter_by(
-                    player_api_id=member.player_api_id
-                ).all()
-                for pm in all_player_members:
-                    pm.journey_synced = False
-                    pm.journey_sync_error = "Journey sync returned no data"
-                db.session.commit()
+                _mark_player_sync_failure(
+                    member.player_api_id,
+                    "Journey sync returned no data",
+                )
 
         except RuntimeError as e:
             err_msg = str(e).lower()
@@ -385,14 +438,10 @@ def run_big6_seed(job_id, seasons=None, team_ids=None, league_ids=None):
                 quota_exhausted = True
                 break
             logger.warning(f"Failed journey sync for player {member.player_api_id}: {e}")
-            member.journey_sync_error = str(e)
-            member.journey_synced = False
-            db.session.commit()
+            _mark_player_sync_failure(member.player_api_id, str(e))
         except Exception as e:
             logger.warning(f"Failed journey sync for player {member.player_api_id}: {e}")
-            member.journey_sync_error = str(e)
-            member.journey_synced = False
-            db.session.commit()
+            _mark_player_sync_failure(member.player_api_id, str(e))
 
         if (idx + 1) % 50 == 0:
             logger.info(

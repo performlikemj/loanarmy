@@ -57,6 +57,8 @@ Go On Loan — Football loan tracking platform with AI-powered newsletters and j
   - Full Rebuild stage-2 academy league rows now seeded/updated from dynamic resolver
   - Cohort discovery now supports separate query team ID (`query_team_api_id`)
   - Sync-state hardening for `journey_synced` and cohort `complete/partial/failed/no_data`
+  - Phase 2 journey sync timeout isolation added (`PLAYER_SYNC_TIMEOUT=90`) with per-player skip on timeout
+  - Constrained live rebuild smoke run passed (`team=49`, `league=696`, `season=2022`): 1 cohort, 40/40 players synced
   - Targeted tests passed (`test_youth_competition_resolver.py`)
 
 ### Now
@@ -72,7 +74,7 @@ Go On Loan — Football loan tracking platform with AI-powered newsletters and j
   - Backend tests: `tests/test_journey.py`
 - **See `ledgers/ACADEMY_WATCH_IMPLEMENTATION_PLAN.md` for detailed status**
 - Cohort ingestion remediation (in progress)
-  - Validate Full Rebuild end-to-end against live DB/API environment
+  - Validate full multi-team Full Rebuild in deployed container with timeout telemetry
   - **See `ledgers/CONTINUITY_cohort-dynamic-resolution.md`**
 
 ### Next
@@ -103,11 +105,12 @@ CONTINUITY.md
 
 - 2026-02-12: Academy data audit — all Big 6 teams show 0% conversion due to journey sync never completing
 - 2026-02-12: Fixed Full Rebuild journey sync: added RateLimiter, quota-exceeded break, non-fatal Stage 3, empty-journey bug fix
+- 2026-02-12: Added Phase 2 journey sync timeout guard (`PLAYER_SYNC_TIMEOUT=90`) and verified a live constrained rebuild completes without hangs
 - 2026-01-10: Fixed agent protocol - made AGENTS.md reading mandatory in CLAUDE.md
 
 ## Open Questions
 
-- (none currently)
+- UNCONFIRMED: prior worker restarts were caused by health probe failure, OOM kill, or external restart policy.
 
 ## Working Set
 
