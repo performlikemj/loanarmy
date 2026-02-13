@@ -13474,7 +13474,10 @@ def admin_test_classify():
 
         # Fetch transfers for upgrade check
         api = APIFootballClient()
-        transfers = api.get_player_transfers(player_api_id)
+        raw_transfers = api.get_player_transfers(player_api_id)
+        transfers = []
+        for block in (raw_transfers or []):
+            transfers.extend(block.get('transfers', []))
 
         # Run classification with reasoning for each parent
         classifications = []

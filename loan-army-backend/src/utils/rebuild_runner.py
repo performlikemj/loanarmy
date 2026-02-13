@@ -401,8 +401,10 @@ def _run_full_rebuild(job_id, config):
                 transfers = journey.raw_transfers if hasattr(journey, 'raw_transfers') else None
                 if not transfers:
                     try:
-                        transfer_data = api_client.get_player_transfers(tp.player_api_id)
-                        transfers = transfer_data if transfer_data else []
+                        raw = api_client.get_player_transfers(tp.player_api_id)
+                        transfers = []
+                        for block in (raw or []):
+                            transfers.extend(block.get('transfers', []))
                     except Exception:
                         transfers = []
                 status = upgrade_status_from_transfers(status, transfers, tp.team.team_id)
