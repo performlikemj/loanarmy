@@ -318,7 +318,7 @@ function ApiFootballStatusCard() {
         let cancelled = false
         ;(async () => {
             try {
-                const data = await APIService.request('/api/admin/api-football/status', {}, { admin: true })
+                const data = await APIService.request('/admin/api-football/status', {}, { admin: true })
                 if (!cancelled) setStatus(data)
             } catch (e) {
                 if (!cancelled) setError(e.message)
@@ -416,7 +416,7 @@ export function AdminTools() {
 
     const loadConfigs = useCallback(async () => {
         try {
-            const data = await APIService.request('/api/admin/rebuild-configs', {}, { admin: true })
+            const data = await APIService.request('/admin/rebuild-configs', {}, { admin: true })
             setConfigs(data || [])
         } catch (e) {
             showMsg('error', `Failed to load configs: ${e.message}`)
@@ -427,7 +427,7 @@ export function AdminTools() {
 
     const loadConfig = useCallback(async (id) => {
         try {
-            const data = await APIService.request(`/api/admin/rebuild-configs/${id}`, {}, { admin: true })
+            const data = await APIService.request(`/admin/rebuild-configs/${id}`, {}, { admin: true })
             setSelectedConfig(data)
             setSelectedId(id)
             setShowHistory(false)
@@ -454,7 +454,7 @@ export function AdminTools() {
         try {
             const body = { name: newName.trim(), notes: newNotes }
             if (cloneFrom) body.clone_from = cloneFrom
-            await APIService.request('/api/admin/rebuild-configs', {
+            await APIService.request('/admin/rebuild-configs', {
                 method: 'POST',
                 body: JSON.stringify(body),
             }, { admin: true })
@@ -475,7 +475,7 @@ export function AdminTools() {
         setSaving(true)
         try {
             const body = { config: configData }
-            await APIService.request(`/api/admin/rebuild-configs/${selectedId}`, {
+            await APIService.request(`/admin/rebuild-configs/${selectedId}`, {
                 method: 'PUT',
                 body: JSON.stringify(body),
             }, { admin: true })
@@ -492,7 +492,7 @@ export function AdminTools() {
 
     const handleActivate = async (id) => {
         try {
-            await APIService.request(`/api/admin/rebuild-configs/${id}/activate`, {
+            await APIService.request(`/admin/rebuild-configs/${id}/activate`, {
                 method: 'POST',
             }, { admin: true })
             showMsg('success', 'Config activated')
@@ -507,7 +507,7 @@ export function AdminTools() {
         const name = configs.find(c => c.id === id)?.name
         if (!confirm(`Delete config "${name}"?`)) return
         try {
-            await APIService.request(`/api/admin/rebuild-configs/${id}`, {
+            await APIService.request(`/admin/rebuild-configs/${id}`, {
                 method: 'DELETE',
             }, { admin: true })
             showMsg('success', `Config "${name}" deleted`)
@@ -523,7 +523,7 @@ export function AdminTools() {
 
     const handleUpdateNotes = async (notes) => {
         try {
-            await APIService.request(`/api/admin/rebuild-configs/${selectedId}`, {
+            await APIService.request(`/admin/rebuild-configs/${selectedId}`, {
                 method: 'PUT',
                 body: JSON.stringify({ notes }),
             }, { admin: true })
