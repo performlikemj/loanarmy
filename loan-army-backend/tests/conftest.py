@@ -53,6 +53,11 @@ os.environ.setdefault('SKIP_API_HANDSHAKE', '1')
 os.environ.setdefault('API_USE_STUB_DATA', 'true')
 os.environ.setdefault('TEST_ONLY_MANU', 'false')
 
+# Map PostgreSQL JSONB to generic JSON so SQLite can handle it in tests
+from sqlalchemy.dialects.postgresql import JSONB
+from sqlalchemy.ext.compiler import compiles
+compiles(JSONB, 'sqlite')(lambda element, compiler, **kw: 'JSON')
+
 from src.models.league import db
 from src.routes.api import api_bp
 from src.routes.teams import teams_bp
@@ -91,6 +96,8 @@ def app():
     app.register_blueprint(subscriptions_bp, url_prefix='/api')
     from src.routes.journalist import journalist_bp
     app.register_blueprint(journalist_bp, url_prefix='/api')
+    from src.routes.cohort import cohort_bp
+    app.register_blueprint(cohort_bp, url_prefix='/api')
 
     ctx = app.app_context()
     ctx.push()
