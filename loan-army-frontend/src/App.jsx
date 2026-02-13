@@ -93,6 +93,8 @@ import { AdminSponsors } from '@/pages/admin/AdminSponsors'
 import { AdminCuration } from '@/pages/admin/AdminCuration'
 import { AdminAcademy } from '@/pages/admin/AdminAcademy'
 import { AdminCohorts } from '@/pages/admin/AdminCohorts'
+import { AdminTools } from '@/pages/admin/AdminTools'
+import { AdminSandbox } from '@/pages/admin/AdminSandbox'
 import { AdminFormation } from '@/pages/admin/AdminFormation'
 import { PublicFormationBuilder } from '@/pages/PublicFormationBuilder'
 import { CohortBrowser } from '@/pages/CohortBrowser'
@@ -10791,6 +10793,8 @@ function AppRoutes() {
         <Route path="academy" element={<AdminAcademy />} />
         <Route path="cohorts" element={<AdminCohorts />} />
         <Route path="settings" element={<AdminSettings />} />
+        <Route path="tools" element={<AdminTools />} />
+        <Route path="sandbox" element={<AdminSandbox />} />
       </Route>
       <Route
         path="/admin/old"

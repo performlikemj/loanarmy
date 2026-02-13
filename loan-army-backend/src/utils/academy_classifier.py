@@ -10,7 +10,7 @@ academy / parent club.  Used by:
 """
 
 import re
-from typing import Optional, Tuple
+from typing import Dict, List, Optional, Tuple
 
 # ── regex to strip youth suffixes from club names ──────────────────────
 YOUTH_SUFFIXES = re.compile(
@@ -172,6 +172,79 @@ def derive_player_status(
 
     # 4. Genuinely at a different club → on loan
     return ('on_loan', current_club_api_id, current_club_name)
+
+
+def derive_player_status_with_reasoning(
+    current_club_api_id: Optional[int],
+    current_club_name: Optional[str],
+    current_level: Optional[str],
+    parent_api_id: int,
+    parent_club_name: str,
+) -> Tuple[str, Optional[int], Optional[str], List[Dict]]:
+    """Like derive_player_status but also returns step-by-step reasoning.
+
+    Returns:
+        (status, loan_club_api_id, loan_club_name, reasoning)
+        where reasoning is a list of dicts with rule/check/result/detail.
+    """
+    reasoning: List[Dict] = []
+
+    if not current_club_api_id:
+        reasoning.append({
+            'rule': 'no_current_club', 'result': 'match',
+            'check': 'current_club_api_id is null',
+            'detail': 'No current club info — defaulting to academy',
+        })
+        return 'academy', None, None, reasoning
+    reasoning.append({
+        'rule': 'no_current_club', 'result': 'pass',
+        'check': 'current_club_api_id is not null',
+        'detail': f'Current club: {current_club_name} ({current_club_api_id})',
+    })
+
+    intl = is_international_level(current_level)
+    reasoning.append({
+        'rule': 'international_level', 'result': 'match' if intl else 'pass',
+        'check': f'current_level "{current_level}" in INTERNATIONAL_LEVELS',
+        'detail': f'Level {"is" if intl else "is not"} international',
+    })
+    if intl:
+        return _base_status(current_level), None, None, reasoning
+
+    natl = is_national_team(current_club_name)
+    reasoning.append({
+        'rule': 'national_team', 'result': 'match' if natl else 'pass',
+        'check': f'is_national_team("{current_club_name}")',
+        'detail': f'"{current_club_name}" {"is" if natl else "is not"} a national team',
+    })
+    if natl:
+        return _base_status(current_level), None, None, reasoning
+
+    same_id = (current_club_api_id == parent_api_id)
+    reasoning.append({
+        'rule': 'same_api_id', 'result': 'match' if same_id else 'pass',
+        'check': f'{current_club_api_id} == {parent_api_id}',
+        'detail': f'{current_club_api_id} {"==" if same_id else "!="} {parent_api_id}',
+    })
+    if same_id:
+        return _base_status(current_level), None, None, reasoning
+
+    same_name = is_same_club(current_club_name or '', parent_club_name)
+    stripped = strip_youth_suffix(current_club_name or '').lower()
+    reasoning.append({
+        'rule': 'same_club_name', 'result': 'match' if same_name else 'pass',
+        'check': f'strip_youth_suffix("{current_club_name}") == "{parent_club_name}"',
+        'detail': f'"{stripped}" {"==" if same_name else "!="} "{parent_club_name.lower()}"',
+    })
+    if same_name:
+        return _base_status(current_level), None, None, reasoning
+
+    reasoning.append({
+        'rule': 'different_club', 'result': 'match',
+        'check': 'No rules matched — different club',
+        'detail': f'Classified as on_loan at {current_club_name}',
+    })
+    return 'on_loan', current_club_api_id, current_club_name, reasoning
 
 
 def upgrade_status_from_transfers(

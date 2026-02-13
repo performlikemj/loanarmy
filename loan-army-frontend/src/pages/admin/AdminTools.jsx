@@ -8,7 +8,7 @@ import { Label } from '@/components/ui/label'
 import { Alert, AlertDescription } from '@/components/ui/alert'
 import {
     Settings2, Plus, Copy, Trash2, Check, History, Pencil, X,
-    AlertCircle, CheckCircle2, Loader2,
+    AlertCircle, CheckCircle2, Loader2, Wifi, WifiOff, Database, Activity,
 } from 'lucide-react'
 
 const TEAM_OPTIONS = [
@@ -310,6 +310,92 @@ function HistoryTimeline({ history }) {
     )
 }
 
+function ApiFootballStatusCard() {
+    const [status, setStatus] = useState(null)
+    const [loading, setLoading] = useState(true)
+    const [error, setError] = useState(null)
+
+    useEffect(() => {
+        let cancelled = false
+        ;(async () => {
+            try {
+                const data = await APIService.request('/api/admin/api-football/status', {}, { admin: true })
+                if (!cancelled) setStatus(data)
+            } catch (e) {
+                if (!cancelled) setError(e.message)
+            } finally {
+                if (!cancelled) setLoading(false)
+            }
+        })()
+        return () => { cancelled = true }
+    }, [])
+
+    const modeBadge = (mode) => {
+        const variants = {
+            direct: { className: 'bg-green-100 text-green-800', label: 'Direct' },
+            rapidapi: { className: 'bg-blue-100 text-blue-800', label: 'RapidAPI' },
+            stub: { className: 'bg-yellow-100 text-yellow-800', label: 'Stub' },
+        }
+        const v = variants[(mode || '').toLowerCase()] || { className: 'bg-gray-100 text-gray-800', label: mode || 'Unknown' }
+        return <span className={`px-2 py-0.5 rounded-full text-xs font-medium ${v.className}`}>{v.label}</span>
+    }
+
+    return (
+        <Card>
+            <CardHeader className="pb-3">
+                <CardTitle className="flex items-center gap-2 text-base">
+                    <Activity className="h-4 w-4" />
+                    API-Football Connection
+                </CardTitle>
+            </CardHeader>
+            <CardContent>
+                {loading ? (
+                    <div className="flex items-center gap-2 text-sm text-muted-foreground">
+                        <Loader2 className="h-4 w-4 animate-spin" /> Checking status...
+                    </div>
+                ) : error ? (
+                    <div className="flex items-center gap-2 text-sm text-red-600">
+                        <WifiOff className="h-4 w-4" /> {error}
+                    </div>
+                ) : (
+                    <div className="grid grid-cols-2 sm:grid-cols-4 gap-4">
+                        <div>
+                            <div className="text-xs font-semibold text-muted-foreground uppercase tracking-wider mb-1">Mode</div>
+                            <div className="flex items-center gap-2">
+                                <Wifi className="h-3.5 w-3.5 text-green-600" />
+                                {modeBadge(status.mode)}
+                            </div>
+                        </div>
+                        <div>
+                            <div className="text-xs font-semibold text-muted-foreground uppercase tracking-wider mb-1">API Key</div>
+                            <div className="flex items-center gap-1.5 text-sm">
+                                <div className={`h-2 w-2 rounded-full ${status.key_present ? 'bg-green-500' : 'bg-red-500'}`} />
+                                {status.key_present
+                                    ? <span className="font-mono text-xs">{status.key_prefix}****</span>
+                                    : <span className="text-red-600">Missing</span>
+                                }
+                            </div>
+                        </div>
+                        <div>
+                            <div className="text-xs font-semibold text-muted-foreground uppercase tracking-wider mb-1">Today's Calls</div>
+                            <div className="text-sm font-mono">
+                                {status.usage?.total_today ?? '—'}
+                            </div>
+                        </div>
+                        <div>
+                            <div className="text-xs font-semibold text-muted-foreground uppercase tracking-wider mb-1">Cache Entries</div>
+                            <div className="flex items-center gap-1.5 text-sm">
+                                <Database className="h-3.5 w-3.5 text-muted-foreground" />
+                                <span className="font-mono">{status.cache?.total_entries ?? '—'}</span>
+                            </div>
+                        </div>
+                    </div>
+                )}
+            </CardContent>
+        </Card>
+    )
+}
+
 export function AdminTools() {
     const { authToken } = useAuth()
     const adminReady = Boolean(authToken && APIService.isAdmin() && APIService.adminKey)
@@ -455,8 +541,8 @@ export function AdminTools() {
         return (
             <div className="space-y-6">
                 <div>
-                    <h2 className="text-3xl font-bold tracking-tight">Rebuild Configs</h2>
-                    <p className="text-muted-foreground mt-1">Sign in as admin to manage rebuild configurations</p>
+                    <h2 className="text-3xl font-bold tracking-tight">Tools</h2>
+                    <p className="text-muted-foreground mt-1">Sign in as admin to manage tools and configurations</p>
                 </div>
                 <Card>
                     <CardContent className="pt-6">
@@ -471,11 +557,15 @@ export function AdminTools() {
 
     return (
         <div className="space-y-6">
+            <div>
+                <h2 className="text-3xl font-bold tracking-tight">Tools</h2>
+                <p className="text-muted-foreground mt-1">API connection status and rebuild configurations</p>
+            </div>
+
+            <ApiFootballStatusCard />
+
             <div className="flex items-center justify-between">
-                <div>
-                    <h2 className="text-3xl font-bold tracking-tight">Rebuild Configs</h2>
-                    <p className="text-muted-foreground mt-1">Manage API-Football rebuild configurations and track changes</p>
-                </div>
+                <h3 className="text-xl font-semibold tracking-tight">Rebuild Configs</h3>
                 <Button onClick={() => { setCreating(true); setCloneFrom(null) }}>
                     <Plus className="h-4 w-4 mr-1" /> New Config
                 </Button>

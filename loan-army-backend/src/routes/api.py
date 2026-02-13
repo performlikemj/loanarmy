@@ -13397,6 +13397,214 @@ def admin_api_cache_cleanup():
 
 
 # ====================================================================
+# Player Classification Sandbox
+# ====================================================================
+
+@api_bp.route('/admin/players/search-api', methods=['GET'])
+@require_api_key
+def admin_search_api_players():
+    """Proxy search to API-Football player search endpoint."""
+    query = request.args.get('q', '').strip()
+    if not query or len(query) < 2:
+        return jsonify({'results': []})
+    season = request.args.get('season', type=int)
+    try:
+        from src.api_football_client import APIFootballClient
+        api = APIFootballClient()
+        raw = api.search_player_profiles(query, season=season)
+        results = []
+        for item in raw[:20]:
+            player = item.get('player', {})
+            stats = item.get('statistics', [{}])
+            team_info = stats[0].get('team', {}) if stats else {}
+            results.append({
+                'id': player.get('id'),
+                'name': player.get('name'),
+                'photo': player.get('photo'),
+                'nationality': player.get('nationality'),
+                'age': player.get('age'),
+                'team': team_info.get('name'),
+                'team_id': team_info.get('id'),
+            })
+        return jsonify({'results': results})
+    except Exception as e:
+        logger.exception('admin_search_api_players failed')
+        return jsonify(_safe_error_payload(e, 'Player search failed')), 500
+
+
+@api_bp.route('/admin/players/test-classify', methods=['POST'])
+@require_api_key
+def admin_test_classify():
+    """Run the classifier pipeline on a single player and return detailed reasoning."""
+    data = request.get_json() or {}
+    player_api_id = data.get('player_api_id')
+    if not player_api_id:
+        return jsonify({'error': 'player_api_id is required'}), 400
+    try:
+        player_api_id = int(player_api_id)
+    except (ValueError, TypeError):
+        return jsonify({'error': 'player_api_id must be an integer'}), 400
+
+    force_sync = data.get('force_sync', False)
+
+    try:
+        from src.models.journey import PlayerJourney, PlayerJourneyEntry
+        from src.services.journey_sync import JourneySyncService
+        from src.api_football_client import APIFootballClient
+        from src.utils.academy_classifier import (
+            derive_player_status_with_reasoning,
+            upgrade_status_from_transfers,
+        )
+
+        service = JourneySyncService()
+        journey = service.sync_player(player_api_id, force_full=force_sync)
+        if not journey:
+            return jsonify({'error': f'Could not sync journey for player {player_api_id}'}), 404
+
+        entries = PlayerJourneyEntry.query.filter_by(
+            journey_id=journey.id
+        ).order_by(PlayerJourneyEntry.season, PlayerJourneyEntry.sort_priority).all()
+
+        # Determine which parent clubs to classify against
+        parent_api_id = data.get('parent_api_id')
+        if parent_api_id:
+            parent_ids = [int(parent_api_id)]
+        else:
+            parent_ids = journey.academy_club_ids or []
+
+        # Fetch transfers for upgrade check
+        api = APIFootballClient()
+        transfers = api.get_player_transfers(player_api_id)
+
+        # Run classification with reasoning for each parent
+        classifications = []
+        for pid in parent_ids:
+            team = Team.query.filter_by(team_id=pid, is_active=True).order_by(Team.season.desc()).first()
+            parent_name = team.name if team else str(pid)
+
+            status, loan_id, loan_name, reasoning = derive_player_status_with_reasoning(
+                journey.current_club_api_id, journey.current_club_name,
+                journey.current_level, pid, parent_name,
+            )
+
+            upgraded = upgrade_status_from_transfers(status, transfers, pid)
+            if upgraded != status:
+                reasoning.append({
+                    'rule': 'transfer_upgrade', 'result': 'match',
+                    'check': f'upgrade_status_from_transfers("{status}")',
+                    'detail': f'Upgraded from {status} to {upgraded} based on transfer history',
+                })
+                status = upgraded
+
+            classifications.append({
+                'parent_api_id': pid,
+                'parent_club_name': parent_name,
+                'status': status,
+                'loan_club_api_id': loan_id,
+                'loan_club_name': loan_name,
+                'reasoning': reasoning,
+            })
+
+        # Transfer summary
+        transfer_summary = []
+        for t in (transfers or []):
+            teams = t.get('teams', {})
+            transfer_summary.append({
+                'date': t.get('date'),
+                'from': teams.get('out', {}).get('name'),
+                'to': teams.get('in', {}).get('name'),
+                'type': t.get('type'),
+            })
+
+        # Check existing tracked player for diff
+        existing = TrackedPlayer.query.filter_by(
+            player_api_id=player_api_id, is_active=True
+        ).all()
+        existing_info = []
+        for tp in existing:
+            parent_tid = tp.team.team_id if tp.team else None
+            matching = next((c for c in classifications if c['parent_api_id'] == parent_tid), None)
+            existing_info.append({
+                'parent_api_id': parent_tid,
+                'parent_club_name': tp.team.name if tp.team else None,
+                'current_status': tp.status,
+                'new_status': matching['status'] if matching else None,
+                'would_change': matching['status'] != tp.status if matching else False,
+            })
+
+        return jsonify({
+            'player': {
+                'api_id': player_api_id,
+                'name': journey.player_name,
+                'photo': journey.player_photo,
+                'nationality': journey.nationality,
+                'birth_date': journey.birth_date,
+                'birth_country': getattr(journey, 'birth_country', None),
+            },
+            'journey': {
+                'id': journey.id,
+                'origin_club': journey.origin_club_name,
+                'current_club': journey.current_club_name,
+                'current_club_api_id': journey.current_club_api_id,
+                'current_level': journey.current_level,
+                'total_clubs': journey.total_clubs,
+                'academy_club_ids': journey.academy_club_ids,
+                'entries': [{
+                    'season': e.season,
+                    'club_name': e.club_name,
+                    'club_api_id': e.club_api_id,
+                    'club_logo': e.club_logo,
+                    'league_name': e.league_name,
+                    'level': e.level,
+                    'entry_type': e.entry_type,
+                    'appearances': e.appearances,
+                    'goals': e.goals,
+                    'assists': e.assists,
+                    'minutes': e.minutes,
+                    'is_youth': e.is_youth,
+                    'is_international': e.is_international,
+                } for e in entries],
+            },
+            'classifications': classifications,
+            'transfer_summary': transfer_summary,
+            'existing_tracked': existing_info,
+        })
+    except Exception as e:
+        logger.exception('admin_test_classify failed')
+        return jsonify(_safe_error_payload(e, 'Classification failed')), 500
+
+
+@api_bp.route('/admin/api-football/status', methods=['GET'])
+@require_api_key
+def admin_api_football_status():
+    """Composite API-Football connection status: mode, key, usage, cache."""
+    import os
+    result = {}
+
+    # Connection info
+    key = os.getenv('API_FOOTBALL_KEY', '')
+    result['mode'] = os.getenv('API_FOOTBALL_MODE', 'direct')
+    result['key_present'] = bool(key)
+    result['key_prefix'] = (key[:4] + '****') if len(key) >= 4 else ('****' if key else '')
+
+    # Usage stats
+    try:
+        from src.models.api_cache import APIUsageDaily
+        result['usage'] = APIUsageDaily.usage_summary(days=7)
+    except Exception:
+        result['usage'] = None
+
+    # Cache stats
+    try:
+        from src.models.api_cache import APICache
+        result['cache'] = APICache.stats()
+    except Exception:
+        result['cache'] = None
+
+    return jsonify(result)
+
+
+# ====================================================================
 # Tracked Players CRUD
 # ====================================================================
 
