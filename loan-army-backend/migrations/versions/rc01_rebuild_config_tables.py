@@ -70,17 +70,15 @@ def upgrade():
     )
 
     # Seed default config
-    now = datetime.now(timezone.utc).isoformat()
     config_str = json.dumps(DEFAULT_CONFIG)
     op.execute(
         text(
             "INSERT INTO rebuild_configs (name, is_active, config_json, notes, created_at, updated_at) "
-            "VALUES (:name, true, :config, :notes, :now, :now)"
+            "VALUES (:name, true, :config, :notes, NOW(), NOW())"
         ).bindparams(
             name='Big 6 Standard',
             config=config_str,
             notes='Default configuration seeded from hardcoded values.',
-            now=now,
         )
     )
 
@@ -88,11 +86,10 @@ def upgrade():
     op.execute(
         text(
             "INSERT INTO rebuild_config_logs (config_id, action, snapshot_json, created_at) "
-            "VALUES ((SELECT id FROM rebuild_configs WHERE name = :name), 'created', :snapshot, :now)"
+            "VALUES ((SELECT id FROM rebuild_configs WHERE name = :name), 'created', :snapshot, NOW())"
         ).bindparams(
             name='Big 6 Standard',
             snapshot=config_str,
-            now=now,
         )
     )
 
