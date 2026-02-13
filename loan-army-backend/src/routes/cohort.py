@@ -3,9 +3,10 @@
 Handles:
 - Admin cohort seeding and management
 - Public cohort browsing and analytics
+- Rebuild configuration management (presets + audit trail)
 """
 from flask import Blueprint, request, jsonify
-from src.models.league import db
+from src.models.league import db, RebuildConfig, RebuildConfigLog
 from src.models.cohort import AcademyCohort, CohortMember
 from src.models.journey import PlayerJourney
 from src.routes.api import require_api_key
@@ -13,6 +14,7 @@ from src.services.cohort_service import CohortService
 from src.utils.background_jobs import create_background_job, update_job, get_job
 from datetime import datetime, timezone
 import multiprocessing
+import json
 import logging
 
 cohort_bp = Blueprint('cohort', __name__)
@@ -359,8 +361,9 @@ def admin_full_rebuild():
       7. Seed club locations
 
     Body (all optional):
-      team_ids: list of API team IDs (default: Big 6)
-      seasons: list of season years (default: 2020-2024)
+      config_id: int (load specific RebuildConfig; otherwise uses active config)
+      team_ids: list of API team IDs (override)
+      seasons: list of season years (override)
       skip_clean: bool (default: false)
       skip_cohorts: bool (default: false)
     """
@@ -368,21 +371,46 @@ def admin_full_rebuild():
     from src.utils.rebuild_runner import run_rebuild_process
 
     data = request.get_json() or {}
-    team_ids = data.get('team_ids') or list(BIG_6.keys())
-    seasons = data.get('seasons') or SEASONS
+
+    # Load rebuild config: explicit config_id > active config > hardcoded defaults
+    config_id_used = None
+    if data.get('config_id'):
+        rc = RebuildConfig.query.get(data['config_id'])
+        if not rc:
+            return jsonify({'error': f'RebuildConfig {data["config_id"]} not found'}), 404
+        try:
+            rebuild_cfg = json.loads(rc.config_json)
+        except (json.JSONDecodeError, TypeError):
+            rebuild_cfg = {}
+        config_id_used = rc.id
+    else:
+        rebuild_cfg, config_id_used = get_active_rebuild_config()
+
+    # Request body overrides take precedence over stored config
+    team_ids_cfg = rebuild_cfg.get('team_ids', {})
+    team_ids = data.get('team_ids') or [int(k) for k in team_ids_cfg.keys()] or list(BIG_6.keys())
+    seasons = data.get('seasons') or rebuild_cfg.get('seasons') or SEASONS
     skip_clean = data.get('skip_clean', False)
     skip_cohorts = data.get('skip_cohorts', False)
 
     job_id = create_background_job('full_rebuild')
 
+    # Merge rebuild config params into the job kwargs
+    job_config = {
+        'team_ids': team_ids,
+        'seasons': seasons,
+        'skip_clean': skip_clean,
+        'skip_cohorts': skip_cohorts,
+        'use_transfers_for_status': rebuild_cfg.get('use_transfers_for_status', False),
+        'inactivity_threshold_years': rebuild_cfg.get('inactivity_threshold_years', 2),
+        'cohort_discover_timeout': rebuild_cfg.get('cohort_discover_timeout', 120),
+        'player_sync_timeout': rebuild_cfg.get('player_sync_timeout', 90),
+        'config_id': config_id_used,
+    }
+
     p = multiprocessing.Process(
         target=run_rebuild_process,
-        args=(job_id, 'full_rebuild', {
-            'team_ids': team_ids,
-            'seasons': seasons,
-            'skip_clean': skip_clean,
-            'skip_cohorts': skip_cohorts,
-        }),
+        args=(job_id, 'full_rebuild', job_config),
         daemon=True,
     )
     p.start()
@@ -392,10 +420,224 @@ def admin_full_rebuild():
         'job_id': job_id,
         'status': 'running',
         'check_status_url': f'/api/admin/jobs/{job_id}',
-        'config': {
-            'team_ids': team_ids,
-            'seasons': seasons,
-            'skip_clean': skip_clean,
-            'skip_cohorts': skip_cohorts,
-        }
+        'config': job_config,
     }), 202
+
+
+# =============================================================================
+# Rebuild Configuration Endpoints
+# =============================================================================
+
+def _get_default_config():
+    """Return the hardcoded default configuration as a dict."""
+    from src.services.big6_seeding_service import BIG_6, SEASONS, COHORT_DISCOVER_TIMEOUT, PLAYER_SYNC_TIMEOUT
+    from src.services.youth_competition_resolver import DEFAULT_YOUTH_LEAGUES
+    return {
+        'team_ids': {str(k): v for k, v in BIG_6.items()},
+        'seasons': list(SEASONS),
+        'youth_leagues': [
+            {'key': yl['key'], 'name': yl['name'], 'fallback_id': yl['fallback_id'], 'level': yl['level']}
+            for yl in DEFAULT_YOUTH_LEAGUES
+        ],
+        'use_transfers_for_status': False,
+        'inactivity_threshold_years': 2,
+        'assume_full_minutes': False,
+        'cohort_discover_timeout': COHORT_DISCOVER_TIMEOUT,
+        'player_sync_timeout': PLAYER_SYNC_TIMEOUT,
+    }
+
+
+def _compute_diff(old_config, new_config):
+    """Compute a diff between two config dicts: {key: {old, new}} for changed fields."""
+    diff = {}
+    all_keys = set(list(old_config.keys()) + list(new_config.keys()))
+    for key in all_keys:
+        old_val = old_config.get(key)
+        new_val = new_config.get(key)
+        if old_val != new_val:
+            diff[key] = {'old': old_val, 'new': new_val}
+    return diff
+
+
+def _log_config_change(config, action, diff=None):
+    """Write an audit log entry for a config change."""
+    log = RebuildConfigLog(
+        config_id=config.id,
+        action=action,
+        diff_json=json.dumps(diff) if diff else None,
+        snapshot_json=config.config_json,
+    )
+    db.session.add(log)
+
+
+def get_active_rebuild_config():
+    """Load the active RebuildConfig as a dict, falling back to hardcoded defaults."""
+    active = RebuildConfig.query.filter_by(is_active=True).first()
+    if active:
+        try:
+            return json.loads(active.config_json), active.id
+        except (json.JSONDecodeError, TypeError):
+            pass
+    return _get_default_config(), None
+
+
+@cohort_bp.route('/admin/rebuild-configs/defaults', methods=['GET'])
+@require_api_key
+def admin_rebuild_config_defaults():
+    """Return the current hardcoded defaults as JSON."""
+    return jsonify(_get_default_config())
+
+
+@cohort_bp.route('/admin/rebuild-configs', methods=['GET'])
+@require_api_key
+def admin_list_rebuild_configs():
+    """List all saved rebuild configurations."""
+    configs = RebuildConfig.query.order_by(RebuildConfig.updated_at.desc()).all()
+    return jsonify([c.to_dict(include_config=False) for c in configs])
+
+
+@cohort_bp.route('/admin/rebuild-configs/<int:config_id>', methods=['GET'])
+@require_api_key
+def admin_get_rebuild_config(config_id):
+    """Get a single rebuild config with full details and recent history."""
+    config = RebuildConfig.query.get_or_404(config_id)
+    result = config.to_dict()
+    recent_logs = (config.logs
+                   .order_by(RebuildConfigLog.created_at.desc())
+                   .limit(20)
+                   .all())
+    result['history'] = [l.to_dict() for l in recent_logs]
+    return jsonify(result)
+
+
+@cohort_bp.route('/admin/rebuild-configs', methods=['POST'])
+@require_api_key
+def admin_create_rebuild_config():
+    """Create a new rebuild configuration.
+
+    Body:
+        name: str (required)
+        config: dict (optional, defaults to hardcoded defaults)
+        notes: str (optional)
+        clone_from: int (optional, config ID to clone from)
+    """
+    data = request.get_json() or {}
+    name = (data.get('name') or '').strip()
+    if not name:
+        return jsonify({'error': 'Name is required'}), 400
+
+    if RebuildConfig.query.filter_by(name=name).first():
+        return jsonify({'error': f'Config "{name}" already exists'}), 409
+
+    # Determine initial config
+    clone_id = data.get('clone_from')
+    if clone_id:
+        source = RebuildConfig.query.get(clone_id)
+        if not source:
+            return jsonify({'error': f'Clone source {clone_id} not found'}), 404
+        config_dict = json.loads(source.config_json)
+    elif data.get('config'):
+        config_dict = data['config']
+    else:
+        config_dict = _get_default_config()
+
+    config = RebuildConfig(
+        name=name,
+        is_active=False,
+        config_json=json.dumps(config_dict),
+        notes=data.get('notes', ''),
+    )
+    db.session.add(config)
+    db.session.flush()
+    _log_config_change(config, 'created')
+    db.session.commit()
+
+    return jsonify(config.to_dict()), 201
+
+
+@cohort_bp.route('/admin/rebuild-configs/<int:config_id>', methods=['PUT'])
+@require_api_key
+def admin_update_rebuild_config(config_id):
+    """Update a rebuild configuration. Logs the diff.
+
+    Body:
+        name: str (optional)
+        config: dict (optional, partial or full replacement)
+        notes: str (optional)
+    """
+    config = RebuildConfig.query.get_or_404(config_id)
+    data = request.get_json() or {}
+
+    if 'name' in data:
+        new_name = (data['name'] or '').strip()
+        if not new_name:
+            return jsonify({'error': 'Name cannot be empty'}), 400
+        existing = RebuildConfig.query.filter_by(name=new_name).first()
+        if existing and existing.id != config_id:
+            return jsonify({'error': f'Config "{new_name}" already exists'}), 409
+        config.name = new_name
+
+    if 'notes' in data:
+        config.notes = data['notes']
+
+    if 'config' in data:
+        try:
+            old_config = json.loads(config.config_json)
+        except (json.JSONDecodeError, TypeError):
+            old_config = {}
+        new_config = data['config']
+        diff = _compute_diff(old_config, new_config)
+        config.config_json = json.dumps(new_config)
+        _log_config_change(config, 'updated', diff=diff)
+    else:
+        _log_config_change(config, 'updated')
+
+    db.session.commit()
+    return jsonify(config.to_dict())
+
+
+@cohort_bp.route('/admin/rebuild-configs/<int:config_id>/activate', methods=['POST'])
+@require_api_key
+def admin_activate_rebuild_config(config_id):
+    """Set a config as the active one. Deactivates the previous active config."""
+    config = RebuildConfig.query.get_or_404(config_id)
+
+    if config.is_active:
+        return jsonify({'message': 'Already active', **config.to_dict()})
+
+    # Deactivate current active
+    prev = RebuildConfig.query.filter_by(is_active=True).first()
+    if prev:
+        prev.is_active = False
+        _log_config_change(prev, 'deactivated')
+
+    config.is_active = True
+    _log_config_change(config, 'activated')
+    db.session.commit()
+
+    return jsonify(config.to_dict())
+
+
+@cohort_bp.route('/admin/rebuild-configs/<int:config_id>', methods=['DELETE'])
+@require_api_key
+def admin_delete_rebuild_config(config_id):
+    """Delete a rebuild configuration (cannot delete active config)."""
+    config = RebuildConfig.query.get_or_404(config_id)
+
+    if config.is_active:
+        return jsonify({'error': 'Cannot delete the active configuration'}), 400
+
+    db.session.delete(config)
+    db.session.commit()
+    return jsonify({'message': f'Config "{config.name}" deleted'})
+
+
+@cohort_bp.route('/admin/rebuild-configs/<int:config_id>/history', methods=['GET'])
+@require_api_key
+def admin_rebuild_config_history(config_id):
+    """Get the full change history for a config."""
+    config = RebuildConfig.query.get_or_404(config_id)
+    logs = (config.logs
+            .order_by(RebuildConfigLog.created_at.desc())
+            .all())
+    return jsonify([l.to_dict() for l in logs])

@@ -73,7 +73,7 @@ def _run_full_rebuild(job_id, config):
     from src.models.weekly import WeeklyLoanAppearance
     from src.services.big6_seeding_service import run_big6_seed, BIG_6, SEASONS
     from src.services.youth_competition_resolver import build_academy_league_seed_rows
-    from src.utils.academy_classifier import derive_player_status
+    from src.utils.academy_classifier import derive_player_status, upgrade_status_from_transfers
     from src.utils.background_jobs import update_job, is_job_cancelled
     from src.api_football_client import APIFootballClient
     from src.services.journey_sync import JourneySyncService, seed_club_locations
@@ -190,7 +190,11 @@ def _run_full_rebuild(job_id, config):
             stage = 'cohorts'
             update_job(job_id, progress=2, total=total_stages, current_player='Stage 3: Discovering cohorts + syncing journeys...')
             try:
-                seed_result = run_big6_seed(job_id, seasons=seasons, team_ids=team_ids)
+                seed_result = run_big6_seed(
+                    job_id, seasons=seasons, team_ids=team_ids,
+                    cohort_discover_timeout=config.get('cohort_discover_timeout'),
+                    player_sync_timeout=config.get('player_sync_timeout'),
+                )
                 results['cohorts_created'] = seed_result.get('cohorts_created', 0)
                 results['players_synced'] = seed_result.get('players_synced', 0)
             except Exception as stage3_err:
@@ -375,7 +379,9 @@ def _run_full_rebuild(job_id, config):
         # ── Stage 6: Refresh statuses ──
         _check_cancelled()
         stage = 'refresh_statuses'
-        update_job(job_id, progress=6, total=total_stages, current_player='Stage 6: Refreshing statuses...')
+        use_transfers = config.get('use_transfers_for_status', False)
+        update_job(job_id, progress=6, total=total_stages,
+                   current_player=f'Stage 6: Refreshing statuses (transfers={use_transfers})...')
         tracked = TrackedPlayer.query.filter(TrackedPlayer.is_active == True).all()
         updated = 0
         status_counts = {}
@@ -390,6 +396,16 @@ def _run_full_rebuild(job_id, config):
                 parent_api_id=tp.team.team_id,
                 parent_club_name=tp.team.name,
             )
+            # Optionally upgrade on_loan → sold/released using transfer data
+            if use_transfers and status == 'on_loan' and journey:
+                transfers = journey.raw_transfers if hasattr(journey, 'raw_transfers') else None
+                if not transfers:
+                    try:
+                        transfer_data = api_client.get_player_transfers(tp.player_api_id)
+                        transfers = transfer_data if transfer_data else []
+                    except Exception:
+                        transfers = []
+                status = upgrade_status_from_transfers(status, transfers, tp.team.team_id)
             if tp.status != status or tp.loan_club_api_id != loan_api_id:
                 tp.status = status
                 tp.loan_club_api_id = loan_api_id

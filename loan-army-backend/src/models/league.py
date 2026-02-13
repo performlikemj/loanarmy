@@ -1786,3 +1786,67 @@ class ContributorProfile(db.Model):
             'created_at': self.created_at.isoformat() if self.created_at else None,
             'updated_at': self.updated_at.isoformat() if self.updated_at else None,
         }
+
+
+class RebuildConfig(db.Model):
+    """Named rebuild configuration preset with all pipeline parameters."""
+    __tablename__ = 'rebuild_configs'
+
+    id = db.Column(db.Integer, primary_key=True)
+    name = db.Column(db.String(100), unique=True, nullable=False)
+    is_active = db.Column(db.Boolean, default=False, nullable=False)
+    config_json = db.Column(db.Text, nullable=False)
+    notes = db.Column(db.Text)
+    created_at = db.Column(db.DateTime, default=lambda: datetime.now(timezone.utc))
+    updated_at = db.Column(db.DateTime, default=lambda: datetime.now(timezone.utc),
+                           onupdate=lambda: datetime.now(timezone.utc))
+
+    logs = db.relationship('RebuildConfigLog', backref='config',
+                           lazy='dynamic', cascade='all, delete-orphan')
+
+    def to_dict(self, include_config=True):
+        import json
+        d = {
+            'id': self.id,
+            'name': self.name,
+            'is_active': self.is_active,
+            'notes': self.notes,
+            'created_at': self.created_at.isoformat() if self.created_at else None,
+            'updated_at': self.updated_at.isoformat() if self.updated_at else None,
+        }
+        if include_config:
+            try:
+                d['config'] = json.loads(self.config_json)
+            except (json.JSONDecodeError, TypeError):
+                d['config'] = {}
+        return d
+
+
+class RebuildConfigLog(db.Model):
+    """Audit log entry for rebuild configuration changes."""
+    __tablename__ = 'rebuild_config_logs'
+
+    id = db.Column(db.Integer, primary_key=True)
+    config_id = db.Column(db.Integer, db.ForeignKey('rebuild_configs.id'), nullable=False)
+    action = db.Column(db.String(20), nullable=False)
+    diff_json = db.Column(db.Text)
+    snapshot_json = db.Column(db.Text)
+    created_at = db.Column(db.DateTime, default=lambda: datetime.now(timezone.utc))
+
+    def to_dict(self):
+        import json
+        d = {
+            'id': self.id,
+            'config_id': self.config_id,
+            'action': self.action,
+            'created_at': self.created_at.isoformat() if self.created_at else None,
+        }
+        try:
+            d['diff'] = json.loads(self.diff_json) if self.diff_json else None
+        except (json.JSONDecodeError, TypeError):
+            d['diff'] = None
+        try:
+            d['snapshot'] = json.loads(self.snapshot_json) if self.snapshot_json else None
+        except (json.JSONDecodeError, TypeError):
+            d['snapshot'] = None
+        return d

@@ -82,7 +82,8 @@ class RateLimiter:
         self.day_calls += 1
 
 
-def run_big6_seed(job_id, seasons=None, team_ids=None, league_ids=None):
+def run_big6_seed(job_id, seasons=None, team_ids=None, league_ids=None,
+                   cohort_discover_timeout=None, player_sync_timeout=None):
     """
     Run the full Big 6 cohort seeding pipeline.
 
@@ -95,11 +96,15 @@ def run_big6_seed(job_id, seasons=None, team_ids=None, league_ids=None):
         seasons: List of season years (default: SEASONS)
         team_ids: List of team API IDs (default: BIG_6 keys)
         league_ids: List of league API IDs (default: YOUTH_LEAGUES keys)
+        cohort_discover_timeout: Seconds before skipping a cohort discovery (default: COHORT_DISCOVER_TIMEOUT)
+        player_sync_timeout: Seconds before skipping a player sync (default: PLAYER_SYNC_TIMEOUT)
     """
     seasons = seasons or SEASONS
     team_ids = team_ids or list(BIG_6.keys())
     provided_league_ids = league_ids
     league_ids = league_ids or list(YOUTH_LEAGUES.keys())
+    cohort_timeout = cohort_discover_timeout or COHORT_DISCOVER_TIMEOUT
+    player_timeout = player_sync_timeout or PLAYER_SYNC_TIMEOUT
 
     cohort_service = CohortService()
     journey_service = JourneySyncService()
@@ -241,12 +246,12 @@ def run_big6_seed(job_id, seasons=None, team_ids=None, league_ids=None):
 
             cohort_id_result, timed_out = _run_with_timeout(
                 _discover_in_context,
-                COHORT_DISCOVER_TIMEOUT,
+                cohort_timeout,
             )
             if timed_out:
                 logger.warning(
                     "Cohort discovery timed out after %ds: %s/%s/%s — skipping",
-                    COHORT_DISCOVER_TIMEOUT, team_name, league_name, season,
+                    cohort_timeout, team_name, league_name, season,
                 )
                 continue
 
@@ -397,10 +402,10 @@ def run_big6_seed(job_id, seasons=None, team_ids=None, league_ids=None):
                 continue
 
             elapsed = time.time() - t0
-            if elapsed > PLAYER_SYNC_TIMEOUT:
+            if elapsed > player_timeout:
                 logger.warning(
                     "Journey sync slow for player %s: %.1fs (limit %ds)",
-                    member.player_api_id, elapsed, PLAYER_SYNC_TIMEOUT,
+                    member.player_api_id, elapsed, player_timeout,
                 )
 
             if journey and not sync_error:
