@@ -1,5 +1,4 @@
 import { useState, useEffect, useCallback, useRef } from 'react'
-import { useAuth } from '@/context/AuthContext'
 import { APIService } from '@/lib/api'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { Button } from '@/components/ui/button'
@@ -33,9 +32,6 @@ function StatusBadge({ status }) {
 }
 
 export function AdminSandbox() {
-    const { authToken } = useAuth()
-    const adminReady = Boolean(authToken && APIService.isAdmin() && APIService.adminKey)
-
     // Search state
     const [searchQuery, setSearchQuery] = useState('')
     const [searchResults, setSearchResults] = useState([])
@@ -61,11 +57,10 @@ export function AdminSandbox() {
 
     // Load tracked players for picker
     useEffect(() => {
-        if (!adminReady) return
         APIService.request('/admin/tracked-players?per_page=500', {}, { admin: true })
             .then((data) => setTrackedPlayers(data?.items || []))
             .catch(() => {})
-    }, [adminReady])
+    }, [])
 
     // Debounced API search
     const handleSearch = useCallback((query) => {
@@ -161,19 +156,6 @@ export function AdminSandbox() {
     const filteredTracked = trackedTeamFilter
         ? trackedPlayers.filter((tp) => tp.team?.id === parseInt(trackedTeamFilter))
         : trackedPlayers
-
-    if (!adminReady) {
-        return (
-            <div className="space-y-6">
-                <h2 className="text-3xl font-bold tracking-tight">Player Sandbox</h2>
-                <Card>
-                    <CardContent className="pt-6">
-                        <p className="text-sm text-muted-foreground">Admin access required.</p>
-                    </CardContent>
-                </Card>
-            </div>
-        )
-    }
 
     return (
         <div className="space-y-6">

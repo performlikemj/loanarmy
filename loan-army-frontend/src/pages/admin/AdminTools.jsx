@@ -1,5 +1,4 @@
 import { useState, useEffect, useCallback } from 'react'
-import { useAuth } from '@/context/AuthContext'
 import { APIService } from '@/lib/api'
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
 import { Button } from '@/components/ui/button'
@@ -397,9 +396,6 @@ function ApiFootballStatusCard() {
 }
 
 export function AdminTools() {
-    const { authToken } = useAuth()
-    const adminReady = Boolean(authToken && APIService.isAdmin() && APIService.adminKey)
-
     const [configs, setConfigs] = useState([])
     const [selectedId, setSelectedId] = useState(null)
     const [selectedConfig, setSelectedConfig] = useState(null)
@@ -441,8 +437,8 @@ export function AdminTools() {
     }, [])
 
     useEffect(() => {
-        if (adminReady) loadConfigs()
-    }, [adminReady, loadConfigs])
+        loadConfigs()
+    }, [loadConfigs])
 
     // Auto-select active config
     useEffect(() => {
@@ -535,24 +531,6 @@ export function AdminTools() {
         } catch (e) {
             showMsg('error', e.message)
         }
-    }
-
-    if (!adminReady) {
-        return (
-            <div className="space-y-6">
-                <div>
-                    <h2 className="text-3xl font-bold tracking-tight">Tools</h2>
-                    <p className="text-muted-foreground mt-1">Sign in as admin to manage tools and configurations</p>
-                </div>
-                <Card>
-                    <CardContent className="pt-6">
-                        <div className="rounded-lg border border-dashed bg-muted/40 p-6 text-sm text-muted-foreground">
-                            <p>Admin access required. Go to Settings to configure authentication.</p>
-                        </div>
-                    </CardContent>
-                </Card>
-            </div>
-        )
     }
 
     return (
