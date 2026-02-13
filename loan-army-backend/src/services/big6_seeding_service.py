@@ -83,7 +83,8 @@ class RateLimiter:
 
 
 def run_big6_seed(job_id, seasons=None, team_ids=None, league_ids=None,
-                   cohort_discover_timeout=None, player_sync_timeout=None):
+                   cohort_discover_timeout=None, player_sync_timeout=None,
+                   rate_limit_per_minute=None, rate_limit_per_day=None):
     """
     Run the full Big 6 cohort seeding pipeline.
 
@@ -110,26 +111,45 @@ def run_big6_seed(job_id, seasons=None, team_ids=None, league_ids=None,
     journey_service = JourneySyncService()
     api_client = cohort_service.api
 
-    # Resolve youth competitions dynamically (with static fallback).
-    resolved_leagues = resolve_youth_leagues(
-        api_client=api_client,
-        explicit_league_ids=provided_league_ids,
-    )
-    if not resolved_leagues:
-        resolved_leagues = [
-            {'league_id': lid, 'name': YOUTH_LEAGUES.get(lid, str(lid))}
-            for lid in league_ids
-        ]
+    # Group teams by country for per-country youth league resolution.
+    from src.models.league import Team as TeamModel
+    team_country_map: dict[str, list[int]] = {}
+    for team_id in team_ids:
+        team_row = TeamModel.query.filter_by(team_id=team_id).order_by(TeamModel.season.desc()).first()
+        country = (team_row.league.country if team_row and team_row.league else 'England')
+        team_country_map.setdefault(country, []).append(team_id)
 
-    # Calculate total combos (team x resolved league x season)
-    combos = [(t, lg, s) for t in team_ids for lg in resolved_leagues for s in seasons]
+    # Resolve youth competitions per country (with static fallback).
+    combos = []
+    if provided_league_ids:
+        # Explicit league IDs override country-based resolution.
+        resolved_leagues = resolve_youth_leagues(
+            api_client=api_client,
+            explicit_league_ids=provided_league_ids,
+        )
+        combos = [(t, lg, s) for t in team_ids for lg in resolved_leagues for s in seasons]
+    else:
+        for country, country_team_ids in team_country_map.items():
+            resolved_leagues = resolve_youth_leagues(
+                api_client=api_client,
+                country=country,
+            )
+            if not resolved_leagues:
+                resolved_leagues = [
+                    {'league_id': lid, 'name': YOUTH_LEAGUES.get(lid, str(lid))}
+                    for lid in league_ids
+                ]
+            combos.extend(
+                (t, lg, s) for t in country_team_ids for lg in resolved_leagues for s in seasons
+            )
     total_combos = len(combos)
 
     update_job(job_id, total=total_combos, progress=0)
     logger.info(
-        "Big 6 seed: %d combos across %d resolved youth leagues",
+        "Seed: %d combos across %d teams in %d countries",
         total_combos,
-        len(resolved_leagues),
+        len(team_ids),
+        len(team_country_map),
     )
 
     parent_names = {
@@ -358,7 +378,11 @@ def run_big6_seed(job_id, seasons=None, team_ids=None, league_ids=None,
             pm.journey_sync_error = sync_error
         db.session.commit()
 
-    rate_limiter = RateLimiter(heartbeat_fn=heartbeat)  # 280 req/min, 7000 req/day
+    rate_limiter = RateLimiter(
+        per_minute_cap=rate_limit_per_minute or 280,
+        per_day_cap=rate_limit_per_day or 7000,
+        heartbeat_fn=heartbeat,
+    )
     quota_exhausted = False
     synced_count = 0
 

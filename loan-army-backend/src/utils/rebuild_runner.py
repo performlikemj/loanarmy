@@ -98,6 +98,18 @@ def _run_full_rebuild(job_id, config):
             if is_job_cancelled(job_id):
                 raise InterruptedError(f'Job cancelled at stage: {stage}')
 
+        # ── Pre-check: ensure league teams exist ──
+        league_ids = config.get('league_ids', [])
+        if league_ids:
+            from src.models.league import League
+            for lid in league_ids:
+                league = League.query.filter_by(league_id=lid).first()
+                if not league or Team.query.filter_by(league_id=league.id, is_active=True).count() == 0:
+                    update_job(job_id, current_player='Syncing European league teams...')
+                    from src.routes.teams import _lazy_sync_european_teams
+                    _lazy_sync_european_teams()
+                    break
+
         # ── Stage 1: Clean slate ──
         if not skip_clean:
             stage = 'clean'
@@ -194,6 +206,8 @@ def _run_full_rebuild(job_id, config):
                     job_id, seasons=seasons, team_ids=team_ids,
                     cohort_discover_timeout=config.get('cohort_discover_timeout'),
                     player_sync_timeout=config.get('player_sync_timeout'),
+                    rate_limit_per_minute=config.get('rate_limit_per_minute'),
+                    rate_limit_per_day=config.get('rate_limit_per_day'),
                 )
                 results['cohorts_created'] = seed_result.get('cohorts_created', 0)
                 results['players_synced'] = seed_result.get('players_synced', 0)
@@ -222,10 +236,11 @@ def _run_full_rebuild(job_id, config):
         total_skipped = 0
 
         for api_team_id in team_ids:
-            team_name = BIG_6.get(api_team_id, str(api_team_id))
+            team_rec = Team.query.filter_by(team_id=api_team_id).order_by(Team.season.desc()).first()
+            team_name = team_rec.name if team_rec else str(api_team_id)
             update_job(job_id, current_player=f'Stage 4: Seeding {team_name}...')
 
-            team = Team.query.filter_by(team_id=api_team_id).order_by(Team.season.desc()).first()
+            team = team_rec
             if not team:
                 results['errors'].append(f'{team_name}: no Team row found')
                 continue

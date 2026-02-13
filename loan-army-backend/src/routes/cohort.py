@@ -393,11 +393,25 @@ def admin_full_rebuild():
     skip_clean = data.get('skip_clean', False)
     skip_cohorts = data.get('skip_cohorts', False)
 
+    # Resolve league_ids to team IDs and merge with explicit team_ids
+    league_ids_cfg = rebuild_cfg.get('league_ids', [])
+    if league_ids_cfg:
+        from src.models.league import Team, League
+        seen = set(team_ids)
+        for lid in league_ids_cfg:
+            league = League.query.filter_by(league_id=lid).first()
+            if league:
+                for t in Team.query.filter_by(league_id=league.id, is_active=True).all():
+                    if t.team_id not in seen:
+                        team_ids.append(t.team_id)
+                        seen.add(t.team_id)
+
     job_id = create_background_job('full_rebuild')
 
     # Merge rebuild config params into the job kwargs
     job_config = {
         'team_ids': team_ids,
+        'league_ids': league_ids_cfg,
         'seasons': seasons,
         'skip_clean': skip_clean,
         'skip_cohorts': skip_cohorts,
@@ -405,6 +419,8 @@ def admin_full_rebuild():
         'inactivity_threshold_years': rebuild_cfg.get('inactivity_threshold_years', 2),
         'cohort_discover_timeout': rebuild_cfg.get('cohort_discover_timeout', 120),
         'player_sync_timeout': rebuild_cfg.get('player_sync_timeout', 90),
+        'rate_limit_per_minute': rebuild_cfg.get('rate_limit_per_minute', 280),
+        'rate_limit_per_day': rebuild_cfg.get('rate_limit_per_day', 7000),
         'config_id': config_id_used,
     }
 
@@ -434,6 +450,7 @@ def _get_default_config():
     from src.services.youth_competition_resolver import DEFAULT_YOUTH_LEAGUES
     return {
         'team_ids': {str(k): v for k, v in BIG_6.items()},
+        'league_ids': [],
         'seasons': list(SEASONS),
         'youth_leagues': [
             {'key': yl['key'], 'name': yl['name'], 'fallback_id': yl['fallback_id'], 'level': yl['level']}
@@ -444,6 +461,8 @@ def _get_default_config():
         'assume_full_minutes': False,
         'cohort_discover_timeout': COHORT_DISCOVER_TIMEOUT,
         'player_sync_timeout': PLAYER_SYNC_TIMEOUT,
+        'rate_limit_per_minute': 280,
+        'rate_limit_per_day': 7000,
     }
 
 

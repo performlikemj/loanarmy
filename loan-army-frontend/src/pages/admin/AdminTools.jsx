@@ -10,15 +10,6 @@ import {
     AlertCircle, CheckCircle2, Loader2, Wifi, WifiOff, Database, Activity,
 } from 'lucide-react'
 
-const TEAM_OPTIONS = [
-    { id: '33', name: 'Manchester United' },
-    { id: '42', name: 'Arsenal' },
-    { id: '49', name: 'Chelsea' },
-    { id: '50', name: 'Manchester City' },
-    { id: '40', name: 'Liverpool' },
-    { id: '47', name: 'Tottenham' },
-]
-
 function ToggleField({ label, description, checked, onChange }) {
     return (
         <label className="flex items-start gap-3 p-3 rounded-lg border bg-muted/20 hover:bg-muted/40 transition-colors cursor-pointer">
@@ -54,19 +45,72 @@ function NumberField({ label, description, value, onChange, min, max }) {
 }
 
 function ConfigEditor({ config, onSave, onCancel, saving }) {
-    const [draft, setDraft] = useState(config)
+    const [draft, setDraft] = useState({ ...config, league_ids: config.league_ids || [] })
+    const [leagues, setLeagues] = useState([])
+    const [teamSearch, setTeamSearch] = useState('')
+    const [teamResults, setTeamResults] = useState([])
+    const [searchLoading, setSearchLoading] = useState(false)
+
+    useEffect(() => {
+        ;(async () => {
+            try {
+                const data = await APIService.request('/leagues')
+                setLeagues(data || [])
+            } catch (e) {
+                console.error('Failed to load leagues:', e)
+            }
+        })()
+    }, [])
+
+    useEffect(() => {
+        if (!teamSearch.trim() || teamSearch.length < 2) {
+            setTeamResults([])
+            return
+        }
+        const timer = setTimeout(async () => {
+            setSearchLoading(true)
+            try {
+                const data = await APIService.request(`/teams?european_only=true&search=${encodeURIComponent(teamSearch)}`)
+                setTeamResults((data?.teams || data || []).slice(0, 10))
+            } catch (e) {
+                console.error('Team search failed:', e)
+            } finally {
+                setSearchLoading(false)
+            }
+        }, 300)
+        return () => clearTimeout(timer)
+    }, [teamSearch])
 
     const updateField = (key, value) => setDraft(prev => ({ ...prev, [key]: value }))
 
-    const toggleTeam = (teamId) => {
+    const toggleLeague = (leagueId) => {
+        setDraft(prev => {
+            const ids = prev.league_ids || []
+            const exists = ids.includes(leagueId)
+            return {
+                ...prev,
+                league_ids: exists ? ids.filter(id => id !== leagueId) : [...ids, leagueId],
+            }
+        })
+    }
+
+    const addTeam = (team) => {
+        const teamId = String(team.team_id || team.id)
+        setDraft(prev => {
+            if (prev.team_ids?.[teamId]) return prev
+            return {
+                ...prev,
+                team_ids: { ...prev.team_ids, [teamId]: team.name },
+            }
+        })
+        setTeamSearch('')
+        setTeamResults([])
+    }
+
+    const removeTeam = (teamId) => {
         setDraft(prev => {
             const teams = { ...prev.team_ids }
-            if (teams[teamId]) {
-                delete teams[teamId]
-            } else {
-                const opt = TEAM_OPTIONS.find(t => t.id === teamId)
-                teams[teamId] = opt?.name || teamId
-            }
+            delete teams[teamId]
             return { ...prev, team_ids: teams }
         })
     }
@@ -116,27 +160,94 @@ function ConfigEditor({ config, onSave, onCancel, saving }) {
 
     return (
         <div className="space-y-6">
-            {/* Team IDs */}
+            {/* Leagues */}
             <div className="space-y-2">
-                <Label className="text-sm font-semibold">Teams</Label>
+                <Label className="text-sm font-semibold">Leagues</Label>
+                <p className="text-xs text-muted-foreground">Select entire leagues to include all their teams in the rebuild</p>
                 <div className="flex flex-wrap gap-2">
-                    {TEAM_OPTIONS.map(t => {
-                        const selected = !!draft.team_ids?.[t.id]
+                    {leagues.map(l => {
+                        const selected = (draft.league_ids || []).includes(l.league_id)
                         return (
                             <button
-                                key={t.id}
+                                key={l.league_id}
                                 type="button"
-                                onClick={() => toggleTeam(t.id)}
-                                className={`px-3 py-1.5 rounded-full text-sm border transition-colors ${
+                                onClick={() => toggleLeague(l.league_id)}
+                                className={`flex items-center gap-2 px-3 py-1.5 rounded-full text-sm border transition-colors ${
                                     selected
                                         ? 'bg-blue-600 text-white border-blue-600'
                                         : 'bg-white text-gray-700 border-gray-300 hover:border-gray-400'
                                 }`}
                             >
-                                {t.name} <span className="text-xs opacity-70">({t.id})</span>
+                                {l.logo && <img src={l.logo} alt="" className="h-4 w-4" />}
+                                {l.name}
                             </button>
                         )
                     })}
+                    {leagues.length === 0 && (
+                        <span className="text-xs text-muted-foreground">Loading leagues...</span>
+                    )}
+                </div>
+            </div>
+
+            {/* Individual Teams */}
+            <div className="space-y-2">
+                <Label className="text-sm font-semibold">Individual Teams</Label>
+                <p className="text-xs text-muted-foreground">Add specific teams beyond league selections</p>
+                <div className="flex flex-wrap gap-1.5 mb-2">
+                    {Object.entries(draft.team_ids || {}).map(([id, name]) => (
+                        <span
+                            key={id}
+                            className="inline-flex items-center gap-1 px-2.5 py-1 rounded-full text-xs bg-blue-100 text-blue-800"
+                        >
+                            {name}
+                            <button
+                                type="button"
+                                onClick={() => removeTeam(id)}
+                                className="ml-0.5 hover:text-red-600"
+                            >
+                                <X className="h-3 w-3" />
+                            </button>
+                        </span>
+                    ))}
+                    {Object.keys(draft.team_ids || {}).length === 0 && (
+                        <span className="text-xs text-muted-foreground">No individual teams selected</span>
+                    )}
+                </div>
+                <div className="relative">
+                    <Input
+                        value={teamSearch}
+                        onChange={(e) => setTeamSearch(e.target.value)}
+                        placeholder="Search teams to add..."
+                        className="w-64"
+                    />
+                    {teamResults.length > 0 && (
+                        <div className="absolute z-10 mt-1 w-80 max-h-48 overflow-y-auto bg-white border rounded-lg shadow-lg">
+                            {teamResults.map(t => {
+                                const tid = String(t.team_id || t.id)
+                                const already = !!draft.team_ids?.[tid]
+                                return (
+                                    <button
+                                        key={tid}
+                                        type="button"
+                                        disabled={already}
+                                        onClick={() => addTeam(t)}
+                                        className={`w-full flex items-center gap-2 px-3 py-2 text-sm text-left hover:bg-muted/40 ${
+                                            already ? 'opacity-40 cursor-not-allowed' : ''
+                                        }`}
+                                    >
+                                        {t.logo && <img src={t.logo} alt="" className="h-5 w-5" />}
+                                        <span>{t.name}</span>
+                                        <span className="text-xs text-muted-foreground ml-auto">{tid}</span>
+                                    </button>
+                                )
+                            })}
+                        </div>
+                    )}
+                    {searchLoading && (
+                        <div className="absolute right-2 top-2">
+                            <Loader2 className="h-4 w-4 animate-spin text-muted-foreground" />
+                        </div>
+                    )}
                 </div>
             </div>
 
@@ -255,6 +366,22 @@ function ConfigEditor({ config, onSave, onCancel, saving }) {
                         onChange={(v) => updateField('player_sync_timeout', v)}
                         min={30}
                         max={300}
+                    />
+                    <NumberField
+                        label="Rate limit (req/min)"
+                        description="API-Football requests per minute"
+                        value={draft.rate_limit_per_minute ?? 280}
+                        onChange={(v) => updateField('rate_limit_per_minute', v)}
+                        min={10}
+                        max={1000}
+                    />
+                    <NumberField
+                        label="Rate limit (req/day)"
+                        description="API-Football requests per day"
+                        value={draft.rate_limit_per_day ?? 7000}
+                        onChange={(v) => updateField('rate_limit_per_day', v)}
+                        min={100}
+                        max={100000}
                     />
                 </div>
             </div>
@@ -722,24 +849,40 @@ export function AdminTools() {
                                 {/* Summary view */}
                                 <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
                                     <div>
-                                        <div className="text-xs font-semibold text-muted-foreground uppercase tracking-wider mb-1">Teams</div>
+                                        <div className="text-xs font-semibold text-muted-foreground uppercase tracking-wider mb-1">Leagues</div>
+                                        <div className="flex flex-wrap gap-1">
+                                            {(selectedConfig.config?.league_ids || []).length > 0
+                                                ? selectedConfig.config.league_ids.map(lid => (
+                                                    <span key={lid} className="px-2 py-0.5 rounded-full text-xs bg-purple-100 text-purple-800">
+                                                        League {lid}
+                                                    </span>
+                                                ))
+                                                : <span className="text-xs text-muted-foreground">None</span>
+                                            }
+                                        </div>
+                                    </div>
+                                    <div>
+                                        <div className="text-xs font-semibold text-muted-foreground uppercase tracking-wider mb-1">Individual Teams</div>
                                         <div className="flex flex-wrap gap-1">
                                             {Object.entries(selectedConfig.config?.team_ids || {}).map(([id, name]) => (
                                                 <span key={id} className="px-2 py-0.5 rounded-full text-xs bg-blue-100 text-blue-800">
                                                     {name}
                                                 </span>
                                             ))}
+                                            {Object.keys(selectedConfig.config?.team_ids || {}).length === 0 && (
+                                                <span className="text-xs text-muted-foreground">None</span>
+                                            )}
                                         </div>
                                     </div>
-                                    <div>
-                                        <div className="text-xs font-semibold text-muted-foreground uppercase tracking-wider mb-1">Seasons</div>
-                                        <div className="flex flex-wrap gap-1">
-                                            {(selectedConfig.config?.seasons || []).map(s => (
-                                                <span key={s} className="px-2 py-0.5 rounded-full text-xs bg-gray-100 text-gray-800">
-                                                    {s}
-                                                </span>
-                                            ))}
-                                        </div>
+                                </div>
+                                <div>
+                                    <div className="text-xs font-semibold text-muted-foreground uppercase tracking-wider mb-1">Seasons</div>
+                                    <div className="flex flex-wrap gap-1">
+                                        {(selectedConfig.config?.seasons || []).map(s => (
+                                            <span key={s} className="px-2 py-0.5 rounded-full text-xs bg-gray-100 text-gray-800">
+                                                {s}
+                                            </span>
+                                        ))}
                                     </div>
                                 </div>
 
@@ -770,6 +913,8 @@ export function AdminTools() {
                                         ['Inactivity', `${selectedConfig.config?.inactivity_threshold_years}y`],
                                         ['Cohort timeout', `${selectedConfig.config?.cohort_discover_timeout}s`],
                                         ['Player timeout', `${selectedConfig.config?.player_sync_timeout}s`],
+                                        ['Rate/min', `${selectedConfig.config?.rate_limit_per_minute ?? 280}`],
+                                        ['Rate/day', `${selectedConfig.config?.rate_limit_per_day ?? 7000}`],
                                     ].map(([label, val]) => (
                                         <div key={label} className="text-sm">
                                             <span className="text-muted-foreground">{label}: </span>

@@ -79,6 +79,81 @@ DEFAULT_YOUTH_LEAGUES = [
     },
 ]
 
+# UEFA Youth League entry shared across all countries.
+_UEFA_YOUTH_LEAGUE = DEFAULT_YOUTH_LEAGUES[-1]  # uefa_youth_league
+
+ITALY_YOUTH_LEAGUES = [
+    {
+        "key": "primavera_1",
+        "name": "Campionato Primavera - 1",
+        "search": "Campionato Primavera - 1",
+        "country": "Italy",
+        "type": "League",
+        "level": "U20",
+        "fallback_id": 705,
+        "match_tokens": ("campionato", "primavera", "1"),
+    },
+    {
+        "key": "primavera_2",
+        "name": "Campionato Primavera - 2",
+        "search": "Campionato Primavera - 2",
+        "country": "Italy",
+        "type": "League",
+        "level": "U20",
+        "fallback_id": 706,
+        "match_tokens": ("campionato", "primavera", "2"),
+    },
+    {
+        "key": "coppa_italia_primavera",
+        "name": "Coppa Italia Primavera",
+        "search": "Coppa Italia Primavera",
+        "country": "Italy",
+        "type": "Cup",
+        "level": "U20",
+        "fallback_id": 704,
+        "match_tokens": ("coppa", "italia", "primavera"),
+    },
+    _UEFA_YOUTH_LEAGUE,
+]
+
+GERMANY_YOUTH_LEAGUES = [
+    {
+        "key": "u19_bundesliga",
+        "name": "U19 Bundesliga",
+        "search": "U19 Bundesliga",
+        "country": "Germany",
+        "type": "League",
+        "level": "U19",
+        "fallback_id": 488,
+        "match_tokens": ("u19", "bundesliga"),
+    },
+    {
+        "key": "dfb_junioren_pokal",
+        "name": "DFB Junioren Pokal",
+        "search": "DFB Junioren Pokal",
+        "country": "Germany",
+        "type": "Cup",
+        "level": "U19",
+        "fallback_id": 715,
+        "match_tokens": ("dfb", "junioren", "pokal"),
+    },
+    _UEFA_YOUTH_LEAGUE,
+]
+
+# Spain and France have no youth competitions in API-Football;
+# only UEFA Youth League is available for clubs in those countries.
+UEFA_ONLY_YOUTH_LEAGUES = [_UEFA_YOUTH_LEAGUE]
+
+# Country -> youth league definitions. Used by the seeding pipeline to
+# resolve the right youth competitions per parent team's country.
+YOUTH_LEAGUES_BY_COUNTRY = {
+    "England": DEFAULT_YOUTH_LEAGUES,
+    "Italy": ITALY_YOUTH_LEAGUES,
+    "Germany": GERMANY_YOUTH_LEAGUES,
+    "Spain": UEFA_ONLY_YOUTH_LEAGUES,
+    "France": UEFA_ONLY_YOUTH_LEAGUES,
+}
+
 
 def _norm(text: str | None) -> str:
     value = (text or "").lower().strip()
@@ -138,14 +213,28 @@ def get_default_youth_league_map() -> dict[int, str]:
     return {entry["fallback_id"]: entry["name"] for entry in DEFAULT_YOUTH_LEAGUES}
 
 
-def resolve_youth_leagues(api_client=None, explicit_league_ids: list[int] | None = None) -> list[dict[str, Any]]:
+def resolve_youth_leagues(api_client=None, explicit_league_ids: list[int] | None = None,
+                          country: str | None = None) -> list[dict[str, Any]]:
     """Resolve youth leagues dynamically with static fallback defaults.
+
+    Args:
+        api_client: Optional API client for dynamic resolution.
+        explicit_league_ids: Override with specific league IDs.
+        country: Country name to select the right youth league set
+                 (e.g. 'England', 'Italy', 'Germany'). Defaults to England.
 
     Returns list of dicts with keys:
       key, league_id, name, country, type, level, source, fallback_id
     """
+    # Select the target youth league definitions for this country.
+    target_leagues = YOUTH_LEAGUES_BY_COUNTRY.get(country or "England", DEFAULT_YOUTH_LEAGUES)
+
     if explicit_league_ids:
-        fallback_by_id = {e["fallback_id"]: e for e in DEFAULT_YOUTH_LEAGUES}
+        # Build lookup across ALL known youth leagues for metadata.
+        all_youth = []
+        for yl_list in YOUTH_LEAGUES_BY_COUNTRY.values():
+            all_youth.extend(yl_list)
+        fallback_by_id = {e["fallback_id"]: e for e in all_youth}
         resolved = []
         for league_id in explicit_league_ids:
             meta = fallback_by_id.get(int(league_id), {})
@@ -164,7 +253,7 @@ def resolve_youth_leagues(api_client=None, explicit_league_ids: list[int] | None
         return resolved
 
     resolved: list[dict[str, Any]] = []
-    for target in DEFAULT_YOUTH_LEAGUES:
+    for target in target_leagues:
         fallback_entry = {
             "key": target["key"],
             "league_id": int(target["fallback_id"]),
