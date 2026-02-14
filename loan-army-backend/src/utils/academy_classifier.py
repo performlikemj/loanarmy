@@ -9,8 +9,12 @@ academy / parent club.  Used by:
    first-team, or international status.
 """
 
+import json
+import logging
 import re
-from typing import Dict, List, Optional, Tuple
+import time
+from datetime import datetime
+from typing import Any, Dict, List, Optional, Tuple, Union
 
 # ── regex to strip youth suffixes from club names ──────────────────────
 YOUTH_SUFFIXES = re.compile(
@@ -275,6 +279,185 @@ def upgrade_status_from_transfers(
     if dep_type in ('free agent', 'free', 'n/a'):
         return 'released'
     return 'sold'
+
+
+# ─── unified classification entry point ───────────────────────────────
+
+logger = logging.getLogger(__name__)
+
+# Module-level cache for the active classification config.
+_config_cache: Dict[str, Any] = {}
+_CONFIG_TTL_SECONDS = 300  # 5 minutes
+
+
+def _get_active_classification_config() -> Dict[str, Any]:
+    """Load classification rules from the active RebuildConfig.
+
+    Returns a dict with keys:
+        use_transfers_for_status (bool, default True)
+        inactivity_release_years (int | None, default None)
+
+    Uses a module-level cache with 5-minute TTL to avoid a DB query on
+    every call.
+    """
+    now = time.monotonic()
+    if _config_cache and (now - _config_cache.get('_ts', 0)) < _CONFIG_TTL_SECONDS:
+        return _config_cache
+
+    defaults: Dict[str, Any] = {
+        'use_transfers_for_status': True,
+        'inactivity_release_years': None,
+    }
+
+    try:
+        from src.models.league import RebuildConfig
+        active = RebuildConfig.query.filter_by(is_active=True).first()
+        if active and active.config_json:
+            raw = json.loads(active.config_json)
+            defaults['use_transfers_for_status'] = raw.get(
+                'use_transfers_for_status', True,
+            )
+            inactivity = raw.get('inactivity_release_years')
+            if inactivity is not None:
+                defaults['inactivity_release_years'] = int(inactivity)
+    except Exception:
+        pass  # Fall through to safe defaults
+
+    defaults['_ts'] = now
+    _config_cache.clear()
+    _config_cache.update(defaults)
+    return _config_cache
+
+
+def flatten_transfers(raw_transfer_response: list) -> list:
+    """Flatten API-Football nested transfer response to a flat list.
+
+    API-Football returns ``[{player: {}, transfers: [...]}, ...]``.
+    This helper extracts and concatenates every inner ``transfers`` list
+    into a single flat list so callers don't need to do it themselves.
+    """
+    flat: list = []
+    for block in (raw_transfer_response or []):
+        if isinstance(block, dict):
+            flat.extend(block.get('transfers', []))
+    return flat
+
+
+def classify_tracked_player(
+    current_club_api_id: Optional[int],
+    current_club_name: Optional[str],
+    current_level: Optional[str],
+    parent_api_id: int,
+    parent_club_name: str,
+    *,
+    transfers: Optional[list] = None,
+    player_api_id: Optional[int] = None,
+    api_client: Any = None,
+    config: Optional[Dict[str, Any]] = None,
+    with_reasoning: bool = False,
+    latest_season: Optional[int] = None,
+) -> Union[
+    Tuple[str, Optional[int], Optional[str]],
+    Tuple[str, Optional[int], Optional[str], List[Dict]],
+]:
+    """Single source of truth for player status classification.
+
+    Applies these rules in order:
+    1. Base status derivation (academy / first_team / on_loan)
+    2. Transfer-based upgrade (on_loan → sold / released)
+       — controlled by ``config['use_transfers_for_status']``
+    3. Inactivity-based release (no data for N seasons)
+       — controlled by ``config['inactivity_release_years']``
+
+    Args:
+        current_club_api_id: Player's current club from journey data.
+        current_club_name: Player's current club name.
+        current_level: Player's current level (First Team, U21 …).
+        parent_api_id: Parent / academy club API-Football ID.
+        parent_club_name: Parent / academy club name.
+        transfers: Pre-fetched *flat* transfer list (already flattened).
+            When ``None`` and ``use_transfers_for_status`` is True the
+            function will attempt to fetch via *api_client*.
+        player_api_id: Required when transfers must be fetched on demand.
+        api_client: ``APIFootballClient`` instance for on-demand fetch.
+        config: Classification config dict.  When ``None`` the active
+            ``RebuildConfig`` is loaded (with caching).
+        with_reasoning: Return step-by-step reasoning list.
+        latest_season: The player's latest season year — used for the
+            inactivity check.
+
+    Returns:
+        ``(status, loan_club_api_id, loan_club_name)`` or
+        ``(status, loan_club_api_id, loan_club_name, reasoning)``
+        when *with_reasoning* is True.
+    """
+    if config is None:
+        config = _get_active_classification_config()
+
+    # ── Step 1: base status derivation ────────────────────────────────
+    if with_reasoning:
+        status, loan_id, loan_name, reasoning = derive_player_status_with_reasoning(
+            current_club_api_id, current_club_name, current_level,
+            parent_api_id, parent_club_name,
+        )
+    else:
+        status, loan_id, loan_name = derive_player_status(
+            current_club_api_id, current_club_name, current_level,
+            parent_api_id, parent_club_name,
+        )
+        reasoning: List[Dict] = []
+
+    # ── Step 2: transfer-based upgrade ────────────────────────────────
+    if status == 'on_loan' and config.get('use_transfers_for_status', True):
+        effective_transfers = transfers
+        if effective_transfers is None and player_api_id and api_client:
+            try:
+                raw = api_client.get_player_transfers(player_api_id)
+                effective_transfers = flatten_transfers(raw)
+            except Exception:
+                effective_transfers = []
+
+        if effective_transfers:
+            upgraded = upgrade_status_from_transfers(
+                status, effective_transfers, parent_api_id,
+            )
+            if upgraded != status:
+                if with_reasoning:
+                    reasoning.append({
+                        'rule': 'transfer_upgrade',
+                        'result': 'match',
+                        'check': f'upgrade_status_from_transfers("{status}")',
+                        'detail': f'Upgraded from {status} to {upgraded}',
+                    })
+                status = upgraded
+                loan_id = None
+                loan_name = None
+
+    # ── Step 3: inactivity-based release ──────────────────────────────
+    inactivity_years = config.get('inactivity_release_years')
+    if inactivity_years and latest_season is not None and status in ('academy', 'on_loan'):
+        current_year = datetime.now().year
+        if latest_season < current_year - inactivity_years:
+            if with_reasoning:
+                reasoning.append({
+                    'rule': 'inactivity_release',
+                    'result': 'match',
+                    'check': (
+                        f'latest_season {latest_season} < '
+                        f'{current_year} - {inactivity_years}'
+                    ),
+                    'detail': (
+                        f'No data for {current_year - latest_season} seasons — '
+                        f'marking as released'
+                    ),
+                })
+            status = 'released'
+            loan_id = None
+            loan_name = None
+
+    if with_reasoning:
+        return (status, loan_id, loan_name, reasoning)
+    return (status, loan_id, loan_name)
 
 
 # ─── internal ──────────────────────────────────────────────────────────

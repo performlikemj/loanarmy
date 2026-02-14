@@ -15,8 +15,7 @@ from src.models.cohort import AcademyCohort, CohortMember
 from src.models.journey import PlayerJourney, PlayerJourneyEntry
 from src.api_football_client import APIFootballClient
 from src.services.journey_sync import JourneySyncService
-from src.utils.academy_classifier import strip_youth_suffix
-from src.utils.academy_classifier import derive_player_status
+from src.utils.academy_classifier import classify_tracked_player, strip_youth_suffix
 
 logger = logging.getLogger(__name__)
 
@@ -347,26 +346,26 @@ class CohortService:
     ) -> str:
         """Derive current_status from a player's journey data.
 
-        Uses the centralised academy classifier to correctly handle
-        international duty and same-club youth teams.
+        Uses the centralised classify_tracked_player which handles:
+        - International duty and same-club youth teams
+        - Transfer-based upgrade (on_loan → sold/released)
+        - Inactivity-based release (config-driven)
         """
         if not journey:
             return 'unknown'
 
-        status, _, _ = derive_player_status(
+        latest_entry = PlayerJourneyEntry.query.filter_by(
+            journey_id=journey.id
+        ).order_by(PlayerJourneyEntry.season.desc()).first()
+
+        status, _, _ = classify_tracked_player(
             current_club_api_id=journey.current_club_api_id,
             current_club_name=journey.current_club_name,
             current_level=journey.current_level,
             parent_api_id=parent_api_id,
             parent_club_name=parent_club_name,
+            transfers=[],  # cohort context — no per-player API calls
+            latest_season=latest_entry.season if latest_entry else None,
         )
-
-        # Additional check: player not seen for 2+ seasons → released
-        if status in ('academy', 'on_loan'):
-            latest_entry = PlayerJourneyEntry.query.filter_by(
-                journey_id=journey.id
-            ).order_by(PlayerJourneyEntry.season.desc()).first()
-            if latest_entry and latest_entry.season < current_year - 2:
-                return 'released'
 
         return status

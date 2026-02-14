@@ -73,7 +73,7 @@ def _run_full_rebuild(job_id, config):
     from src.models.weekly import WeeklyLoanAppearance
     from src.services.big6_seeding_service import run_big6_seed, BIG_6, SEASONS
     from src.services.youth_competition_resolver import build_academy_league_seed_rows
-    from src.utils.academy_classifier import derive_player_status, upgrade_status_from_transfers
+    from src.utils.academy_classifier import classify_tracked_player, flatten_transfers
     from src.utils.background_jobs import update_job, is_job_cancelled
     from src.api_football_client import APIFootballClient
     from src.services.journey_sync import JourneySyncService, seed_club_locations
@@ -331,12 +331,14 @@ def _run_full_rebuild(job_id, config):
                     position = pi.get('position') or ''
                     age = pi.get('age')
 
-                    status, loan_club_api_id, loan_club_name = derive_player_status(
+                    status, loan_club_api_id, loan_club_name = classify_tracked_player(
                         current_club_api_id=journey.current_club_api_id if journey else None,
                         current_club_name=journey.current_club_name if journey else None,
                         current_level=journey.current_level if journey else None,
                         parent_api_id=parent_api_id,
                         parent_club_name=team.name,
+                        player_api_id=pid,
+                        api_client=api_client,
                     )
 
                     current_level = journey.current_level if journey and journey.current_level else None
@@ -394,9 +396,8 @@ def _run_full_rebuild(job_id, config):
         # ── Stage 6: Refresh statuses ──
         _check_cancelled()
         stage = 'refresh_statuses'
-        use_transfers = config.get('use_transfers_for_status', False)
         update_job(job_id, progress=6, total=total_stages,
-                   current_player=f'Stage 6: Refreshing statuses (transfers={use_transfers})...')
+                   current_player='Stage 6: Refreshing statuses...')
         tracked = TrackedPlayer.query.filter(TrackedPlayer.is_active == True).all()
         updated = 0
         status_counts = {}
@@ -404,25 +405,15 @@ def _run_full_rebuild(job_id, config):
             if not tp.team:
                 continue
             journey = tp.journey
-            status, loan_api_id, loan_name = derive_player_status(
+            status, loan_api_id, loan_name = classify_tracked_player(
                 current_club_api_id=journey.current_club_api_id if journey else None,
                 current_club_name=journey.current_club_name if journey else None,
                 current_level=journey.current_level if journey else None,
                 parent_api_id=tp.team.team_id,
                 parent_club_name=tp.team.name,
+                player_api_id=tp.player_api_id,
+                api_client=api_client,
             )
-            # Optionally upgrade on_loan → sold/released using transfer data
-            if use_transfers and status == 'on_loan' and journey:
-                transfers = journey.raw_transfers if hasattr(journey, 'raw_transfers') else None
-                if not transfers:
-                    try:
-                        raw = api_client.get_player_transfers(tp.player_api_id)
-                        transfers = []
-                        for block in (raw or []):
-                            transfers.extend(block.get('transfers', []))
-                    except Exception:
-                        transfers = []
-                status = upgrade_status_from_transfers(status, transfers, tp.team.team_id)
             if tp.status != status or tp.loan_club_api_id != loan_api_id:
                 tp.status = status
                 tp.loan_club_api_id = loan_api_id

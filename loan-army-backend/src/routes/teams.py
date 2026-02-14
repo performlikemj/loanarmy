@@ -30,7 +30,7 @@ from src.models.league import (
 )
 from src.models.journey import PlayerJourney, PlayerJourneyEntry
 from src.models.tracked_player import TrackedPlayer
-from src.utils.academy_classifier import derive_player_status, is_same_club
+from src.utils.academy_classifier import classify_tracked_player, is_same_club
 from src.utils.slug import resolve_team_by_identifier
 
 logger = logging.getLogger(__name__)
@@ -804,17 +804,18 @@ def get_academy_network(team_identifier):
             pid = journey.player_api_id
             seen_pids.add(pid)
 
-            # Derive status: prefer TrackedPlayer, fallback to derive_player_status
+            # Derive status: prefer TrackedPlayer, fallback to classify_tracked_player
             tp = tp_lookup.get(pid)
             if tp:
                 status = tp.status
             else:
-                status, _, _ = derive_player_status(
+                status, _, _ = classify_tracked_player(
                     journey.current_club_api_id,
                     journey.current_club_name,
                     journey.current_level,
                     team_api_id,
                     parent_name,
+                    transfers=[],  # read-only view, skip API calls
                 )
 
             status_counts[status] = status_counts.get(status, 0) + 1

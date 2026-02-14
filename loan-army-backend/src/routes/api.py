@@ -37,7 +37,7 @@ from src.utils.sanitize import sanitize_comment_body, sanitize_plain_text, sanit
 from src.agents.errors import NoActiveLoaneesError
 from src.models.tracked_player import TrackedPlayer
 from src.utils.slug import resolve_team_by_identifier, generate_unique_team_slug
-from src.utils.academy_classifier import derive_player_status, is_same_club, upgrade_status_from_transfers
+from src.utils.academy_classifier import classify_tracked_player, flatten_transfers, is_same_club
 from src.utils.newsletter_slug import compose_newsletter_public_slug
 from src.services.email_service import email_service
 import threading
@@ -13451,11 +13451,6 @@ def admin_test_classify():
         from src.models.journey import PlayerJourney, PlayerJourneyEntry
         from src.services.journey_sync import JourneySyncService
         from src.api_football_client import APIFootballClient
-        from src.utils.academy_classifier import (
-            derive_player_status_with_reasoning,
-            upgrade_status_from_transfers,
-        )
-
         service = JourneySyncService()
         journey = service.sync_player(player_api_id, force_full=force_sync)
         if not journey:
@@ -13475,9 +13470,7 @@ def admin_test_classify():
         # Fetch transfers for upgrade check
         api = APIFootballClient()
         raw_transfers = api.get_player_transfers(player_api_id)
-        transfers = []
-        for block in (raw_transfers or []):
-            transfers.extend(block.get('transfers', []))
+        transfers = flatten_transfers(raw_transfers)
 
         # Run classification with reasoning for each parent
         classifications = []
@@ -13485,19 +13478,12 @@ def admin_test_classify():
             team = Team.query.filter_by(team_id=pid, is_active=True).order_by(Team.season.desc()).first()
             parent_name = team.name if team else str(pid)
 
-            status, loan_id, loan_name, reasoning = derive_player_status_with_reasoning(
+            status, loan_id, loan_name, reasoning = classify_tracked_player(
                 journey.current_club_api_id, journey.current_club_name,
                 journey.current_level, pid, parent_name,
+                transfers=transfers,
+                with_reasoning=True,
             )
-
-            upgraded = upgrade_status_from_transfers(status, transfers, pid)
-            if upgraded != status:
-                reasoning.append({
-                    'rule': 'transfer_upgrade', 'result': 'match',
-                    'check': f'upgrade_status_from_transfers("{status}")',
-                    'detail': f'Upgraded from {status} to {upgraded} based on transfer history',
-                })
-                status = upgraded
 
             classifications.append({
                 'parent_api_id': pid,
@@ -13784,6 +13770,16 @@ def admin_refresh_tracked_player_statuses():
             from src.services.journey_sync import JourneySyncService
             journey_svc = JourneySyncService()
 
+        # Batch pre-fetch transfers for all players to avoid per-player API calls
+        from src.api_football_client import APIFootballClient
+        api_client = APIFootballClient()
+        player_api_ids = [tp.player_api_id for tp in players if tp.player_api_id]
+        raw_transfers_map = api_client.batch_get_player_transfers(player_api_ids)
+        transfers_map = {
+            pid: flatten_transfers(raw)
+            for pid, raw in raw_transfers_map.items()
+        }
+
         for tp in players:
             journey = None
 
@@ -13818,12 +13814,15 @@ def admin_refresh_tracked_player_statuses():
             if not parent_team:
                 continue
 
-            new_status, new_loan_id, new_loan_name = derive_player_status(
+            new_status, new_loan_id, new_loan_name = classify_tracked_player(
                 current_club_api_id=journey.current_club_api_id,
                 current_club_name=journey.current_club_name,
                 current_level=journey.current_level,
                 parent_api_id=parent_team.team_id,
                 parent_club_name=parent_team.name,
+                transfers=transfers_map.get(tp.player_api_id),
+                player_api_id=tp.player_api_id,
+                api_client=api_client,
             )
 
             changed = False
@@ -14023,22 +14022,15 @@ def admin_seed_tracked_players():
                 ).first()
                 if existing:
                     # Refresh status on re-seed so stale statuses get corrected
-                    new_status, new_loan_id, new_loan_name = derive_player_status(
+                    new_status, new_loan_id, new_loan_name = classify_tracked_player(
                         current_club_api_id=journey.current_club_api_id if journey else None,
                         current_club_name=journey.current_club_name if journey else None,
                         current_level=journey.current_level if journey else None,
                         parent_api_id=parent_api_id,
                         parent_club_name=team.name,
+                        player_api_id=pid,
+                        api_client=api_client,
                     )
-                    if new_status == 'on_loan' and journey:
-                        try:
-                            player_transfers = []
-                            raw = api_client.get_player_transfers(pid)
-                            for block in raw:
-                                player_transfers.extend(block.get('transfers', []))
-                            new_status = upgrade_status_from_transfers(new_status, player_transfers, parent_api_id)
-                        except Exception as tx_err:
-                            logger.warning('seed: transfer check failed for %d: %s', pid, tx_err)
                     if existing.status != new_status or existing.loan_club_api_id != new_loan_id:
                         existing.status = new_status
                         existing.loan_club_api_id = new_loan_id
@@ -14064,25 +14056,16 @@ def admin_seed_tracked_players():
                     position = (stats_list[0].get('games') or {}).get('position') or ''
                 age = pi.get('age')
 
-                # Determine status using the centralised academy classifier
-                status, loan_club_api_id, loan_club_name = derive_player_status(
+                # Determine status using the centralised classifier
+                status, loan_club_api_id, loan_club_name = classify_tracked_player(
                     current_club_api_id=journey.current_club_api_id if journey else None,
                     current_club_name=journey.current_club_name if journey else None,
                     current_level=journey.current_level if journey else None,
                     parent_api_id=parent_api_id,
                     parent_club_name=team.name,
+                    player_api_id=pid,
+                    api_client=api_client,
                 )
-
-                # Upgrade on_loan → sold/released using transfer history
-                if status == 'on_loan' and journey:
-                    try:
-                        player_transfers = []
-                        raw = api_client.get_player_transfers(pid)
-                        for block in raw:
-                            player_transfers.extend(block.get('transfers', []))
-                        status = upgrade_status_from_transfers(status, player_transfers, parent_api_id)
-                    except Exception as tx_err:
-                        logger.warning('seed: transfer check failed for %d: %s', pid, tx_err)
 
                 # Derive level from journey
                 current_level = None
