@@ -775,7 +775,7 @@ class JourneySyncService:
     def _upsert_tracked_players(self, journey: PlayerJourney, academy_ids: set, transfers=None):
         """Create or update TrackedPlayer rows for discovered academy connections."""
         from src.models.tracked_player import TrackedPlayer
-        from src.utils.academy_classifier import classify_tracked_player
+        from src.utils.academy_classifier import classify_tracked_player, _get_latest_season
 
         # Deactivate journey-sync rows whose academy connection no longer holds
         stale_rows = TrackedPlayer.query.filter_by(
@@ -808,6 +808,7 @@ class JourneySyncService:
                 parent_api_id=academy_api_id,
                 parent_club_name=team.name,
                 transfers=transfers or [],
+                latest_season=_get_latest_season(journey.id),
             )
 
             if not existing:

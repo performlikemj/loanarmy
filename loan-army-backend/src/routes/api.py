@@ -37,7 +37,7 @@ from src.utils.sanitize import sanitize_comment_body, sanitize_plain_text, sanit
 from src.agents.errors import NoActiveLoaneesError
 from src.models.tracked_player import TrackedPlayer
 from src.utils.slug import resolve_team_by_identifier, generate_unique_team_slug
-from src.utils.academy_classifier import classify_tracked_player, flatten_transfers, is_same_club
+from src.utils.academy_classifier import classify_tracked_player, flatten_transfers, is_same_club, _get_latest_season
 from src.utils.newsletter_slug import compose_newsletter_public_slug
 from src.services.email_service import email_service
 import threading
@@ -13483,6 +13483,7 @@ def admin_test_classify():
                 journey.current_level, pid, parent_name,
                 transfers=transfers,
                 with_reasoning=True,
+                latest_season=_get_latest_season(journey.id),
             )
 
             classifications.append({
@@ -13823,6 +13824,7 @@ def admin_refresh_tracked_player_statuses():
                 transfers=transfers_map.get(tp.player_api_id),
                 player_api_id=tp.player_api_id,
                 api_client=api_client,
+                latest_season=_get_latest_season(journey.id),
             )
 
             changed = False
@@ -14030,6 +14032,7 @@ def admin_seed_tracked_players():
                         parent_club_name=team.name,
                         player_api_id=pid,
                         api_client=api_client,
+                        latest_season=_get_latest_season(journey.id) if journey else None,
                     )
                     if existing.status != new_status or existing.loan_club_api_id != new_loan_id:
                         existing.status = new_status
@@ -14065,6 +14068,7 @@ def admin_seed_tracked_players():
                     parent_club_name=team.name,
                     player_api_id=pid,
                     api_client=api_client,
+                    latest_season=_get_latest_season(journey.id) if journey else None,
                 )
 
                 # Derive level from journey

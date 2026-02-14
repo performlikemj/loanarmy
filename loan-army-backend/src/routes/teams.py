@@ -30,7 +30,7 @@ from src.models.league import (
 )
 from src.models.journey import PlayerJourney, PlayerJourneyEntry
 from src.models.tracked_player import TrackedPlayer
-from src.utils.academy_classifier import classify_tracked_player, is_same_club
+from src.utils.academy_classifier import classify_tracked_player, is_same_club, _get_latest_season
 from src.utils.slug import resolve_team_by_identifier
 
 logger = logging.getLogger(__name__)
@@ -816,6 +816,7 @@ def get_academy_network(team_identifier):
                     team_api_id,
                     parent_name,
                     transfers=[],  # read-only view, skip API calls
+                    latest_season=_get_latest_season(journey.id),
                 )
 
             status_counts[status] = status_counts.get(status, 0) + 1

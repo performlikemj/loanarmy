@@ -18,7 +18,7 @@ from typing import Any, Dict, List, Optional, Tuple, Union
 
 # ── regex to strip youth suffixes from club names ──────────────────────
 YOUTH_SUFFIXES = re.compile(
-    r'\s+(U18|U19|U21|U23|Under[\s-]?\d+|II|B|Youth|Reserve|Development)s?$',
+    r'\s+(U18|U19|U21|U23|Under[\s-]?\d+|II|B|Youth|Academy|Reserve|Development)s?$',
     re.IGNORECASE,
 )
 
@@ -306,7 +306,7 @@ def _get_active_classification_config() -> Dict[str, Any]:
 
     defaults: Dict[str, Any] = {
         'use_transfers_for_status': True,
-        'inactivity_release_years': None,
+        'inactivity_release_years': 2,
     }
 
     try:
@@ -341,6 +341,15 @@ def flatten_transfers(raw_transfer_response: list) -> list:
         if isinstance(block, dict):
             flat.extend(block.get('transfers', []))
     return flat
+
+
+def _get_latest_season(journey_id: int) -> Optional[int]:
+    """Get the most recent season from a player's journey entries."""
+    from src.models.journey import PlayerJourneyEntry
+    entry = PlayerJourneyEntry.query.filter_by(
+        journey_id=journey_id
+    ).order_by(PlayerJourneyEntry.season.desc()).first()
+    return entry.season if entry else None
 
 
 def classify_tracked_player(

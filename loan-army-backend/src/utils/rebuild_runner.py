@@ -73,7 +73,7 @@ def _run_full_rebuild(job_id, config):
     from src.models.weekly import WeeklyLoanAppearance
     from src.services.big6_seeding_service import run_big6_seed, BIG_6, SEASONS
     from src.services.youth_competition_resolver import build_academy_league_seed_rows
-    from src.utils.academy_classifier import classify_tracked_player, flatten_transfers
+    from src.utils.academy_classifier import classify_tracked_player, flatten_transfers, _get_latest_season
     from src.utils.background_jobs import update_job, is_job_cancelled
     from src.api_football_client import APIFootballClient
     from src.services.journey_sync import JourneySyncService, seed_club_locations
@@ -339,6 +339,7 @@ def _run_full_rebuild(job_id, config):
                         parent_club_name=team.name,
                         player_api_id=pid,
                         api_client=api_client,
+                        latest_season=_get_latest_season(journey.id) if journey else None,
                     )
 
                     current_level = journey.current_level if journey and journey.current_level else None
@@ -413,6 +414,7 @@ def _run_full_rebuild(job_id, config):
                 parent_club_name=tp.team.name,
                 player_api_id=tp.player_api_id,
                 api_client=api_client,
+                latest_season=_get_latest_season(journey.id) if journey else None,
             )
             if tp.status != status or tp.loan_club_api_id != loan_api_id:
                 tp.status = status
