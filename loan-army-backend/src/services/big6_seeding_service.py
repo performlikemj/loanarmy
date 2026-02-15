@@ -7,7 +7,6 @@ Premier League Big 6 clubs across multiple youth leagues and seasons.
 
 import logging
 import time
-from concurrent.futures import ThreadPoolExecutor, TimeoutError as FuturesTimeoutError
 from datetime import datetime, timezone
 from collections import deque
 
@@ -163,30 +162,6 @@ def run_big6_seed(job_id, seasons=None, team_ids=None, league_ids=None,
     def phase1_heartbeat():
         update_job(job_id, current_player="Phase 1: discovering cohorts...")
 
-    # Get the app object for pushing app context in ThreadPoolExecutor
-    # worker threads (thread-local contexts don't propagate to new threads).
-    # We use a deferred import to avoid circular imports at module level.
-    from src.main import app as _app
-
-    def _run_with_timeout(task_fn, timeout_seconds):
-        """Run a callable in a worker thread with a hard timeout.
-
-        NOTE: Only used for Phase 1 (cohort discovery) which has fewer
-        iterations.  Phase 2 (journey sync) calls sync_player directly
-        to avoid leaking DB connections from abandoned threads.
-        """
-        executor = ThreadPoolExecutor(max_workers=1)
-        future = executor.submit(task_fn)
-        timed_out = False
-        try:
-            return future.result(timeout=timeout_seconds), False
-        except FuturesTimeoutError:
-            timed_out = True
-            future.cancel()
-            return None, True
-        finally:
-            executor.shutdown(wait=not timed_out, cancel_futures=timed_out)
-
     # ── Phase 1: Discovery ──
     cohort_ids = []
     for idx, (team_id, league_meta, season) in enumerate(combos):
@@ -250,38 +225,19 @@ def run_big6_seed(job_id, seasons=None, team_ids=None, league_ids=None,
             except Exception as cache_err:
                 logger.warning("Cache clearing failed for combo %s/%s/%s: %s", team_name, league_name, season, cache_err)
 
-            # Run discover_cohort with a timeout so one hung API call
-            # can't kill the entire rebuild.
-            _discover_args = dict(
+            # Call discover_cohort directly in the main thread.
+            # Previous approach used ThreadPoolExecutor for timeout, but
+            # timed-out threads leaked DB connections from the pool,
+            # eventually exhausting it and hanging the subprocess.
+            # The API client has per-request HTTP timeouts (15s), so
+            # individual calls are bounded.
+            cohort = cohort_service.discover_cohort(
                 team_api_id=team_id, league_api_id=league_id, season=season,
                 fallback_team_name=team_name, fallback_league_name=league_name,
                 query_team_api_id=int(query_team_id), heartbeat_fn=phase1_heartbeat,
             )
-
-            def _discover_in_context():
-                with _app.app_context():
-                    c = cohort_service.discover_cohort(**_discover_args)
-                    # Return just the id — the ORM object can't cross threads
-                    return c.id if c else None
-
-            cohort_id_result, timed_out = _run_with_timeout(
-                _discover_in_context,
-                cohort_timeout,
-            )
-            if timed_out:
-                logger.warning(
-                    "Cohort discovery timed out after %ds: %s/%s/%s — skipping",
-                    cohort_timeout, team_name, league_name, season,
-                )
-                continue
-
-            if not cohort_id_result:
-                skipped_empty_cohorts += 1
-                continue
-
-            # Re-fetch cohort in the main thread's session
-            cohort = db.session.get(AcademyCohort, cohort_id_result)
             if not cohort:
+                skipped_empty_cohorts += 1
                 continue
 
             if cohort.total_players > 0:

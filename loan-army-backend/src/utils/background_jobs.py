@@ -13,7 +13,7 @@ from src.models.league import db, BackgroundJob
 
 logger = logging.getLogger(__name__)
 
-STALE_JOB_TIMEOUT = timedelta(minutes=60)
+STALE_JOB_TIMEOUT = timedelta(hours=4)
 
 
 def create_background_job(job_type: str) -> str:

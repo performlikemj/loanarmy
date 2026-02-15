@@ -17,6 +17,7 @@ def run_rebuild_process(job_id, rebuild_type, kwargs):
     Creates its own Flask app context and DB connections, completely
     independent of any gunicorn worker.
     """
+    import signal
     import sys
 
     # Ensure subprocess logging goes to stdout/stderr so container logs
@@ -30,6 +31,22 @@ def run_rebuild_process(job_id, rebuild_type, kwargs):
     )
 
     from src.main import app
+
+    # Handle SIGTERM gracefully so container restarts / worker recycling
+    # mark the job as failed instead of leaving it stuck in 'running'.
+    def _sigterm_handler(signum, frame):
+        logger.warning('Rebuild subprocess %s received SIGTERM, marking job failed', job_id)
+        try:
+            with app.app_context():
+                from src.utils.background_jobs import update_job as _update
+                _update(job_id, status='failed',
+                        error='Process terminated (SIGTERM — container restart or shutdown)',
+                        completed_at=datetime.now(timezone.utc).isoformat())
+        except Exception:
+            pass
+        sys.exit(1)
+
+    signal.signal(signal.SIGTERM, _sigterm_handler)
 
     with app.app_context():
         from src.utils.background_jobs import update_job

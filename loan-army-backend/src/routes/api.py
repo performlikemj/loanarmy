@@ -7407,6 +7407,40 @@ def cancel_job_endpoint(job_id: str):
     return jsonify({'error': 'Job not found or not running'}), 404
 
 
+@api_bp.route('/admin/jobs/<job_id>/force-fail', methods=['POST'])
+@require_api_key
+def force_fail_job(job_id: str):
+    """Force-fail a stuck job, regardless of stale timeout."""
+    job = db.session.get(BackgroundJob, job_id)
+    if not job:
+        return jsonify({'error': 'Job not found'}), 404
+    if job.status not in ('running', 'cancelled'):
+        return jsonify({'error': f'Job already {job.status}'}), 400
+    job.status = 'failed'
+    job.error = 'Force-failed by admin'
+    job.completed_at = datetime.now(timezone.utc)
+    db.session.commit()
+    return jsonify({'message': 'Job force-failed', 'job_id': job_id})
+
+
+@api_bp.route('/admin/jobs/force-fail-all', methods=['POST'])
+@require_api_key
+def force_fail_all_jobs():
+    """Force-fail all running/cancelled jobs."""
+    stuck = BackgroundJob.query.filter(
+        BackgroundJob.status.in_(('running', 'cancelled'))
+    ).all()
+    if not stuck:
+        return jsonify({'message': 'No stuck jobs found', 'count': 0})
+    now = datetime.now(timezone.utc)
+    for job in stuck:
+        job.status = 'failed'
+        job.error = 'Force-failed by admin (bulk)'
+        job.completed_at = now
+    db.session.commit()
+    return jsonify({'message': f'{len(stuck)} jobs force-failed', 'count': len(stuck)})
+
+
 @api_bp.route('/admin/loans/sync-denormalized-stats', methods=['POST'])
 @require_api_key
 def admin_sync_denormalized_stats():

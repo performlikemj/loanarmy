@@ -77,7 +77,7 @@ def admin_seed_big6():
     p = multiprocessing.Process(
         target=run_rebuild_process,
         args=(job_id, 'seed_big6', {'seasons': seasons, 'team_ids': team_ids, 'league_ids': league_ids}),
-        daemon=True,
+        daemon=False,
     )
     p.start()
 
@@ -427,7 +427,7 @@ def admin_full_rebuild():
     p = multiprocessing.Process(
         target=run_rebuild_process,
         args=(job_id, 'full_rebuild', job_config),
-        daemon=True,
+        daemon=False,
     )
     p.start()
 
