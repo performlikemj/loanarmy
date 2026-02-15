@@ -415,7 +415,7 @@ def admin_full_rebuild():
         'seasons': seasons,
         'skip_clean': skip_clean,
         'skip_cohorts': skip_cohorts,
-        'use_transfers_for_status': rebuild_cfg.get('use_transfers_for_status', False),
+        'use_transfers_for_status': rebuild_cfg.get('use_transfers_for_status', True),
         'inactivity_threshold_years': rebuild_cfg.get('inactivity_threshold_years', 2),
         'cohort_discover_timeout': rebuild_cfg.get('cohort_discover_timeout', 120),
         'player_sync_timeout': rebuild_cfg.get('player_sync_timeout', 90),
@@ -456,8 +456,8 @@ def _get_default_config():
             {'key': yl['key'], 'name': yl['name'], 'fallback_id': yl['fallback_id'], 'level': yl['level']}
             for yl in DEFAULT_YOUTH_LEAGUES
         ],
-        'use_transfers_for_status': False,
-        'inactivity_threshold_years': 2,
+        'use_transfers_for_status': True,
+        'inactivity_release_years': 2,
         'assume_full_minutes': False,
         'cohort_discover_timeout': COHORT_DISCOVER_TIMEOUT,
         'player_sync_timeout': PLAYER_SYNC_TIMEOUT,

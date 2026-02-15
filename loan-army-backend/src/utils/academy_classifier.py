@@ -317,7 +317,7 @@ def _get_active_classification_config() -> Dict[str, Any]:
             defaults['use_transfers_for_status'] = raw.get(
                 'use_transfers_for_status', True,
             )
-            inactivity = raw.get('inactivity_release_years')
+            inactivity = raw.get('inactivity_release_years') or raw.get('inactivity_threshold_years')
             if inactivity is not None:
                 defaults['inactivity_release_years'] = int(inactivity)
     except Exception:
