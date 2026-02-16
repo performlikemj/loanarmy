@@ -417,6 +417,21 @@ def _run_full_rebuild(job_id, config):
         update_job(job_id, progress=6, total=total_stages,
                    current_player='Stage 6: Refreshing statuses...')
         tracked = TrackedPlayer.query.filter(TrackedPlayer.is_active == True).all()
+
+        # Build squad membership map for squad cross-reference
+        squad_members_by_club = {}
+        _loan_ids = {tp.loan_club_api_id for tp in tracked if tp.loan_club_api_id}
+        _parent_ids = {tp.team.team_id for tp in tracked if tp.team}
+        for _cid in (_loan_ids | _parent_ids):
+            try:
+                _sq = api_client.get_team_players(_cid)
+                squad_members_by_club[_cid] = {
+                    int(e['player']['id']) for e in _sq
+                    if e and e.get('player', {}).get('id')
+                }
+            except Exception:
+                pass
+
         updated = 0
         status_counts = {}
         for tp in tracked:
@@ -432,6 +447,7 @@ def _run_full_rebuild(job_id, config):
                 player_api_id=tp.player_api_id,
                 api_client=api_client,
                 latest_season=_get_latest_season(journey.id, parent_api_id=tp.team.team_id, parent_club_name=tp.team.name) if journey else None,
+                squad_members_by_club=squad_members_by_club,
             )
             if tp.status != status or tp.loan_club_api_id != loan_api_id:
                 tp.status = status
