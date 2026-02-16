@@ -9520,17 +9520,30 @@ def admin_update_team_tracking(team_id: int):
     try:
         team = Team.query.get_or_404(team_id)
         data = request.get_json() or {}
-        
+
+        was_tracked = team.is_tracked
         if 'is_tracked' in data:
             team.is_tracked = bool(data['is_tracked'])
-        
+
         db.session.commit()
-        return jsonify({
+
+        response = {
             'message': 'updated',
             'team_id': team.id,
             'team_name': team.name,
-            'is_tracked': team.is_tracked
-        })
+            'is_tracked': team.is_tracked,
+        }
+
+        # Auto-seed academy players when a team is newly tracked
+        if team.is_tracked and not was_tracked:
+            try:
+                seed_job_id = _start_background_seed(team.id)
+                response['seed_job_id'] = seed_job_id
+            except Exception as seed_err:
+                logger.warning('Auto-seed failed for team %s: %s', team.name, seed_err)
+                response['seed_error'] = str(seed_err)
+
+        return jsonify(response)
     except Exception as e:
         logger.exception('admin_update_team_tracking failed')
         db.session.rollback()
@@ -13913,6 +13926,362 @@ def admin_refresh_tracked_player_statuses():
         return jsonify(_safe_error_payload(e, 'Failed to refresh statuses')), 500
 
 
+def _seed_single_team(team, max_age=30, sync_journeys=True, years=4, season=None):
+    """Core seed logic: discover academy players and create TrackedPlayer rows.
+
+    Can be called from the HTTP endpoint or from a background worker.
+    Returns a dict with result stats.
+    """
+    from src.models.journey import PlayerJourney
+    from src.services.journey_sync import JourneySyncService
+    from sqlalchemy import cast
+    from sqlalchemy.dialects.postgresql import JSONB as PG_JSONB
+
+    _api = APIFootballClient()
+    if season is None:
+        season = _api.current_season_start_year
+
+    parent_api_id = team.team_id
+    team_id = team.id
+    logger.info(
+        'seed_tracked_players: starting for %s (api_id=%s, season=%s, '
+        'max_age=%s, sync_journeys=%s)',
+        team.name, parent_api_id, season, max_age, sync_journeys,
+    )
+
+    # ── Source 1: Players already identified as academy products ──
+    known_journeys = PlayerJourney.query.filter(
+        PlayerJourney.academy_club_ids.contains(cast([parent_api_id], PG_JSONB))
+    ).all()
+    candidate_ids = {j.player_api_id: j for j in known_journeys}
+    logger.info(
+        'seed_tracked_players: %d players already have academy_club_ids containing %s',
+        len(candidate_ids), parent_api_id,
+    )
+
+    # ── Source 2: Fetch squads for each season in the window ──
+    seasons_to_fetch = range(season - years + 1, season + 1)
+    all_squad_player_ids = set()
+    squad_data = []
+
+    for fetch_season in seasons_to_fetch:
+        season_squad = _api.get_team_players(parent_api_id, season=fetch_season)
+        logger.info(
+            'seed_tracked_players: API squad returned %d entries for %s season %d',
+            len(season_squad), team.name, fetch_season,
+        )
+        for entry in season_squad:
+            player_info = (entry or {}).get('player') or {}
+            pid = player_info.get('id')
+            if pid:
+                all_squad_player_ids.add(int(pid))
+        squad_data.extend(season_squad)
+
+    logger.info(
+        'seed_tracked_players: %d unique players across %d seasons for %s',
+        len(all_squad_player_ids), len(list(seasons_to_fetch)), team.name,
+    )
+
+    journey_svc = JourneySyncService(_api)
+    synced = 0
+    not_academy = 0
+
+    for entry in squad_data:
+        player_info = (entry or {}).get('player') or {}
+        pid = player_info.get('id')
+        if not pid:
+            continue
+        pid = int(pid)
+
+        if pid in candidate_ids:
+            continue
+
+        age = player_info.get('age')
+        if age and int(age) > max_age:
+            continue
+
+        existing_journey = PlayerJourney.query.filter_by(player_api_id=pid).first()
+        if existing_journey and season in (existing_journey.seasons_synced or []):
+            if parent_api_id in (existing_journey.academy_club_ids or []):
+                candidate_ids[pid] = existing_journey
+            continue
+
+        if sync_journeys:
+            try:
+                journey = journey_svc.sync_player(pid)
+                synced += 1
+                if journey and parent_api_id in (journey.academy_club_ids or []):
+                    candidate_ids[pid] = journey
+                else:
+                    not_academy += 1
+            except Exception as sync_err:
+                logger.warning('seed: journey sync failed for %d: %s', pid, sync_err)
+        else:
+            journey = PlayerJourney.query.filter_by(player_api_id=pid).first()
+            if journey and parent_api_id in (journey.academy_club_ids or []):
+                candidate_ids[pid] = journey
+
+    # ── Source 3: CohortMember records (via AcademyCohort) ──
+    try:
+        from src.models.cohort import AcademyCohort, CohortMember
+        cohort_ids = [c.id for c in AcademyCohort.query.filter_by(
+            team_api_id=parent_api_id
+        ).all()]
+        if cohort_ids:
+            cohort_members = CohortMember.query.filter(
+                CohortMember.cohort_id.in_(cohort_ids)
+            ).all()
+            for cm in cohort_members:
+                if cm.player_api_id and cm.player_api_id not in candidate_ids:
+                    journey = PlayerJourney.query.filter_by(
+                        player_api_id=cm.player_api_id
+                    ).first()
+                    candidate_ids[cm.player_api_id] = journey
+            logger.info(
+                'seed_tracked_players: %d cohort members across %d cohorts for api_id=%s',
+                len(cohort_members), len(cohort_ids), parent_api_id,
+            )
+        else:
+            logger.info('seed_tracked_players: no cohorts found for api_id=%s', parent_api_id)
+    except Exception as cohort_err:
+        logger.warning('seed: cohort lookup failed: %s', cohort_err)
+
+    # ── Build a lookup of squad player info for enrichment ──
+    squad_by_id = {}
+    for entry in squad_data:
+        pi = (entry or {}).get('player') or {}
+        if pi.get('id'):
+            squad_by_id[int(pi['id'])] = entry
+
+    # ── Create TrackedPlayer rows ──
+    created = 0
+    skipped = 0
+    errors = []
+
+    for pid, journey in candidate_ids.items():
+        try:
+            existing = TrackedPlayer.query.filter_by(
+                player_api_id=pid, team_id=team_id,
+            ).first()
+            if existing:
+                new_status, new_loan_id, new_loan_name = classify_tracked_player(
+                    current_club_api_id=journey.current_club_api_id if journey else None,
+                    current_club_name=journey.current_club_name if journey else None,
+                    current_level=journey.current_level if journey else None,
+                    parent_api_id=parent_api_id,
+                    parent_club_name=team.name,
+                    player_api_id=pid,
+                    api_client=_api,
+                    latest_season=_get_latest_season(journey.id, parent_api_id=parent_api_id, parent_club_name=team.name) if journey else None,
+                )
+                if existing.status != new_status or existing.loan_club_api_id != new_loan_id:
+                    existing.status = new_status
+                    existing.loan_club_api_id = new_loan_id
+                    existing.loan_club_name = new_loan_name
+                skipped += 1
+                continue
+
+            squad_entry = squad_by_id.get(pid) or {}
+            pi = squad_entry.get('player') or {}
+            stats_list = squad_entry.get('statistics') or []
+
+            player_name = (
+                (journey.player_name if journey else None)
+                or pi.get('name')
+                or f'Player {pid}'
+            )
+            photo_url = (journey.player_photo if journey else None) or pi.get('photo')
+            nationality = (journey.nationality if journey else None) or pi.get('nationality')
+            birth_date = (journey.birth_date if journey else None) or (pi.get('birth') or {}).get('date')
+            position = pi.get('position') or ''
+            if not position and stats_list:
+                position = (stats_list[0].get('games') or {}).get('position') or ''
+            age = pi.get('age')
+
+            status, loan_club_api_id, loan_club_name = classify_tracked_player(
+                current_club_api_id=journey.current_club_api_id if journey else None,
+                current_club_name=journey.current_club_name if journey else None,
+                current_level=journey.current_level if journey else None,
+                parent_api_id=parent_api_id,
+                parent_club_name=team.name,
+                player_api_id=pid,
+                api_client=_api,
+                latest_season=_get_latest_season(journey.id, parent_api_id=parent_api_id, parent_club_name=team.name) if journey else None,
+            )
+
+            current_level = None
+            if journey and journey.current_level:
+                current_level = journey.current_level
+
+            tp = TrackedPlayer(
+                player_api_id=pid,
+                player_name=player_name,
+                photo_url=photo_url,
+                position=position,
+                nationality=nationality,
+                birth_date=birth_date,
+                age=int(age) if age else None,
+                team_id=team_id,
+                status=status,
+                current_level=current_level,
+                loan_club_api_id=loan_club_api_id,
+                loan_club_name=loan_club_name,
+                data_source='api-football',
+                data_depth='full_stats',
+                journey_id=journey.id if journey else None,
+            )
+            db.session.add(tp)
+            created += 1
+        except Exception as entry_err:
+            errors.append(f'Player {pid}: {entry_err}')
+            logger.warning('seed_tracked_players: error for player %d: %s', pid, entry_err)
+
+    db.session.commit()
+    logger.info(
+        'seed_tracked_players: done for %s — created=%d, skipped=%d, '
+        'candidates=%d, journeys_synced=%d, not_academy=%d',
+        team.name, created, skipped, len(candidate_ids), synced, not_academy,
+    )
+    return {
+        'team_id': team_id,
+        'team_name': team.name,
+        'api_team_id': parent_api_id,
+        'season': season,
+        'years': years,
+        'seasons_fetched': list(seasons_to_fetch),
+        'created': created,
+        'skipped': skipped,
+        'candidates_found': len(candidate_ids),
+        'journeys_synced': synced,
+        'not_academy': not_academy,
+        'unique_squad_players': len(all_squad_player_ids),
+        'errors': errors[:10] if errors else [],
+    }
+
+
+# ── Background seed workers ──
+
+def _run_seed_team_process(job_id, team_id, max_age=30, sync_journeys=True, years=4):
+    """Background worker: seed TrackedPlayers for one team."""
+    import signal
+    import sys
+    logging.basicConfig(
+        stream=sys.stderr, level=logging.INFO,
+        format='%(asctime)s - %(name)s - %(levelname)s - %(message)s', force=True,
+    )
+    from src.main import app
+
+    def _sigterm_handler(signum, frame):
+        try:
+            with app.app_context():
+                from src.utils.background_jobs import update_job as _upd
+                _upd(job_id, status='failed',
+                     error='Process terminated (SIGTERM)',
+                     completed_at=datetime.now(timezone.utc).isoformat())
+        except Exception:
+            pass
+        sys.exit(1)
+
+    signal.signal(signal.SIGTERM, _sigterm_handler)
+
+    with app.app_context():
+        from src.utils.background_jobs import update_job
+        try:
+            team = Team.query.get(team_id)
+            if not team:
+                update_job(job_id, status='failed', error=f'Team {team_id} not found',
+                           completed_at=datetime.now(timezone.utc).isoformat())
+                return
+            update_job(job_id, status='running', progress=0, total=1,
+                       current_player=f'Seeding {team.name}...')
+            result = _seed_single_team(team, max_age=max_age,
+                                       sync_journeys=sync_journeys, years=years)
+            update_job(job_id, status='completed', progress=1, total=1,
+                       results=result,
+                       completed_at=datetime.now(timezone.utc).isoformat())
+        except Exception as e:
+            logger.exception('Background seed for team %s failed', team_id)
+            db.session.rollback()
+            update_job(job_id, status='failed', error=str(e),
+                       completed_at=datetime.now(timezone.utc).isoformat())
+
+
+def _run_seed_all_tracked_process(job_id, max_age=30, sync_journeys=True, years=4):
+    """Background worker: seed all tracked teams that have no TrackedPlayers."""
+    import signal
+    import sys
+    logging.basicConfig(
+        stream=sys.stderr, level=logging.INFO,
+        format='%(asctime)s - %(name)s - %(levelname)s - %(message)s', force=True,
+    )
+    from src.main import app
+
+    def _sigterm_handler(signum, frame):
+        try:
+            with app.app_context():
+                from src.utils.background_jobs import update_job as _upd
+                _upd(job_id, status='failed',
+                     error='Process terminated (SIGTERM)',
+                     completed_at=datetime.now(timezone.utc).isoformat())
+        except Exception:
+            pass
+        sys.exit(1)
+
+    signal.signal(signal.SIGTERM, _sigterm_handler)
+
+    with app.app_context():
+        from src.utils.background_jobs import update_job, is_job_cancelled
+        try:
+            teams = Team.query.filter_by(is_tracked=True, is_active=True).all()
+            empty_teams = [t for t in teams
+                           if TrackedPlayer.query.filter_by(team_id=t.id, is_active=True).count() == 0]
+            update_job(job_id, status='running', progress=0, total=len(empty_teams))
+            results = {'teams': {}, 'errors': []}
+            for i, team in enumerate(empty_teams):
+                if is_job_cancelled(job_id):
+                    update_job(job_id, status='cancelled',
+                               error=f'Cancelled after {i}/{len(empty_teams)} teams',
+                               results=results,
+                               completed_at=datetime.now(timezone.utc).isoformat())
+                    return
+                update_job(job_id, progress=i, total=len(empty_teams),
+                           current_player=f'Seeding {team.name}...')
+                try:
+                    team_result = _seed_single_team(team, max_age=max_age,
+                                                     sync_journeys=sync_journeys, years=years)
+                    results['teams'][team.name] = {
+                        'created': team_result.get('created', 0),
+                        'skipped': team_result.get('skipped', 0),
+                        'candidates': team_result.get('candidates_found', 0),
+                    }
+                except Exception as team_err:
+                    logger.warning('seed_all_tracked: failed for %s: %s', team.name, team_err)
+                    results['errors'].append(f'{team.name}: {team_err}')
+            update_job(job_id, status='completed', progress=len(empty_teams),
+                       total=len(empty_teams), results=results,
+                       completed_at=datetime.now(timezone.utc).isoformat())
+        except Exception as e:
+            logger.exception('Background seed-all-tracked failed')
+            db.session.rollback()
+            update_job(job_id, status='failed', error=str(e),
+                       completed_at=datetime.now(timezone.utc).isoformat())
+
+
+def _start_background_seed(team_id, max_age=30, sync_journeys=True, years=4):
+    """Launch a background process to seed TrackedPlayers for a team. Returns job_id."""
+    import multiprocessing
+    job_id = _create_background_job('seed_team')
+    p = multiprocessing.Process(
+        target=_run_seed_team_process,
+        args=(job_id, team_id),
+        kwargs={'max_age': max_age, 'sync_journeys': sync_journeys, 'years': years},
+        daemon=False,
+    )
+    p.start()
+    multiprocessing.process._children.discard(p)
+    return job_id
+
+
 @api_bp.route('/admin/tracked-players/seed-team', methods=['POST'])
 @require_api_key
 def admin_seed_tracked_players():
@@ -13938,250 +14307,69 @@ def admin_seed_tracked_players():
             return jsonify({'error': 'Team not found'}), 404
 
         max_age = data.get('max_age', 30)
-        season = data.get('season') or api_client.current_season_start_year
         sync_journeys = data.get('sync_journeys', True)
-
-        parent_api_id = team.team_id
-        logger.info(
-            'seed_tracked_players: starting for %s (api_id=%s, season=%s, '
-            'max_age=%s, sync_journeys=%s)',
-            team.name, parent_api_id, season, max_age, sync_journeys,
-        )
-
-        from src.models.journey import PlayerJourney
-        from src.services.journey_sync import JourneySyncService
-        from sqlalchemy import cast
-        from sqlalchemy.dialects.postgresql import JSONB as PG_JSONB
-
-        # ── Source 1: Players already identified as academy products ──
-        known_journeys = PlayerJourney.query.filter(
-            PlayerJourney.academy_club_ids.contains(cast([parent_api_id], PG_JSONB))
-        ).all()
-        candidate_ids = {j.player_api_id: j for j in known_journeys}
-        logger.info(
-            'seed_tracked_players: %d players already have academy_club_ids containing %s',
-            len(candidate_ids), parent_api_id,
-        )
-
-        # ── Source 2: Fetch squads for each season in the window ──
-        # Fetching multiple seasons discovers players who have since left
-        # (e.g. a player in Arsenal's U21 in 2022 who was released in 2023).
-        # Each API call is cached in APICache (7-day TTL) so re-seeding is cheap.
         years = data.get('years', 4)
-        seasons_to_fetch = range(season - years + 1, season + 1)
-        all_squad_player_ids = set()
-        squad_data = []  # collect all entries for enrichment lookup later
+        season = data.get('season')
 
-        for fetch_season in seasons_to_fetch:
-            season_squad = api_client.get_team_players(parent_api_id, season=fetch_season)
-            logger.info(
-                'seed_tracked_players: API squad returned %d entries for %s season %d',
-                len(season_squad), team.name, fetch_season,
-            )
-            for entry in season_squad:
-                player_info = (entry or {}).get('player') or {}
-                pid = player_info.get('id')
-                if pid:
-                    all_squad_player_ids.add(int(pid))
-            squad_data.extend(season_squad)
-
-        logger.info(
-            'seed_tracked_players: %d unique players across %d seasons for %s',
-            len(all_squad_player_ids), len(list(seasons_to_fetch)), team.name,
-        )
-
-        journey_svc = JourneySyncService(api_client._resolve()
-                                         if hasattr(api_client, '_resolve')
-                                         else api_client)
-        synced = 0
-        not_academy = 0
-
-        for entry in squad_data:
-            player_info = (entry or {}).get('player') or {}
-            pid = player_info.get('id')
-            if not pid:
-                continue
-            pid = int(pid)
-
-            # Skip if already a known academy product
-            if pid in candidate_ids:
-                continue
-
-            # Age gate — don't bother syncing journeys for senior players
-            age = player_info.get('age')
-            if age and int(age) > max_age:
-                continue
-
-            # Skip if journey already covers the current season
-            existing_journey = PlayerJourney.query.filter_by(player_api_id=pid).first()
-            if existing_journey and season in (existing_journey.seasons_synced or []):
-                if parent_api_id in (existing_journey.academy_club_ids or []):
-                    candidate_ids[pid] = existing_journey
-                continue
-
-            # Sync their journey to compute academy_club_ids
-            if sync_journeys:
-                try:
-                    journey = journey_svc.sync_player(pid)
-                    synced += 1
-                    if journey and parent_api_id in (journey.academy_club_ids or []):
-                        candidate_ids[pid] = journey
-                    else:
-                        not_academy += 1
-                except Exception as sync_err:
-                    logger.warning('seed: journey sync failed for %d: %s', pid, sync_err)
-            else:
-                # Without sync, just check if a journey exists
-                journey = PlayerJourney.query.filter_by(player_api_id=pid).first()
-                if journey and parent_api_id in (journey.academy_club_ids or []):
-                    candidate_ids[pid] = journey
-
-        # ── Source 3: CohortMember records (via AcademyCohort) ──
-        try:
-            from src.models.cohort import AcademyCohort, CohortMember
-            cohort_ids = [c.id for c in AcademyCohort.query.filter_by(
-                team_api_id=parent_api_id
-            ).all()]
-            if cohort_ids:
-                cohort_members = CohortMember.query.filter(
-                    CohortMember.cohort_id.in_(cohort_ids)
-                ).all()
-                for cm in cohort_members:
-                    if cm.player_api_id and cm.player_api_id not in candidate_ids:
-                        journey = PlayerJourney.query.filter_by(
-                            player_api_id=cm.player_api_id
-                        ).first()
-                        candidate_ids[cm.player_api_id] = journey  # may be None
-                logger.info(
-                    'seed_tracked_players: %d cohort members across %d cohorts for api_id=%s',
-                    len(cohort_members), len(cohort_ids), parent_api_id,
-                )
-            else:
-                logger.info('seed_tracked_players: no cohorts found for api_id=%s', parent_api_id)
-        except Exception as cohort_err:
-            logger.warning('seed: cohort lookup failed: %s', cohort_err)
-
-        # ── Build a lookup of squad player info for enrichment ──
-        squad_by_id = {}
-        for entry in squad_data:
-            pi = (entry or {}).get('player') or {}
-            if pi.get('id'):
-                squad_by_id[int(pi['id'])] = entry
-
-        # ── Create TrackedPlayer rows ──
-        created = 0
-        skipped = 0
-        errors = []
-
-        for pid, journey in candidate_ids.items():
-            try:
-                existing = TrackedPlayer.query.filter_by(
-                    player_api_id=pid, team_id=team_id,
-                ).first()
-                if existing:
-                    # Refresh status on re-seed so stale statuses get corrected
-                    new_status, new_loan_id, new_loan_name = classify_tracked_player(
-                        current_club_api_id=journey.current_club_api_id if journey else None,
-                        current_club_name=journey.current_club_name if journey else None,
-                        current_level=journey.current_level if journey else None,
-                        parent_api_id=parent_api_id,
-                        parent_club_name=team.name,
-                        player_api_id=pid,
-                        api_client=api_client,
-                        latest_season=_get_latest_season(journey.id, parent_api_id=parent_api_id, parent_club_name=team.name) if journey else None,
-                    )
-                    if existing.status != new_status or existing.loan_club_api_id != new_loan_id:
-                        existing.status = new_status
-                        existing.loan_club_api_id = new_loan_id
-                        existing.loan_club_name = new_loan_name
-                    skipped += 1
-                    continue
-
-                # Gather info from journey + squad data
-                squad_entry = squad_by_id.get(pid) or {}
-                pi = squad_entry.get('player') or {}
-                stats_list = squad_entry.get('statistics') or []
-
-                player_name = (
-                    (journey.player_name if journey else None)
-                    or pi.get('name')
-                    or f'Player {pid}'
-                )
-                photo_url = (journey.player_photo if journey else None) or pi.get('photo')
-                nationality = (journey.nationality if journey else None) or pi.get('nationality')
-                birth_date = (journey.birth_date if journey else None) or (pi.get('birth') or {}).get('date')
-                position = pi.get('position') or ''
-                if not position and stats_list:
-                    position = (stats_list[0].get('games') or {}).get('position') or ''
-                age = pi.get('age')
-
-                # Determine status using the centralised classifier
-                status, loan_club_api_id, loan_club_name = classify_tracked_player(
-                    current_club_api_id=journey.current_club_api_id if journey else None,
-                    current_club_name=journey.current_club_name if journey else None,
-                    current_level=journey.current_level if journey else None,
-                    parent_api_id=parent_api_id,
-                    parent_club_name=team.name,
-                    player_api_id=pid,
-                    api_client=api_client,
-                    latest_season=_get_latest_season(journey.id, parent_api_id=parent_api_id, parent_club_name=team.name) if journey else None,
-                )
-
-                # Derive level from journey
-                current_level = None
-                if journey and journey.current_level:
-                    current_level = journey.current_level
-
-                tp = TrackedPlayer(
-                    player_api_id=pid,
-                    player_name=player_name,
-                    photo_url=photo_url,
-                    position=position,
-                    nationality=nationality,
-                    birth_date=birth_date,
-                    age=int(age) if age else None,
-                    team_id=team_id,
-                    status=status,
-                    current_level=current_level,
-                    loan_club_api_id=loan_club_api_id,
-                    loan_club_name=loan_club_name,
-                    data_source='api-football',
-                    data_depth='full_stats',
-                    journey_id=journey.id if journey else None,
-                )
-                db.session.add(tp)
-                created += 1
-            except Exception as entry_err:
-                errors.append(f'Player {pid}: {entry_err}')
-                logger.warning('seed_tracked_players: error for player %d: %s', pid, entry_err)
-
-        db.session.commit()
-        logger.info(
-            'seed_tracked_players: done for %s — created=%d, skipped=%d, '
-            'candidates=%d, journeys_synced=%d, not_academy=%d',
-            team.name, created, skipped, len(candidate_ids), synced, not_academy,
-        )
-        result = {
-            'team_id': team_id,
-            'team_name': team.name,
-            'api_team_id': parent_api_id,
-            'season': season,
-            'years': years,
-            'seasons_fetched': list(seasons_to_fetch),
-            'created': created,
-            'skipped': skipped,
-            'candidates_found': len(candidate_ids),
-            'journeys_synced': synced,
-            'not_academy': not_academy,
-            'unique_squad_players': len(all_squad_player_ids),
-        }
-        if errors:
-            result['errors'] = errors[:10]
+        result = _seed_single_team(team, max_age=max_age, sync_journeys=sync_journeys,
+                                   years=years, season=season)
         return jsonify(result)
     except Exception as e:
         db.session.rollback()
         logger.exception('admin_seed_tracked_players failed')
         return jsonify(_safe_error_payload(e, 'Failed to seed tracked players')), 500
+
+
+@api_bp.route('/admin/tracked-players/seed-all-tracked', methods=['POST'])
+@require_api_key
+def admin_seed_all_tracked():
+    """Backfill: seed TrackedPlayers for all tracked teams that have none.
+
+    Finds teams with is_tracked=True and 0 active TrackedPlayers, then runs
+    the seed logic for each in a single background job.
+
+    Body (all optional): { max_age?: int, sync_journeys?: bool, years?: int }
+    """
+    try:
+        import multiprocessing
+        data = request.get_json(force=True) if request.data else {}
+        max_age = data.get('max_age', 30)
+        sync_journeys = data.get('sync_journeys', True)
+        years = data.get('years', 4)
+
+        # Preview which teams would be seeded
+        teams = Team.query.filter_by(is_tracked=True, is_active=True).all()
+        empty_teams = [t for t in teams
+                       if TrackedPlayer.query.filter_by(team_id=t.id, is_active=True).count() == 0]
+
+        if not empty_teams:
+            return jsonify({
+                'message': 'All tracked teams already have TrackedPlayers',
+                'tracked_teams': len(teams),
+                'empty_teams': 0,
+            })
+
+        job_id = _create_background_job('seed_all_tracked')
+        p = multiprocessing.Process(
+            target=_run_seed_all_tracked_process,
+            args=(job_id,),
+            kwargs={'max_age': max_age, 'sync_journeys': sync_journeys, 'years': years},
+            daemon=False,
+        )
+        p.start()
+        multiprocessing.process._children.discard(p)
+
+        return jsonify({
+            'message': f'Background seed started for {len(empty_teams)} teams',
+            'job_id': job_id,
+            'tracked_teams': len(teams),
+            'teams_to_seed': len(empty_teams),
+            'team_names': [t.name for t in empty_teams],
+        })
+    except Exception as e:
+        logger.exception('admin_seed_all_tracked failed')
+        db.session.rollback()
+        return jsonify(_safe_error_payload(e, 'Failed to start seed-all-tracked')), 500
 
 
 @api_bp.route('/admin/tracked-players/sync-journeys', methods=['POST'])

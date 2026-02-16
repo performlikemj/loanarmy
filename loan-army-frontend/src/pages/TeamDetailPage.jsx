@@ -122,7 +122,7 @@ export function TeamDetailPage() {
         if (newslettersLoaded || newslettersLoading) return
         setNewslettersLoading(true)
         try {
-            const data = await APIService.getNewsletters({ team: teamId, published_only: 'true' })
+            const data = await APIService.getNewsletters({ team: team.id, published_only: 'true' })
             const items = Array.isArray(data) ? data : data?.items || data?.newsletters || []
             setNewsletters(items)
         } catch (err) {
@@ -132,7 +132,7 @@ export function TeamDetailPage() {
             setNewslettersLoading(false)
             setNewslettersLoaded(true)
         }
-    }, [teamId, newslettersLoaded, newslettersLoading])
+    }, [team, newslettersLoaded, newslettersLoading])
 
     // Load squad on mount (default tab)
     useEffect(() => {

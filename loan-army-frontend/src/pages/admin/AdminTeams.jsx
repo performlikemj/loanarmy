@@ -1,6 +1,6 @@
 import { useState, useEffect, useCallback, useMemo } from 'react'
 import { Link } from 'react-router-dom'
-import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
+import { Card, CardAction, CardContent, CardDescription, CardFooter, CardHeader, CardTitle } from '@/components/ui/card'
 import { Button } from '@/components/ui/button'
 import { Badge } from '@/components/ui/badge'
 import { Input } from '@/components/ui/input'
@@ -29,8 +29,20 @@ import {
   Save,
   X,
   Wand2,
-  LayoutGrid
+  LayoutGrid,
+  MoreVertical,
+  ChevronsUpDown
 } from 'lucide-react'
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuLabel,
+  DropdownMenuSeparator,
+  DropdownMenuTrigger,
+} from '@/components/ui/dropdown-menu'
+import { Collapsible, CollapsibleTrigger, CollapsibleContent } from '@/components/ui/collapsible'
+import { Tooltip, TooltipTrigger, TooltipContent } from '@/components/ui/tooltip'
 import { APIService } from '@/lib/api'
 
 export function AdminTeams() {
@@ -646,7 +658,7 @@ export function AdminTeams() {
       )}
 
       <Tabs defaultValue="teams">
-        <TabsList className="flex-wrap h-auto gap-1 p-1">
+        <TabsList className="w-full justify-start overflow-x-auto h-auto gap-1 p-1" style={{ scrollbarWidth: 'none' }}>
           <TabsTrigger value="teams" className="text-xs sm:text-sm">
             <Users className="h-4 w-4 mr-1 sm:mr-2" />
             <span className="hidden xs:inline">Teams</span> ({trackedTeams.length})
@@ -674,104 +686,63 @@ export function AdminTeams() {
           </TabsTrigger>
         </TabsList>
 
-        <TabsContent value="teams" className="space-y-4">
-          <div className="grid gap-4 lg:grid-cols-2">
-            <Card>
-              <CardHeader>
-              <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
-                <div>
-                  <CardTitle>Tracked Teams</CardTitle>
-                  <CardDescription>
-                    Teams currently being tracked for academy player data
-                  </CardDescription>
+        <TabsContent value="teams" className="space-y-6">
+          {/* Shared search bar */}
+          <div className="flex flex-col sm:flex-row items-stretch sm:items-center gap-2 sm:gap-4">
+            <div className="relative flex-1">
+              <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 h-4 w-4 text-muted-foreground" />
+              <Input
+                placeholder="Search teams by name or league..."
+                value={search}
+                onChange={(e) => setSearch(e.target.value)}
+                className="pl-10"
+                autoComplete="off"
+                aria-label="Search teams"
+              />
+            </div>
+            <Button variant="outline" onClick={loadTeams} className="shrink-0">
+              <RefreshCw className="h-4 w-4 mr-2" />
+              Refresh
+            </Button>
+          </div>
+
+          {/* Tracked Teams - full width */}
+          <Card>
+            <CardHeader>
+              <CardTitle>Tracked Teams ({trackedTeams.length})</CardTitle>
+              <CardDescription>
+                Teams currently being tracked for academy player data
+              </CardDescription>
+              <CardAction>
+                <div className="flex items-center gap-1">
+                  <Tooltip>
+                    <TooltipTrigger asChild>
+                      <Button variant="ghost" size="icon" className="h-8 w-8" onClick={selectAllTracked} aria-label="Select all">
+                        <CheckSquare className="h-4 w-4" />
+                      </Button>
+                    </TooltipTrigger>
+                    <TooltipContent>Select All</TooltipContent>
+                  </Tooltip>
+                  <Tooltip>
+                    <TooltipTrigger asChild>
+                      <Button variant="ghost" size="icon" className="h-8 w-8" onClick={selectNone} aria-label="Deselect all">
+                        <Square className="h-4 w-4" />
+                      </Button>
+                    </TooltipTrigger>
+                    <TooltipContent>Deselect All</TooltipContent>
+                  </Tooltip>
+                  <Tooltip>
+                    <TooltipTrigger asChild>
+                      <Button variant="ghost" size="icon" className="h-8 w-8" onClick={invertSelection} aria-label="Invert selection">
+                        <ArrowLeftRight className="h-4 w-4" />
+                      </Button>
+                    </TooltipTrigger>
+                    <TooltipContent>Invert Selection</TooltipContent>
+                  </Tooltip>
                 </div>
-                <Button variant="outline" size="sm" asChild>
-                  <a href="#untracked-teams">View Untracked</a>
-                </Button>
-              </div>
-              </CardHeader>
-              <CardContent>
-              {/* Search and controls */}
-              <div className="flex flex-col gap-4 mb-4">
-                <div className="flex flex-col sm:flex-row items-stretch sm:items-center gap-2 sm:gap-4">
-                  <div className="relative flex-1">
-                    <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 h-4 w-4 text-muted-foreground" />
-                    <Input
-                      placeholder="Search teams..."
-                      value={search}
-                      onChange={(e) => setSearch(e.target.value)}
-                      className="pl-10"
-                    />
-                  </div>
-                  <Button variant="outline" onClick={loadTeams} className="shrink-0">
-                    <RefreshCw className="h-4 w-4 mr-2" />
-                    Refresh
-                  </Button>
-                </div>
-
-                {/* Bulk selection controls */}
-                {trackedTeams.length > 0 && (
-                  <div className="flex flex-wrap items-center gap-2 p-3 bg-muted/50 rounded-lg">
-                    <span className="text-sm font-medium w-full sm:w-auto">Selection:</span>
-                    <div className="flex flex-wrap items-center gap-2">
-                      <Button variant="outline" size="sm" onClick={selectAllTracked}>
-                        <CheckSquare className="h-4 w-4 mr-1" />
-                        All
-                      </Button>
-                      <Button variant="outline" size="sm" onClick={selectNone}>
-                        <Square className="h-4 w-4 mr-1" />
-                        None
-                      </Button>
-                      <Button variant="outline" size="sm" onClick={invertSelection}>
-                        <ArrowLeftRight className="h-4 w-4 mr-1" />
-                        Invert
-                      </Button>
-                    </div>
-
-                    <span className="text-sm text-muted-foreground">
-                      {selectedTeamIds.size} selected
-                    </span>
-
-                    {selectedTeamIds.size > 0 && (
-                      <div className="flex flex-wrap items-center gap-2 w-full sm:w-auto mt-2 sm:mt-0 pt-2 sm:pt-0 border-t sm:border-t-0 sm:border-l sm:pl-2 border-border">
-                        <Select value={bulkMode} onValueChange={setBulkMode}>
-                          <SelectTrigger className="w-full sm:w-44 h-8">
-                            <SelectValue />
-                          </SelectTrigger>
-                          <SelectContent>
-                            <SelectItem value="delete">
-                              <span className="flex items-center gap-2">
-                                <Trash2 className="h-3 w-3" />
-                                Delete selected
-                              </span>
-                            </SelectItem>
-                            <SelectItem value="keep">
-                              <span className="flex items-center gap-2">
-                                <Shield className="h-3 w-3" />
-                                Keep selected only
-                              </span>
-                            </SelectItem>
-                          </SelectContent>
-                        </Select>
-
-                        <Button
-                          variant="destructive"
-                          size="sm"
-                          onClick={handleBulkDeleteClick}
-                          className="w-full sm:w-auto"
-                        >
-                          <Trash2 className="h-4 w-4 mr-1" />
-                          {bulkMode === 'delete'
-                            ? `Delete ${teamsToDelete.length}`
-                            : `Delete ${teamsToDelete.length}, keep ${teamsToKeep.length}`
-                          }
-                        </Button>
-                      </div>
-                    )}
-                  </div>
-                )}
-              </div>
-
+              </CardAction>
+            </CardHeader>
+            <CardContent>
               {loading ? (
                 <div className="flex items-center justify-center py-8">
                   <Loader2 className="h-6 w-6 animate-spin" />
@@ -787,197 +758,235 @@ export function AdminTeams() {
                     return (
                       <div
                         key={team.id}
-                        className={`p-3 border rounded-lg transition-colors ${isSelected
+                        className={`flex items-center gap-3 p-3 border rounded-lg transition-colors ${isSelected
                           ? willBeDeleted
                             ? 'bg-red-50 border-red-200'
                             : 'bg-green-50 border-green-200'
                           : 'hover:bg-muted/50'
                           }`}
                       >
-                        <div className="flex items-start gap-3">
-                          <Checkbox
-                            checked={isSelected}
-                            onCheckedChange={() => toggleTeamSelection(team.id)}
-                            className="mt-1"
-                          />
-                          <Avatar className="h-10 w-10 shrink-0">
-                            <AvatarImage src={team.logo} alt={team.name} />
-                            <AvatarFallback>{team.name.slice(0, 2).toUpperCase()}</AvatarFallback>
-                          </Avatar>
-                          <div className="flex-1 min-w-0">
-                            <div className="flex flex-wrap items-center gap-2">
-                              <p className="font-medium truncate">{team.name}</p>
-                              <Badge variant="default" className="bg-green-600 shrink-0">
-                                <CheckCircle className="h-3 w-3 mr-1" />
-                                Tracked
-                              </Badge>
-                              {isSelected && selectedTeamIds.size > 0 && (
-                                <Badge variant={willBeDeleted ? "destructive" : "default"} className="shrink-0">
-                                  {willBeDeleted ? 'Will be deleted' : 'Will be kept'}
-                                </Badge>
-                              )}
-                            </div>
-                            <p className="text-sm text-muted-foreground truncate">
-                              {team.league_name || team.country} • {team.current_loaned_out_count} loans
-                            </p>
-                            <div className="flex flex-wrap gap-2 mt-2">
-                              <Button
-                                variant="outline"
-                                size="sm"
-                                onClick={() => handleToggleTracking(team)}
-                              >
-                                Stop Tracking
-                              </Button>
-                              <Button
-                                variant="outline"
-                                size="sm"
-                                onClick={() => handleSyncFixtures(team)}
-                                disabled={syncingTeamId === team.id}
-                              >
-                                {syncingTeamId === team.id ? (
-                                  <>
-                                    <Loader2 className="h-4 w-4 mr-1 animate-spin" />
-                                    Syncing...
-                                  </>
-                                ) : (
-                                  <>
-                                    <RefreshCw className="h-4 w-4 mr-1" />
-                                    Sync Fixtures
-                                  </>
-                                )}
-                              </Button>
-                              <Button
-                                variant="outline"
-                                size="sm"
-                                asChild
-                              >
-                                <Link to={`/admin/teams/${team.id}/formation`}>
-                                  <LayoutGrid className="h-4 w-4 mr-1" />
-                                  Formation
-                                </Link>
-                              </Button>
-                              <Button
-                                variant="destructive"
-                                size="sm"
-                                onClick={() => handleDeleteClick(team)}
-                              >
-                                <Trash2 className="h-4 w-4 mr-1" />
-                                Delete
-                              </Button>
-                            </div>
-                          </div>
+                        <Checkbox
+                          checked={isSelected}
+                          onCheckedChange={() => toggleTeamSelection(team.id)}
+                          aria-label={`Select ${team.name}`}
+                        />
+                        <Avatar className="h-8 w-8 shrink-0">
+                          <AvatarImage src={team.logo} alt="" />
+                          <AvatarFallback>{team.name.slice(0, 2).toUpperCase()}</AvatarFallback>
+                        </Avatar>
+                        <div className="flex-1 min-w-0">
+                          <p className="font-medium truncate">{team.name}</p>
+                          <p className="text-xs text-muted-foreground truncate">
+                            {team.league_name || team.country} · {team.current_loaned_out_count} loans
+                          </p>
                         </div>
+                        {isSelected && selectedTeamIds.size > 0 && (
+                          <Badge
+                            variant={willBeDeleted ? "destructive" : "secondary"}
+                            className="shrink-0 hidden sm:inline-flex"
+                          >
+                            {willBeDeleted ? 'Delete' : 'Keep'}
+                          </Badge>
+                        )}
+                        <DropdownMenu>
+                          <DropdownMenuTrigger asChild>
+                            <Button variant="ghost" size="icon" className="shrink-0 h-8 w-8" aria-label={`Actions for ${team.name}`}>
+                              <MoreVertical className="h-4 w-4" />
+                            </Button>
+                          </DropdownMenuTrigger>
+                          <DropdownMenuContent align="end">
+                            <DropdownMenuLabel>Actions</DropdownMenuLabel>
+                            <DropdownMenuItem onClick={() => handleToggleTracking(team)}>
+                              <XCircle className="h-4 w-4" />
+                              Stop Tracking
+                            </DropdownMenuItem>
+                            <DropdownMenuItem
+                              onClick={() => handleSyncFixtures(team)}
+                              disabled={syncingTeamId === team.id}
+                            >
+                              {syncingTeamId === team.id ? (
+                                <Loader2 className="h-4 w-4 animate-spin" />
+                              ) : (
+                                <RefreshCw className="h-4 w-4" />
+                              )}
+                              {syncingTeamId === team.id ? 'Syncing...' : 'Sync Fixtures'}
+                            </DropdownMenuItem>
+                            <DropdownMenuItem asChild>
+                              <Link to={`/admin/teams/${team.id}/formation`}>
+                                <LayoutGrid className="h-4 w-4" />
+                                Formation
+                              </Link>
+                            </DropdownMenuItem>
+                            <DropdownMenuSeparator />
+                            <DropdownMenuItem
+                              variant="destructive"
+                              onClick={() => handleDeleteClick(team)}
+                            >
+                              <Trash2 className="h-4 w-4" />
+                              Delete Data
+                            </DropdownMenuItem>
+                          </DropdownMenuContent>
+                        </DropdownMenu>
                       </div>
                     )
                   })}
                 </div>
               )}
-              {!loading && trackedTeams.length > 0 && (
-                <div className="flex flex-col gap-2 pt-4 border-t">
-                  <span className="text-xs text-muted-foreground">
-                    Showing {trackedRangeStart}-{trackedRangeEnd} of {trackedTeams.length} tracked teams
-                  </span>
-                  {trackedTotalPages > 1 && (
-                    <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-2">
-                      <span className="text-xs text-muted-foreground">
-                        Page {trackedPage} of {trackedTotalPages}
-                      </span>
+            </CardContent>
+            {!loading && trackedTeams.length > 0 && (
+              <CardFooter className="flex items-center justify-between border-t pt-4">
+                <span className="text-xs text-muted-foreground">
+                  {trackedRangeStart}–{trackedRangeEnd} of {trackedTeams.length}
+                </span>
+                {trackedTotalPages > 1 && (
+                  <div className="flex items-center gap-2">
+                    <Button
+                      variant="outline"
+                      size="sm"
+                      disabled={trackedPage === 1}
+                      onClick={() => setTrackedPage(page => Math.max(1, page - 1))}
+                    >
+                      Previous
+                    </Button>
+                    <span className="text-xs text-muted-foreground tabular-nums">
+                      {trackedPage} / {trackedTotalPages}
+                    </span>
+                    <Button
+                      variant="outline"
+                      size="sm"
+                      disabled={trackedPage === trackedTotalPages}
+                      onClick={() => setTrackedPage(page => Math.min(trackedTotalPages, page + 1))}
+                    >
+                      Next
+                    </Button>
+                  </div>
+                )}
+              </CardFooter>
+            )}
+          </Card>
+
+          {/* Untracked Teams - full width, collapsible */}
+          <Collapsible defaultOpen={untrackedTeams.length > 0 && untrackedTeams.length <= 20}>
+            <Card>
+              <CardHeader>
+                <CardTitle>Untracked Teams ({untrackedTeams.length})</CardTitle>
+                <CardDescription>
+                  Teams available but not currently being tracked
+                </CardDescription>
+                <CardAction>
+                  <CollapsibleTrigger asChild>
+                    <Button variant="ghost" size="icon" className="h-8 w-8" aria-label="Toggle untracked teams">
+                      <ChevronsUpDown className="h-4 w-4" />
+                    </Button>
+                  </CollapsibleTrigger>
+                </CardAction>
+              </CardHeader>
+              <CollapsibleContent>
+                <CardContent>
+                  {loading ? (
+                    <div className="flex items-center justify-center py-8">
+                      <Loader2 className="h-6 w-6 animate-spin" />
+                    </div>
+                  ) : untrackedTeams.length === 0 ? (
+                    <p className="text-center text-muted-foreground py-8">All teams are being tracked</p>
+                  ) : (
+                    <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-2">
+                      {untrackedTeamsPage.map(team => (
+                        <div key={team.id} className="flex items-center gap-2 p-2 border rounded-lg text-sm">
+                          <Avatar className="h-8 w-8 shrink-0">
+                            <AvatarImage src={team.logo} alt="" />
+                            <AvatarFallback className="text-xs">{team.name.slice(0, 2).toUpperCase()}</AvatarFallback>
+                          </Avatar>
+                          <span className="flex-1 min-w-0 truncate">{team.name}</span>
+                          <Button
+                            variant="ghost"
+                            size="sm"
+                            className="shrink-0"
+                            onClick={() => handleToggleTracking(team)}
+                          >
+                            Track
+                          </Button>
+                        </div>
+                      ))}
+                    </div>
+                  )}
+                </CardContent>
+                {!loading && untrackedTeams.length > 0 && (
+                  <CardFooter className="flex items-center justify-between border-t pt-4">
+                    <span className="text-xs text-muted-foreground">
+                      {untrackedRangeStart}–{untrackedRangeEnd} of {untrackedTeams.length}
+                    </span>
+                    {untrackedTotalPages > 1 && (
                       <div className="flex items-center gap-2">
                         <Button
                           variant="outline"
                           size="sm"
-                          disabled={trackedPage === 1}
-                          onClick={() => setTrackedPage(page => Math.max(1, page - 1))}
+                          disabled={untrackedPage === 1}
+                          onClick={() => setUntrackedPage(page => Math.max(1, page - 1))}
                         >
                           Previous
                         </Button>
+                        <span className="text-xs text-muted-foreground tabular-nums">
+                          {untrackedPage} / {untrackedTotalPages}
+                        </span>
                         <Button
                           variant="outline"
                           size="sm"
-                          disabled={trackedPage === trackedTotalPages}
-                          onClick={() => setTrackedPage(page => Math.min(trackedTotalPages, page + 1))}
+                          disabled={untrackedPage === untrackedTotalPages}
+                          onClick={() => setUntrackedPage(page => Math.min(untrackedTotalPages, page + 1))}
                         >
                           Next
                         </Button>
                       </div>
-                    </div>
-                  )}
-                </div>
-              )}
-              </CardContent>
-            </Card>
-
-            <Card id="untracked-teams">
-              <CardHeader>
-                <CardTitle>Untracked Teams</CardTitle>
-                <CardDescription>
-                  Teams available but not currently being tracked
-                </CardDescription>
-              </CardHeader>
-              <CardContent>
-                {loading ? (
-                  <div className="flex items-center justify-center py-8">
-                    <Loader2 className="h-6 w-6 animate-spin" />
-                  </div>
-                ) : untrackedTeams.length === 0 ? (
-                  <p className="text-center text-muted-foreground py-8">All teams are being tracked</p>
-                ) : (
-                  <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-2">
-                    {untrackedTeamsPage.map(team => (
-                      <div key={team.id} className="flex items-center justify-between p-2 border rounded-lg text-sm">
-                        <div className="flex items-center gap-2">
-                          <Avatar className="h-8 w-8">
-                            <AvatarImage src={team.logo} alt={team.name} />
-                            <AvatarFallback className="text-xs">{team.name.slice(0, 2).toUpperCase()}</AvatarFallback>
-                          </Avatar>
-                          <span className="truncate max-w-[120px]">{team.name}</span>
-                        </div>
-                        <Button
-                          variant="ghost"
-                          size="sm"
-                          onClick={() => handleToggleTracking(team)}
-                        >
-                          Track
-                        </Button>
-                      </div>
-                    ))}
-                  </div>
-                )}
-                {!loading && untrackedTeams.length > 0 && (
-                  <div className="flex flex-col gap-2 pt-4 border-t">
-                    <span className="text-xs text-muted-foreground">
-                      Showing {untrackedRangeStart}-{untrackedRangeEnd} of {untrackedTeams.length} untracked teams
-                    </span>
-                    {untrackedTotalPages > 1 && (
-                      <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-2">
-                        <span className="text-xs text-muted-foreground">
-                          Page {untrackedPage} of {untrackedTotalPages}
-                        </span>
-                        <div className="flex items-center gap-2">
-                          <Button
-                            variant="outline"
-                            size="sm"
-                            disabled={untrackedPage === 1}
-                            onClick={() => setUntrackedPage(page => Math.max(1, page - 1))}
-                          >
-                            Previous
-                          </Button>
-                          <Button
-                            variant="outline"
-                            size="sm"
-                            disabled={untrackedPage === untrackedTotalPages}
-                            onClick={() => setUntrackedPage(page => Math.min(untrackedTotalPages, page + 1))}
-                          >
-                            Next
-                          </Button>
-                        </div>
-                      </div>
                     )}
-                  </div>
+                  </CardFooter>
                 )}
-              </CardContent>
+              </CollapsibleContent>
             </Card>
-          </div>
+          </Collapsible>
+
+          {/* Floating bulk selection bar */}
+          {selectedTeamIds.size > 0 && (
+            <div className="fixed bottom-4 left-1/2 -translate-x-1/2 z-50 flex items-center gap-3 rounded-lg border bg-background px-4 py-2.5 shadow-lg">
+              <span className="text-sm font-medium tabular-nums">
+                {selectedTeamIds.size} selected
+              </span>
+              <div className="h-4 w-px bg-border" />
+              <Select value={bulkMode} onValueChange={setBulkMode}>
+                <SelectTrigger className="h-8 w-40 text-xs">
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="delete">
+                    <span className="flex items-center gap-2">
+                      <Trash2 className="h-3 w-3" />
+                      Delete selected
+                    </span>
+                  </SelectItem>
+                  <SelectItem value="keep">
+                    <span className="flex items-center gap-2">
+                      <Shield className="h-3 w-3" />
+                      Keep selected only
+                    </span>
+                  </SelectItem>
+                </SelectContent>
+              </Select>
+              <Button
+                variant="destructive"
+                size="sm"
+                onClick={handleBulkDeleteClick}
+              >
+                <Trash2 className="h-4 w-4 mr-1" />
+                {bulkMode === 'delete'
+                  ? `Delete ${teamsToDelete.length}`
+                  : `Delete ${teamsToDelete.length}, keep ${teamsToKeep.length}`
+                }
+              </Button>
+              <Button variant="ghost" size="sm" onClick={selectNone} aria-label="Clear selection">
+                <X className="h-4 w-4" />
+              </Button>
+            </div>
+          )}
         </TabsContent>
 
         <TabsContent value="requests" className="space-y-4">
@@ -1113,15 +1122,14 @@ export function AdminTeams() {
                   Find Placeholder Names
                 </Button>
                 <div className="flex flex-wrap items-center gap-2 w-full sm:w-auto sm:ml-auto">
-                  <label className="flex items-center gap-2 text-sm">
-                    <input
-                      type="checkbox"
+                  <div className="flex items-center gap-2">
+                    <Checkbox
+                      id="bulk-fix-dry-run"
                       checked={bulkFixDryRun}
-                      onChange={(e) => setBulkFixDryRun(e.target.checked)}
-                      className="h-4 w-4"
+                      onCheckedChange={setBulkFixDryRun}
                     />
-                    <span>Dry run</span>
-                  </label>
+                    <Label htmlFor="bulk-fix-dry-run" className="text-sm font-normal">Dry run</Label>
+                  </div>
                   <Button
                     onClick={bulkFixPlaceholderNames}
                     disabled={bulkFixing || !placeholderSeason}
@@ -1145,15 +1153,14 @@ export function AdminTeams() {
                     </p>
                   </div>
                   <div className="flex flex-wrap items-center gap-2 w-full sm:w-auto">
-                    <label className="flex items-center gap-2 text-sm">
-                      <input
-                        type="checkbox"
+                    <div className="flex items-center gap-2">
+                      <Checkbox
+                        id="propagate-dry-run"
                         checked={propagateDryRun}
-                        onChange={(e) => setPropagateDryRun(e.target.checked)}
-                        className="h-4 w-4"
+                        onCheckedChange={setPropagateDryRun}
                       />
-                      <span>Dry run</span>
-                    </label>
+                      <Label htmlFor="propagate-dry-run" className="text-sm font-normal">Dry run</Label>
+                    </div>
                     <Button
                       onClick={propagateTeamNames}
                       disabled={propagating}
@@ -1238,6 +1245,7 @@ export function AdminTeams() {
                                     size="sm"
                                     onClick={() => saveTeamName(team.id)}
                                     disabled={savingName}
+                                    aria-label="Save team name"
                                   >
                                     {savingName ? (
                                       <Loader2 className="h-4 w-4 animate-spin" />
@@ -1250,6 +1258,7 @@ export function AdminTeams() {
                                     variant="ghost"
                                     onClick={cancelEditingName}
                                     disabled={savingName}
+                                    aria-label="Cancel editing"
                                   >
                                     <X className="h-4 w-4" />
                                   </Button>
@@ -1424,6 +1433,7 @@ export function AdminTeams() {
                               size="sm"
                               className="text-red-600 hover:text-red-700 hover:bg-red-50"
                               onClick={() => handleDeleteAlias(alias.id)}
+                              aria-label={`Delete alias ${alias.alias}`}
                             >
                               <Trash2 className="h-4 w-4" />
                             </Button>
