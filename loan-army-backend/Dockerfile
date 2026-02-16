@@ -31,7 +31,7 @@ EXPOSE 5001
 # Health check for Azure Container Apps health probes
 # Increased start-period to 30s to allow for preloading on cold start
 HEALTHCHECK --interval=30s --timeout=10s --start-period=30s --retries=3 \
-    CMD curl -f http://localhost:5001/api/auth/status || exit 1
+    CMD curl -f http://localhost:5001/api/health || exit 1
 
 # Run the application with Gunicorn (production-grade WSGI server)
 # Optimized for cold start: fewer workers (2 vs 4), preload app code, longer timeout

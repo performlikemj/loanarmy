@@ -202,7 +202,7 @@ done
 if az containerapp show -g "$RG" -n "$APP_BACKEND" >/dev/null 2>&1; then
   log "Updating backend image + ingress (force new revision)"
   az containerapp revision set-mode -g "$RG" -n "$APP_BACKEND" --mode single >/dev/null 2>&1 || true
-  az containerapp update -g "$RG" -n "$APP_BACKEND" --image "$ACR_SERVER/loanarmy/backend:$TAG" --revision-suffix "r$RANDOM$RANDOM" >/dev/null
+  az containerapp update -g "$RG" -n "$APP_BACKEND" --image "$ACR_SERVER/loanarmy/backend:$TAG" --min-replicas 1 --revision-suffix "r$RANDOM$RANDOM" >/dev/null
   az containerapp ingress enable -g "$RG" -n "$APP_BACKEND" --type external --target-port 5001 >/dev/null 2>&1 || true
 fi
 

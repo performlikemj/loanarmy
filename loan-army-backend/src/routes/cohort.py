@@ -80,6 +80,8 @@ def admin_seed_big6():
         daemon=False,
     )
     p.start()
+    # Detach: prevent parent's atexit handler from blocking on join()
+    multiprocessing.process._children.discard(p)
 
     return jsonify({
         'message': 'Big 6 seeding started in background',
@@ -430,6 +432,8 @@ def admin_full_rebuild():
         daemon=False,
     )
     p.start()
+    # Detach: prevent parent's atexit handler from blocking on join()
+    multiprocessing.process._children.discard(p)
 
     return jsonify({
         'message': 'Full academy rebuild started in background',
