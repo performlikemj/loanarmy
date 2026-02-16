@@ -352,9 +352,12 @@ def _get_latest_season(
     """Get the most recent season from a player's journey entries.
 
     When *parent_api_id* (and optionally *parent_club_name*) are provided,
-    only entries at the parent club (or its youth variants) are considered.
-    This ensures the inactivity check measures time since the player was
-    last at the **parent** club, not at any loan destination.
+    entries at the parent club are preferred.  If no parent-club entries
+    exist (common because API-Football records loan *destinations*, not
+    the parent club itself), we fall back to the latest season at any club.
+    Active loans will have recent entries that pass the inactivity
+    threshold; truly inactive players will have old entries that trigger
+    release.
     """
     from src.models.journey import PlayerJourneyEntry
     query = PlayerJourneyEntry.query.filter_by(journey_id=journey_id)
@@ -366,6 +369,11 @@ def _get_latest_season(
                 return entry.season
             if parent_club_name and is_same_club(entry.club_name or '', parent_club_name):
                 return entry.season
+        # No entries at parent club — fall back to latest season at any club.
+        # Active loans have recent entries (2025) that pass the threshold.
+        # Truly inactive players have old entries that trigger release.
+        if entries:
+            return entries[0].season
         return None
 
     entry = query.order_by(PlayerJourneyEntry.season.desc()).first()
