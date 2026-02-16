@@ -366,7 +366,7 @@ def _get_latest_season(
                 return entry.season
             if parent_club_name and is_same_club(entry.club_name or '', parent_club_name):
                 return entry.season
-        return None
+        return 0  # No entries at parent club → treat as ancient for inactivity check
 
     entry = query.order_by(PlayerJourneyEntry.season.desc()).first()
     return entry.season if entry else None
