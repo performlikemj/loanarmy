@@ -14,7 +14,7 @@ import logging
 import re
 import time
 from datetime import datetime
-from typing import Any, Dict, List, Optional, Tuple, Union
+from typing import Any, Dict, List, Optional, Set, Tuple, Union
 
 # ── regex to strip youth suffixes from club names ──────────────────────
 YOUTH_SUFFIXES = re.compile(
@@ -307,6 +307,7 @@ def _get_active_classification_config() -> Dict[str, Any]:
     defaults: Dict[str, Any] = {
         'use_transfers_for_status': True,
         'inactivity_release_years': 2,
+        'use_squad_check': True,
     }
 
     try:
@@ -320,6 +321,8 @@ def _get_active_classification_config() -> Dict[str, Any]:
             inactivity = raw.get('inactivity_release_years') or raw.get('inactivity_threshold_years')
             if inactivity is not None:
                 defaults['inactivity_release_years'] = int(inactivity)
+            if 'use_squad_check' in raw:
+                defaults['use_squad_check'] = bool(raw['use_squad_check'])
     except Exception:
         pass  # Fall through to safe defaults
 
@@ -393,6 +396,7 @@ def classify_tracked_player(
     config: Optional[Dict[str, Any]] = None,
     with_reasoning: bool = False,
     latest_season: Optional[int] = None,
+    squad_members_by_club: Optional[Dict[int, Set[int]]] = None,
 ) -> Union[
     Tuple[str, Optional[int], Optional[str]],
     Tuple[str, Optional[int], Optional[str], List[Dict]],
@@ -403,6 +407,10 @@ def classify_tracked_player(
     1. Base status derivation (academy / first_team / on_loan)
     2. Transfer-based upgrade (on_loan → sold / released)
        — controlled by ``config['use_transfers_for_status']``
+    2.5. Squad cross-reference (on_loan players only)
+       — if player absent from loan club squad, check parent squad;
+         returned to parent → academy/first_team, absent from both → released
+       — controlled by ``config['use_squad_check']``
     3. Inactivity-based release (no data for N seasons)
        — controlled by ``config['inactivity_release_years']``
 
@@ -468,6 +476,47 @@ def classify_tracked_player(
                         'detail': f'Upgraded from {status} to {upgraded}',
                     })
                 status = upgraded
+                loan_id = None
+                loan_name = None
+
+    # ── Step 2.5: squad cross-reference ────────────────────────────────
+    if (status == 'on_loan' and config.get('use_squad_check')
+            and squad_members_by_club is not None and player_api_id):
+        loan_squad = squad_members_by_club.get(loan_id)
+        parent_squad = squad_members_by_club.get(parent_api_id)
+        in_loan_squad = loan_squad is not None and player_api_id in loan_squad
+        in_parent_squad = parent_squad is not None and player_api_id in parent_squad
+        if not in_loan_squad:
+            if in_parent_squad:
+                old_status = status
+                status = _base_status(current_level)
+                if with_reasoning:
+                    reasoning.append({
+                        'rule': 'squad_cross_reference',
+                        'result': 'match',
+                        'check': (
+                            f'player {player_api_id} not in loan club '
+                            f'{loan_id} squad, found in parent {parent_api_id}'
+                        ),
+                        'detail': (
+                            f'Returned to parent club — '
+                            f'{old_status} → {status}'
+                        ),
+                    })
+                loan_id = None
+                loan_name = None
+            else:
+                if with_reasoning:
+                    reasoning.append({
+                        'rule': 'squad_cross_reference',
+                        'result': 'match',
+                        'check': (
+                            f'player {player_api_id} not in loan club '
+                            f'{loan_id} or parent {parent_api_id} squad'
+                        ),
+                        'detail': 'Absent from both squads — released',
+                    })
+                status = 'released'
                 loan_id = None
                 loan_name = None
 

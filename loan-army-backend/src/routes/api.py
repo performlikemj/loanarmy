@@ -13815,6 +13815,27 @@ def admin_refresh_tracked_player_statuses():
             for pid, raw in raw_transfers_map.items()
         }
 
+        # Batch pre-fetch squads for loan clubs + parent clubs
+        squad_members_by_club = {}
+        loan_club_ids = {tp.loan_club_api_id for tp in players if tp.loan_club_api_id}
+        parent_club_ids = set()
+        _team_cache = {}
+        for tp in players:
+            if tp.team_id not in _team_cache:
+                _team_cache[tp.team_id] = Team.query.get(tp.team_id)
+            pt = _team_cache[tp.team_id]
+            if pt:
+                parent_club_ids.add(pt.team_id)
+        for club_id in (loan_club_ids | parent_club_ids):
+            try:
+                squad = api_client.get_team_players(club_id)
+                squad_members_by_club[club_id] = {
+                    int(e['player']['id']) for e in squad
+                    if e and e.get('player', {}).get('id')
+                }
+            except Exception as exc:
+                logger.warning('Squad fetch failed for club %d: %s', club_id, exc)
+
         for tp in players:
             journey = None
 
@@ -13859,6 +13880,7 @@ def admin_refresh_tracked_player_statuses():
                 player_api_id=tp.player_api_id,
                 api_client=api_client,
                 latest_season=_get_latest_season(journey.id, parent_api_id=parent_team.team_id, parent_club_name=parent_team.name),
+                squad_members_by_club=squad_members_by_club,
             )
 
             changed = False
