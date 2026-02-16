@@ -343,12 +343,32 @@ def flatten_transfers(raw_transfer_response: list) -> list:
     return flat
 
 
-def _get_latest_season(journey_id: int) -> Optional[int]:
-    """Get the most recent season from a player's journey entries."""
+def _get_latest_season(
+    journey_id: int,
+    *,
+    parent_api_id: int | None = None,
+    parent_club_name: str | None = None,
+) -> Optional[int]:
+    """Get the most recent season from a player's journey entries.
+
+    When *parent_api_id* (and optionally *parent_club_name*) are provided,
+    only entries at the parent club (or its youth variants) are considered.
+    This ensures the inactivity check measures time since the player was
+    last at the **parent** club, not at any loan destination.
+    """
     from src.models.journey import PlayerJourneyEntry
-    entry = PlayerJourneyEntry.query.filter_by(
-        journey_id=journey_id
-    ).order_by(PlayerJourneyEntry.season.desc()).first()
+    query = PlayerJourneyEntry.query.filter_by(journey_id=journey_id)
+
+    if parent_api_id is not None:
+        entries = query.order_by(PlayerJourneyEntry.season.desc()).all()
+        for entry in entries:
+            if entry.club_api_id == parent_api_id:
+                return entry.season
+            if parent_club_name and is_same_club(entry.club_name or '', parent_club_name):
+                return entry.season
+        return None
+
+    entry = query.order_by(PlayerJourneyEntry.season.desc()).first()
     return entry.season if entry else None
 
 
@@ -423,7 +443,8 @@ def classify_tracked_player(
             try:
                 raw = api_client.get_player_transfers(player_api_id)
                 effective_transfers = flatten_transfers(raw)
-            except Exception:
+            except Exception as exc:
+                logger.warning('Transfer fetch failed for player %s: %s', player_api_id, exc)
                 effective_transfers = []
 
         if effective_transfers:

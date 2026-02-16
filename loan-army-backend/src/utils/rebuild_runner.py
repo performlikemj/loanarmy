@@ -356,7 +356,7 @@ def _run_full_rebuild(job_id, config):
                         parent_club_name=team.name,
                         player_api_id=pid,
                         api_client=api_client,
-                        latest_season=_get_latest_season(journey.id) if journey else None,
+                        latest_season=_get_latest_season(journey.id, parent_api_id=parent_api_id, parent_club_name=team.name) if journey else None,
                     )
 
                     current_level = journey.current_level if journey and journey.current_level else None
@@ -431,7 +431,7 @@ def _run_full_rebuild(job_id, config):
                 parent_club_name=tp.team.name,
                 player_api_id=tp.player_api_id,
                 api_client=api_client,
-                latest_season=_get_latest_season(journey.id) if journey else None,
+                latest_season=_get_latest_season(journey.id, parent_api_id=tp.team.team_id, parent_club_name=tp.team.name) if journey else None,
             )
             if tp.status != status or tp.loan_club_api_id != loan_api_id:
                 tp.status = status

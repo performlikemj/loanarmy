@@ -808,7 +808,7 @@ class JourneySyncService:
                 parent_api_id=academy_api_id,
                 parent_club_name=team.name,
                 transfers=transfers or [],
-                latest_season=_get_latest_season(journey.id),
+                latest_season=_get_latest_season(journey.id, parent_api_id=academy_api_id, parent_club_name=team.name),
             )
 
             if not existing:

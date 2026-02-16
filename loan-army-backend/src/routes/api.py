@@ -13517,7 +13517,7 @@ def admin_test_classify():
                 journey.current_level, pid, parent_name,
                 transfers=transfers,
                 with_reasoning=True,
-                latest_season=_get_latest_season(journey.id),
+                latest_season=_get_latest_season(journey.id, parent_api_id=pid, parent_club_name=parent_name),
             )
 
             classifications.append({
@@ -13858,7 +13858,7 @@ def admin_refresh_tracked_player_statuses():
                 transfers=transfers_map.get(tp.player_api_id),
                 player_api_id=tp.player_api_id,
                 api_client=api_client,
-                latest_season=_get_latest_season(journey.id),
+                latest_season=_get_latest_season(journey.id, parent_api_id=parent_team.team_id, parent_club_name=parent_team.name),
             )
 
             changed = False
@@ -14066,7 +14066,7 @@ def admin_seed_tracked_players():
                         parent_club_name=team.name,
                         player_api_id=pid,
                         api_client=api_client,
-                        latest_season=_get_latest_season(journey.id) if journey else None,
+                        latest_season=_get_latest_season(journey.id, parent_api_id=parent_api_id, parent_club_name=team.name) if journey else None,
                     )
                     if existing.status != new_status or existing.loan_club_api_id != new_loan_id:
                         existing.status = new_status
@@ -14102,7 +14102,7 @@ def admin_seed_tracked_players():
                     parent_club_name=team.name,
                     player_api_id=pid,
                     api_client=api_client,
-                    latest_season=_get_latest_season(journey.id) if journey else None,
+                    latest_season=_get_latest_season(journey.id, parent_api_id=parent_api_id, parent_club_name=team.name) if journey else None,
                 )
 
                 # Derive level from journey

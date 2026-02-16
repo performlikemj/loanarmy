@@ -816,7 +816,7 @@ def get_academy_network(team_identifier):
                     team_api_id,
                     parent_name,
                     transfers=[],  # read-only view, skip API calls
-                    latest_season=_get_latest_season(journey.id),
+                    latest_season=_get_latest_season(journey.id, parent_api_id=team_api_id, parent_club_name=parent_name),
                 )
 
             status_counts[status] = status_counts.get(status, 0) + 1
