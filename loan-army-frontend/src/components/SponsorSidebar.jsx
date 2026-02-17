@@ -115,7 +115,7 @@ export function SponsorStrip({ className }) {
     }
 
     return (
-        <div className={cn('w-full py-4', className)}>
+        <div className={cn('w-full py-2', className)}>
             <div className="rounded-xl border bg-card shadow-sm overflow-hidden">
                 <div className="px-4 py-2 border-b bg-muted/30">
                     <h3 className="text-xs font-semibold uppercase tracking-wider text-muted-foreground text-center">

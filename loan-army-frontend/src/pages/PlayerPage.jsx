@@ -28,7 +28,7 @@ import { Loader2, ArrowLeft, User, TrendingUp, Calendar, Target, PenTool, Chevro
 import { APIService } from '@/lib/api'
 import { format } from 'date-fns'
 import { Avatar, AvatarFallback, AvatarImage } from '@/components/ui/avatar'
-import { SponsorSidebar, SponsorStrip } from '@/components/SponsorSidebar'
+import { SponsorStrip } from '@/components/SponsorSidebar'
 import { MatchDetailDrawer } from '@/components/MatchDetailDrawer'
 import PlayerJourneyView from '@/components/PlayerJourneyView'
 import { JourneyProvider, useJourney } from '@/contexts/JourneyContext'
@@ -348,7 +348,7 @@ export function PlayerPage() {
         <div className="min-h-screen bg-gradient-to-b from-slate-50 to-slate-100">
             {/* Header */}
             <div className="bg-white border-b sticky top-0 z-10">
-                <div className="max-w-6xl mx-auto px-4 py-4">
+                <div className="max-w-4xl mx-auto px-4 sm:px-6 py-3 sm:py-4">
                     <div className="flex flex-col sm:flex-row sm:items-center gap-3 sm:gap-4">
                         <Button variant="ghost" size="sm" onClick={handleBack} className="self-start">
                             <ArrowLeft className="mr-2 h-4 w-4" />
@@ -369,7 +369,7 @@ export function PlayerPage() {
                                 </div>
                             )}
                             <div className="min-w-0">
-                                <h1 className="text-xl sm:text-2xl font-bold text-gray-900 truncate">{playerName}</h1>
+                                <h1 className="text-xl sm:text-2xl font-bold text-gray-900 text-balance">{playerName}</h1>
                                 <div className="flex flex-wrap items-center gap-2 mt-1">
                                     <Badge variant="secondary">{position}</Badge>
                                     {profile?.age && (
@@ -388,10 +388,10 @@ export function PlayerPage() {
                                     <div className="mt-2">
                                         <button
                                             onClick={handleParentClubClick}
-                                            className="flex items-center gap-1.5 text-sm text-gray-600 hover:text-blue-600 transition-colors cursor-pointer group"
+                                            className="flex items-center gap-1.5 text-sm text-gray-600 hover:text-blue-600 transition-colors cursor-pointer group focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 rounded-md"
                                         >
                                             {profile.parent_team_logo && (
-                                                <img src={profile.parent_team_logo} alt="" className="w-5 h-5 rounded-full object-cover" />
+                                                <img src={profile.parent_team_logo} alt="" width={20} height={20} className="w-5 h-5 rounded-full object-cover" />
                                             )}
                                             <span className="font-medium group-hover:underline">{profile.parent_team_name} Academy</span>
                                             <Users className="w-3.5 h-3.5 opacity-0 group-hover:opacity-100 transition-opacity text-blue-500" />
@@ -404,10 +404,8 @@ export function PlayerPage() {
                 </div>
             </div>
 
-            <div className="max-w-[1400px] mx-auto px-4 py-6">
-                <div className="flex flex-col lg:flex-row gap-6">
-                    {/* Main Content */}
-                    <div className="flex-1 min-w-0 max-w-6xl space-y-6">
+            <div className="max-w-4xl mx-auto px-4 sm:px-6 py-6 pb-24 sm:pb-6">
+                    <div className="space-y-8">
                         {stats.length === 0 && seasonStats?.stats_coverage !== 'limited' ? (
                             <Card>
                                 <CardContent className="py-12 text-center">
@@ -470,9 +468,11 @@ export function PlayerPage() {
                                         <CardContent>
                                             <div className="flex items-center gap-3">
                                                 {seasonStats.clubs[0].team_logo && (
-                                                    <img 
-                                                        src={seasonStats.clubs[0].team_logo} 
+                                                    <img
+                                                        src={seasonStats.clubs[0].team_logo}
                                                         alt={seasonStats.clubs[0].team_name}
+                                                        width={40}
+                                                        height={40}
                                                         className="h-10 w-10 object-contain"
                                                     />
                                                 )}
@@ -568,7 +568,7 @@ export function PlayerPage() {
                                             >
                                                 <div className="flex items-center gap-2 mb-3">
                                                     {club.team_logo && (
-                                                        <img src={club.team_logo} alt="" className="w-6 h-6 rounded-full" />
+                                                        <img src={club.team_logo} alt="" width={24} height={24} className="w-6 h-6 rounded-full" />
                                                     )}
                                                     <span className="font-semibold">{club.team_name}</span>
                                                     <Badge 
@@ -625,7 +625,7 @@ export function PlayerPage() {
                             <Tabs defaultValue="charts">
                                 <CardHeader className="pb-0">
                                     <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-2">
-                                        <CardTitle className="flex items-center gap-2">
+                                        <CardTitle className="flex items-center gap-2 text-pretty">
                                             <TrendingUp className="h-5 w-5" />
                                             Performance Analysis
                                         </CardTitle>
@@ -745,29 +745,39 @@ export function PlayerPage() {
                                             <table className="w-full text-sm text-left">
                                                 <thead className="bg-gray-50 sticky top-0 z-10">
                                                     <tr>
-                                                        <th className="p-2 sm:p-3 font-medium text-gray-500">Date</th>
-                                                        <th className="p-2 sm:p-3 font-medium text-gray-500 hidden sm:table-cell">Club</th>
-                                                        <th className="p-2 sm:p-3 font-medium text-gray-500">Match</th>
-                                                        <th className="p-2 sm:p-3 font-medium text-gray-500">Min</th>
-                                                        <th className="p-2 sm:p-3 font-medium text-gray-500">Rating</th>
-                                                        <th className="p-2 sm:p-3 font-medium text-gray-500">{position === 'Goalkeeper' ? 'Performance' : 'G/A'}</th>
-                                                        <th className="p-2 sm:p-3 font-medium text-gray-500 hidden sm:table-cell">Key Stats</th>
+                                                        <th className="px-2 py-2.5 sm:p-3 font-medium text-gray-500">Date</th>
+                                                        <th className="px-2 py-2.5 sm:p-3 font-medium text-gray-500 hidden sm:table-cell">Club</th>
+                                                        <th className="px-2 py-2.5 sm:p-3 font-medium text-gray-500">Match</th>
+                                                        <th className="px-2 py-2.5 sm:p-3 font-medium text-gray-500">Min</th>
+                                                        <th className="px-2 py-2.5 sm:p-3 font-medium text-gray-500">Rating</th>
+                                                        <th className="px-2 py-2.5 sm:p-3 font-medium text-gray-500">{position === 'Goalkeeper' ? 'Performance' : 'G/A'}</th>
+                                                        <th className="px-2 py-2.5 sm:p-3 font-medium text-gray-500 hidden sm:table-cell">Key Stats</th>
                                                     </tr>
                                                 </thead>
                                                 <tbody className="divide-y">
                                                     {stats.slice().reverse().map((s, i) => (
                                                         <tr
                                                             key={i}
-                                                            className="hover:bg-blue-50 cursor-pointer transition-colors group"
+                                                            className="hover:bg-blue-50 cursor-pointer transition-colors group focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500 focus-visible:ring-inset"
+                                                            tabIndex={0}
+                                                            role="button"
+                                                            aria-label={`View match details: ${s.opponent} on ${s.fixture_date ? format(new Date(s.fixture_date), 'MMM d') : 'unknown date'}`}
                                                             onClick={() => {
                                                                 setSelectedMatch(s)
                                                                 setMatchDetailOpen(true)
                                                             }}
+                                                            onKeyDown={(e) => {
+                                                                if (e.key === 'Enter' || e.key === ' ') {
+                                                                    e.preventDefault()
+                                                                    setSelectedMatch(s)
+                                                                    setMatchDetailOpen(true)
+                                                                }
+                                                            }}
                                                         >
-                                                            <td className="p-2 sm:p-3 text-xs sm:text-sm">
+                                                            <td className="px-2 py-2.5 sm:p-3 text-xs sm:text-sm">
                                                                 {s.fixture_date ? format(new Date(s.fixture_date), 'MMM d') : '-'}
                                                             </td>
-                                                            <td className="p-2 sm:p-3 hidden sm:table-cell">
+                                                            <td className="px-2 py-2.5 sm:p-3 hidden sm:table-cell">
                                                                 <div className="flex items-center gap-1.5">
                                                                     {s.loan_team_logo && (
                                                                         <img src={s.loan_team_logo} alt="" width={16} height={16} className="w-4 h-4 rounded-full" />
@@ -782,7 +792,7 @@ export function PlayerPage() {
                                                                     </Badge>
                                                                 )}
                                                             </td>
-                                                            <td className="p-2 sm:p-3">
+                                                            <td className="px-2 py-2.5 sm:p-3">
                                                                 <div className="flex items-center gap-2 min-w-0">
                                                                     <div className="min-w-0">
                                                                         <div className="font-medium group-hover:text-blue-700 transition-colors truncate">{s.opponent}</div>
@@ -791,8 +801,8 @@ export function PlayerPage() {
                                                                     <ExternalLink className="h-3.5 w-3.5 text-gray-300 group-hover:text-blue-500 transition-colors opacity-0 group-hover:opacity-100 flex-shrink-0" />
                                                                 </div>
                                                             </td>
-                                                            <td className="p-2 sm:p-3 tabular-nums">{s.minutes}'</td>
-                                                            <td className="p-2 sm:p-3">
+                                                            <td className="px-2 py-2.5 sm:p-3 tabular-nums">{s.minutes}'</td>
+                                                            <td className="px-2 py-2.5 sm:p-3">
                                                                 <span className={`px-1.5 sm:px-2 py-1 rounded text-xs font-medium tabular-nums ${parseFloat(s.rating) >= 7.5 ? 'bg-green-100 text-green-700' :
                                                                     parseFloat(s.rating) >= 6.0 ? 'bg-gray-100 text-gray-700' :
                                                                         'bg-red-50 text-red-700'
@@ -800,7 +810,7 @@ export function PlayerPage() {
                                                                     {s.rating || '-'}
                                                                 </span>
                                                             </td>
-                                                            <td className="p-2 sm:p-3">
+                                                            <td className="px-2 py-2.5 sm:p-3">
                                                                 {position === 'Goalkeeper' ? (
                                                                     <div className="flex flex-col gap-0.5">
                                                                         {(s.saves > 0 || s.saves === 0) && (
@@ -822,7 +832,7 @@ export function PlayerPage() {
                                                                     </>
                                                                 )}
                                                             </td>
-                                                            <td className="p-2 sm:p-3 text-xs text-gray-500 hidden sm:table-cell">
+                                                            <td className="px-2 py-2.5 sm:p-3 text-xs text-gray-500 hidden sm:table-cell">
                                                                 {position === 'Goalkeeper' ? (
                                                                     <>
                                                                         {s.passes?.total > 0 && <div>{s.passes.total} Passes</div>}
@@ -856,7 +866,7 @@ export function PlayerPage() {
                         {commentaries.total_count > 0 && (
                             <Card>
                                 <CardHeader>
-                                    <CardTitle className="flex items-center gap-2">
+                                    <CardTitle className="flex items-center gap-2 text-pretty">
                                         <PenTool className="h-5 w-5" />
                                         Writer Coverage
                                     </CardTitle>
@@ -960,21 +970,16 @@ export function PlayerPage() {
                             </Card>
                         )}
 
-                        {/* Player Discussion */}
-                        <CommentSection playerId={parseInt(playerId)} title="Discussion" />
+                        {/* Inline Sponsor Strip */}
+                        <SponsorStrip />
 
-                        {/* Player Links */}
-                        <PlayerLinksSection playerId={parseInt(playerId)} />
+                        {/* Community */}
+                        <section aria-label="Community" className="space-y-6">
+                            <h2 className="text-lg font-semibold text-gray-900 text-pretty">Community</h2>
+                            <CommentSection playerId={parseInt(playerId)} title="Discussion" />
+                            <PlayerLinksSection playerId={parseInt(playerId)} />
+                        </section>
                     </div>
-
-                    {/* Sponsor Sidebar - visible on larger screens */}
-                    <SponsorSidebar className="hidden lg:block" />
-                </div>
-
-                {/* Mobile Sponsor Strip - visible on smaller screens */}
-                <div className="lg:hidden pb-6">
-                    <SponsorStrip />
-                </div>
             </div>
 
             {/* Academy Drawer — browse other academy players from the same parent club */}
