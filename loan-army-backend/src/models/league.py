@@ -1783,3 +1783,148 @@ class ContributorProfile(db.Model):
             'created_at': self.created_at.isoformat() if self.created_at else None,
             'updated_at': self.updated_at.isoformat() if self.updated_at else None,
         }
+
+
+class PlayerComment(db.Model):
+    """User comments on player profiles."""
+    __tablename__ = 'player_comments'
+
+    id = db.Column(db.Integer, primary_key=True)
+    player_api_id = db.Column(db.Integer, nullable=False, index=True)
+    user_id = db.Column(db.Integer, db.ForeignKey('user_accounts.id'), nullable=False)
+
+    content = db.Column(db.Text, nullable=False)  # Max ~1000 chars enforced at API
+
+    # Voting
+    upvotes = db.Column(db.Integer, default=0)
+    downvotes = db.Column(db.Integer, default=0)
+
+    # Moderation
+    is_hidden = db.Column(db.Boolean, default=False)  # Auto-hide if downvotes exceed threshold
+    reported = db.Column(db.Boolean, default=False)
+
+    created_at = db.Column(db.DateTime, default=lambda: datetime.now(timezone.utc))
+    updated_at = db.Column(db.DateTime, default=lambda: datetime.now(timezone.utc),
+                          onupdate=lambda: datetime.now(timezone.utc))
+
+    user = db.relationship('UserAccount', backref=db.backref('player_comments', lazy='dynamic'))
+    votes = db.relationship('PlayerCommentVote', backref='comment', lazy='dynamic', cascade='all, delete-orphan')
+
+    __table_args__ = (
+        db.Index('ix_player_comments_player', 'player_api_id'),
+        db.Index('ix_player_comments_user', 'user_id'),
+    )
+
+    def to_dict(self):
+        return {
+            'id': self.id,
+            'player_api_id': self.player_api_id,
+            'user_id': self.user_id,
+            'username': self.user.display_name if self.user else None,
+            'content': self.content,
+            'upvotes': self.upvotes or 0,
+            'downvotes': self.downvotes or 0,
+            'is_hidden': self.is_hidden,
+            'reported': self.reported,
+            'created_at': self.created_at.isoformat() if self.created_at else None,
+            'updated_at': self.updated_at.isoformat() if self.updated_at else None,
+        }
+
+
+class PlayerCommentVote(db.Model):
+    """Tracks up/downvotes on player comments."""
+    __tablename__ = 'player_comment_votes'
+
+    id = db.Column(db.Integer, primary_key=True)
+    comment_id = db.Column(db.Integer, db.ForeignKey('player_comments.id', ondelete='CASCADE'), nullable=False)
+    user_id = db.Column(db.Integer, db.ForeignKey('user_accounts.id'), nullable=True)
+    session_id = db.Column(db.String(100), nullable=True)  # Anonymous tracking
+    vote = db.Column(db.SmallInteger, nullable=False)  # +1 or -1
+
+    created_at = db.Column(db.DateTime, default=lambda: datetime.now(timezone.utc))
+
+    __table_args__ = (
+        db.UniqueConstraint('comment_id', 'user_id', name='uq_comment_vote_user'),
+        db.Index('ix_comment_votes_comment', 'comment_id'),
+    )
+
+    def to_dict(self):
+        return {
+            'id': self.id,
+            'comment_id': self.comment_id,
+            'user_id': self.user_id,
+            'vote': self.vote,
+            'created_at': self.created_at.isoformat() if self.created_at else None,
+        }
+
+
+class PlayerVideo(db.Model):
+    """YouTube video highlights submitted for players."""
+    __tablename__ = 'player_videos'
+
+    id = db.Column(db.Integer, primary_key=True)
+    player_api_id = db.Column(db.Integer, nullable=False, index=True)
+    submitted_by = db.Column(db.Integer, db.ForeignKey('user_accounts.id'), nullable=False)
+
+    youtube_url = db.Column(db.String(500), nullable=False)
+    youtube_id = db.Column(db.String(20), nullable=False)  # Extracted video ID
+    title = db.Column(db.String(300), nullable=True)  # User-provided or scraped
+
+    # Voting
+    upvotes = db.Column(db.Integer, default=0)
+    downvotes = db.Column(db.Integer, default=0)
+
+    # Moderation
+    status = db.Column(db.String(20), default='approved')  # 'approved', 'hidden', 'removed'
+
+    created_at = db.Column(db.DateTime, default=lambda: datetime.now(timezone.utc))
+
+    submitter = db.relationship('UserAccount', backref=db.backref('submitted_videos', lazy='dynamic'))
+    votes = db.relationship('PlayerVideoVote', backref='video', lazy='dynamic', cascade='all, delete-orphan')
+
+    __table_args__ = (
+        db.Index('ix_player_videos_player', 'player_api_id'),
+        db.UniqueConstraint('player_api_id', 'youtube_id', name='uq_player_video'),
+    )
+
+    def to_dict(self):
+        return {
+            'id': self.id,
+            'player_api_id': self.player_api_id,
+            'submitted_by': self.submitted_by,
+            'submitter_name': self.submitter.display_name if self.submitter else None,
+            'youtube_url': self.youtube_url,
+            'youtube_id': self.youtube_id,
+            'title': self.title,
+            'upvotes': self.upvotes or 0,
+            'downvotes': self.downvotes or 0,
+            'status': self.status,
+            'created_at': self.created_at.isoformat() if self.created_at else None,
+        }
+
+
+class PlayerVideoVote(db.Model):
+    """Tracks up/downvotes on player videos."""
+    __tablename__ = 'player_video_votes'
+
+    id = db.Column(db.Integer, primary_key=True)
+    video_id = db.Column(db.Integer, db.ForeignKey('player_videos.id', ondelete='CASCADE'), nullable=False)
+    user_id = db.Column(db.Integer, db.ForeignKey('user_accounts.id'), nullable=True)
+    session_id = db.Column(db.String(100), nullable=True)  # Anonymous tracking
+    vote = db.Column(db.SmallInteger, nullable=False)  # +1 or -1
+
+    created_at = db.Column(db.DateTime, default=lambda: datetime.now(timezone.utc))
+
+    __table_args__ = (
+        db.UniqueConstraint('video_id', 'user_id', name='uq_video_vote_user'),
+        db.Index('ix_video_votes_video', 'video_id'),
+    )
+
+    def to_dict(self):
+        return {
+            'id': self.id,
+            'video_id': self.video_id,
+            'user_id': self.user_id,
+            'vote': self.vote,
+            'created_at': self.created_at.isoformat() if self.created_at else None,
+        }
