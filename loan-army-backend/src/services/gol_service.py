@@ -27,12 +27,13 @@ and career journeys across European football using data analysis.
 
 ## Tools
 
-You have two tools:
+You have three tools:
 1. **run_analysis** — Execute pandas code against GOL DataFrames. Your code MUST \
 assign the final result to a variable called `result`. Choose the best `display` \
 format for the data. `pd` (pandas) and `np` (numpy) are pre-loaded. NEVER use \
 `import` statements — they are blocked by the sandbox and will fail.
 2. **search_web** — Search the web for recent football news.
+3. **lookup_player** — Search API-Football and add missing players on demand.
 
 ## Available DataFrames
 
@@ -245,6 +246,16 @@ Example: `result = academy_comparison()` with display "bar_chart"
 Example: `result = academy_first_team_apps()` with display "bar_chart"
 Example: `result = top_loan_performers(limit=10)` with display "table"
 Example: `result = player_career('Saka')` with display "table"
+
+## Player Lookup
+If a user asks about a player NOT in your DataFrames, use `lookup_player` to fetch them from API-Football.
+- First try `run_analysis` to check if the player exists in tracked, journeys, or journey_entries
+- If not found, call `lookup_player` with the player's name
+- Tell the user: "I don't have [name] in my database yet. Let me look them up..."
+- After lookup succeeds, run your analysis again — the data will now be available
+- If lookup fails or is rate-limited, tell the user you don't have data on that player right now
+- Do NOT call lookup_player for players already in your data
+- Do NOT mention web search — there is no web fallback
 """
 
 TOOL_SCHEMAS = [
@@ -296,6 +307,25 @@ TOOL_SCHEMAS = [
             },
         },
     },
+    {
+        "type": "function",
+        "function": {
+            "name": "lookup_player",
+            "description": (
+                "Search API-Football for a player not in the database, fetch their "
+                "stats and career data, and add them. Use ONLY when run_analysis returns "
+                "no results for a specific player the user asked about."
+            ),
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "name": {"type": "string", "description": "Player name to search for"},
+                    "team": {"type": "string", "description": "Optional team name to narrow search"},
+                },
+                "required": ["name"],
+            },
+        },
+    },
 ]
 
 
@@ -304,12 +334,13 @@ class GolService:
 
     _df_cache = None  # Class-level singleton
 
-    def __init__(self):
+    def __init__(self, session_id: str | None = None):
         api_key = os.getenv('OPENAI_API_KEY')
         if not api_key:
             raise RuntimeError("OPENAI_API_KEY not configured")
         self.client = OpenAI(api_key=api_key)
         self.model = 'gpt-4.1-mini'
+        self._session_id = session_id
         if GolService._df_cache is None:
             GolService._df_cache = DataFrameCache()
         self.df_cache = GolService._df_cache
@@ -332,6 +363,9 @@ class GolService:
             # Add history (cap at 20 messages = 10 turns)
             if history:
                 messages.extend(history[-20:])
+
+            # Set per-chat session context for lookup_rate limiting
+            self._session_id = session_id
 
             messages.append({"role": "user", "content": message})
 
@@ -467,11 +501,23 @@ class GolService:
                 return execute_analysis(code, frames, display, description=description)
             elif name == "search_web":
                 return self._tool_search_web(args.get("query", ""))
+            elif name == "lookup_player":
+                return self._tool_lookup_player(args.get("name", ""), args.get("team"))
             else:
                 return {"error": f"Unknown tool: {name}"}
         except Exception as e:
             logger.error(f"Tool {name} failed: {e}")
             return {"result_type": "error", "error": str(e)}
+
+    def _tool_lookup_player(self, name: str, team: str = None) -> dict:
+        """Lookup a player via API-Football and persist full journey + tracked entry."""
+        from flask import current_app
+        from src.services.gol_player_lookup import GolPlayerLookup
+
+        lookup = GolPlayerLookup(current_app._get_current_object())
+        return lookup.lookup(name, team=team, session_id=self._session_id)
+
+
 
     def _tool_search_web(self, query: str) -> dict:
         """Search the web using Brave Search API."""

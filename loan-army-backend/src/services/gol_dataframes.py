@@ -17,12 +17,14 @@ TTL_SECONDS = 300  # 5 minutes
 
 
 class DataFrameCache:
+    _instance = None
     """Thread-safe in-process cache for GOL DataFrames."""
 
     def __init__(self):
         self._cache: dict[str, pd.DataFrame] = {}
         self._lock = threading.Lock()
         self._loaded_at: float = 0
+        DataFrameCache._instance = self
 
     def get_frames(self, app) -> dict[str, pd.DataFrame]:
         """Return cached DataFrames, refreshing if TTL expired. Returns copies."""
@@ -156,6 +158,13 @@ class DataFrameCache:
             """)
 
             return frames
+
+    @classmethod
+    def invalidate(cls):
+        """Clear cached DataFrames so next access reloads from DB."""
+        if cls._instance:
+            cls._instance._cache = {}
+            cls._instance._loaded_at = 0
 
     @staticmethod
     def _load_query(engine, sql: str) -> pd.DataFrame:
