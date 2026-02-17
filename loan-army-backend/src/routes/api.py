@@ -1950,6 +1950,40 @@ def _sync_player_club_fixtures(player_id: int, loan_team_api_id: int, season: in
     
     return synced
 
+@api_bp.route('/players/search', methods=['GET'])
+def public_player_search():
+    """Public search for tracked players by name."""
+    q = (request.args.get('q') or '').strip()
+    if len(q) < 2:
+        return jsonify([])
+    try:
+        rows = TrackedPlayer.query\
+            .filter(TrackedPlayer.player_name.ilike(f'%{q}%'), TrackedPlayer.is_active == True)\
+            .order_by(TrackedPlayer.player_name)\
+            .limit(20)\
+            .all()
+        # Deduplicate by player_api_id (a player may be tracked by multiple academies)
+        seen = set()
+        results = []
+        for row in rows:
+            if row.player_api_id in seen:
+                continue
+            seen.add(row.player_api_id)
+            results.append({
+                'player_api_id': row.player_api_id,
+                'player_name': row.player_name,
+                'photo_url': row.photo_url,
+                'position': row.position,
+                'team_name': row.team.name if row.team else None,
+                'loan_club_name': row.loan_club_name,
+            })
+            if len(results) >= 8:
+                break
+        return jsonify(results)
+    except Exception as e:
+        return jsonify(_safe_error_payload(e, 'Player search failed')), 500
+
+
 @api_bp.route('/players/<int:player_id>/profile', methods=['GET'])
 def get_public_player_profile(player_id: int):
     """
@@ -2706,7 +2740,31 @@ def list_player_links(player_id: int):
             .filter_by(player_id=player_id, status='approved')\
             .order_by(PlayerLink.upvotes.desc(), PlayerLink.created_at.desc())\
             .all()
-        return jsonify([r.to_dict() for r in rows])
+        results = [r.to_dict() for r in rows]
+
+        # Merge YouTube links from newsletters for this player
+        yt_rows = NewsletterPlayerYoutubeLink.query\
+            .filter_by(player_id=player_id)\
+            .order_by(NewsletterPlayerYoutubeLink.created_at.desc())\
+            .all()
+        seen_urls = {r['url'] for r in results}
+        for yt in yt_rows:
+            if yt.youtube_link in seen_urls:
+                continue
+            seen_urls.add(yt.youtube_link)
+            results.append({
+                'id': f'yt-{yt.id}',
+                'player_id': yt.player_id,
+                'url': yt.youtube_link,
+                'title': yt.player_name + ' Highlights' if yt.player_name else 'Match Highlights',
+                'link_type': 'highlight',
+                'status': 'approved',
+                'upvotes': 0,
+                'source': 'newsletter',
+                'created_at': yt.created_at.isoformat() if yt.created_at else None,
+            })
+
+        return jsonify(results)
     except Exception as e:
         return jsonify(_safe_error_payload(e, 'Failed to fetch player links')), 500
 

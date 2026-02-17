@@ -12,6 +12,8 @@ import {
 } from '@/components/ui/select'
 import { Link2, Newspaper, Video, Share2, BarChart3, Globe, Plus, Loader2, Check, ExternalLink } from 'lucide-react'
 import { APIService } from '@/lib/api'
+import { isYouTubeUrl } from '@/lib/youtube'
+import { VideoEmbed } from '@/components/VideoEmbed'
 
 const TYPE_META = {
   article:   { label: 'Article',   icon: Newspaper },
@@ -81,13 +83,20 @@ export function PlayerLinksSection({ playerId }) {
     }
   }
 
-  // Group links by type
+  // Group links by type, with highlights first
   const grouped = links.reduce((acc, link) => {
     const t = link.link_type || 'other'
     if (!acc[t]) acc[t] = []
     acc[t].push(link)
     return acc
   }, {})
+
+  // Sort so highlights appear first
+  const sortedTypes = Object.keys(grouped).sort((a, b) => {
+    if (a === 'highlight') return -1
+    if (b === 'highlight') return 1
+    return 0
+  })
 
   return (
     <Card>
@@ -169,35 +178,50 @@ export function PlayerLinksSection({ playerId }) {
           </p>
         ) : (
           <div className="space-y-3">
-            {Object.entries(grouped).map(([type, items]) => (
-              <div key={type}>
-                <div className="flex items-center gap-1.5 mb-2">
-                  <LinkTypeIcon type={type} className="h-3.5 w-3.5 text-gray-500" />
-                  <span className="text-xs font-medium text-gray-500 uppercase tracking-wide">
-                    {TYPE_META[type]?.label || type}
-                  </span>
+            {sortedTypes.map((type) => {
+              const items = grouped[type]
+              return (
+                <div key={type}>
+                  <div className="flex items-center gap-1.5 mb-2">
+                    <LinkTypeIcon type={type} className="h-3.5 w-3.5 text-gray-500" />
+                    <span className="text-xs font-medium text-gray-500 uppercase tracking-wide">
+                      {TYPE_META[type]?.label || type}
+                    </span>
+                  </div>
+                  <div className="space-y-1.5">
+                    {items.map((link) => {
+                      if (type === 'highlight' && isYouTubeUrl(link.url)) {
+                        return (
+                          <div key={link.id} className="space-y-1.5">
+                            {link.title && (
+                              <p className="text-sm font-medium text-gray-700 px-1">{link.title}</p>
+                            )}
+                            <VideoEmbed url={link.url} title={link.title} />
+                          </div>
+                        )
+                      }
+                      return (
+                        <a
+                          key={link.id}
+                          href={link.url}
+                          target="_blank"
+                          rel="noopener noreferrer"
+                          className="flex items-center gap-2 px-3 py-2 rounded-lg hover:bg-gray-50 transition-colors group text-sm"
+                        >
+                          <ExternalLink className="h-3.5 w-3.5 text-gray-400 group-hover:text-blue-500 flex-shrink-0" />
+                          <span className="text-gray-700 group-hover:text-blue-600 truncate flex-1">
+                            {link.title || link.url}
+                          </span>
+                          {link.upvotes > 0 && (
+                            <Badge variant="secondary" className="text-xs px-1.5 py-0">{link.upvotes}</Badge>
+                          )}
+                        </a>
+                      )
+                    })}
+                  </div>
                 </div>
-                <div className="space-y-1.5">
-                  {items.map((link) => (
-                    <a
-                      key={link.id}
-                      href={link.url}
-                      target="_blank"
-                      rel="noopener noreferrer"
-                      className="flex items-center gap-2 px-3 py-2 rounded-lg hover:bg-gray-50 transition-colors group text-sm"
-                    >
-                      <ExternalLink className="h-3.5 w-3.5 text-gray-400 group-hover:text-blue-500 flex-shrink-0" />
-                      <span className="text-gray-700 group-hover:text-blue-600 truncate flex-1">
-                        {link.title || link.url}
-                      </span>
-                      {link.upvotes > 0 && (
-                        <Badge variant="secondary" className="text-xs px-1.5 py-0">{link.upvotes}</Badge>
-                      )}
-                    </a>
-                  ))}
-                </div>
-              </div>
-            ))}
+              )
+            })}
           </div>
         )}
 

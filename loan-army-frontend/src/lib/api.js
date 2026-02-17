@@ -420,6 +420,12 @@ export class APIService {
         return this.request('/journalists')
     }
 
+    static async searchPlayers(query) {
+        if (!query || query.length < 2) return []
+        const params = new URLSearchParams({ q: query })
+        return this.request(`/players/search?${params}`)
+    }
+
     static async searchCommentaries(query) {
         if (!query || query.length < 2) return []
         const params = new URLSearchParams({ q: query })

@@ -29,6 +29,7 @@ import {
   PenLine,
 } from "lucide-react"
 import { Badge } from "@/components/ui/badge"
+import { Avatar, AvatarImage, AvatarFallback } from "@/components/ui/avatar"
 import { APIService } from "@/lib/api"
 
 // Debounce helper
@@ -61,6 +62,7 @@ export function GlobalSearchDialog({
   const [newsletters, setNewsletters] = React.useState([])
   const [journalists, setJournalists] = React.useState([])
   const [writeups, setWriteups] = React.useState([])
+  const [players, setPlayers] = React.useState([])
 
   const debouncedQuery = useDebounce(searchQuery, 300)
 
@@ -70,6 +72,7 @@ export function GlobalSearchDialog({
       setTeams([])
       setNewsletters([])
       setWriteups([])
+      setPlayers([])
       return
     }
 
@@ -77,7 +80,7 @@ export function GlobalSearchDialog({
       setIsLoading(true)
       console.log("[GlobalSearch] Searching for:", debouncedQuery)
       try {
-        const [teamsRes, newslettersRes, writeupsRes] = await Promise.all([
+        const [teamsRes, newslettersRes, writeupsRes, playersRes] = await Promise.all([
           APIService.getTeams({ search: debouncedQuery }).catch((err) => {
             console.error("[GlobalSearch] Teams search failed:", err)
             return []
@@ -90,15 +93,21 @@ export function GlobalSearchDialog({
             console.error("[GlobalSearch] Writeups search failed:", err)
             return []
           }),
+          APIService.searchPlayers(debouncedQuery).catch((err) => {
+            console.error("[GlobalSearch] Players search failed:", err)
+            return []
+          }),
         ])
 
         console.log("[GlobalSearch] Teams results:", teamsRes?.length || 0)
         console.log("[GlobalSearch] Newsletters results:", newslettersRes?.length || 0)
         console.log("[GlobalSearch] Writeups results:", writeupsRes?.length || 0)
+        console.log("[GlobalSearch] Players results:", playersRes?.length || 0)
 
         setTeams(Array.isArray(teamsRes) ? teamsRes.slice(0, 5) : [])
         setNewsletters(Array.isArray(newslettersRes) ? newslettersRes.slice(0, 5) : [])
         setWriteups(Array.isArray(writeupsRes) ? writeupsRes.slice(0, 5) : [])
+        setPlayers(Array.isArray(playersRes) ? playersRes.slice(0, 5) : [])
       } catch (error) {
         console.error("[GlobalSearch] Search error:", error)
       } finally {
@@ -160,6 +169,14 @@ export function GlobalSearchDialog({
             name: item.display_name,
           }
           break
+        case "player":
+          path = `/players/${item.player_api_id}`
+          searchItem = {
+            type: "player",
+            id: item.player_api_id,
+            name: item.player_name,
+          }
+          break
         case "writeup":
           path = `/writeups/${item.id}`
           searchItem = {
@@ -177,6 +194,7 @@ export function GlobalSearchDialog({
           if (item.type === "team") path = `/teams?highlight=${item.id}`
           else if (item.type === "newsletter") path = `/newsletters/${item.id}`
           else if (item.type === "journalist") path = `/journalists/${item.id}`
+          else if (item.type === "player") path = `/players/${item.id}`
           else if (item.type === "writeup") path = `/writeups/${item.id}`
           break
         default:
@@ -204,7 +222,7 @@ export function GlobalSearchDialog({
   ]
 
   const hasResults =
-    teams.length > 0 || newsletters.length > 0 || filteredJournalists.length > 0 || writeups.length > 0
+    teams.length > 0 || newsletters.length > 0 || filteredJournalists.length > 0 || writeups.length > 0 || players.length > 0
   const showQuickActions = !debouncedQuery || debouncedQuery.length < 2
 
   return (
@@ -363,10 +381,47 @@ export function GlobalSearchDialog({
               </>
             )}
 
+            {/* Players */}
+            {players.length > 0 && (
+              <>
+                {(teams.length > 0 || newsletters.length > 0 || filteredJournalists.length > 0) && (
+                  <CommandSeparator />
+                )}
+                <CommandGroup heading="Players">
+                  {players.map((player) => (
+                    <CommandItem
+                      key={`player-${player.player_api_id}`}
+                      onSelect={() => handleSelect("player", player)}
+                    >
+                      <Avatar className="mr-2 h-5 w-5">
+                        {player.photo_url ? (
+                          <AvatarImage src={player.photo_url} alt={player.player_name} />
+                        ) : null}
+                        <AvatarFallback className="text-[10px] bg-gray-100">
+                          {(player.player_name || '?').substring(0, 1).toUpperCase()}
+                        </AvatarFallback>
+                      </Avatar>
+                      <span>{player.player_name}</span>
+                      {player.position && (
+                        <Badge variant="outline" className="ml-2 text-xs px-1.5 py-0">
+                          {player.position}
+                        </Badge>
+                      )}
+                      {player.team_name && (
+                        <span className="ml-2 text-xs text-muted-foreground truncate">
+                          {player.team_name}
+                        </span>
+                      )}
+                    </CommandItem>
+                  ))}
+                </CommandGroup>
+              </>
+            )}
+
             {/* Writeups */}
             {writeups.length > 0 && (
               <>
-                {(teams.length > 0 || newsletters.length > 0 || filteredJournalists.length > 0) && (
+                {(teams.length > 0 || newsletters.length > 0 || filteredJournalists.length > 0 || players.length > 0) && (
                   <CommandSeparator />
                 )}
                 <CommandGroup heading="Writeups">

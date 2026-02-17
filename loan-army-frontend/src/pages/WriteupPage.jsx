@@ -1,11 +1,11 @@
 import { useEffect, useState, useMemo } from 'react'
-import { useParams, useNavigate } from 'react-router-dom'
+import { useParams, useNavigate, Link } from 'react-router-dom'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 import { Avatar, AvatarImage, AvatarFallback } from '@/components/ui/avatar'
 import {
-  Loader2, ArrowLeft, Lock, Calendar, Trophy,
+  Loader2, ArrowLeft, ArrowRight, Lock, Calendar, Trophy,
   Clock, Target, Users, Shield, Footprints, AlertTriangle,
   Sparkles, ExternalLink
 } from 'lucide-react'
@@ -339,11 +339,21 @@ export function WriteupPage() {
           <div className="bg-gradient-to-br from-gray-900 via-gray-800 to-gray-900 text-white p-6">
             <div className="flex items-start gap-4">
               {player?.photo_url ? (
-                <img
-                  src={player.photo_url}
-                  alt={player.name}
-                  className="h-20 w-20 rounded-full object-cover border-4 border-white/20 shadow-lg"
-                />
+                data.player_id ? (
+                  <Link to={`/players/${data.player_id}`}>
+                    <img
+                      src={player.photo_url}
+                      alt={player.name}
+                      className="h-20 w-20 rounded-full object-cover border-4 border-white/20 shadow-lg hover:border-white/40 transition-colors"
+                    />
+                  </Link>
+                ) : (
+                  <img
+                    src={player.photo_url}
+                    alt={player.name}
+                    className="h-20 w-20 rounded-full object-cover border-4 border-white/20 shadow-lg"
+                  />
+                )
               ) : team?.logo ? (
                 <img
                   src={team.logo}
@@ -354,7 +364,13 @@ export function WriteupPage() {
 
               <div className="flex-1 min-w-0">
                 {player && (
-                  <h2 className="text-xl sm:text-2xl font-bold truncate">{player.name}</h2>
+                  data.player_id ? (
+                    <Link to={`/players/${data.player_id}`} className="hover:underline decoration-white/50">
+                      <h2 className="text-xl sm:text-2xl font-bold truncate">{player.name}</h2>
+                    </Link>
+                  ) : (
+                    <h2 className="text-xl sm:text-2xl font-bold truncate">{player.name}</h2>
+                  )
                 )}
                 <div className="flex flex-wrap items-center gap-2 mt-1">
                   {team?.name && (
@@ -371,6 +387,15 @@ export function WriteupPage() {
                     <span className="text-sm text-gray-400">{player.nationality}</span>
                   )}
                 </div>
+
+                {data.player_id && (
+                  <Link
+                    to={`/players/${data.player_id}`}
+                    className="inline-flex items-center gap-1.5 mt-3 text-sm text-gray-300 hover:text-white transition-colors"
+                  >
+                    View Full Profile <ArrowRight className="h-3.5 w-3.5" />
+                  </Link>
+                )}
 
                 {/* Week context */}
                 {data.week_start_date && data.week_end_date && (
