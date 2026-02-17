@@ -13,7 +13,8 @@ from typing import Generator
 from openai import OpenAI
 from sqlalchemy import func
 
-from src.models.league import db, LoanedPlayer
+from src.models.league import db
+from src.models.tracked_player import TrackedPlayer
 from src.services.gol_dataframes import DataFrameCache
 from src.services.gol_sandbox import execute_analysis
 
@@ -35,14 +36,11 @@ format for the data. `pd` (pandas) and `np` (numpy) are pre-loaded. NEVER use \
 
 ## Available DataFrames
 
-### `players` (active loan spells — roster ONLY, NO stats)
-Columns: player_id (int, API-Football ID), player_name (str), age (int), \
-nationality (str), primary_team_id (int, FK to teams.id), \
-primary_team_name (str, parent club), loan_team_id (int, FK to teams.id), \
-loan_team_name (str, where on loan), \
-pathway_status (str: academy/on_loan/first_team/released), \
-current_level (str: U18/U21/U23/Reserve/Senior), \
-stats_coverage (str: full/limited/none), window_key (str), is_active (bool)
+### `loan_players` (players currently on loan — roster ONLY, NO stats)
+Columns: player_api_id (int, API-Football ID), player_name (str), age (int), \
+position (str), nationality (str), parent_team_id (int, FK to teams.id), \
+parent_club (str, parent/academy club name), loan_club_name (str, where on loan), \
+current_level (str), is_active (bool)
 **This table has NO stats columns.** For goals, assists, appearances, minutes, \
 use `fixture_stats` (per-match) or `journey_entries` (season aggregates).
 
@@ -107,13 +105,12 @@ dribbles_success (int), fouls_drawn (int), fouls_committed (int)
 ## Joining DataFrames
 
 Key relationships:
-- `players.primary_team_id` → `teams.id` (parent club)
-- `players.loan_team_id` → `teams.id` (loan club)
-- `players.player_id` → `journeys.player_api_id`
+- `loan_players.parent_team_id` → `teams.id` (parent club)
+- `loan_players.player_api_id` → `journeys.player_api_id`
 - `journeys.player_api_id` → `journey_entries.player_api_id`
 - `cohort_members.cohort_id` → `cohorts.id`
 - `tracked.team_id` → `teams.id`
-- `fixture_stats.player_api_id` → `players.player_id` (**INNER join only** — fixture_stats \
+- `fixture_stats.player_api_id` → `loan_players.player_api_id` (**INNER join only** — fixture_stats \
 has ALL players in every fixture, not just loaned ones)
 - `fixture_stats.fixture_id` → `fixtures.id` (internal PK, NOT fixture_id_api)
 - `teams.team_id` (API ID) joins to `cohorts.team_api_id`, `tracked` columns, etc.
@@ -131,13 +128,13 @@ Choose the best `display` for each query:
 - `"list"` — simple ordered lists
 
 ## Data Tips (MUST READ before writing code)
-- **CRITICAL — Getting player stats:** The `players` table has NO stats columns. \
+- **CRITICAL — Getting player stats:** The `loan_players` table has NO stats columns. \
 You MUST use `fixture_stats` for per-match data or `journey_entries` for season \
 aggregates. Standard pattern for loan player stats:
   ```
   fs = fixture_stats[fixture_stats['season'] == fixture_stats['season'].max()]
   agg = fs.groupby('player_api_id')[['goals','assists','minutes']].sum().reset_index()
-  result = players[['player_id','player_name','loan_team_name']].merge(agg, left_on='player_id', right_on='player_api_id', how='inner')
+  result = loan_players[['player_api_id','player_name','loan_club_name']].merge(agg, on='player_api_id', how='inner')
   ```
 - **Season filtering:** When aggregating `fixture_stats`, always filter by season \
 first: `fixture_stats[fixture_stats['season'] == fixture_stats['season'].max()]`. This avoids \
@@ -145,10 +142,12 @@ counting stats from previous seasons. Unless the user explicitly asks about mult
 default to the current season only.
 - **Loaned player performance:** `fixture_stats` contains stats for ALL \
 players in every fixture, not just loaned players. To query loan player performance, \
-always start from `players` and INNER merge to `fixture_stats`. \
-Never LEFT join from fixture_stats to players — non-loaned players will have null names.
-- **Player name lookup:** `players` has names for active loans only. For broader lookups, \
+always start from `loan_players` and INNER merge to `fixture_stats`. \
+Never LEFT join from fixture_stats to loan_players — non-loaned players will have null names.
+- **Player name lookup:** `loan_players` has names for active loans only. For broader lookups, \
 use `journeys` (player_api_id → player_name) which covers all known players.
+- **Loan player queries:** `loan_players` contains players currently on loan. Alternatively, \
+filter `tracked` where `status == 'on_loan'` for the same data with slightly different columns.
 - **"How is X doing?":** Filter `fixture_stats` to current season, then group by player and \
 aggregate goals, assists, minutes, avg rating.
 - **Career history:** Use `journey_entries` for a player's full season-by-season career path.
@@ -510,12 +509,12 @@ class GolService:
         """Generate conversation starter suggestions based on recent data."""
         suggestions = []
 
-        recent_players = LoanedPlayer.query.filter_by(
-            is_active=True
+        recent_players = TrackedPlayer.query.filter_by(
+            status='on_loan', is_active=True
         ).order_by(func.random()).limit(2).all()
 
         for p in recent_players:
-            suggestions.append(f"How is {p.player_name} doing at {p.loan_team_name}?")
+            suggestions.append(f"How is {p.player_name} doing at {p.loan_club_name}?")
 
         suggestions.extend([
             "Which Big 6 academy is producing the most first-team players?",

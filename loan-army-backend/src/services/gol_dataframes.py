@@ -47,15 +47,17 @@ class DataFrameCache:
             engine = db.engine
             frames = {}
 
-            frames['players'] = self._load_query(engine, """
+            frames['loan_players'] = self._load_query(engine, """
                 SELECT
-                    player_id, player_name, age, nationality,
-                    primary_team_id, primary_team_name,
-                    loan_team_id, loan_team_name,
-                    pathway_status, current_level,
-                    stats_coverage, window_key, is_active
-                FROM loaned_players
-                WHERE is_active = true
+                    tp.player_api_id, tp.player_name, tp.age,
+                    tp.position, tp.nationality,
+                    tp.team_id AS parent_team_id,
+                    t.name AS parent_club,
+                    tp.loan_club_name,
+                    tp.current_level, tp.is_active
+                FROM tracked_players tp
+                LEFT JOIN teams t ON tp.team_id = t.id
+                WHERE tp.status = 'on_loan' AND tp.is_active = true
             """)
 
             frames['teams'] = self._load_query(engine, """

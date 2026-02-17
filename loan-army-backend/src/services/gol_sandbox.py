@@ -157,21 +157,20 @@ def _build_helpers(dataframes: dict) -> dict:
 
     def top_loan_performers(season=None, limit=20):
         """Top loan players by goals this season."""
-        players = dataframes.get('players', pd.DataFrame())
+        loan_players = dataframes.get('loan_players', pd.DataFrame())
         fixture_stats = dataframes.get('fixture_stats', pd.DataFrame())
-        if players.empty or fixture_stats.empty:
+        if loan_players.empty or fixture_stats.empty:
             return pd.DataFrame(columns=['player_name', 'parent_club', 'loan_club', 'goals', 'assists', 'minutes', 'avg_rating'])
 
-        active = players[players['is_active'] == True]  # noqa: E712
         fs = fixture_stats.copy()
         target_season = season if season else fs['season'].max()
         fs = fs[fs['season'] == target_season]
 
-        merged = active.merge(fs, left_on='player_id', right_on='player_api_id', how='inner')
+        merged = loan_players.merge(fs, on='player_api_id', how='inner')
         if merged.empty:
             return pd.DataFrame(columns=['player_name', 'parent_club', 'loan_club', 'goals', 'assists', 'minutes', 'avg_rating'])
 
-        agg = merged.groupby(['player_id', 'player_name', 'primary_team_name', 'loan_team_name']).agg(
+        agg = merged.groupby(['player_api_id', 'player_name', 'parent_club', 'loan_club_name']).agg(
             goals=('goals', 'sum'),
             assists=('assists', 'sum'),
             minutes=('minutes', 'sum'),
@@ -180,8 +179,7 @@ def _build_helpers(dataframes: dict) -> dict:
         agg['avg_rating'] = agg['avg_rating'].round(2)
         agg = agg.sort_values(['goals', 'assists'], ascending=[False, False]).head(limit)
         return agg.rename(columns={
-            'primary_team_name': 'parent_club',
-            'loan_team_name': 'loan_club'
+            'loan_club_name': 'loan_club'
         })[['player_name', 'parent_club', 'loan_club', 'goals', 'assists', 'minutes', 'avg_rating']].reset_index(drop=True)
 
     def player_career(player_name):
