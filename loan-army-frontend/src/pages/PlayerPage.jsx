@@ -407,7 +407,7 @@ export function PlayerPage() {
             <div className="max-w-[1400px] mx-auto px-4 py-6">
                 <div className="flex flex-col lg:flex-row gap-6">
                     {/* Main Content */}
-                    <div className="flex-1 min-w-0 max-w-6xl">
+                    <div className="flex-1 min-w-0 max-w-6xl space-y-6">
                         {stats.length === 0 && seasonStats?.stats_coverage !== 'limited' ? (
                             <Card>
                                 <CardContent className="py-12 text-center">
@@ -849,8 +849,10 @@ export function PlayerPage() {
                                 </CardContent>
                             </Tabs>
                         </Card>
+                        </div>
+                    )}
 
-                        {/* Writer Coverage Section */}
+                    {/* Writer Coverage Section */}
                         {commentaries.total_count > 0 && (
                             <Card>
                                 <CardHeader>
@@ -963,8 +965,6 @@ export function PlayerPage() {
 
                         {/* Player Links */}
                         <PlayerLinksSection playerId={parseInt(playerId)} />
-                        </div>
-                    )}
                     </div>
 
                     {/* Sponsor Sidebar - visible on larger screens */}
