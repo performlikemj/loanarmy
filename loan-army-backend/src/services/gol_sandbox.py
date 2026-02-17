@@ -131,11 +131,82 @@ def _build_helpers(dataframes: dict) -> dict:
                 .sort_values(['team', 'status', 'player_name'])
                 .reset_index(drop=True))
 
+    def academy_first_team_apps(team_name=None):
+        """Graduates with first-team appearances, grouped by club. Deduplicated on player_api_id."""
+        tracked = dataframes.get('tracked', pd.DataFrame())
+        teams = dataframes.get('teams', pd.DataFrame())
+        journeys = dataframes.get('journeys', pd.DataFrame())
+        if tracked.empty or teams.empty or journeys.empty:
+            return pd.DataFrame(columns=['team', 'total_graduates', 'total_first_team_apps'])
+
+        ft = tracked[tracked['status'] == 'first_team'].drop_duplicates(subset=['player_api_id'])
+        ft = ft.merge(teams[['id', 'name']], left_on='team_id', right_on='id', how='inner')
+        ft = ft.merge(journeys[['player_api_id', 'total_first_team_apps']], on='player_api_id', how='left')
+        ft['total_first_team_apps'] = ft['total_first_team_apps'].fillna(0).astype(int)
+
+        if team_name:
+            ft = ft[ft['name'].str.contains(team_name, case=False, na=False)]
+        else:
+            ft = ft[ft['name'].isin(BIG_6)]
+
+        result = ft.groupby('name').agg(
+            total_graduates=('player_api_id', 'count'),
+            total_first_team_apps=('total_first_team_apps', 'sum')
+        ).reset_index().rename(columns={'name': 'team'})
+        return result.sort_values('total_first_team_apps', ascending=False).reset_index(drop=True)
+
+    def top_loan_performers(season=None, limit=20):
+        """Top loan players by goals this season."""
+        players = dataframes.get('players', pd.DataFrame())
+        fixture_stats = dataframes.get('fixture_stats', pd.DataFrame())
+        if players.empty or fixture_stats.empty:
+            return pd.DataFrame(columns=['player_name', 'parent_club', 'loan_club', 'goals', 'assists', 'minutes', 'avg_rating'])
+
+        active = players[players['is_active'] == True]  # noqa: E712
+        fs = fixture_stats.copy()
+        target_season = season if season else fs['season'].max()
+        fs = fs[fs['season'] == target_season]
+
+        merged = active.merge(fs, left_on='player_id', right_on='player_api_id', how='inner')
+        if merged.empty:
+            return pd.DataFrame(columns=['player_name', 'parent_club', 'loan_club', 'goals', 'assists', 'minutes', 'avg_rating'])
+
+        agg = merged.groupby(['player_id', 'player_name', 'primary_team_name', 'loan_team_name']).agg(
+            goals=('goals', 'sum'),
+            assists=('assists', 'sum'),
+            minutes=('minutes', 'sum'),
+            avg_rating=('rating', 'mean')
+        ).reset_index()
+        agg['avg_rating'] = agg['avg_rating'].round(2)
+        agg = agg.sort_values(['goals', 'assists'], ascending=[False, False]).head(limit)
+        return agg.rename(columns={
+            'primary_team_name': 'parent_club',
+            'loan_team_name': 'loan_club'
+        })[['player_name', 'parent_club', 'loan_club', 'goals', 'assists', 'minutes', 'avg_rating']].reset_index(drop=True)
+
+    def player_career(player_name):
+        """Season-by-season career for a player (partial name match)."""
+        journeys = dataframes.get('journeys', pd.DataFrame())
+        journey_entries = dataframes.get('journey_entries', pd.DataFrame())
+        if journeys.empty or journey_entries.empty:
+            return pd.DataFrame(columns=['season', 'club_name', 'level', 'appearances', 'goals', 'assists', 'minutes'])
+
+        matches = journeys[journeys['player_name'].str.contains(player_name, case=False, na=False)]
+        if matches.empty:
+            return pd.DataFrame(columns=['season', 'club_name', 'level', 'appearances', 'goals', 'assists', 'minutes'])
+
+        pid = matches.iloc[0]['player_api_id']
+        entries = journey_entries[journey_entries['player_api_id'] == pid].sort_values('season')
+        return entries[['season', 'club_name', 'level', 'appearances', 'goals', 'assists', 'minutes']].reset_index(drop=True)
+
     return {
         'academy_comparison': academy_comparison,
         'first_team_graduates': first_team_graduates,
         'player_status_breakdown': player_status_breakdown,
         'active_academy_pipeline': active_academy_pipeline,
+        'academy_first_team_apps': academy_first_team_apps,
+        'top_loan_performers': top_loan_performers,
+        'player_career': player_career,
     }
 
 
