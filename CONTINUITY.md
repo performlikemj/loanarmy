@@ -4,7 +4,7 @@
 
 ## Goal
 
-Go On Loan — Football loan tracking platform with AI-powered newsletters and journalist content management.
+The Academy Watch — Football academy tracking platform with AI-powered newsletters and journalist content management.
 
 ## Constraints / Assumptions
 

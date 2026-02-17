@@ -275,7 +275,7 @@ export function AdminNewsletters() {
     const getMarkdownContent = useCallback(() => {
         if (!newsletterJson) return ''
         const webUrl = newsletterJson.public_slug 
-            ? `https://goonloan.com/newsletters/${newsletterJson.public_slug}`
+            ? `https://theacademywatch.com/newsletters/${newsletterJson.public_slug}`
             : null
         if (markdownFormat === 'compact') {
             return convertNewsletterToCompactMarkdown(newsletterJson)

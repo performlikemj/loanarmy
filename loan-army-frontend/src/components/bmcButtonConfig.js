@@ -2,7 +2,7 @@ export const BMC_SCRIPT_SRC = 'https://cdnjs.buymeacoffee.com/1.0.0/button.prod.
 
 export const BUTTON_DATASET = {
   text: 'Buy me a coffee',
-  slug: 'GoOnLoan',
+  slug: 'TheAcademyWatch',
   color: '#100f0f',
   emoji: '',
   font: 'Cookie',

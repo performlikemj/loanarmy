@@ -1,4 +1,4 @@
-# Scheduled Scaling for Go On Loan Backend
+# Scheduled Scaling for The Academy Watch Backend
 #
 # This workflow automatically toggles minReplicas based on traffic patterns:
 # - 02:00 UTC: Set minReplicas=1 (peak UK evening / US afternoon traffic)

@@ -4,7 +4,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Project Overview
 
-**Go On Loan** is a football (soccer) loan tracking platform that monitors players on loan, generates AI-powered newsletters, and enables journalists to write content about loaned players. It integrates with API-Football for player/fixture data, Stripe for payments, Mailgun for email delivery, and Reddit for social posting.
+**The Academy Watch** is a football (soccer) academy tracking platform that monitors academy players on loan, generates AI-powered newsletters, and enables journalists to write content about loaned players. It integrates with API-Football for player/fixture data, Stripe for payments, Mailgun for email delivery, and Reddit for social posting.
 
 ## Development Commands
 

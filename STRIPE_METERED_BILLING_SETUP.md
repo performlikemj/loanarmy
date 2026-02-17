@@ -12,7 +12,7 @@ Monthly Bill = (Price per Newsletter) × (Newsletters Published This Month)
 - Subscriber signs up for a "subscription"
 - Each time journalist publishes a newsletter, we record usage in Stripe
 - At end of billing period, Stripe charges: (# of newsletters) × (price per newsletter)
-- Go On Loan automatically gets 10% via application fee
+- The Academy Watch automatically gets 10% via application fee
 
 ## How It Works
 
@@ -70,7 +70,7 @@ At the end of each month:
 
 ### 1. Configure Your Stripe Account
 
-Your "Go On Loan" business account in Stripe is the **Platform Account**.
+Your "The Academy Watch" business account in Stripe is the **Platform Account**.
 
 ### 2. Test the Flow
 

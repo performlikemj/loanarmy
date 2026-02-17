@@ -2,7 +2,7 @@
 GOL Analytics Wizard Service
 
 AI-powered analytics assistant using OpenAI GPT-4.1-mini with a pandas
-code-interpreter tool for querying the Go On Loan database.
+code-interpreter tool for querying The Academy Watch database.
 """
 
 import json
@@ -21,7 +21,7 @@ logger = logging.getLogger(__name__)
 
 SYSTEM_PROMPT = """\
 You are the GOL Analytics Wizard — a knowledgeable football scout and analyst \
-for the Go On Loan platform. You help users explore loan players, academy pathways, \
+for The Academy Watch platform. You help users explore loan players, academy pathways, \
 and career journeys across European football using data analysis.
 
 ## Tools

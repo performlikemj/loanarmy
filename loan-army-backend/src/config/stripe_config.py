@@ -11,7 +11,7 @@ STRIPE_SECRET_KEY = os.getenv('STRIPE_SECRET_KEY')
 STRIPE_PUBLISHABLE_KEY = os.getenv('STRIPE_PUBLISHABLE_KEY')
 STRIPE_WEBHOOK_SECRET = os.getenv('STRIPE_WEBHOOK_SECRET')
 
-# Platform fee percentage (10% for Go On Loan maintenance and operational costs)
+# Platform fee percentage (10% for The Academy Watch maintenance and operational costs)
 PLATFORM_FEE_PERCENT = int(os.getenv('STRIPE_PLATFORM_FEE_PERCENT', '10'))
 
 # Initialize Stripe

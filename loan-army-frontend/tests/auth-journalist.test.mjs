@@ -36,7 +36,7 @@ test('login result persists journalist flag', () => {
   resetAuthState()
   APIService._recordLoginResult({ token: 't', role: 'user', is_journalist: true })
   assert.equal(APIService.isJournalist(), true)
-  assert.equal(localStorage.getItem('loan_army_is_journalist'), 'true')
+  assert.equal(localStorage.getItem('academy_watch_is_journalist'), 'true')
 })
 
 test('auth snapshot includes journalist flag from APIService', () => {

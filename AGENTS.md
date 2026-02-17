@@ -14,7 +14,7 @@
 
 ## Project Overview
 
-**What:** Go On Loan — Football loan tracking platform with AI newsletters
+**What:** The Academy Watch — Football academy tracking platform with AI newsletters
 **Stack:** Flask 3.1 + SQLAlchemy (backend), React 19 + Vite 6 + Tailwind (frontend), PostgreSQL
 **Test command:** `cd loan-army-frontend && pnpm lint && pnpm test:e2e`
 **Dev server:** Backend: `cd loan-army-backend && python src/main.py` | Frontend: `cd loan-army-frontend && pnpm dev`

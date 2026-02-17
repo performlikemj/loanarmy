@@ -20,7 +20,7 @@ import { Button } from '@/components/ui/button'
 import { Collapsible, CollapsibleTrigger, CollapsibleContent } from '@/components/ui/collapsible'
 import { useAuthUI } from '@/context/AuthContext'
 
-const GROUPS_KEY = 'loan_army_admin_sidebar_groups'
+const GROUPS_KEY = 'academy_watch_admin_sidebar_groups'
 
 const sidebarGroups = [
     {

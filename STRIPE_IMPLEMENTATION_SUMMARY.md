@@ -2,7 +2,7 @@
 
 ## Overview
 
-Successfully implemented a complete Stripe Connect Express subscription system for Go On Loan, enabling journalists to receive paid subscriptions from users. The platform takes a 10% fee for maintenance and operational costs, with full transparency through an admin dashboard.
+Successfully implemented a complete Stripe Connect Express subscription system for The Academy Watch, enabling journalists to receive paid subscriptions from users. The platform takes a 10% fee for maintenance and operational costs, with full transparency through an admin dashboard.
 
 ## ✅ Completed Features
 
@@ -328,7 +328,7 @@ The implementation provides:
 
 ## Conclusion
 
-The Stripe subscription system is now fully implemented and ready for testing. All components are in place for journalists to receive paid subscriptions, with Go On Loan automatically collecting a 10% platform fee for maintenance and operational costs. The admin dashboard provides full transparency into revenue collection.
+The Stripe subscription system is now fully implemented and ready for testing. All components are in place for journalists to receive paid subscriptions, with The Academy Watch automatically collecting a 10% platform fee for maintenance and operational costs. The admin dashboard provides full transparency into revenue collection.
 
 Follow the `STRIPE_SETUP_GUIDE.md` to configure your Stripe account and test the complete flow.
 

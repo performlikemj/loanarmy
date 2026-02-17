@@ -33,7 +33,7 @@ class RedditPostingError(RedditServiceError):
 class RedditService:
     """Service for interacting with Reddit API via PRAW.
     
-    This service uses a single bot account (GoOnLoanBot) to post
+    This service uses a single bot account to post
     loan reports to various team subreddits.
     """
     
@@ -46,7 +46,7 @@ class RedditService:
         self.client_secret = os.environ.get('REDDIT_CLIENT_SECRET')
         self.username = os.environ.get('REDDIT_USERNAME')
         self.password = os.environ.get('REDDIT_PASSWORD')
-        self.user_agent = os.environ.get('REDDIT_USER_AGENT', 'GoOnLoan/1.0 by /u/GoOnLoanBot')
+        self.user_agent = os.environ.get('REDDIT_USER_AGENT', 'TheAcademyWatch/1.0 by /u/TheAcademyWatchBot')
         
     @classmethod
     def get_instance(cls) -> 'RedditService':

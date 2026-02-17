@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-# Scheduled Scaling Script for Go On Loan Backend
+# Scheduled Scaling Script for The Academy Watch Backend
 # 
 # This script toggles minReplicas between 0 and 1 based on traffic patterns:
 # - Peak hours (02:00-10:00 UTC): minReplicas=1 (always running, no cold starts)

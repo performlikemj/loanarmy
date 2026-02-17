@@ -3118,7 +3118,7 @@ function AdminPage({ defaultTab = 'newsletters', includeSandbox = true, forcedTa
   }, [])
 
   const ensureAdminSession = useCallback(() => {
-    const storedToken = APIService.userToken || (typeof localStorage !== 'undefined' ? localStorage.getItem('loan_army_user_token') : null)
+    const storedToken = APIService.userToken || (typeof localStorage !== 'undefined' ? localStorage.getItem('academy_watch_user_token') : null)
     if (storedToken && !APIService.userToken) {
       APIService.setUserToken(storedToken)
     }
@@ -3127,7 +3127,7 @@ function AdminPage({ defaultTab = 'newsletters', includeSandbox = true, forcedTa
       err.code = 'missing_token'
       throw err
     }
-    const storedKey = APIService.adminKey || (typeof localStorage !== 'undefined' ? localStorage.getItem('loan_army_admin_key') : null)
+    const storedKey = APIService.adminKey || (typeof localStorage !== 'undefined' ? localStorage.getItem('academy_watch_admin_key') : null)
     if (storedKey && !APIService.adminKey) {
       APIService.setAdminKey(storedKey)
     }
@@ -6619,7 +6619,7 @@ function AdminSandboxPage() {
   }, [])
 
   const ensureAdminSession = useCallback(() => {
-    const storedToken = APIService.userToken || (typeof localStorage !== 'undefined' ? localStorage.getItem('loan_army_user_token') : null)
+    const storedToken = APIService.userToken || (typeof localStorage !== 'undefined' ? localStorage.getItem('academy_watch_user_token') : null)
     if (storedToken && !APIService.userToken) {
       APIService.setUserToken(storedToken)
     }
@@ -6628,7 +6628,7 @@ function AdminSandboxPage() {
       err.code = 'missing_token'
       throw err
     }
-    const storedKey = APIService.adminKey || (typeof localStorage !== 'undefined' ? localStorage.getItem('loan_army_admin_key') : null)
+    const storedKey = APIService.adminKey || (typeof localStorage !== 'undefined' ? localStorage.getItem('academy_watch_admin_key') : null)
     if (storedKey && !APIService.adminKey) {
       APIService.setAdminKey(storedKey)
     }

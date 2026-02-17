@@ -33,7 +33,7 @@ def _stub_render_variants(parsed, team_name):
 
 def test_auto_send_uses_prior_season_subscriptions(app, monkeypatch):
     monkeypatch.setenv('N8N_EMAIL_WEBHOOK_URL', 'https://example.com/webhook')
-    monkeypatch.setenv('EMAIL_FROM_NAME', 'Go On Loan Test')
+    monkeypatch.setenv('EMAIL_FROM_NAME', 'The Academy Watch Test')
     monkeypatch.setenv('EMAIL_FROM_ADDRESS', 'newsletter@example.com')
 
     prev_team = Team(team_id=123, name='Club FC', country='England', season=2023)
@@ -87,7 +87,7 @@ def test_auto_send_uses_prior_season_subscriptions(app, monkeypatch):
 
 def test_deliver_newsletter_uses_link_base_for_unsubscribe(app, monkeypatch):
     monkeypatch.setenv('N8N_EMAIL_WEBHOOK_URL', 'https://example.com/webhook')
-    monkeypatch.setenv('NEWSLETTER_LINK_BASE_URL', 'https://app.loan.army')
+    monkeypatch.setenv('NEWSLETTER_LINK_BASE_URL', 'https://app.theacademywatch.com')
 
     team = Team(team_id=999, name='Link FC', country='England', season=2024)
     db.session.add(team)
@@ -130,7 +130,7 @@ def test_deliver_newsletter_uses_link_base_for_unsubscribe(app, monkeypatch):
 
     assert captured, 'Expected payload to be sent via webhook'
     unsubscribe_url = captured[0]['json']['meta']['unsubscribe_url']
-    assert unsubscribe_url == 'https://app.loan.army/subscriptions/unsubscribe/tok-link-test'
+    assert unsubscribe_url == 'https://app.theacademywatch.com/subscriptions/unsubscribe/tok-link-test'
     expected_public_slug = newsletter.public_slug
     assert expected_public_slug
     html_payload = captured[0]['json']['html']
@@ -142,7 +142,7 @@ def test_newsletter_template_includes_buy_me_coffee_button(app):
         html = render_template(
             'newsletter_email.html',
             title='Weekly Update',
-            team_name='Go On Loan',
+            team_name='The Academy Watch',
             range=('Jan 1', 'Jan 7'),
             summary='Summary',
             highlights=[],
@@ -150,7 +150,7 @@ def test_newsletter_template_includes_buy_me_coffee_button(app):
             unsubscribe_url='https://example.com/unsub',
         )
 
-    assert html.count('data-slug="GoOnLoan"') == 2
+    assert 'buymeacoffee.com/TheAcademyWatch' in html
     assert 'Buy me a coffee' in html
 
 
@@ -559,14 +559,14 @@ def test_newsletter_templates_render_sofascore_embed_when_available(app):
         email_html = render_template(
             'newsletter_email.html',
             title='Weekly Update',
-            team_name='Go On Loan',
+            team_name='The Academy Watch',
             sections=sections,
             highlights=[],
         )
         web_html = render_template(
             'newsletter_web.html',
             title='Weekly Update',
-            team_name='Go On Loan',
+            team_name='The Academy Watch',
             sections=sections,
             highlights=[],
         )
@@ -600,14 +600,14 @@ def test_templates_hide_stats_for_untracked_players(app):
         email_html = render_template(
             'newsletter_email.html',
             title='Weekly Update',
-            team_name='Go On Loan',
+            team_name='The Academy Watch',
             sections=sections,
             highlights=[],
         )
         web_html = render_template(
             'newsletter_web.html',
             title='Weekly Update',
-            team_name='Go On Loan',
+            team_name='The Academy Watch',
             sections=sections,
             highlights=[],
         )
@@ -1059,8 +1059,8 @@ def _write_png(path: str) -> None:
 
 
 def test_newsletter_web_render_includes_social_meta(app, client, monkeypatch):
-    monkeypatch.setenv('PUBLIC_BASE_URL', 'https://goonloan.test')
-    monkeypatch.setenv('TWITTER_HANDLE', '@goonloan')
+    monkeypatch.setenv('PUBLIC_BASE_URL', 'https://theacademywatch.test')
+    monkeypatch.setenv('TWITTER_HANDLE', '@theacademywatch')
     monkeypatch.setenv('ADMIN_API_KEY', 'test-admin-key')
 
     static_root = app.static_folder
@@ -1121,12 +1121,12 @@ def test_newsletter_web_render_includes_social_meta(app, client, monkeypatch):
     assert '<meta name="description" content="Goals, minutes, and form tracker for every United loanee this week.">' in html
     assert '<meta property="og:title" content="Manchester United Loan Watch — Week Ending 21 Sep 2025">' in html
     assert '<meta name="twitter:card" content="summary_large_image">' in html
-    assert '<meta name="twitter:site" content="@goonloan">' in html
+    assert '<meta name="twitter:site" content="@theacademywatch">' in html
 
-    og_url = f'content="https://goonloan.test/newsletters/{expected_slug}"'
+    og_url = f'content="https://theacademywatch.test/newsletters/{expected_slug}"'
     assert f'<meta property="og:url" {og_url}>' in html
 
-    og_image = f'content="https://goonloan.test/static/newsletters/{expected_slug}/cover.jpg"'
+    og_image = f'content="https://theacademywatch.test/static/newsletters/{expected_slug}/cover.jpg"'
     assert f'<meta property="og:image" {og_image}>' in html
 
 def test_render_newsletter_includes_team_logo(app):

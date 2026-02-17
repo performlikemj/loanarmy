@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-# Go On Loan - ACA deployment script (local use)
+# The Academy Watch - ACA deployment script (local use)
 # - Builds backend image and pushes to ACR
 # - Deploys frontend to Azure Static Web App
 # - Grants AcrPull to app identities and updates Container Apps

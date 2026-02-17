@@ -1,4 +1,4 @@
-# SOP: Fanzine Partner Onboarding (Loan Army)
+# SOP: Fanzine Partner Onboarding (The Academy Watch)
 
 ## Purpose
 Ensure fanzine partners can reliably submit loan‑player writeups with clear attribution, correct coverage permissions, and consistent publishing outcomes.

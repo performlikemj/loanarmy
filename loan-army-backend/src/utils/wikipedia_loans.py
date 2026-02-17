@@ -36,7 +36,7 @@ def _http() -> requests.Session:
     session = requests.Session()
     user_agent = os.getenv(
         'WIKIPEDIA_USER_AGENT',
-        'LoanArmyBot/1.0 (+https://goonloan.com; contact goon@goonloan.com)'
+        'AcademyWatchBot/1.0 (+https://theacademywatch.com)'
     )
     session.headers.update({
         'User-Agent': user_agent,

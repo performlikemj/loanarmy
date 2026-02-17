@@ -1,4 +1,4 @@
-# Full deployment workflow for Go On Loan
+# Full deployment workflow for The Academy Watch
 #
 # Deploys backend to Azure Container Apps and frontend to Azure Static Web App
 # Mirrors the functionality of deploy_aca.sh

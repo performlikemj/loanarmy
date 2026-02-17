@@ -7,12 +7,12 @@ import {
 const API_BASE_URL = (typeof import.meta !== 'undefined' && import.meta.env && import.meta.env.VITE_API_BASE) || '/api'
 
 export class APIService {
-    static adminKey = (typeof localStorage !== 'undefined' && localStorage.getItem('loan_army_admin_key')) || null
-    static userToken = (typeof localStorage !== 'undefined' && localStorage.getItem('loan_army_user_token')) || null
-    static isAdminFlag = (typeof localStorage !== 'undefined' && localStorage.getItem('loan_army_is_admin') === 'true') || false
-    static isJournalistFlag = (typeof localStorage !== 'undefined' && localStorage.getItem('loan_army_is_journalist') === 'true') || false
-    static displayName = (typeof localStorage !== 'undefined' && localStorage.getItem('loan_army_display_name')) || null
-    static displayNameConfirmedFlag = (typeof localStorage !== 'undefined' && localStorage.getItem('loan_army_display_name_confirmed') === 'true') || false
+    static adminKey = (typeof localStorage !== 'undefined' && localStorage.getItem('academy_watch_admin_key')) || null
+    static userToken = (typeof localStorage !== 'undefined' && localStorage.getItem('academy_watch_user_token')) || null
+    static isAdminFlag = (typeof localStorage !== 'undefined' && localStorage.getItem('academy_watch_is_admin') === 'true') || false
+    static isJournalistFlag = (typeof localStorage !== 'undefined' && localStorage.getItem('academy_watch_is_journalist') === 'true') || false
+    static displayName = (typeof localStorage !== 'undefined' && localStorage.getItem('academy_watch_display_name')) || null
+    static displayNameConfirmedFlag = (typeof localStorage !== 'undefined' && localStorage.getItem('academy_watch_display_name_confirmed') === 'true') || false
     static authEventName = 'loan_auth_changed'
 
     static _emitAuthChanged(extra = {}) {
@@ -37,7 +37,7 @@ export class APIService {
         if (typeof window === 'undefined') return !!this.displayNameConfirmedFlag
         if (!this.displayNameConfirmedFlag && typeof localStorage !== 'undefined') {
             try {
-                this.displayNameConfirmedFlag = localStorage.getItem('loan_army_display_name_confirmed') === 'true'
+                this.displayNameConfirmedFlag = localStorage.getItem('academy_watch_display_name_confirmed') === 'true'
             } catch (err) {
                 console.warn('Failed to read display name confirmation flag', err)
             }
@@ -49,9 +49,9 @@ export class APIService {
         this.displayNameConfirmedFlag = !!value
         try {
             if (this.displayNameConfirmedFlag) {
-                localStorage.setItem('loan_army_display_name_confirmed', 'true')
+                localStorage.setItem('academy_watch_display_name_confirmed', 'true')
             } else {
-                localStorage.removeItem('loan_army_display_name_confirmed')
+                localStorage.removeItem('academy_watch_display_name_confirmed')
             }
         } catch (err) {
             console.warn('Failed to persist display name confirmation flag', err)
@@ -66,9 +66,9 @@ export class APIService {
         this.adminKey = trimmed || null
         try {
             if (trimmed) {
-                localStorage.setItem('loan_army_admin_key', trimmed)
+                localStorage.setItem('academy_watch_admin_key', trimmed)
             } else {
-                localStorage.removeItem('loan_army_admin_key')
+                localStorage.removeItem('academy_watch_admin_key')
             }
         } catch (err) {
             console.warn('Failed to persist admin key', err)
@@ -80,9 +80,9 @@ export class APIService {
         this.userToken = token || null
         try {
             if (token) {
-                localStorage.setItem('loan_army_user_token', token)
+                localStorage.setItem('academy_watch_user_token', token)
             } else {
-                localStorage.removeItem('loan_army_user_token')
+                localStorage.removeItem('academy_watch_user_token')
             }
         } catch (err) {
             console.warn('Failed to persist user token', err)
@@ -99,7 +99,7 @@ export class APIService {
     static setIsAdmin(isAdmin) {
         this.isAdminFlag = !!isAdmin
         try {
-            localStorage.setItem('loan_army_is_admin', this.isAdminFlag ? 'true' : 'false')
+            localStorage.setItem('academy_watch_is_admin', this.isAdminFlag ? 'true' : 'false')
         } catch (err) {
             console.warn('Failed to persist admin flag', err)
         }
@@ -110,7 +110,7 @@ export class APIService {
         if (this.isAdminFlag) return true
         if (typeof localStorage === 'undefined') return false
         try {
-            return localStorage.getItem('loan_army_is_admin') === 'true'
+            return localStorage.getItem('academy_watch_is_admin') === 'true'
         } catch (err) {
             console.warn('Failed to read admin flag', err)
             return false
@@ -120,7 +120,7 @@ export class APIService {
     static setIsJournalist(isJournalist) {
         this.isJournalistFlag = !!isJournalist
         try {
-            localStorage.setItem('loan_army_is_journalist', this.isJournalistFlag ? 'true' : 'false')
+            localStorage.setItem('academy_watch_is_journalist', this.isJournalistFlag ? 'true' : 'false')
         } catch (err) {
             console.warn('Failed to persist journalist flag', err)
         }
@@ -131,7 +131,7 @@ export class APIService {
         if (this.isJournalistFlag) return true
         if (typeof localStorage === 'undefined') return false
         try {
-            return localStorage.getItem('loan_army_is_journalist') === 'true'
+            return localStorage.getItem('academy_watch_is_journalist') === 'true'
         } catch (err) {
             console.warn('Failed to read journalist flag', err)
             return false
@@ -142,9 +142,9 @@ export class APIService {
         this.displayName = name || null
         try {
             if (name) {
-                localStorage.setItem('loan_army_display_name', name)
+                localStorage.setItem('academy_watch_display_name', name)
             } else {
-                localStorage.removeItem('loan_army_display_name')
+                localStorage.removeItem('academy_watch_display_name')
             }
         } catch (err) {
             console.warn('Failed to persist display name', err)
@@ -158,7 +158,7 @@ export class APIService {
     static clearDisplayNameCache() {
         this.displayName = null
         try {
-            localStorage.removeItem('loan_army_display_name')
+            localStorage.removeItem('academy_watch_display_name')
         } catch (err) {
             console.warn('Failed to clear display name cache', err)
         }
@@ -913,9 +913,9 @@ export class APIService {
     }
     static async adminNewsletterRender(id, fmt = 'web') {
         const headers = { 'Accept': 'text/html' }
-        const key = this.adminKey || (typeof localStorage !== 'undefined' && localStorage.getItem('loan_army_admin_key'))
+        const key = this.adminKey || (typeof localStorage !== 'undefined' && localStorage.getItem('academy_watch_admin_key'))
         if (key) headers['X-API-Key'] = key
-        const token = this.userToken || (typeof localStorage !== 'undefined' && localStorage.getItem('loan_army_user_token'))
+        const token = this.userToken || (typeof localStorage !== 'undefined' && localStorage.getItem('academy_watch_user_token'))
         if (token) headers['Authorization'] = `Bearer ${token}`
         const numericId = parseNewsletterId(id)
         if (!numericId) {

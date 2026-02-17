@@ -239,7 +239,7 @@ class SMTPProvider(EmailProvider):
         
         # Build from address
         default_from_name = os.getenv('EMAIL_FROM_NAME', 'The Academy Watch')
-        default_from_email = os.getenv('EMAIL_FROM_ADDRESS', f'no-reply@loan.army')
+        default_from_email = os.getenv('EMAIL_FROM_ADDRESS', f'no-reply@theacademywatch.com')
         from_name = from_name or default_from_name
         from_email = from_email or default_from_email
         from_addr = f"{from_name} <{from_email}>"
@@ -662,7 +662,7 @@ class EmailService:
         <div class="footer">
             <p><strong>This link expires in 24 hours.</strong></p>
             <p>If you didn't expect this email, you can safely ignore it.</p>
-            <p>&mdash; The The Academy Watch Team</p>
+            <p>&mdash; The Academy Watch Team</p>
         </div>
     </div>
 </body>
@@ -680,7 +680,7 @@ This link expires in 24 hours.
 
 If you didn't expect this email, you can safely ignore it.
 
--- The The Academy Watch Team
+-- The Academy Watch Team
 """
 
         return self.send_email(

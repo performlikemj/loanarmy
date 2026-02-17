@@ -1,4 +1,4 @@
-# Production Dockerfile for Go On Loan Backend - Azure Container App Ready
+# Production Dockerfile for The Academy Watch Backend - Azure Container App Ready
 FROM python:3.11-slim
 
 # Set working directory

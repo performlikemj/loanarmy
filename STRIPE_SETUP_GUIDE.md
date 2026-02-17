@@ -1,16 +1,16 @@
 # Stripe Subscription Setup Guide
 
-This guide walks you through setting up and testing the Stripe subscription system for Go On Loan.
+This guide walks you through setting up and testing the Stripe subscription system for The Academy Watch.
 
 ## Overview
 
-The system uses **Stripe Connect Express** to enable journalists to receive subscription payments directly. Go On Loan acts as the platform and takes a 10% fee for maintenance and operational costs.
+The system uses **Stripe Connect Express** to enable journalists to receive subscription payments directly. The Academy Watch acts as the platform and takes a 10% fee for maintenance and operational costs.
 
 ## Architecture
 
-- **Platform Account**: Go On Loan's main Stripe account
+- **Platform Account**: The Academy Watch's main Stripe account
 - **Connected Accounts**: Each journalist gets a Stripe Express account
-- **Revenue Split**: 90% to journalist, 10% to Go On Loan
+- **Revenue Split**: 90% to journalist, 10% to The Academy Watch
 - **Pricing**: Journalists set their own subscription prices (free-form)
 
 ## Setup Steps
@@ -18,7 +18,7 @@ The system uses **Stripe Connect Express** to enable journalists to receive subs
 ### 1. Create Stripe Account
 
 1. Go to https://stripe.com and create an account
-2. This will be the **Platform Account** for Go On Loan
+2. This will be the **Platform Account** for The Academy Watch
 3. Complete business verification (required for Connect)
 
 ### 2. Get API Keys

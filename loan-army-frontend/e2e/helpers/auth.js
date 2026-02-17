@@ -11,7 +11,7 @@ export async function loginWithCode(page, email, dbClient, { displayName = 'E2E 
       await logOutButton.click()
     } else {
       await page.evaluate(() => {
-        localStorage.removeItem('loan_army_user_token')
+        localStorage.removeItem('academy_watch_user_token')
       })
       await page.reload()
     }
@@ -37,15 +37,15 @@ export async function loginWithCode(page, email, dbClient, { displayName = 'E2E 
   const closeButton = page.getByRole('button', { name: /^Close$/i }).filter({ hasText: /^Close$/i })
   await closeButton.first().click()
 
-  await expect.poll(async () => page.evaluate(() => localStorage.getItem('loan_army_user_token'))).not.toBeNull()
+  await expect.poll(async () => page.evaluate(() => localStorage.getItem('academy_watch_user_token'))).not.toBeNull()
 }
 
 export async function setAdminKey(page, adminKey) {
   await page.evaluate((key) => {
-    localStorage.setItem('loan_army_admin_key', key)
+    localStorage.setItem('academy_watch_admin_key', key)
   }, adminKey)
 }
 
 export async function getUserToken(page) {
-  return page.evaluate(() => localStorage.getItem('loan_army_user_token'))
+  return page.evaluate(() => localStorage.getItem('academy_watch_user_token'))
 }

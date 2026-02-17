@@ -273,7 +273,7 @@ def _send_single_digest(user_id: int, week_key: str) -> dict:
         
         payload = {
             'email': user.email,
-            'subject': f"Your Weekly Loan Army Digest ({week_range})",
+            'subject': f"Your Weekly Academy Watch Digest ({week_range})",
             'html': html,
             'text': text,
             'headers': email_headers,  # RFC 8058 List-Unsubscribe headers

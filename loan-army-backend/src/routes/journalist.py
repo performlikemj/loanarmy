@@ -3735,7 +3735,7 @@ def send_claim_invite(writer_id):
         db.session.commit()
 
         # Send email with claim link
-        frontend_url = os.getenv('FRONTEND_URL', 'https://goonloan.com')
+        frontend_url = os.getenv('FRONTEND_URL', 'https://theacademywatch.com')
         claim_url = f"{frontend_url}/claim-account?token={claim_token}"
 
         try:

@@ -11,7 +11,7 @@ import { Sheet, SheetContent, SheetHeader, SheetTitle } from '@/components/ui/sh
 import { useAuth } from '@/context/AuthContext'
 import { BackgroundJobsProvider } from '@/context/BackgroundJobsContext'
 
-const SIDEBAR_COLLAPSE_KEY = 'loan_army_admin_sidebar_collapsed'
+const SIDEBAR_COLLAPSE_KEY = 'academy_watch_admin_sidebar_collapsed'
 
 export function AdminLayout() {
     const { token, isAdmin, hasApiKey } = useAuth()

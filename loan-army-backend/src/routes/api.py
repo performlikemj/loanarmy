@@ -4529,7 +4529,7 @@ def _compute_newsletter_social_meta(n: Newsletter, context: dict[str, Any]) -> d
 
     site_name = (os.getenv('SITE_NAME') or os.getenv('PUBLIC_SITE_NAME') or 'The Academy Watch').strip() or 'The Academy Watch'
     author = (os.getenv('ARTICLE_AUTHOR_NAME') or site_name).strip() or site_name
-    twitter_handle = (os.getenv('TWITTER_HANDLE') or '@goonloan').strip()
+    twitter_handle = (os.getenv('TWITTER_HANDLE') or '@theacademywatch').strip()
 
     return {
         'title': title,
@@ -4820,7 +4820,7 @@ def _deliver_newsletter_via_webhook(
 
     from_addr = {
         'name': os.getenv('EMAIL_FROM_NAME', 'The Academy Watch'),
-        'email': os.getenv('EMAIL_FROM_ADDRESS', 'no-reply@loan.army'),
+        'email': os.getenv('EMAIL_FROM_ADDRESS', 'no-reply@theacademywatch.com'),
     }
 
     # Optional public base URL for manage/unsubscribe links if the n8n flow uses it
@@ -10712,7 +10712,7 @@ def _maybe_post_to_reddit_on_publish(newsletters: list) -> list:
             
             web_url = None
             if newsletter.public_slug:
-                web_url = f"https://goonloan.com/newsletters/{newsletter.public_slug}"
+                web_url = f"https://theacademywatch.com/newsletters/{newsletter.public_slug}"
             
             for sub in subreddits:
                 try:
@@ -11300,7 +11300,7 @@ def admin_post_newsletter_to_reddit(newsletter_id: int):
         # Get web URL for linking back
         web_url = None
         if newsletter.public_slug:
-            web_url = f"https://goonloan.com/newsletters/{newsletter.public_slug}"
+            web_url = f"https://theacademywatch.com/newsletters/{newsletter.public_slug}"
         
         results = []
         for sub in subreddits:

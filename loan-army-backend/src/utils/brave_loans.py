@@ -555,7 +555,7 @@ def collect_loans_from_brave(
             try:
                 import requests  # local import
                 session = requests.Session()
-                ua = os.getenv('BRAVE_CRAWL_USER_AGENT') or 'LoanArmyBot/1.0 (+https://goonloan.com)'
+                ua = os.getenv('BRAVE_CRAWL_USER_AGENT') or 'AcademyWatchBot/1.0 (+https://theacademywatch.com)'
                 session.headers.update({'User-Agent': ua, 'Accept': 'text/html,application/xhtml+xml'})
                 logger.info("[brave-loans] fetching article url=%s", url)
                 resp = session.get(url, timeout=10)

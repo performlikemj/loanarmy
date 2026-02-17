@@ -1,6 +1,6 @@
 # Supabase Security Configuration
 
-This document outlines the security configuration for the Supabase database used by the Go On Loan application.
+This document outlines the security configuration for the Supabase database used by The Academy Watch application.
 
 ## Security Status
 
