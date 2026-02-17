@@ -14,11 +14,32 @@ export function ChatPanel({ teamId = null, leagueId = null }) {
     const messagesEndRef = useRef(null)
     const inputRef = useRef(null)
 
+    // Team selector state (only when no teamId/leagueId props)
+    const showTeamSelector = !teamId && !leagueId
+    const [teams, setTeams] = useState([])
+    const [selectedTeamId, setSelectedTeamId] = useState(null)
+    const [teamsLoading, setTeamsLoading] = useState(false)
+
+    useEffect(() => {
+        if (showTeamSelector && auth.token) {
+            setTeamsLoading(true)
+            APIService.getTeams({ tracked: true })
+                .then(data => {
+                    const list = Array.isArray(data) ? data : data?.teams || data?.results || []
+                    setTeams(list)
+                })
+                .catch(err => console.error('Failed to load teams:', err))
+                .finally(() => setTeamsLoading(false))
+        }
+    }, [showTeamSelector, auth.token])
+
     const scrollToBottom = useCallback(() => {
         messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' })
     }, [])
 
     useEffect(() => { scrollToBottom() }, [messages, scrollToBottom])
+
+    const effectiveTeamId = teamId || selectedTeamId
 
     const sendMessage = async () => {
         if (!input.trim() || loading) return
@@ -30,7 +51,10 @@ export function ChatPanel({ teamId = null, leagueId = null }) {
         try {
             let sessionId = activeSession
             if (!sessionId) {
-                const session = await APIService.createChatSession({ team_id: teamId, league_id: leagueId })
+                const params = {}
+                if (effectiveTeamId) params.team_id = effectiveTeamId
+                if (leagueId) params.league_id = leagueId
+                const session = await APIService.createChatSession(params)
                 sessionId = session.id
                 setActiveSession(sessionId)
             }
@@ -73,7 +97,7 @@ export function ChatPanel({ teamId = null, leagueId = null }) {
                 <p className="mb-3">Sign in to chat with the Academy Watch analyst</p>
                 <button
                     onClick={openLoginModal}
-                    className="px-4 py-2 bg-blue-600 text-white rounded-md hover:bg-blue-700 text-sm"
+                    className="px-4 py-2 bg-blue-600 text-white rounded-md hover:bg-blue-700 text-sm min-h-[44px]"
                 >
                     Sign In
                 </button>
@@ -89,23 +113,39 @@ export function ChatPanel({ teamId = null, leagueId = null }) {
     ]
 
     return (
-        <div className="flex flex-col h-[600px] border rounded-lg bg-white shadow-sm">
+        <div className="flex flex-col h-[calc(100dvh-200px)] min-h-[400px] max-h-[800px] border rounded-lg bg-white shadow-sm">
             {/* Header */}
-            <div className="px-4 py-3 border-b flex items-center justify-between">
+            <div className="px-4 py-3 border-b flex items-center justify-between flex-shrink-0">
                 <div className="flex items-center gap-2">
                     <svg className="h-5 w-5 text-blue-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                         <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M8 12h.01M12 12h.01M16 12h.01M21 12c0 4.418-4.03 8-9 8a9.863 9.863 0 01-4.255-.949L3 20l1.395-3.72C3.512 15.042 3 13.574 3 12c0-4.418 4.03-8 9-8s9 3.582 9 8z" />
                     </svg>
                     <h3 className="font-semibold text-gray-900">Academy Watch Analyst</h3>
                 </div>
-                {activeSession && (
-                    <button
-                        onClick={startNewSession}
-                        className="text-xs text-gray-500 hover:text-gray-700 px-2 py-1 rounded hover:bg-gray-100"
-                    >
-                        New Chat
-                    </button>
-                )}
+                <div className="flex items-center gap-2">
+                    {/* Team selector dropdown */}
+                    {showTeamSelector && !activeSession && (
+                        <select
+                            value={selectedTeamId || ''}
+                            onChange={e => setSelectedTeamId(e.target.value ? Number(e.target.value) : null)}
+                            disabled={teamsLoading}
+                            className="text-xs border rounded px-2 py-1 bg-white text-gray-700 focus:outline-none focus:ring-1 focus:ring-blue-500 max-w-[160px] min-h-[32px]"
+                        >
+                            <option value="">All Teams</option>
+                            {teams.map(t => (
+                                <option key={t.id} value={t.id}>{t.name}</option>
+                            ))}
+                        </select>
+                    )}
+                    {activeSession && (
+                        <button
+                            onClick={startNewSession}
+                            className="text-xs text-gray-500 hover:text-gray-700 px-2 py-1 rounded hover:bg-gray-100 min-h-[44px] min-w-[44px] flex items-center justify-center"
+                        >
+                            New Chat
+                        </button>
+                    )}
+                </div>
             </div>
 
             {/* Messages */}
@@ -118,7 +158,7 @@ export function ChatPanel({ teamId = null, leagueId = null }) {
                                 <button
                                     key={q}
                                     onClick={() => setInput(q)}
-                                    className="text-xs px-3 py-1.5 border rounded-full hover:bg-gray-50 text-gray-600"
+                                    className="text-xs px-3 py-2 border rounded-full hover:bg-gray-50 text-gray-600 min-h-[44px]"
                                 >
                                     {q}
                                 </button>
@@ -166,7 +206,7 @@ export function ChatPanel({ teamId = null, leagueId = null }) {
             </div>
 
             {/* Input */}
-            <div className="p-4 border-t">
+            <div className="p-4 border-t sticky bottom-0 bg-white flex-shrink-0">
                 <form onSubmit={(e) => { e.preventDefault(); sendMessage() }} className="flex gap-2">
                     <input
                         ref={inputRef}
@@ -175,13 +215,13 @@ export function ChatPanel({ teamId = null, leagueId = null }) {
                         onKeyDown={handleKeyDown}
                         placeholder="Ask about players, stats, comparisons..."
                         disabled={loading}
-                        className="flex-1 px-3 py-2 border rounded-md text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 disabled:opacity-50"
+                        className="flex-1 px-3 py-2 border rounded-md text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 disabled:opacity-50 min-h-[44px]"
                         maxLength={4000}
                     />
                     <button
                         type="submit"
                         disabled={loading || !input.trim()}
-                        className="px-3 py-2 bg-blue-600 text-white rounded-md hover:bg-blue-700 disabled:opacity-50 disabled:cursor-not-allowed"
+                        className="px-3 py-2 bg-blue-600 text-white rounded-md hover:bg-blue-700 disabled:opacity-50 disabled:cursor-not-allowed min-h-[44px] min-w-[44px]"
                     >
                         <svg className="h-4 w-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                             <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 19l9 2-9-18-9 18 9-2zm0 0v-8" />

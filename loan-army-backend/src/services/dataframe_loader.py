@@ -33,9 +33,6 @@ def load_context(
     Returns:
         Dict with keys: df_players, df_loans, df_matches, df_journeys
     """
-    if team_id is None and league_id is None and not player_ids:
-        raise ValueError("At least one filter (team_id, league_id, or player_ids) is required")
-
     # --- Build loan query ---
     loan_query = LoanedPlayer.query.filter_by(is_active=True)
     if team_id is not None:
@@ -47,6 +44,10 @@ def load_context(
         ).filter(Team.league_id == league_id)
     if player_ids:
         loan_query = loan_query.filter(LoanedPlayer.player_id.in_(player_ids))
+
+    # If no filters provided, cap results to prevent huge queries
+    if team_id is None and league_id is None and not player_ids:
+        loan_query = loan_query.limit(500)
 
     loans = loan_query.all()
 

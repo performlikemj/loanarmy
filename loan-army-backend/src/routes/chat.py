@@ -19,6 +19,7 @@ from src.agents.academy_watch_agent import (
     build_academy_watch_agent,
     set_session_dataframes,
     clear_session_dataframes,
+    ChatContext,
 )
 from src.services.dataframe_loader import load_context
 from src.routes.api import require_user_auth, _user_rate_limit_key
@@ -49,10 +50,10 @@ def _get_cached_dataframes(session_id, team_id=None, league_id=None):
     return dfs
 
 
-def _run_agent_sync(agent, messages):
+def _run_agent_sync(agent, messages, context=None):
     """Run async agent in a new thread to avoid event loop conflicts."""
     with concurrent.futures.ThreadPoolExecutor(max_workers=1) as pool:
-        future = pool.submit(asyncio.run, Runner.run(agent, messages))
+        future = pool.submit(asyncio.run, Runner.run(agent, messages, context=context))
         return future.result(timeout=60)
 
 
@@ -188,7 +189,8 @@ def send_message(session_id):
     # Run agent
     try:
         agent = build_academy_watch_agent()
-        result = _run_agent_sync(agent, messages)
+        chat_context = ChatContext(session_id=session.id)
+        result = _run_agent_sync(agent, messages, context=chat_context)
 
         response_text = result.final_output or ''
         tokens_used = 0

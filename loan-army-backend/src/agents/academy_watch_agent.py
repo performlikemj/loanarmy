@@ -13,11 +13,17 @@ from __future__ import annotations
 import json
 import logging
 import os
+from dataclasses import dataclass
 from typing import Any
 
 from pydantic import BaseModel, Field
 from openai import AsyncOpenAI
-from agents import Agent, FunctionTool, set_default_openai_client
+from agents import Agent, FunctionTool, RunContextWrapper, set_default_openai_client
+
+
+@dataclass
+class ChatContext:
+    session_id: int
 
 from src.api_football_client import APIFootballClient
 from src.models.league import db
@@ -102,10 +108,9 @@ def clear_session_dataframes(session_id: int) -> None:
     _session_dataframes.pop(session_id, None)
 
 
-def _get_session_dataframes(ctx: Any) -> dict:
+def _get_session_dataframes(ctx: RunContextWrapper[ChatContext]) -> dict:
     """Retrieve DataFrames from the run context."""
-    # The context object carries the session_id set by the route handler
-    session_id = getattr(ctx, 'session_id', None) if ctx else None
+    session_id = ctx.context.session_id if ctx and hasattr(ctx, 'context') else None
     if session_id and session_id in _session_dataframes:
         return _session_dataframes[session_id]
     # Fallback: return empty DataFrames
@@ -118,7 +123,7 @@ def _get_session_dataframes(ctx: Any) -> dict:
     }
 
 
-async def refresh_player_stats(ctx, args_str: str) -> str:
+async def refresh_player_stats(ctx: RunContextWrapper[ChatContext], args_str: str) -> str:
     """Fetch fresh stats from API-Football for a player."""
     args = RefreshPlayerStatsArgs.model_validate_json(args_str)
     try:
@@ -134,7 +139,7 @@ async def refresh_player_stats(ctx, args_str: str) -> str:
         return json.dumps({'error': str(e)})
 
 
-async def get_player_journey(ctx, args_str: str) -> str:
+async def get_player_journey(ctx: RunContextWrapper[ChatContext], args_str: str) -> str:
     """Get a player's career journey from academy to current."""
     args = GetPlayerJourneyArgs.model_validate_json(args_str)
     journey = PlayerJourney.query.filter_by(
@@ -171,7 +176,7 @@ async def get_player_journey(ctx, args_str: str) -> str:
     }, default=str)
 
 
-async def run_analytics(ctx, args_str: str) -> str:
+async def run_analytics(ctx: RunContextWrapper[ChatContext], args_str: str) -> str:
     """Execute Python code in a sandboxed subprocess against pre-loaded DataFrames."""
     args = RunAnalyticsArgs.model_validate_json(args_str)
     dataframes = _get_session_dataframes(ctx)
