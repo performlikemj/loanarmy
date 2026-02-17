@@ -718,7 +718,7 @@ class JourneySyncService:
         youth_entries = [
             e for e in entries
             if e.is_youth and not e.is_international
-            and e.entry_type in ('academy', 'development')
+            and e.entry_type in ('academy', 'development', 'integration')
         ]
         if not youth_entries:
             journey.academy_club_ids = []
@@ -751,6 +751,25 @@ class JourneySyncService:
 
             # Fallback 2: query Team table (broader coverage)
             team = Team.query.filter(Team.name == base_name).first()
+            if team:
+                academy_ids.add(team.team_id)
+                continue
+
+            # Fallback 3: TeamProfile name is a substring of base_name
+            # Handles "Tottenham Hotspur" containing "Tottenham", etc.
+            profile = TeamProfile.query.filter(
+                db.func.strpos(base_name, TeamProfile.name) > 0,
+                db.func.length(TeamProfile.name) >= 4,
+            ).order_by(db.func.length(TeamProfile.name).desc()).first()
+            if profile:
+                academy_ids.add(profile.team_id)
+                continue
+
+            # Fallback 4: Team name is a substring of base_name
+            team = Team.query.filter(
+                db.func.strpos(base_name, Team.name) > 0,
+                db.func.length(Team.name) >= 4,
+            ).order_by(db.func.length(Team.name).desc()).first()
             if team:
                 academy_ids.add(team.team_id)
                 continue
