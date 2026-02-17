@@ -16,7 +16,7 @@ import SyncBanner from '@/components/SyncBanner.jsx'
 import { CommentaryManager } from '@/components/CommentaryManager.jsx'
 import { Accordion, AccordionContent, AccordionItem, AccordionTrigger } from '@/components/ui/accordion.jsx'
 import { Alert, AlertDescription } from '@/components/ui/alert.jsx'
-import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from '@/components/ui/dialog.jsx'
+import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle, DialogTrigger } from '@/components/ui/dialog.jsx'
 import { Drawer, DrawerTrigger, DrawerContent, DrawerHeader, DrawerFooter, DrawerTitle, DrawerDescription, DrawerClose } from '@/components/ui/drawer.jsx'
 import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover.jsx'
 import { Avatar, AvatarImage, AvatarFallback } from '@/components/ui/avatar.jsx'
@@ -7342,6 +7342,55 @@ function AuthControls({ isMobile = false, onNavigate }) {
             <Badge variant="default" className="bg-emerald-100 text-emerald-700 border-emerald-200">
               Admin ready
             </Badge>
+          ) : isMobile ? (
+            <Dialog open={apiKeyPopoverOpen} onOpenChange={setApiKeyPopoverOpen}>
+              <DialogTrigger asChild>
+                <Badge
+                  asChild
+                  variant="outline"
+                  className="border-amber-300 text-amber-700 cursor-pointer hover:bg-amber-50"
+                >
+                  <button
+                    type="button"
+                    className="inline-flex items-center gap-1 focus:outline-none"
+                    aria-haspopup="dialog"
+                    aria-expanded={apiKeyPopoverOpen}
+                  >
+                    <KeyRound className="h-3.5 w-3.5" />
+                    API key needed
+                  </button>
+                </Badge>
+              </DialogTrigger>
+              <DialogContent className="max-w-sm space-y-3 sm:max-w-md">
+                <DialogHeader>
+                  <DialogTitle className="text-base">Add admin API key</DialogTitle>
+                  <DialogDescription className="text-xs text-gray-600">
+                    Paste the API key supplied in admin settings to unlock admin tools on this device.
+                  </DialogDescription>
+                </DialogHeader>
+                <form className="space-y-3" onSubmit={handleAdminKeySubmit}>
+                  <div className="space-y-1.5">
+                    <Label htmlFor={`nav-admin-api-key-${isMobile ? 'mobile' : 'desktop'}`} className="text-xs text-gray-500">
+                      API key
+                    </Label>
+                    <Input
+                      id={`nav-admin-api-key-${isMobile ? 'mobile' : 'desktop'}`}
+                      autoComplete="off"
+                      value={apiKeyInput}
+                      onChange={(event) => setApiKeyInput(event.target.value)}
+                      placeholder="sk_live_..."
+                    />
+                  </div>
+                  {apiKeyError && (
+                    <p className="text-xs text-red-600">{apiKeyError}</p>
+                  )}
+                  <Button type="submit" size="sm" className="w-full" disabled={savingApiKey}>
+                    {savingApiKey && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
+                    Save key
+                  </Button>
+                </form>
+              </DialogContent>
+            </Dialog>
           ) : (
             <Popover open={apiKeyPopoverOpen} onOpenChange={setApiKeyPopoverOpen}>
               <PopoverTrigger asChild>
