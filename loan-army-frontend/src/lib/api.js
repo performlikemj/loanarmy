@@ -945,6 +945,51 @@ export class APIService {
         })
     }
 
+    static async applaudCommentary(commentaryId) {
+        if (!commentaryId) throw new Error('commentaryId is required')
+        return this.request(`/commentaries/${encodeURIComponent(commentaryId)}/applaud`, {
+            method: 'POST',
+        })
+    }
+
+    static async listPlayerComments(playerId) {
+        if (!playerId) throw new Error('playerId is required')
+        return this.request(`/players/${encodeURIComponent(playerId)}/comments`)
+    }
+
+    static async createPlayerComment(playerId, body) {
+        if (!playerId) throw new Error('playerId is required')
+        return this.request(`/players/${encodeURIComponent(playerId)}/comments`, {
+            method: 'POST',
+            body: JSON.stringify({ body }),
+        })
+    }
+
+    static async getPlayerLinks(playerId) {
+        if (!playerId) throw new Error('playerId is required')
+        return this.request(`/players/${encodeURIComponent(playerId)}/links`)
+    }
+
+    static async submitPlayerLink(playerId, { url, title, link_type }) {
+        if (!playerId) throw new Error('playerId is required')
+        return this.request(`/players/${encodeURIComponent(playerId)}/links`, {
+            method: 'POST',
+            body: JSON.stringify({ url, title, link_type }),
+        })
+    }
+
+    static async adminGetPendingPlayerLinks(params = {}) {
+        const query = new URLSearchParams(params).toString()
+        return this.request(`/admin/player-links/pending${query ? '?' + query : ''}`, {}, { admin: true })
+    }
+
+    static async adminUpdatePlayerLink(linkId, payload) {
+        return this.request(`/admin/player-links/${linkId}`, {
+            method: 'PUT',
+            body: JSON.stringify(payload),
+        }, { admin: true })
+    }
+
     // Writer Portal API methods
     static async getWriterTeams() {
         return this.request('/writer/teams')

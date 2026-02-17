@@ -9,6 +9,7 @@ import ClapIcon from '@/components/ClapIcon.jsx'
 import { BlockRenderer } from '@/components/BlockRenderer'
 import { cn } from '@/lib/utils'
 import { formatTextToHtml } from '@/lib/formatText'
+import { APIService } from '@/lib/api'
 
 // Color palette for different journalists
 const JOURNALIST_COLORS = [
@@ -56,7 +57,8 @@ export function CommentaryCard({
     try {
       setApplauseCount(prev => prev + 1)
       setHasApplauded(true)
-    } catch (err) {
+      await APIService.applaudCommentary(commentary.id)
+    } catch {
       setApplauseCount(prev => prev - 1)
       setHasApplauded(false)
     } finally {

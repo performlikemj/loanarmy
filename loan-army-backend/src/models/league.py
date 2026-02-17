@@ -1822,6 +1822,65 @@ class RebuildConfig(db.Model):
         return d
 
 
+class PlayerComment(db.Model):
+    """User comments on player pages."""
+    __tablename__ = 'player_comments'
+
+    id = db.Column(db.Integer, primary_key=True)
+    player_id = db.Column(db.Integer, nullable=False)  # API-Football player ID
+    user_id = db.Column(db.Integer, db.ForeignKey('user_accounts.id'), nullable=True)
+    author_email = db.Column(db.String(255), nullable=False)
+    author_name = db.Column(db.String(120))
+    body = db.Column(db.Text, nullable=False)
+    is_deleted = db.Column(db.Boolean, default=False)
+    created_at = db.Column(db.DateTime, default=lambda: datetime.now(timezone.utc))
+    updated_at = db.Column(db.DateTime, default=lambda: datetime.now(timezone.utc), onupdate=lambda: datetime.now(timezone.utc))
+
+    user = db.relationship('UserAccount', backref='player_comments')
+
+    def to_dict(self):
+        display_name = None
+        if self.user and self.user.display_name:
+            display_name = sanitize_plain_text(self.user.display_name)
+        return {
+            'id': self.id,
+            'player_id': self.player_id,
+            'author_name': sanitize_plain_text(self.author_name) if self.author_name else None,
+            'author_display_name': display_name,
+            'body': self.body,
+            'created_at': self.created_at.isoformat() if self.created_at else None,
+        }
+
+
+class PlayerLink(db.Model):
+    """User-submitted links on player pages (articles, highlights, etc.)."""
+    __tablename__ = 'player_links'
+
+    id = db.Column(db.Integer, primary_key=True)
+    player_id = db.Column(db.Integer, nullable=False)  # API-Football player ID
+    user_id = db.Column(db.Integer, db.ForeignKey('user_accounts.id'), nullable=True)
+    url = db.Column(db.String(500), nullable=False)
+    title = db.Column(db.String(200))
+    link_type = db.Column(db.String(30), default='article')  # article | highlight | social | stats | other
+    status = db.Column(db.String(20), default='pending')      # pending | approved | rejected
+    upvotes = db.Column(db.Integer, default=0)
+    created_at = db.Column(db.DateTime, default=lambda: datetime.now(timezone.utc))
+
+    user = db.relationship('UserAccount', backref='player_links')
+
+    def to_dict(self):
+        return {
+            'id': self.id,
+            'player_id': self.player_id,
+            'url': self.url,
+            'title': self.title,
+            'link_type': self.link_type,
+            'status': self.status,
+            'upvotes': self.upvotes,
+            'created_at': self.created_at.isoformat() if self.created_at else None,
+        }
+
+
 class RebuildConfigLog(db.Model):
     """Audit log entry for rebuild configuration changes."""
     __tablename__ = 'rebuild_config_logs'

@@ -1,5 +1,5 @@
 from flask import Blueprint, request, jsonify, make_response, render_template, Response, current_app, g
-from src.models.league import db, League, Team, LoanedPlayer, Newsletter, UserSubscription, EmailToken, LoanFlag, AdminSetting, NewsletterComment, UserAccount, SupplementalLoan, NewsletterPlayerYoutubeLink, NewsletterCommentary, Player, JournalistTeamAssignment, CommentaryApplause, TeamTrackingRequest, StripeSubscription, NewsletterDigestQueue, JournalistSubscription, BackgroundJob, TeamSubreddit, RedditPost, TeamAlias, ManualPlayerSubmission, CommunityTake, AcademyAppearance, _as_utc, _dedupe_loans
+from src.models.league import db, League, Team, LoanedPlayer, Newsletter, UserSubscription, EmailToken, LoanFlag, AdminSetting, NewsletterComment, UserAccount, SupplementalLoan, NewsletterPlayerYoutubeLink, NewsletterCommentary, Player, JournalistTeamAssignment, CommentaryApplause, TeamTrackingRequest, StripeSubscription, NewsletterDigestQueue, JournalistSubscription, BackgroundJob, TeamSubreddit, RedditPost, TeamAlias, ManualPlayerSubmission, CommunityTake, AcademyAppearance, PlayerComment, PlayerLink, _as_utc, _dedupe_loans
 from src.models.sponsor import Sponsor
 from src.api_football_client import APIFootballClient
 from src.admin.sandbox_tasks import (
@@ -2646,6 +2646,141 @@ def create_newsletter_comment(newsletter_id: int):
         except Exception:
             pass
         return jsonify(_safe_error_payload(e, 'An unexpected error occurred. Please try again later.')), 500
+
+
+# ===== Player Comments =====
+
+@api_bp.route('/players/<int:player_id>/comments', methods=['GET'])
+def list_player_comments(player_id: int):
+    try:
+        rows = PlayerComment.query\
+            .filter_by(player_id=player_id, is_deleted=False)\
+            .order_by(PlayerComment.created_at.asc())\
+            .all()
+        return jsonify([r.to_dict() for r in rows])
+    except Exception as e:
+        return jsonify(_safe_error_payload(e, 'An unexpected error occurred. Please try again later.')), 500
+
+@api_bp.route('/players/<int:player_id>/comments', methods=['POST'])
+@require_user_auth
+@limiter.limit("8 per minute", key_func=_user_rate_limit_key)
+def create_player_comment(player_id: int):
+    try:
+        payload = request.get_json() or {}
+        raw_body = (payload.get('body') or '').strip()
+        if not raw_body:
+            return jsonify({'error': 'body is required'}), 400
+        body = sanitize_comment_body(raw_body)
+        if not body:
+            return jsonify({'error': 'body is required'}), 400
+        user_email = getattr(g, 'user_email', None)
+        if not user_email:
+            return jsonify({'error': 'auth context missing email'}), 401
+        user = UserAccount.query.filter_by(email=user_email).first()
+        if not user:
+            user = _ensure_user_account(user_email)
+        c = PlayerComment(
+            player_id=player_id,
+            user_id=user.id if user else None,
+            author_email=user_email,
+            author_name=user.display_name if user else None,
+            body=body,
+        )
+        db.session.add(c)
+        db.session.commit()
+        return jsonify({'message': 'Comment created', 'comment': c.to_dict()}), 201
+    except Exception as e:
+        try:
+            db.session.rollback()
+        except Exception:
+            pass
+        return jsonify(_safe_error_payload(e, 'An unexpected error occurred. Please try again later.')), 500
+
+
+# ===== Player Links =====
+
+@api_bp.route('/players/<int:player_id>/links', methods=['GET'])
+def list_player_links(player_id: int):
+    try:
+        rows = PlayerLink.query\
+            .filter_by(player_id=player_id, status='approved')\
+            .order_by(PlayerLink.upvotes.desc(), PlayerLink.created_at.desc())\
+            .all()
+        return jsonify([r.to_dict() for r in rows])
+    except Exception as e:
+        return jsonify(_safe_error_payload(e, 'Failed to fetch player links')), 500
+
+@api_bp.route('/players/<int:player_id>/links', methods=['POST'])
+@require_user_auth
+@limiter.limit("5 per minute", key_func=_user_rate_limit_key)
+def submit_player_link(player_id: int):
+    try:
+        payload = request.get_json() or {}
+        raw_url = (payload.get('url') or '').strip()
+        if not raw_url:
+            return jsonify({'error': 'url is required'}), 400
+        if len(raw_url) > 500:
+            return jsonify({'error': 'url is too long'}), 400
+        raw_title = (payload.get('title') or '').strip()
+        title = sanitize_plain_text(raw_title)[:200] if raw_title else None
+        link_type = (payload.get('link_type') or 'article').strip()
+        if link_type not in ('article', 'highlight', 'social', 'stats', 'other'):
+            link_type = 'other'
+        user_email = getattr(g, 'user_email', None)
+        if not user_email:
+            return jsonify({'error': 'auth context missing email'}), 401
+        user = UserAccount.query.filter_by(email=user_email).first()
+        if not user:
+            user = _ensure_user_account(user_email)
+        link = PlayerLink(
+            player_id=player_id,
+            user_id=user.id if user else None,
+            url=raw_url,
+            title=title,
+            link_type=link_type,
+            status='pending',
+        )
+        db.session.add(link)
+        db.session.commit()
+        return jsonify({'message': 'Link submitted for review', 'link': link.to_dict()}), 201
+    except Exception as e:
+        try:
+            db.session.rollback()
+        except Exception:
+            pass
+        return jsonify(_safe_error_payload(e, 'Failed to submit link')), 500
+
+@api_bp.route('/admin/player-links/pending', methods=['GET'])
+@require_api_key
+def admin_list_pending_player_links():
+    try:
+        rows = PlayerLink.query\
+            .filter_by(status='pending')\
+            .order_by(PlayerLink.created_at.asc())\
+            .all()
+        return jsonify([r.to_dict() for r in rows])
+    except Exception as e:
+        return jsonify(_safe_error_payload(e, 'Failed to fetch pending links')), 500
+
+@api_bp.route('/admin/player-links/<int:link_id>', methods=['PUT'])
+@require_api_key
+def admin_update_player_link(link_id: int):
+    try:
+        link = PlayerLink.query.get_or_404(link_id)
+        payload = request.get_json() or {}
+        new_status = payload.get('status')
+        if new_status not in ('approved', 'rejected'):
+            return jsonify({'error': 'status must be approved or rejected'}), 400
+        link.status = new_status
+        db.session.commit()
+        return jsonify({'message': f'Link {new_status}', 'link': link.to_dict()})
+    except Exception as e:
+        try:
+            db.session.rollback()
+        except Exception:
+            pass
+        return jsonify(_safe_error_payload(e, 'Failed to update link')), 500
+
 
 @api_bp.route('/newsletters/generate', methods=['POST'])
 def generate_newsletter():
@@ -14026,6 +14161,8 @@ def _seed_single_team(team, max_age=30, sync_journeys=True, years=4, season=None
         from src.models.cohort import AcademyCohort, CohortMember
         cohort_ids = [c.id for c in AcademyCohort.query.filter_by(
             team_api_id=parent_api_id
+        ).filter(
+            AcademyCohort.sync_status != 'duplicate'
         ).all()]
         if cohort_ids:
             cohort_members = CohortMember.query.filter(
@@ -14036,7 +14173,8 @@ def _seed_single_team(team, max_age=30, sync_journeys=True, years=4, season=None
                     journey = PlayerJourney.query.filter_by(
                         player_api_id=cm.player_api_id
                     ).first()
-                    candidate_ids[cm.player_api_id] = journey
+                    if journey and parent_api_id in (journey.academy_club_ids or []):
+                        candidate_ids[cm.player_api_id] = journey
             logger.info(
                 'seed_tracked_players: %d cohort members across %d cohorts for api_id=%s',
                 len(cohort_members), len(cohort_ids), parent_api_id,

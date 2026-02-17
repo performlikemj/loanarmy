@@ -34,6 +34,8 @@ import PlayerJourneyView from '@/components/PlayerJourneyView'
 import { JourneyProvider, useJourney } from '@/contexts/JourneyContext'
 import { MiniProgressBar } from '@/components/MiniProgressBar'
 import { SeasonStatsPanel } from '@/components/SeasonStatsPanel'
+import { CommentSection } from '@/components/CommentSection'
+import { PlayerLinksSection } from '@/components/PlayerLinksSection'
 
 /** Dims children when viewing a past career stop so SeasonStatsPanel takes focus. */
 function JourneyDimmer({ children, className = '' }) {
@@ -866,7 +868,7 @@ export function PlayerPage() {
                                         <h3 className="text-sm font-medium text-gray-700 mb-3">Writers covering this player</h3>
                                         <div className="flex flex-wrap gap-3">
                                             {commentaries.authors.map((author) => (
-                                                <Link 
+                                                <Link
                                                     key={author.id}
                                                     to={`/journalists/${author.id}`}
                                                     className="flex items-center gap-2 px-3 py-2 bg-gray-50 hover:bg-gray-100 rounded-lg transition-colors group"
@@ -896,7 +898,7 @@ export function PlayerPage() {
                                         <h3 className="text-sm font-medium text-gray-700 mb-3">Recent writeups</h3>
                                         <div className="space-y-3">
                                             {commentaries.commentaries.slice(0, 5).map((commentary) => (
-                                                <Link 
+                                                <Link
                                                     key={commentary.id}
                                                     to={`/writeups/${commentary.id}`}
                                                     className="block p-4 bg-gray-50 hover:bg-gray-100 rounded-lg transition-colors group"
@@ -955,6 +957,12 @@ export function PlayerPage() {
                                 </CardContent>
                             </Card>
                         )}
+
+                        {/* Player Discussion */}
+                        <CommentSection playerId={parseInt(playerId)} title="Discussion" />
+
+                        {/* Player Links */}
+                        <PlayerLinksSection playerId={parseInt(playerId)} />
                         </div>
                     )}
                     </div>

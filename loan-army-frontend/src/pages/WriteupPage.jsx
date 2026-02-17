@@ -14,6 +14,7 @@ import { cn } from '@/lib/utils'
 import ClapIcon from '@/components/ClapIcon.jsx'
 import { BlockRenderer } from '@/components/BlockRenderer'
 import { formatTextToHtml } from '@/lib/formatText'
+import { CommentSection } from '@/components/CommentSection'
 
 // Stat display helper
 function StatItem({ icon: Icon, label, value, highlight = false }) {
@@ -274,10 +275,16 @@ export function WriteupPage() {
     return () => { cancelled = true }
   }, [commentaryId])
 
-  const handleApplause = () => {
+  const handleApplause = async () => {
     if (hasApplauded) return
     setApplauseCount(prev => prev + 1)
     setHasApplauded(true)
+    try {
+      await APIService.applaudCommentary(commentaryId)
+    } catch {
+      setApplauseCount(prev => prev - 1)
+      setHasApplauded(false)
+    }
   }
 
   if (loading) {
@@ -570,6 +577,11 @@ export function WriteupPage() {
               </Button>
             </CardContent>
           </Card>
+        )}
+
+        {/* Comment Section */}
+        {data.newsletter_id && (
+          <CommentSection newsletterId={data.newsletter_id} />
         )}
       </div>
     </div>
