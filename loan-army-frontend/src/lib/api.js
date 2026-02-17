@@ -1503,6 +1503,50 @@ export class APIService {
         }, { admin: true })
     }
 
+    // --- Player Comments & Videos ---
+
+    static async getPlayerComments(playerApiId, { sort = 'newest', limit = 20, offset = 0 } = {}) {
+        return this.request(`/players/${playerApiId}/comments?sort=${sort}&limit=${limit}&offset=${offset}`)
+    }
+
+    static async postPlayerComment(playerApiId, content) {
+        return this.request(`/players/${playerApiId}/comments`, {
+            method: 'POST',
+            body: JSON.stringify({ content })
+        })
+    }
+
+    static async voteOnComment(commentId, vote) {
+        return this.request(`/players/comments/${commentId}/vote`, {
+            method: 'POST',
+            body: JSON.stringify({ vote })
+        })
+    }
+
+    static async deleteComment(commentId) {
+        return this.request(`/players/comments/${commentId}`, {
+            method: 'DELETE'
+        })
+    }
+
+    static async getPlayerVideos(playerApiId) {
+        return this.request(`/players/${playerApiId}/videos`)
+    }
+
+    static async submitPlayerVideo(playerApiId, youtubeUrl, title = null) {
+        return this.request(`/players/${playerApiId}/videos`, {
+            method: 'POST',
+            body: JSON.stringify({ youtube_url: youtubeUrl, title })
+        })
+    }
+
+    static async voteOnVideo(videoId, vote) {
+        return this.request(`/players/videos/${videoId}/vote`, {
+            method: 'POST',
+            body: JSON.stringify({ vote })
+        })
+    }
+
     // --- Chat Agent ---
 
     static async createChatSession(options = {}) {

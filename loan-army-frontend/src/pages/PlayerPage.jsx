@@ -24,7 +24,7 @@ import {
     ResponsiveContainer,
     ReferenceLine,
 } from 'recharts'
-import { Loader2, ArrowLeft, User, TrendingUp, Calendar, Target, PenTool, ChevronRight, Users, Info, ExternalLink, MapPin } from 'lucide-react'
+import { Loader2, ArrowLeft, User, TrendingUp, Calendar, Target, PenTool, ChevronRight, Users, Info, ExternalLink, MapPin, MessageCircle, Video } from 'lucide-react'
 import { APIService } from '@/lib/api'
 import { format } from 'date-fns'
 import { Avatar, AvatarFallback, AvatarImage } from '@/components/ui/avatar'
@@ -33,6 +33,8 @@ import { Tooltip as UITooltip, TooltipContent, TooltipTrigger } from '@/componen
 import { MatchDetailDrawer } from '@/components/MatchDetailDrawer'
 import { JourneyMap } from '@/components/JourneyMap'
 import { JourneyTimeline } from '@/components/JourneyTimeline'
+import { PlayerComments } from '@/components/PlayerComments'
+import { PlayerVideoGallery } from '@/components/PlayerVideoGallery'
 
 const METRIC_CONFIG = {
     'Attacker': {
@@ -719,6 +721,14 @@ export function PlayerPage() {
                                                 <MapPin className="h-4 w-4 mr-1" />
                                                 Journey
                                             </TabsTrigger>
+                                            <TabsTrigger value="comments">
+                                                <MessageCircle className="h-4 w-4 mr-1" />
+                                                Comments
+                                            </TabsTrigger>
+                                            <TabsTrigger value="videos">
+                                                <Video className="h-4 w-4 mr-1" />
+                                                Videos
+                                            </TabsTrigger>
                                         </TabsList>
                                     </div>
                                 </CardHeader>
@@ -942,6 +952,14 @@ export function PlayerPage() {
                                                 />
                                             )}
                                         </div>
+                                    </TabsContent>
+
+                                    <TabsContent value="comments" className="mt-0">
+                                        <PlayerComments playerApiId={profile?.player_api_id || playerId} />
+                                    </TabsContent>
+
+                                    <TabsContent value="videos" className="mt-0">
+                                        <PlayerVideoGallery playerApiId={profile?.player_api_id || playerId} />
                                     </TabsContent>
                                 </CardContent>
                             </Tabs>
