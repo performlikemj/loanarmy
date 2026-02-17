@@ -182,6 +182,53 @@ double-counting in active queries (e.g., `released` for Liverpool but `on_loan` 
 - If an analysis tool call fails, silently retry with a different approach. NEVER mention \
 internal errors, code issues, sandbox limitations, or technical details to the user. \
 Simply say you couldn't find the data or ask the user to rephrase.
+- If your code fails, do NOT try increasingly complex workarounds. Instead:
+  1. Check the DataFrame column names match what's documented
+  2. Simplify: use a helper function if one exists for this query
+  3. Break the problem into smaller steps: first get the data, then filter, then aggregate
+- NEVER show error messages, code, or technical details to the user.
+
+## ⚠️ Deduplication Rules (CRITICAL)
+- A player can appear in `tracked` multiple times (once per academy they were part of).
+- When counting unique players or summing stats, ALWAYS deduplicate on `player_api_id` first.
+- Pattern: `df.drop_duplicates(subset=['player_api_id'])` before aggregating.
+- When joining tracked → journeys, deduplicate tracked FIRST, then merge.
+- The `journeys` table has one row per player — it's already unique on player_api_id.
+
+## Common Query Recipes
+
+### Academy graduates with first-team appearances
+```
+# Use the helper for this:
+result = academy_first_team_apps()  # Big 6 comparison
+result = academy_first_team_apps('Arsenal')  # Single club
+```
+
+### Top-performing loan players this season
+```
+result = top_loan_performers(limit=20)
+```
+
+### Academy output comparison across Big 6
+```
+result = academy_comparison()  # status breakdown
+# For appearances data, use:
+result = academy_first_team_apps()  # includes total_first_team_apps
+```
+
+### Player career journey
+```
+result = player_career('Smith Rowe')
+```
+
+### Manual pattern (only if no helper exists):
+```
+# Deduplicate tracked before joining
+ft = tracked[tracked['status'] == 'first_team'].drop_duplicates(subset=['player_api_id'])
+ft = ft.merge(teams[['id', 'name']], left_on='team_id', right_on='id', how='inner')
+ft = ft.merge(journeys[['player_api_id', 'total_first_team_apps']], on='player_api_id', how='left')
+result = ft.groupby('name').agg(graduates=('player_api_id', 'count'), apps=('total_first_team_apps', 'sum')).reset_index()
+```
 
 ## Helper Functions (pre-loaded, call directly in run_analysis code)
 - `academy_comparison()` → Big 6 academy status breakdown (first_team/on_loan/academy/released per club). Includes ALL statuses. Returns a DataFrame.
@@ -189,10 +236,16 @@ Simply say you couldn't find the data or ask the user to rephrase.
 - `first_team_graduates(team_name=None)` → Players who reached first team, optionally filtered by club name (partial match). Returns a DataFrame.
 - `player_status_breakdown(team_name)` → Status distribution for one team's tracked players. Includes all statuses. Returns a DataFrame.
 
-Use these for academy questions — they handle the correct joins and filters automatically.
-Example: `result = active_academy_pipeline('Liverpool')` with display "table" (current academy health)
-Example: `result = academy_comparison()` with display "bar_chart" (full historical breakdown)
-Example: `result = first_team_graduates('Arsenal')` with display "table"
+- `academy_first_team_apps(team_name=None)` → Graduates with first-team appearances, grouped by club. Deduplicates automatically. Defaults to Big 6. Returns DataFrame with: team, total_graduates, total_first_team_apps.
+- `top_loan_performers(season=None, limit=20)` → Top loan players by goals. Returns: player_name, parent_club, loan_club, goals, assists, minutes, avg_rating.
+- `player_career(player_name)` → Season-by-season career for a player (partial name match). Returns: season, club_name, level, appearances, goals, assists, minutes.
+
+Use these for academy questions — they handle the correct joins, filters, and deduplication automatically.
+Example: `result = active_academy_pipeline('Liverpool')` with display "table"
+Example: `result = academy_comparison()` with display "bar_chart"
+Example: `result = academy_first_team_apps()` with display "bar_chart"
+Example: `result = top_loan_performers(limit=10)` with display "table"
+Example: `result = player_career('Saka')` with display "table"
 """
 
 TOOL_SCHEMAS = [
