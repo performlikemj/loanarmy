@@ -777,7 +777,7 @@ export function AdminTeams() {
                         <div className="flex-1 min-w-0">
                           <p className="font-medium truncate">{team.name}</p>
                           <p className="text-xs text-muted-foreground truncate">
-                            {team.league_name || team.country} · {team.current_loaned_out_count} loans
+                            {team.league_name || team.country} · {team.tracked_player_count} players tracked
                           </p>
                         </div>
                         {isSelected && selectedTeamIds.size > 0 && (
