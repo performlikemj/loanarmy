@@ -3531,7 +3531,7 @@ function AdminPage({ defaultTab = 'newsletters', includeSandbox = true, forcedTa
                 </div>
               ) : (
                 <form
-                  className="space-y-3"
+                  className="space-y-4"
                   onSubmit={async (event) => {
                     event.preventDefault()
                     await saveKey()
@@ -3541,22 +3541,26 @@ function AdminPage({ defaultTab = 'newsletters', includeSandbox = true, forcedTa
                     <Label htmlFor="admin-key-input" className="text-sm font-medium">Admin API key</Label>
                     <Input
                       id="admin-key-input"
+                      className="h-11 font-mono"
                       type={showKeyValue ? 'text' : 'password'}
                       value={adminKeyInput}
                       onChange={(e) => setAdminKeyInput(e.target.value)}
                       placeholder="Paste the admin API key"
                       autoComplete="off"
+                      autoCapitalize="none"
+                      autoCorrect="off"
+                      spellCheck="false"
                     />
                   </div>
-                  <div className="flex flex-wrap items-center gap-2">
-                    <Button type="submit" size="sm" disabled={validatingKey}>
-                      {validatingKey ? 'Validating…' : 'Save key'}
+                  <div className="flex flex-wrap items-center gap-3">
+                    <Button type="submit" className="h-11 px-6" disabled={validatingKey}>
+                      {validatingKey ? 'Validating\u2026' : 'Save key'}
                     </Button>
                     {hasStoredKey && (
                       <Button
                         type="button"
-                        size="sm"
                         variant="ghost"
+                        className="h-11"
                         onClick={() => {
                           setEditingKey(false)
                           setAdminKeyInput('')
@@ -3566,7 +3570,7 @@ function AdminPage({ defaultTab = 'newsletters', includeSandbox = true, forcedTa
                         Cancel
                       </Button>
                     )}
-                    <Button type="button" size="sm" variant="ghost" onClick={() => setShowKeyValue(v => !v)}>
+                    <Button type="button" variant="ghost" className="h-11" onClick={() => setShowKeyValue(v => !v)}>
                       {showKeyValue ? 'Hide' : 'Show'}
                     </Button>
                   </div>
@@ -7352,7 +7356,7 @@ function AuthControls({ isMobile = false, onNavigate }) {
                 >
                   <button
                     type="button"
-                    className="inline-flex items-center gap-1 focus:outline-none"
+                    className="inline-flex items-center gap-1"
                     aria-haspopup="dialog"
                     aria-expanded={apiKeyPopoverOpen}
                   >
@@ -7361,30 +7365,34 @@ function AuthControls({ isMobile = false, onNavigate }) {
                   </button>
                 </Badge>
               </DialogTrigger>
-              <DialogContent className="max-w-sm space-y-3 sm:max-w-md">
+              <DialogContent className="max-w-[calc(100vw-2rem)] sm:max-w-md">
                 <DialogHeader>
-                  <DialogTitle className="text-base">Add admin API key</DialogTitle>
-                  <DialogDescription className="text-xs text-muted-foreground">
-                    Paste the API key supplied in admin settings to unlock admin tools on this device.
+                  <DialogTitle className="text-lg">Add admin API key</DialogTitle>
+                  <DialogDescription className="text-sm text-muted-foreground">
+                    Paste the API key from admin settings to unlock admin tools on this device.
                   </DialogDescription>
                 </DialogHeader>
-                <form className="space-y-3" onSubmit={handleAdminKeySubmit}>
-                  <div className="space-y-1.5">
-                    <Label htmlFor={`nav-admin-api-key-${isMobile ? 'mobile' : 'desktop'}`} className="text-xs text-muted-foreground">
+                <form className="space-y-4" onSubmit={handleAdminKeySubmit}>
+                  <div className="space-y-2">
+                    <Label htmlFor="nav-admin-api-key-mobile" className="text-sm font-medium">
                       API key
                     </Label>
                     <Input
-                      id={`nav-admin-api-key-${isMobile ? 'mobile' : 'desktop'}`}
+                      id="nav-admin-api-key-mobile"
+                      className="h-12 text-base font-mono"
                       autoComplete="off"
+                      autoCapitalize="none"
+                      autoCorrect="off"
+                      spellCheck="false"
                       value={apiKeyInput}
                       onChange={(event) => setApiKeyInput(event.target.value)}
                       placeholder="sk_live_..."
                     />
                   </div>
                   {apiKeyError && (
-                    <p className="text-xs text-rose-600">{apiKeyError}</p>
+                    <p className="text-sm text-rose-600">{apiKeyError}</p>
                   )}
-                  <Button type="submit" size="sm" className="w-full" disabled={savingApiKey}>
+                  <Button type="submit" className="h-12 w-full text-base" disabled={savingApiKey}>
                     {savingApiKey && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
                     Save key
                   </Button>
@@ -7401,7 +7409,7 @@ function AuthControls({ isMobile = false, onNavigate }) {
                 >
                   <button
                     type="button"
-                    className="inline-flex items-center gap-1 focus:outline-none"
+                    className="inline-flex items-center gap-1"
                     aria-haspopup="dialog"
                     aria-expanded={apiKeyPopoverOpen}
                   >
@@ -7410,30 +7418,34 @@ function AuthControls({ isMobile = false, onNavigate }) {
                   </button>
                 </Badge>
               </PopoverTrigger>
-              <PopoverContent align="end" className="w-72 space-y-3">
+              <PopoverContent align="end" className="w-80 space-y-3">
                 <div className="space-y-1">
                   <p className="text-sm font-semibold text-foreground">Add admin API key</p>
-                  <p className="text-xs text-muted-foreground">
-                    Paste the API key supplied in admin settings to unlock admin tools on this device.
+                  <p className="text-sm text-muted-foreground">
+                    Paste the API key from admin settings to unlock admin tools on this device.
                   </p>
                 </div>
                 <form className="space-y-3" onSubmit={handleAdminKeySubmit}>
-                  <div className="space-y-1.5">
-                    <Label htmlFor={`nav-admin-api-key-${isMobile ? 'mobile' : 'desktop'}`} className="text-xs text-muted-foreground">
+                  <div className="space-y-2">
+                    <Label htmlFor="nav-admin-api-key-desktop" className="text-sm font-medium">
                       API key
                     </Label>
                     <Input
-                      id={`nav-admin-api-key-${isMobile ? 'mobile' : 'desktop'}`}
+                      id="nav-admin-api-key-desktop"
+                      className="h-10 font-mono"
                       autoComplete="off"
+                      autoCapitalize="none"
+                      autoCorrect="off"
+                      spellCheck="false"
                       value={apiKeyInput}
                       onChange={(event) => setApiKeyInput(event.target.value)}
                       placeholder="sk_live_..."
                     />
                   </div>
                   {apiKeyError && (
-                    <p className="text-xs text-rose-600">{apiKeyError}</p>
+                    <p className="text-sm text-rose-600">{apiKeyError}</p>
                   )}
-                  <Button type="submit" size="sm" className="w-full" disabled={savingApiKey}>
+                  <Button type="submit" className="h-10 w-full" disabled={savingApiKey}>
                     {savingApiKey && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
                     Save key
                   </Button>

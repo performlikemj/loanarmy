@@ -111,84 +111,98 @@ export function AuthModal() {
 
     return (
         <Dialog open={isLoginModalOpen} onOpenChange={(open) => { if (!open) closeLoginModal() }}>
-            <DialogContent className="sm:max-w-md">
+            <DialogContent className="max-w-[calc(100vw-2rem)] sm:max-w-md">
                 <DialogHeader>
-                    <DialogTitle>{auth.token ? 'Account' : 'Sign in to The Academy Watch'}</DialogTitle>
-                    <DialogDescription>
+                    <DialogTitle className="text-lg">{auth.token ? 'Account' : 'Sign in to The Academy Watch'}</DialogTitle>
+                    <DialogDescription className="text-sm">
                         {auth.token
                             ? 'Update your display name or sign out of your session.'
-                            : 'We’ll email you a one-time code to finish signing in.'}
+                            : 'We\u2019ll email you a one-time code to finish signing in.'}
                     </DialogDescription>
                 </DialogHeader>
 
                 {auth.token ? (
-                    <div className="space-y-4">
-                        <div className="rounded-md border bg-muted/40 p-3 text-sm">
+                    <div className="space-y-5">
+                        <div className="rounded-lg border bg-muted/40 p-4 text-sm">
                             <div className="font-medium text-foreground">Signed in as {auth.displayName || 'GOL supporter'}</div>
                             {auth.isAdmin && (
-                                <div className="text-xs text-muted-foreground mt-1">
+                                <div className="text-sm text-muted-foreground mt-1">
                                     Admin access: {auth.hasApiKey ? 'ready' : 'missing API key'}
                                 </div>
                             )}
                         </div>
-                        <form className="space-y-2" onSubmit={handleDisplayNameSave}>
-                            <Label htmlFor="display-name">Display name</Label>
-                            <Input
-                                id="display-name"
-                                value={displayNameInput}
-                                onChange={(e) => setDisplayNameInput(e.target.value)}
-                                maxLength={40}
-                                placeholder="Your public name"
-                            />
+                        <form className="space-y-4" onSubmit={handleDisplayNameSave}>
+                            <div className="space-y-2">
+                                <Label htmlFor="display-name" className="text-sm font-medium">Display name</Label>
+                                <Input
+                                    id="display-name"
+                                    className="h-11"
+                                    value={displayNameInput}
+                                    onChange={(e) => setDisplayNameInput(e.target.value)}
+                                    maxLength={40}
+                                    placeholder="Your public name"
+                                    autoComplete="nickname"
+                                    autoCapitalize="words"
+                                />
+                            </div>
                             {displayNameStatus && (
-                                <p className={`text-xs ${displayNameStatus.type === 'error' ? 'text-red-600' : 'text-emerald-600'}`}>
+                                <p className={`text-sm ${displayNameStatus.type === 'error' ? 'text-red-600' : 'text-emerald-600'}`}>
                                     {displayNameStatus.message}
                                 </p>
                             )}
-                            <div className="flex items-center gap-2">
-                                <Button size="sm" type="submit" disabled={displayNameBusy}>
+                            <div className="flex items-center gap-3">
+                                <Button type="submit" disabled={displayNameBusy} className="h-11 px-6">
                                     {displayNameBusy && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}Save
                                 </Button>
-                                <Button size="sm" variant="ghost" type="button" onClick={() => setDisplayNameInput(auth.displayName || '')}>
+                                <Button variant="ghost" type="button" className="h-11" onClick={() => setDisplayNameInput(auth.displayName || '')}>
                                     Reset
                                 </Button>
                             </div>
                         </form>
                     </div>
                 ) : (
-                    <div className="space-y-4">
-                        <form className="space-y-3" onSubmit={handleRequest}>
+                    <div className="space-y-5">
+                        <form className="space-y-4" onSubmit={handleRequest}>
                             <div className="space-y-2">
-                                <Label htmlFor="login-email">Email</Label>
+                                <Label htmlFor="login-email" className="text-sm font-medium">Email</Label>
                                 <Input
                                     id="login-email"
+                                    className="h-12 text-base"
                                     type="email"
                                     autoComplete="email"
+                                    inputMode="email"
+                                    spellCheck="false"
+                                    autoCapitalize="none"
                                     value={email}
                                     onChange={(e) => setEmail(e.target.value)}
                                     placeholder="you@example.com"
                                     required
                                 />
                             </div>
-                            <Button type="submit" disabled={busy} className="w-full">
+                            <Button type="submit" disabled={busy} className="h-12 w-full text-base">
                                 {busy && !requestSent ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : null}
                                 Send login code
                             </Button>
                         </form>
 
                         {requestSent && (
-                            <form className="space-y-3" onSubmit={handleVerify}>
+                            <form className="space-y-4" onSubmit={handleVerify}>
                                 <div className="space-y-2">
-                                    <Label htmlFor="login-code">Verification code</Label>
+                                    <Label htmlFor="login-code" className="text-sm font-medium">Verification code</Label>
                                     <Input
                                         id="login-code"
+                                        className="h-12 text-base tracking-wide font-mono"
                                         value={code}
                                         onChange={(e) => setCode(e.target.value)}
                                         placeholder="Enter the 11-character code"
                                         autoComplete="one-time-code"
+                                        inputMode="text"
+                                        spellCheck="false"
+                                        autoCapitalize="none"
+                                        autoCorrect="off"
                                     />
                                 </div>
-                                <Button type="submit" disabled={busy} className="w-full">
+                                <Button type="submit" disabled={busy} className="h-12 w-full text-base">
                                     {busy ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : null}
                                     Verify & sign in
                                 </Button>
@@ -196,25 +210,25 @@ export function AuthModal() {
                         )}
 
                         {status && (
-                            <Alert className={`border ${status.type === 'error' ? 'border-red-200 bg-red-50 text-red-700' : 'border-emerald-200 bg-emerald-50 text-emerald-700'}`}>
+                            <Alert className={`border ${status.type === 'error' ? 'border-red-200 bg-red-50 text-red-700 dark:border-red-800 dark:bg-red-950/50 dark:text-red-400' : 'border-emerald-200 bg-emerald-50 text-emerald-700 dark:border-emerald-800 dark:bg-emerald-950/50 dark:text-emerald-400'}`}>
                                 {status.type === 'error' ? <AlertCircle className="h-4 w-4" /> : <CheckCircle className="h-4 w-4" />}
-                                <AlertDescription>{status.message}</AlertDescription>
+                                <AlertDescription className="text-sm">{status.message}</AlertDescription>
                             </Alert>
                         )}
                     </div>
                 )}
 
-                <DialogFooter className="flex items-center justify-between">
+                <DialogFooter className="flex-col-reverse gap-2 sm:flex-row sm:justify-between">
                     {auth.token ? (
-                        <Button variant="ghost" onClick={() => { logout(); closeLoginModal() }}>
+                        <Button variant="ghost" className="h-11 w-full sm:w-auto" onClick={() => { logout(); closeLoginModal() }}>
                             <LogOut className="mr-2 h-4 w-4" /> Log out
                         </Button>
                     ) : requestSent ? (
-                        <Button variant="ghost" onClick={() => { setRequestSent(false); setCode(''); setStatus(null) }}>
+                        <Button variant="ghost" className="h-11 w-full sm:w-auto" onClick={() => { setRequestSent(false); setCode(''); setStatus(null) }}>
                             Back
                         </Button>
-                    ) : <span />}
-                    <Button variant="outline" onClick={closeLoginModal}>Close</Button>
+                    ) : <span className="hidden sm:block" />}
+                    <Button variant="outline" className="h-11 w-full sm:w-auto" onClick={closeLoginModal}>Close</Button>
                 </DialogFooter>
             </DialogContent>
         </Dialog>
