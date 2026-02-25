@@ -1307,6 +1307,7 @@ def _build_player_report_item(loanee: dict, hits: list[dict[str, Any]], *, week_
         "links": links,
         "source": loanee.get("source"),
         "upcoming_fixtures": list(loanee.get("upcoming_fixtures") or []),
+        "loan_league_name": loanee.get("loan_league_name"),
     }
     if isinstance(matches, list):
         formatted_notes: list[str] = []
@@ -1409,6 +1410,104 @@ def _compose_team_summary_from_player_items(team_name: str, week_range: list[str
         },
     )
     return summary_text
+
+
+POSITION_STAT_KEYS = {
+    'Forward': ['goals', 'assists', 'shots_total', 'dribbles_success', 'rating'],
+    'Midfielder': ['goals', 'assists', 'passes_key', 'tackles_total', 'rating'],
+    'Defender': ['tackles_total', 'tackles_interceptions', 'duels_won', 'passes_total', 'rating'],
+    'Goalkeeper': ['saves', 'goals_conceded', 'passes_total', 'rating'],
+}
+
+
+def _generate_player_charts(player_api_id: int, player_name: str,
+                            week_start, week_end) -> dict:
+    """Generate platform data charts for a player's newsletter section.
+
+    Returns a dict of chart file URLs (``/static/charts/...``) keyed by chart
+    type.  All errors are swallowed so chart generation never blocks the
+    newsletter pipeline.
+    """
+    try:
+        from src.routes.journalist import (
+            _fetch_chart_data_for_rendering,
+            _get_primary_position,
+            _categorize_position,
+        )
+        from src.services.chart_renderer import save_chart_to_file
+    except Exception:
+        return {}
+
+    if not player_api_id:
+        return {}
+
+    ts = int(datetime.now(timezone.utc).timestamp())
+    charts: dict[str, str] = {}
+
+    # Helper: determine position-appropriate stat keys from season data
+    position_category = 'Midfielder'  # default
+    try:
+        season_data = _fetch_chart_data_for_rendering(
+            player_api_id, 'stat_table', ['rating'], 'season')
+        if season_data and season_data.get('data'):
+            pos = _get_primary_position([
+                {'stats': row} for row in season_data['data']
+            ])
+            position_category = _categorize_position(pos)
+    except Exception:
+        pass
+
+    stat_keys = POSITION_STAT_KEYS.get(position_category, POSITION_STAT_KEYS['Midfielder'])
+    ws = week_start.isoformat() if hasattr(week_start, 'isoformat') else str(week_start)
+    we = week_end.isoformat() if hasattr(week_end, 'isoformat') else str(week_end)
+
+    # 1. Radar chart (season-level)
+    try:
+        radar_data = _fetch_chart_data_for_rendering(
+            player_api_id, 'radar', stat_keys, 'season')
+        if radar_data and radar_data.get('data'):
+            fname = f"{player_api_id}_radar_{ts}"
+            path = save_chart_to_file('radar', radar_data, fname, width=400, height=400)
+            charts['radar_chart_url'] = '/static/charts/' + os.path.basename(path)
+    except Exception:
+        pass
+
+    # 2. Stat table (week data)
+    try:
+        table_data = _fetch_chart_data_for_rendering(
+            player_api_id, 'stat_table', stat_keys, 'week',
+            week_start=ws, week_end=we)
+        if table_data and table_data.get('data'):
+            fname = f"{player_api_id}_stat_table_{ts}"
+            path = save_chart_to_file('stat_table', table_data, fname, width=500, height=250)
+            charts['stat_table_url'] = '/static/charts/' + os.path.basename(path)
+    except Exception:
+        pass
+
+    # 3. Season trend line (rating)
+    try:
+        trend_data = _fetch_chart_data_for_rendering(
+            player_api_id, 'line', ['rating'], 'season')
+        if trend_data and trend_data.get('data'):
+            fname = f"{player_api_id}_trend_{ts}"
+            path = save_chart_to_file('line', trend_data, fname, width=500, height=300)
+            charts['trend_chart_url'] = '/static/charts/' + os.path.basename(path)
+    except Exception:
+        pass
+
+    # 4. Match performance card (week data)
+    try:
+        card_data = _fetch_chart_data_for_rendering(
+            player_api_id, 'match_card', stat_keys, 'week',
+            week_start=ws, week_end=we)
+        if card_data and card_data.get('fixtures'):
+            fname = f"{player_api_id}_match_card_{ts}"
+            path = save_chart_to_file('match_card', card_data, fname, width=500, height=200)
+            charts['match_card_url'] = '/static/charts/' + os.path.basename(path)
+    except Exception:
+        pass
+
+    return charts
 
 
 def _merge_stats_into_item(item: dict, totals: dict | None) -> dict:
@@ -1525,6 +1624,21 @@ def _apply_stat_driven_summaries(content: dict, report: dict, brave_ctx: dict) -
                             item["minutes_graph_url"] = minutes_graph
                     except Exception as e:
                         _nl_dbg(f"Graph generation failed for {canonical_pid}: {e}")
+
+                    # Generate platform data charts (radar, stat table, trend, match card)
+                    if item.get("can_fetch_stats", True):
+                        try:
+                            range_info = report.get("range") or []
+                            ws = range_info[0] if len(range_info) > 0 else None
+                            we = range_info[1] if len(range_info) > 1 else None
+                            if ws and we:
+                                charts = _generate_player_charts(
+                                    canonical_pid, item.get("player_name"), ws, we)
+                                if charts:
+                                    item.update(charts)
+                        except Exception as e:
+                            _nl_dbg(f"Chart generation failed for {canonical_pid}: {e}")
+
                 loan_team_name = _strip_text(loanee.get("loan_team_name"))
                 if loan_team_name:
                     item.setdefault("loan_team", loan_team_name)
@@ -1674,6 +1788,11 @@ def fetch_pipeline_report_tool(parent_team_db_id: int, season_start_year: int, s
                     player_dict['sofascore_player_id'] = getattr(lp, 'sofascore_player_id', None)
             # Get weekly stats from FixturePlayerStats
             _enrich_on_loan_stats(player_dict, tp, start, end, season_start_year)
+            # Fallback: derive loan league from Team record if not set from match data
+            if not player_dict.get('loan_league_name') and tp.loan_club_api_id:
+                loan_team_row = Team.query.filter_by(team_id=tp.loan_club_api_id).first()
+                if loan_team_row and loan_team_row.league:
+                    player_dict['loan_league_name'] = loan_team_row.league.name
             groups['on_loan'].append(player_dict)
 
         elif tp.status == 'first_team':
@@ -1747,6 +1866,11 @@ def _enrich_on_loan_stats(player_dict: dict, tp: "TrackedPlayer", start: date, e
                 })
         player_dict['totals'] = totals
         player_dict['matches'] = matches
+        # Derive loan league name from match competitions for newsletter grouping
+        league_names = [m.get('competition') for m in matches if m.get('competition')]
+        if league_names:
+            from collections import Counter
+            player_dict['loan_league_name'] = Counter(league_names).most_common(1)[0][0]
     except Exception as e:
         _nl_dbg('_enrich_on_loan_stats error:', str(e))
         player_dict['totals'] = {}
@@ -2590,11 +2714,31 @@ def compose_team_weekly_newsletter(team_db_id: int, target_date: date, force_ref
             hits = _extract_hits_for_loanee(player, hits_by_player)
             item = _build_player_report_item(player, hits, week_start=week_start, week_end=week_end)
             item["pathway_status"] = "on_loan"
+            # Generate platform data charts for players with stats coverage
+            if item.get("can_fetch_stats") and item.get("player_id"):
+                try:
+                    charts = _generate_player_charts(
+                        item["player_id"], item.get("player_name"),
+                        week_start, week_end)
+                    if charts:
+                        item.update(charts)
+                except Exception as e:
+                    _nl_dbg(f"Chart generation failed for {item.get('player_id')}: {e}")
             on_loan_items.append(item)
 
         for player in groups.get("first_team", []):
             hits = _extract_hits_for_loanee(player, hits_by_player)
             item = _build_first_team_report_item(player, hits, week_start=week_start, week_end=week_end)
+            # Generate platform data charts for first-team players with stats
+            if item.get("can_fetch_stats") and item.get("player_id"):
+                try:
+                    charts = _generate_player_charts(
+                        item["player_id"], item.get("player_name"),
+                        week_start, week_end)
+                    if charts:
+                        item.update(charts)
+                except Exception as e:
+                    _nl_dbg(f"Chart generation failed for {item.get('player_id')}: {e}")
             first_team_items.append(item)
 
         for player in groups.get("academy", []):
@@ -2710,20 +2854,54 @@ def compose_team_weekly_newsletter(team_db_id: int, target_date: date, force_ref
                     item["commentary_title"] = coms[0].get("title")
                     print(f"[DEBUG] Injected commentary for player {pid} ({item.get('player_name')})")
 
-    # Build multi-section content grouped by pathway status
+    # Build multi-section content grouped by pathway status, with sub-groups
+    def _group_items_by(items: list[dict], key: str, fallback: str = "Other") -> list[dict[str, Any]]:
+        """Group items into subsections by a given key."""
+        from collections import OrderedDict
+        groups_map: OrderedDict[str, list] = OrderedDict()
+        for item in items:
+            label = item.get(key) or fallback
+            groups_map.setdefault(label, []).append(item)
+        return [{"label": label, "items": sub_items} for label, sub_items in groups_map.items()]
+
     sections: list[dict[str, Any]] = []
     if first_team_items:
+        # First team is typically small, keep flat
         sections.append({"title": "First Team Graduates", "items": first_team_items})
     if on_loan_items:
-        sections.append({"title": "On Loan", "items": on_loan_items})
+        subsections = _group_items_by(on_loan_items, "loan_league_name", fallback="Other")
+        if len(subsections) > 1:
+            sections.append({"title": "On Loan", "subsections": subsections})
+        else:
+            sections.append({"title": "On Loan", "items": on_loan_items})
     if academy_items:
-        sections.append({"title": "Academy Rising", "items": academy_items})
+        subsections = _group_items_by(academy_items, "current_level", fallback="Academy")
+        if len(subsections) > 1:
+            sections.append({"title": "Academy Rising", "subsections": subsections})
+        else:
+            sections.append({"title": "Academy Rising", "items": academy_items})
     if not sections:
         sections.append({"title": "Player Reports", "items": []})
+
+    # Build table of contents
+    toc: list[dict[str, Any]] = []
+    for sec in sections:
+        toc_entry: dict[str, Any] = {"section": sec["title"]}
+        if "subsections" in sec:
+            toc_entry["count"] = sum(len(sub["items"]) for sub in sec["subsections"])
+            toc_entry["subsections"] = [
+                {"label": sub["label"], "count": len(sub["items"])}
+                for sub in sec["subsections"]
+            ]
+        else:
+            toc_entry["count"] = len(sec.get("items", []))
+        toc.append(toc_entry)
+
     newsletter_title = f"{team_name} Academy Pipeline Update"
 
     content_payload: dict[str, Any] = {
         "title": newsletter_title,
+        "toc": toc,
         "summary": summary_text,
         "season": report.get("season"),
         "range": range_window,

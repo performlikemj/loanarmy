@@ -4705,6 +4705,7 @@ def _newsletter_render_context(n: Newsletter) -> dict[str, Any]:
         'summary': data.get('summary'),
         'highlights': data.get('highlights') or [],
         'sections': data.get('sections') or [],
+        'toc': data.get('toc') or [],
         'by_numbers': data.get('by_numbers') or {},
         'fan_pulse': data.get('fan_pulse') or [],
         'team_logo': team_logo,

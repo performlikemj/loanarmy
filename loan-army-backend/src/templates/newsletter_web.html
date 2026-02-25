@@ -933,21 +933,45 @@
     {% endfor %}
     {% endif %}
 
+    {# Table of Contents #}
+    {% if toc and toc|length > 1 %}
+    <nav class="toc" style="background:rgba(255,255,255,0.03);border:1px solid rgba(255,255,255,0.1);border-radius:8px;padding:14px 18px;margin:18px 0 24px;">
+      <div style="font-size:12px;letter-spacing:2px;text-transform:uppercase;color:#bebebe;margin-bottom:10px;font-weight:600;">In This Issue</div>
+      {% for entry in toc %}
+      <a href="#section-{{ entry.section|lower|replace(' ', '-') }}" style="display:block;color:#e0e0e0;text-decoration:none;font-size:14px;padding:4px 0;">
+        {{ entry.section }} <span style="color:#888;font-size:12px;">({{ entry.count }})</span>
+      </a>
+      {% if entry.subsections %}
+      <div style="padding-left:16px;font-size:12px;color:#999;margin-top:2px;">
+        {% for sub in entry.subsections %}
+        {{ sub.label }} ({{ sub.count }}){% if not loop.last %} · {% endif %}
+        {% endfor %}
+      </div>
+      {% endif %}
+      {% endfor %}
+    </nav>
+    {% endif %}
+
     <section class="sections">
       {% for sec in sections %}
-      <h2>{{ sec.title }}</h2>
-      {% set items = [] %}
-      {% if sec is mapping %}
-      {% set raw_items = sec.get('items') %}
-      {% elif sec and ('items' in sec) %}
-      {% set raw_items = sec['items'] %}
+      <h2 id="section-{{ sec.title|lower|replace(' ', '-') }}">{{ sec.title }}</h2>
+      {# Flatten subsections into items list with header markers #}
+      {% set ns = namespace(flat_items=[]) %}
+      {% if sec.subsections is defined and sec.subsections %}
+        {% for sub in sec.subsections %}
+          {% set ns.flat_items = ns.flat_items + [{'_subsection_header': sub.label}] + (sub.items or []) %}
+        {% endfor %}
       {% else %}
-      {% set raw_items = [] %}
+        {% if sec is mapping and sec.get is defined %}
+          {% set ns.flat_items = sec.get('items', []) or [] %}
+        {% elif sec is mapping %}
+          {% set ns.flat_items = sec['items'] if 'items' in sec else [] %}
+        {% endif %}
       {% endif %}
-      {% if raw_items is iterable and raw_items is not string %}
-      {% set items = raw_items %}
-      {% endif %}
-      {% for it in items if it is mapping %}
+      {% for it in ns.flat_items if it is mapping %}
+      {% if it.get is defined and it.get('_subsection_header') %}
+      <h3 id="sub-{{ it._subsection_header|lower|replace(' ', '-') }}" style="font-size:15px;margin:20px 0 10px;text-transform:uppercase;letter-spacing:1px;color:#c0c0c0;border-bottom:1px solid rgba(255,255,255,0.1);padding-bottom:6px;">{{ it._subsection_header }}</h3>
+      {% else %}
       <article class="item">
         <div class="item-header">
           <div class="player-block">
@@ -1182,6 +1206,44 @@
             style="max-width:100%;border-radius:6px;display:block;" />
         </div>
         {% endif %}
+        {# Platform Data Visuals #}
+        {% if it.match_card_url %}
+        <div style="margin-top:12px;">
+          <img src="{{ embed_image(it.match_card_url) }}" alt="Match Performance Summary"
+            style="max-width:100%;border-radius:6px;display:block;" />
+        </div>
+        {% endif %}
+        {% if it.radar_chart_url %}
+        <div style="margin-top:12px;">
+          <img src="{{ embed_image(it.radar_chart_url) }}" alt="Performance Radar"
+            style="max-width:100%;border-radius:6px;display:block;" />
+        </div>
+        {% endif %}
+        {% if it.stat_table_url %}
+        <div style="margin-top:12px;">
+          <img src="{{ embed_image(it.stat_table_url) }}" alt="Recent Match Stats"
+            style="max-width:100%;border-radius:6px;display:block;" />
+        </div>
+        {% endif %}
+        {% if it.trend_chart_url %}
+        <div style="margin-top:12px;">
+          <img src="{{ embed_image(it.trend_chart_url) }}" alt="Season Trend"
+            style="max-width:100%;border-radius:6px;display:block;" />
+        </div>
+        {% endif %}
+        {# Player Page CTA #}
+        {% set player_link_id = it.player_api_id or it.player_id %}
+        {% if player_link_id and public_base_url %}
+        <div style="margin-top:14px;text-align:center;">
+          <a href="{{ public_base_url }}/players/{{ player_link_id }}"
+             style="display:inline-block;padding:10px 20px;background:#7c3aed;color:#ffffff;
+                    text-decoration:none;border-radius:6px;font-size:13px;font-weight:600;
+                    letter-spacing:0.5px;"
+             target="_blank" rel="noopener">
+            View Full Interactive Stats &rarr;
+          </a>
+        </div>
+        {% endif %}
         {% if it.week_summary %}
         <p>{{ it.week_summary }}</p>
         {% endif %}
@@ -1344,6 +1406,7 @@
         {% endfor %}
         {% endif %}
       </article>
+      {% endif %}
       {% endfor %}
       {% endfor %}
     </section>

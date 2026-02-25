@@ -2161,6 +2161,7 @@ def _build_template_context(news: dict, team_name: str | None, **kwargs) -> dict
         'summary': news.get('summary'),
         'highlights': news.get('highlights') or [],
         'sections': news.get('sections') or [],
+        'toc': news.get('toc') or [],
         'by_numbers': news.get('by_numbers') or {},
         'fan_pulse': news.get('fan_pulse') or [],
         'sofascore_image_template': os.getenv('SOFASCORE_IMAGE_TEMPLATE') or '',

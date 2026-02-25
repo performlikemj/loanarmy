@@ -320,68 +320,84 @@ export function convertNewsletterToMarkdown(newsletter, options = {}) {
     const sections = content.sections || []
     for (const section of sections) {
         if (!section || typeof section !== 'object') continue
-        
+
         const sectionTitle = section.title || 'Players'
         lines.push(`## 📋 ${sectionTitle}`)
         lines.push('')
-        
-        const items = section.items || []
-        for (const item of items) {
-            if (!item || typeof item !== 'object') continue
-            
-            const playerName = item.player_name || 'Unknown Player'
-            const loanTeam = item.loan_team || item.loan_team_name || ''
-            
-            // Player header
-            lines.push(`### ${playerName}`)
-            if (loanTeam) {
-                lines.push(`*Currently at ${loanTeam}*`)
+
+        // Collect items: either flat or from subsections
+        const itemGroups = []
+        if (section.subsections && section.subsections.length > 0) {
+            for (const sub of section.subsections) {
+                if (!sub || typeof sub !== 'object') continue
+                itemGroups.push({ label: sub.label, items: sub.items || [] })
             }
-            lines.push('')
-            
-            // Stats line
-            const canTrack = item.can_fetch_stats !== false
-            if (canTrack && item.stats) {
-                const statsLine = formatStatsLine(item.stats)
-                if (statsLine) {
-                    lines.push(`**Stats:** ${statsLine}`)
-                    lines.push('')
+        } else {
+            itemGroups.push({ label: null, items: section.items || [] })
+        }
+
+        for (const group of itemGroups) {
+            if (group.label) {
+                lines.push(`### ${group.label}`)
+                lines.push('')
+            }
+            for (const item of group.items) {
+                if (!item || typeof item !== 'object') continue
+
+                const playerName = item.player_name || 'Unknown Player'
+                const loanTeam = item.loan_team || item.loan_team_name || ''
+
+                // Player header
+                lines.push(`### ${playerName}`)
+                if (loanTeam) {
+                    lines.push(`*Currently at ${loanTeam}*`)
                 }
-                
-                // Expanded stats table
-                if (includeExpandedStats) {
-                    const expandedStats = formatExpandedStats(item.stats)
-                    if (expandedStats) {
-                        lines.push(expandedStats)
+                lines.push('')
+
+                // Stats line
+                const canTrack = item.can_fetch_stats !== false
+                if (canTrack && item.stats) {
+                    const statsLine = formatStatsLine(item.stats)
+                    if (statsLine) {
+                        lines.push(`**Stats:** ${statsLine}`)
                         lines.push('')
                     }
+
+                    // Expanded stats table
+                    if (includeExpandedStats) {
+                        const expandedStats = formatExpandedStats(item.stats)
+                        if (expandedStats) {
+                            lines.push(expandedStats)
+                            lines.push('')
+                        }
+                    }
+                } else if (!canTrack) {
+                    lines.push('*Stats not available for this player*')
+                    lines.push('')
                 }
-            } else if (!canTrack) {
-                lines.push('*Stats not available for this player*')
+
+                // Week summary
+                if (item.week_summary) {
+                    lines.push(item.week_summary)
+                    lines.push('')
+                }
+
+                // Matches
+                const matchesSection = formatMatches(item.matches, item.upcoming_fixtures)
+                if (matchesSection) {
+                    lines.push(matchesSection)
+                    lines.push('')
+                }
+
+                // Links
+                if (includeLinks && item.links && item.links.length > 0) {
+                    lines.push(formatLinks(item.links))
+                    lines.push('')
+                }
+
+                lines.push('---')
                 lines.push('')
             }
-            
-            // Week summary
-            if (item.week_summary) {
-                lines.push(item.week_summary)
-                lines.push('')
-            }
-            
-            // Matches
-            const matchesSection = formatMatches(item.matches, item.upcoming_fixtures)
-            if (matchesSection) {
-                lines.push(matchesSection)
-                lines.push('')
-            }
-            
-            // Links
-            if (includeLinks && item.links && item.links.length > 0) {
-                lines.push(formatLinks(item.links))
-                lines.push('')
-            }
-            
-            lines.push('---')
-            lines.push('')
         }
     }
     
@@ -445,19 +461,29 @@ export function convertNewsletterToCompactMarkdown(newsletter) {
     const sections = content.sections || []
     for (const section of sections) {
         if (!section || typeof section !== 'object') continue
-        
-        const items = section.items || []
-        if (items.length === 0) continue
-        
+
+        // Collect all items (flat or from subsections)
+        const allItems = []
+        if (section.subsections && section.subsections.length > 0) {
+            for (const sub of section.subsections) {
+                if (sub && sub.items) allItems.push(...sub.items)
+            }
+        } else {
+            allItems.push(...(section.items || []))
+        }
+        if (allItems.length === 0) continue
+
+        lines.push(`**${section.title || 'Players'}**`)
+        lines.push('')
         lines.push('| Player | Team | Stats |')
         lines.push('|:-------|:-----|:------|')
-        
-        for (const item of items) {
+
+        for (const item of allItems) {
             if (!item || typeof item !== 'object') continue
-            
+
             const playerName = item.player_name || 'Unknown'
             const loanTeam = item.loan_team || item.loan_team_name || '-'
-            
+
             let statsStr = '-'
             if (item.stats) {
                 const s = item.stats
@@ -467,10 +493,10 @@ export function convertNewsletterToCompactMarkdown(newsletter) {
                 const rating = s.rating ? `⭐${Number(s.rating).toFixed(1)}` : ''
                 statsStr = `${mins}' ${goals}G ${assists}A ${rating}`.trim()
             }
-            
+
             lines.push(`| ${playerName} | ${loanTeam} | ${statsStr} |`)
         }
-        
+
         lines.push('')
     }
     
