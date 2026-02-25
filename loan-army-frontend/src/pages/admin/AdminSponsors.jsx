@@ -209,7 +209,7 @@ export function AdminSponsors() {
     if (loading) {
         return (
             <div className="flex justify-center items-center min-h-[400px]">
-                <Loader2 className="h-8 w-8 animate-spin text-blue-600" />
+                <Loader2 className="h-8 w-8 animate-spin text-primary" />
             </div>
         )
     }
@@ -240,7 +240,7 @@ export function AdminSponsors() {
                 <Card>
                     <CardHeader className="pb-2">
                         <CardDescription>Active</CardDescription>
-                        <CardTitle className="text-2xl text-green-600">
+                        <CardTitle className="text-2xl text-emerald-600">
                             {sponsors.filter(s => s.is_active).length}
                         </CardTitle>
                     </CardHeader>
@@ -248,7 +248,7 @@ export function AdminSponsors() {
                 <Card>
                     <CardHeader className="pb-2">
                         <CardDescription>Inactive</CardDescription>
-                        <CardTitle className="text-2xl text-gray-400">
+                        <CardTitle className="text-2xl text-muted-foreground/70">
                             {sponsors.filter(s => !s.is_active).length}
                         </CardTitle>
                     </CardHeader>
@@ -317,11 +317,11 @@ export function AdminSponsors() {
                                         <div className="flex items-center gap-2">
                                             <span className="font-medium truncate">{sponsor.name}</span>
                                             {sponsor.is_active ? (
-                                                <Badge variant="secondary" className="bg-green-100 text-green-700">
+                                                <Badge variant="secondary" className="bg-emerald-50 text-emerald-700">
                                                     Active
                                                 </Badge>
                                             ) : (
-                                                <Badge variant="secondary" className="bg-gray-100 text-gray-500">
+                                                <Badge variant="secondary" className="bg-secondary text-muted-foreground">
                                                     Inactive
                                                 </Badge>
                                             )}
@@ -459,7 +459,7 @@ export function AdminSponsors() {
                             {formData.image_url && !formErrors.image_url && (
                                 <div className="mt-2 p-2 border rounded-md bg-muted/50">
                                     <p className="text-xs text-muted-foreground mb-2">Preview:</p>
-                                    <div className="aspect-[16/9] w-32 overflow-hidden rounded bg-white flex items-center justify-center">
+                                    <div className="aspect-[16/9] w-32 overflow-hidden rounded bg-card flex items-center justify-center">
                                         <img
                                             src={formData.image_url}
                                             alt="Preview"

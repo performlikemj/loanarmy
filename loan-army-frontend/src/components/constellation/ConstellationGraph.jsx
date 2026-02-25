@@ -79,7 +79,7 @@ export function ConstellationGraph({ data, onNodeClick, selectedNode }) {
         if (isSelected) {
             ctx.beginPath()
             ctx.arc(node.x, node.y, r + 5, 0, 2 * Math.PI)
-            ctx.strokeStyle = '#3b82f6'
+            ctx.strokeStyle = '#d97706' // amber-600 (selection ring)
             ctx.lineWidth = 2.5
             ctx.stroke()
         }

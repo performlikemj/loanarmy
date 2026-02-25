@@ -106,7 +106,7 @@ export function PlayerLinksSection({ playerId }) {
             <Link2 className="h-4 w-4" />
             Links
             {links.length > 0 && (
-              <span className="text-sm font-normal text-gray-500">({links.length})</span>
+              <span className="text-sm font-normal text-muted-foreground">({links.length})</span>
             )}
           </CardTitle>
           {isLoggedIn && !showForm && (
@@ -120,7 +120,7 @@ export function PlayerLinksSection({ playerId }) {
       <CardContent className="space-y-4">
         {/* Submit form */}
         {showForm && (
-          <form onSubmit={handleSubmit} className="p-4 bg-gray-50 rounded-lg space-y-3">
+          <form onSubmit={handleSubmit} className="p-4 bg-secondary rounded-lg space-y-3">
             {submitted ? (
               <div className="flex items-center gap-2 text-sm text-green-600 py-2">
                 <Check className="h-4 w-4" />
@@ -170,10 +170,10 @@ export function PlayerLinksSection({ playerId }) {
         {/* Links list */}
         {loading ? (
           <div className="flex justify-center py-6">
-            <Loader2 className="h-5 w-5 animate-spin text-gray-400" />
+            <Loader2 className="h-5 w-5 animate-spin text-muted-foreground/70" />
           </div>
         ) : links.length === 0 && !showForm ? (
-          <p className="text-sm text-gray-500 text-center py-4">
+          <p className="text-sm text-muted-foreground text-center py-4">
             No links yet.{isLoggedIn ? ' Share a relevant article or highlight.' : ' Sign in to submit links.'}
           </p>
         ) : (
@@ -183,8 +183,8 @@ export function PlayerLinksSection({ playerId }) {
               return (
                 <div key={type}>
                   <div className="flex items-center gap-1.5 mb-2">
-                    <LinkTypeIcon type={type} className="h-3.5 w-3.5 text-gray-500" />
-                    <span className="text-xs font-medium text-gray-500 uppercase tracking-wide">
+                    <LinkTypeIcon type={type} className="h-3.5 w-3.5 text-muted-foreground" />
+                    <span className="text-xs font-medium text-muted-foreground uppercase tracking-wide">
                       {TYPE_META[type]?.label || type}
                     </span>
                   </div>
@@ -194,7 +194,7 @@ export function PlayerLinksSection({ playerId }) {
                         return (
                           <div key={link.id} className="space-y-1.5">
                             {link.title && (
-                              <p className="text-sm font-medium text-gray-700 px-1">{link.title}</p>
+                              <p className="text-sm font-medium text-foreground/80 px-1">{link.title}</p>
                             )}
                             <VideoEmbed url={link.url} title={link.title} />
                           </div>
@@ -206,10 +206,10 @@ export function PlayerLinksSection({ playerId }) {
                           href={link.url}
                           target="_blank"
                           rel="noopener noreferrer"
-                          className="flex items-center gap-2 px-3 py-2 rounded-lg hover:bg-gray-50 transition-colors group text-sm"
+                          className="flex items-center gap-2 px-3 py-2 rounded-lg hover:bg-secondary transition-colors group text-sm"
                         >
-                          <ExternalLink className="h-3.5 w-3.5 text-gray-400 group-hover:text-blue-500 flex-shrink-0" />
-                          <span className="text-gray-700 group-hover:text-blue-600 truncate flex-1">
+                          <ExternalLink className="h-3.5 w-3.5 text-muted-foreground/70 group-hover:text-primary flex-shrink-0" />
+                          <span className="text-foreground/80 group-hover:text-primary truncate flex-1">
                             {link.title || link.url}
                           </span>
                           {link.upvotes > 0 && (
@@ -228,7 +228,7 @@ export function PlayerLinksSection({ playerId }) {
         {/* Sign-in prompt */}
         {!isLoggedIn && links.length > 0 && (
           <div className="pt-2 border-t text-center">
-            <p className="text-sm text-gray-500">Sign in to submit links</p>
+            <p className="text-sm text-muted-foreground">Sign in to submit links</p>
           </div>
         )}
       </CardContent>

@@ -9,20 +9,7 @@ import {
   Legend,
   ResponsiveContainer,
 } from 'recharts'
-
-const STAT_COLORS = {
-  goals: '#10b981',
-  assists: '#3b82f6',
-  rating: '#f59e0b',
-  minutes: '#6b7280',
-  shots_total: '#ef4444',
-  shots_on: '#ec4899',
-  passes_total: '#8b5cf6',
-  passes_key: '#14b8a6',
-  tackles_total: '#f97316',
-  duels_won: '#06b6d4',
-  saves: '#84cc16',
-}
+import { CHART_STAT_COLORS, CHART_AXIS_COLOR, CHART_GRID_COLOR, CHART_TOOLTIP_BG, CHART_TOOLTIP_BORDER } from '../../lib/theme-constants'
 
 const STAT_LABELS = {
   goals: 'Goals',
@@ -44,7 +31,7 @@ export function PlayerBarChart({ data }) {
   
   if (!chartData.length) {
     return (
-      <div className="text-center text-gray-500 py-4 text-sm">
+      <div className="text-center text-muted-foreground py-4 text-sm">
         No data available for bar chart
       </div>
     )
@@ -61,7 +48,7 @@ export function PlayerBarChart({ data }) {
   return (
     <div className="space-y-2">
       {data?.player?.name && (
-        <div className="text-sm font-medium text-gray-700">
+        <div className="text-sm font-medium text-foreground/80">
           {data.player.name} - Per Match Stats
         </div>
       )}
@@ -69,19 +56,19 @@ export function PlayerBarChart({ data }) {
       <div className="h-[300px] w-full">
         <ResponsiveContainer width="100%" height="100%">
           <BarChart data={formattedData} margin={{ top: 10, right: 10, left: 0, bottom: 0 }}>
-            <CartesianGrid strokeDasharray="3 3" stroke="#e5e7eb" />
-            <XAxis 
-              dataKey="name" 
-              tick={{ fontSize: 10, fill: '#6b7280' }}
+            <CartesianGrid strokeDasharray="3 3" stroke={CHART_GRID_COLOR} />
+            <XAxis
+              dataKey="name"
+              tick={{ fontSize: 10, fill: CHART_AXIS_COLOR }}
               angle={-45}
               textAnchor="end"
               height={60}
             />
-            <YAxis tick={{ fontSize: 10, fill: '#6b7280' }} />
+            <YAxis tick={{ fontSize: 10, fill: CHART_AXIS_COLOR }} />
             <Tooltip
               contentStyle={{
-                backgroundColor: 'white',
-                border: '1px solid #e5e7eb',
+                backgroundColor: CHART_TOOLTIP_BG,
+                border: `1px solid ${CHART_TOOLTIP_BORDER}`,
                 borderRadius: '8px',
                 boxShadow: '0 4px 6px -1px rgb(0 0 0 / 0.1)',
               }}
@@ -97,7 +84,7 @@ export function PlayerBarChart({ data }) {
                 key={key}
                 dataKey={key}
                 name={STAT_LABELS[key] || key.replace('_', ' ')}
-                fill={STAT_COLORS[key] || '#6b7280'}
+                fill={CHART_STAT_COLORS[key] || CHART_AXIS_COLOR}
                 radius={[4, 4, 0, 0]}
               />
             ))}

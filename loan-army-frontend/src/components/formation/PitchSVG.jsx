@@ -140,7 +140,7 @@ function PlacedPlayer({ player, slotKey, onClick }) {
       <div className="relative">
         <Avatar className="h-10 w-10 border-2 border-white shadow-lg ring-2 ring-black/20 group-hover:ring-white/60 transition-all">
           <AvatarImage src={player.photo_url || player.photo} alt={surname} />
-          <AvatarFallback className="text-xs bg-white text-gray-700 font-bold">
+          <AvatarFallback className="text-xs bg-white text-foreground/80 font-bold">
             {surname.slice(0, 2).toUpperCase()}
           </AvatarFallback>
         </Avatar>

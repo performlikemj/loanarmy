@@ -22,13 +22,13 @@ function StatItem({ icon: Icon, label, value, highlight = false }) {
   return (
     <div className={cn(
       'flex items-center gap-2 px-3 py-2 rounded-lg',
-      highlight ? 'bg-emerald-50 text-emerald-700' : 'bg-gray-50 text-gray-700'
+      highlight ? 'bg-emerald-50 text-emerald-700' : 'bg-secondary text-foreground/80'
     )}>
       <Icon className="h-4 w-4 flex-shrink-0" />
       <span className="text-sm font-medium">{label}</span>
       <span className={cn(
         'ml-auto font-bold',
-        highlight ? 'text-emerald-800' : 'text-gray-900'
+        highlight ? 'text-emerald-800' : 'text-foreground'
       )}>
         {value}
       </span>
@@ -51,8 +51,8 @@ function FixtureCard({ fixture }) {
 
   const resultColors = {
     win: 'bg-emerald-500',
-    loss: 'bg-red-500',
-    draw: 'bg-gray-400'
+    loss: 'bg-rose-500',
+    draw: 'bg-stone-400'
   }
 
   const formattedDate = date ? new Date(date).toLocaleDateString(undefined, {
@@ -64,12 +64,12 @@ function FixtureCard({ fixture }) {
   return (
     <Card className="overflow-hidden">
       {/* Match Header */}
-      <div className="bg-gradient-to-r from-gray-900 to-gray-800 text-white p-4">
+      <div className="bg-gradient-to-r from-foreground to-foreground/90 text-primary-foreground p-4">
         <div className="flex items-center justify-between mb-3">
-          <Badge variant="secondary" className="bg-white/20 text-white border-none text-xs">
+          <Badge variant="secondary" className="bg-white/20 text-primary-foreground border-none text-xs">
             {competition || 'Match'}
           </Badge>
-          <span className="text-xs text-gray-300">{formattedDate}</span>
+          <span className="text-xs text-muted-foreground/50">{formattedDate}</span>
         </div>
 
         {/* Score Display */}
@@ -80,8 +80,8 @@ function FixtureCard({ fixture }) {
             )}
             <span className={cn(
               'font-semibold text-xs sm:text-sm truncate',
-              is_home && 'text-white',
-              !is_home && 'text-gray-300'
+              is_home && 'text-primary-foreground',
+              !is_home && 'text-primary-foreground/60'
             )}>
               {home_team.name}
             </span>
@@ -89,15 +89,15 @@ function FixtureCard({ fixture }) {
 
           <div className="flex items-center gap-1.5 sm:gap-2 px-2 sm:px-4 flex-shrink-0">
             <span className="text-xl sm:text-2xl font-bold tabular-nums">{home_team.score ?? '-'}</span>
-            <span className="text-gray-400">-</span>
+            <span className="text-primary-foreground/50">-</span>
             <span className="text-xl sm:text-2xl font-bold tabular-nums">{away_team.score ?? '-'}</span>
           </div>
 
           <div className="flex items-center gap-2 flex-1 min-w-0">
             <span className={cn(
               'font-semibold text-xs sm:text-sm truncate',
-              !is_home && 'text-white',
-              is_home && 'text-gray-300'
+              !is_home && 'text-primary-foreground',
+              is_home && 'text-primary-foreground/60'
             )}>
               {away_team.name}
             </span>
@@ -109,7 +109,7 @@ function FixtureCard({ fixture }) {
 
         {/* Result indicator */}
         <div className="flex justify-center mt-3">
-          <Badge className={cn(resultColors[result], 'text-white border-none')}>
+          <Badge className={cn(resultColors[result], 'text-primary-foreground border-none')}>
             {result === 'win' ? 'Victory' : result === 'loss' ? 'Defeat' : 'Draw'}
           </Badge>
         </div>
@@ -119,33 +119,33 @@ function FixtureCard({ fixture }) {
       <CardContent className="p-4 space-y-4">
         {/* Key Stats Row */}
         <div className="grid grid-cols-3 gap-2 text-center">
-          <div className="p-3 bg-gray-50 rounded-lg">
-            <div className="text-2xl font-bold text-gray-900">{stats.minutes || 0}'</div>
-            <div className="text-xs text-gray-500 uppercase tracking-wide">Minutes</div>
+          <div className="p-3 bg-secondary rounded-lg">
+            <div className="text-2xl font-bold text-foreground">{stats.minutes || 0}'</div>
+            <div className="text-xs text-muted-foreground uppercase tracking-wide">Minutes</div>
           </div>
           <div className={cn(
             'p-3 rounded-lg',
-            stats.goals > 0 ? 'bg-emerald-50' : 'bg-gray-50'
+            stats.goals > 0 ? 'bg-emerald-50' : 'bg-secondary'
           )}>
             <div className={cn(
               'text-2xl font-bold',
-              stats.goals > 0 ? 'text-emerald-600' : 'text-gray-900'
+              stats.goals > 0 ? 'text-emerald-600' : 'text-foreground'
             )}>
               {stats.goals || 0}
             </div>
-            <div className="text-xs text-gray-500 uppercase tracking-wide">Goals</div>
+            <div className="text-xs text-muted-foreground uppercase tracking-wide">Goals</div>
           </div>
           <div className={cn(
             'p-3 rounded-lg',
-            stats.assists > 0 ? 'bg-blue-50' : 'bg-gray-50'
+            stats.assists > 0 ? 'bg-amber-50' : 'bg-secondary'
           )}>
             <div className={cn(
               'text-2xl font-bold',
-              stats.assists > 0 ? 'text-blue-600' : 'text-gray-900'
+              stats.assists > 0 ? 'text-amber-600' : 'text-foreground'
             )}>
               {stats.assists || 0}
             </div>
-            <div className="text-xs text-gray-500 uppercase tracking-wide">Assists</div>
+            <div className="text-xs text-muted-foreground uppercase tracking-wide">Assists</div>
           </div>
         </div>
 
@@ -157,9 +157,9 @@ function FixtureCard({ fixture }) {
               className={cn(
                 'text-lg font-bold px-4 py-1',
                 stats.rating >= 7.5 ? 'border-emerald-500 text-emerald-700 bg-emerald-50' :
-                  stats.rating >= 6.5 ? 'border-blue-500 text-blue-700 bg-blue-50' :
-                    stats.rating >= 5.5 ? 'border-gray-500 text-gray-700 bg-gray-50' :
-                      'border-red-500 text-red-700 bg-red-50'
+                  stats.rating >= 6.5 ? 'border-amber-500 text-amber-700 bg-amber-50' :
+                    stats.rating >= 5.5 ? 'border-border text-foreground/80 bg-secondary' :
+                      'border-rose-500 text-rose-700 bg-rose-50'
               )}
             >
               {stats.rating.toFixed(1)} Rating
@@ -291,7 +291,7 @@ export function WriteupPage() {
     return (
       <div className="min-h-[60vh] flex flex-col items-center justify-center px-4">
         <Loader2 className="h-8 w-8 animate-spin text-violet-500 mb-3" />
-        <p className="text-gray-500">Loading analysis...</p>
+        <p className="text-muted-foreground">Loading analysis...</p>
       </div>
     )
   }
@@ -300,8 +300,8 @@ export function WriteupPage() {
     return (
       <div className="max-w-lg mx-auto py-12 px-4 text-center space-y-4">
         <AlertTriangle className="h-12 w-12 text-amber-500 mx-auto mb-4" />
-        <h2 className="text-xl font-semibold text-gray-900">Analysis unavailable</h2>
-        <p className="text-gray-500">{error || 'We could not find this analysis.'}</p>
+        <h2 className="text-xl font-semibold text-foreground">Analysis unavailable</h2>
+        <p className="text-muted-foreground">{error || 'We could not find this analysis.'}</p>
         <Button variant="ghost" onClick={() => navigate(-1)}>
           <ArrowLeft className="mr-2 h-4 w-4" /> Go back
         </Button>
@@ -316,9 +316,9 @@ export function WriteupPage() {
   const weekFixtures = data.week_fixtures || []
 
   return (
-    <div className="min-h-screen bg-gray-100">
+    <div className="min-h-screen bg-background">
       {/* Header */}
-      <div className="bg-white border-b sticky top-0 z-10">
+      <div className="bg-card border-b sticky top-0 z-10">
         <div className="max-w-3xl mx-auto px-4 py-3">
           <Button
             variant="ghost"
@@ -336,7 +336,7 @@ export function WriteupPage() {
         {/* Article Header Card */}
         <Card className="overflow-hidden">
           {/* Hero section with team/player */}
-          <div className="bg-gradient-to-br from-gray-900 via-gray-800 to-gray-900 text-white p-6">
+          <div className="bg-gradient-to-br from-foreground via-foreground/90 to-foreground text-primary-foreground p-6">
             <div className="flex items-start gap-4">
               {player?.photo_url ? (
                 data.player_id ? (
@@ -374,24 +374,24 @@ export function WriteupPage() {
                 )}
                 <div className="flex flex-wrap items-center gap-2 mt-1">
                   {team?.name && (
-                    <Badge className="bg-white/20 text-white border-none">
+                    <Badge className="bg-white/20 text-primary-foreground border-none">
                       {team.name}
                     </Badge>
                   )}
                   {player?.position && (
-                    <Badge variant="outline" className="text-gray-300 border-gray-600">
+                    <Badge variant="outline" className="text-primary-foreground/60 border-primary-foreground/30">
                       {player.position}
                     </Badge>
                   )}
                   {player?.nationality && (
-                    <span className="text-sm text-gray-400">{player.nationality}</span>
+                    <span className="text-sm text-primary-foreground/50">{player.nationality}</span>
                   )}
                 </div>
 
                 {data.player_id && (
                   <Link
                     to={`/players/${data.player_id}`}
-                    className="inline-flex items-center gap-1.5 mt-3 text-sm text-gray-300 hover:text-white transition-colors"
+                    className="inline-flex items-center gap-1.5 mt-3 text-sm text-primary-foreground/60 hover:text-primary-foreground transition-colors"
                   >
                     View Full Profile <ArrowRight className="h-3.5 w-3.5" />
                   </Link>
@@ -399,7 +399,7 @@ export function WriteupPage() {
 
                 {/* Week context */}
                 {data.week_start_date && data.week_end_date && (
-                  <div className="flex items-center gap-2 mt-3 text-sm text-gray-400">
+                  <div className="flex items-center gap-2 mt-3 text-sm text-primary-foreground/50">
                     <Calendar className="h-4 w-4" />
                     <span>Week of {data.week_start_date} – {data.week_end_date}</span>
                   </div>
@@ -429,35 +429,35 @@ export function WriteupPage() {
                     </AvatarFallback>
                   </Avatar>
                   <div className="flex-1">
-                    <div className="font-semibold text-gray-900 flex items-center gap-2 flex-wrap">
+                    <div className="font-semibold text-foreground flex items-center gap-2 flex-wrap">
                       {primaryName}
                       {hasContributor && (author?.display_name || data.author_name) && (
-                        <span className="text-sm font-normal text-gray-500">
+                        <span className="text-sm font-normal text-muted-foreground">
                           via {author?.display_name || data.author_name}
                         </span>
                       )}
                       {(primaryAttribUrl || primaryAttribName) && (
                         <>
-                          <span className="text-gray-300">•</span>
+                          <span className="text-muted-foreground/50">•</span>
                           {primaryAttribUrl ? (
                             <a
                               href={primaryAttribUrl}
                               target="_blank"
                               rel="noopener noreferrer"
-                              className="text-sm font-normal text-gray-500 hover:text-blue-600 hover:underline flex items-center gap-1"
+                              className="text-sm font-normal text-muted-foreground hover:text-primary hover:underline flex items-center gap-1"
                             >
                               {primaryAttribName || 'Visit Site'}
                               <ExternalLink className="h-3 w-3" />
                             </a>
                           ) : (
-                            <span className="text-sm font-normal text-gray-500">
+                            <span className="text-sm font-normal text-muted-foreground">
                               {primaryAttribName}
                             </span>
                           )}
                         </>
                       )}
                     </div>
-                    <div className="text-sm text-gray-500">
+                    <div className="text-sm text-muted-foreground">
                       {data.created_at && new Date(data.created_at).toLocaleDateString(undefined, {
                         year: 'numeric',
                         month: 'long',
@@ -477,7 +477,7 @@ export function WriteupPage() {
 
             {/* Title */}
             {data.title && (
-              <h1 className="text-2xl sm:text-3xl font-bold text-gray-900 leading-tight mb-4">
+              <h1 className="text-2xl sm:text-3xl font-bold text-foreground leading-tight mb-4">
                 {data.title}
               </h1>
             )}
@@ -504,14 +504,14 @@ export function WriteupPage() {
                   className="prose prose-gray max-w-full break-words blur-sm select-none line-clamp-4"
                   dangerouslySetInnerHTML={{ __html: formatTextToHtml(data.content) }}
                 />
-                <div className="absolute inset-0 flex flex-col items-center justify-center bg-gradient-to-t from-white via-white/95 to-transparent">
-                  <Lock className="h-8 w-8 text-gray-400 mb-3" />
-                  <p className="text-gray-600 mb-3 text-center">
+                <div className="absolute inset-0 flex flex-col items-center justify-center bg-gradient-to-t from-card via-card/95 to-transparent">
+                  <Lock className="h-8 w-8 text-muted-foreground/70 mb-3" />
+                  <p className="text-muted-foreground mb-3 text-center">
                     Subscribe to {author?.display_name || 'this writer'} to read the full analysis
                   </p>
                   <Button
                     onClick={() => author?.id && navigate(`/journalists/${author.id}`)}
-                    className="bg-gray-900 hover:bg-gray-800 text-white rounded-full px-6"
+                    className="bg-foreground hover:bg-foreground/90 text-primary-foreground rounded-full px-6"
                   >
                     Subscribe
                   </Button>
@@ -521,10 +521,10 @@ export function WriteupPage() {
               // Legacy unlocked content
               <div
                 className="prose prose-gray max-w-full break-words
-                  prose-headings:text-gray-900 prose-headings:font-bold
-                  prose-p:text-gray-700 prose-p:leading-relaxed prose-p:my-2
+                  prose-headings:text-foreground prose-headings:font-bold
+                  prose-p:text-foreground/80 prose-p:leading-relaxed prose-p:my-2
                   prose-ul:my-2 prose-ul:pl-5 prose-li:my-1
-                  prose-strong:text-gray-900
+                  prose-strong:text-foreground
                   prose-a:text-violet-600 prose-a:no-underline hover:prose-a:underline"
                 dangerouslySetInnerHTML={{ __html: formatTextToHtml(data.content) }}
               />
@@ -541,7 +541,7 @@ export function WriteupPage() {
                     'flex items-center gap-2 px-4 py-2 rounded-full transition-colors focus-visible:ring-2 focus-visible:ring-violet-500 focus-visible:outline-none',
                     hasApplauded
                       ? 'bg-violet-100 text-violet-700'
-                      : 'bg-gray-100 text-gray-600 hover:bg-violet-50 hover:text-violet-600'
+                      : 'bg-secondary text-muted-foreground hover:bg-violet-50 hover:text-violet-600'
                   )}
                 >
                   <ClapIcon className={cn(
@@ -570,7 +570,7 @@ export function WriteupPage() {
         {/* Week's Match Performance */}
         {weekFixtures.length > 0 && (
           <div className="space-y-4">
-            <h2 className="text-lg font-bold text-gray-900 px-1 flex items-center gap-2">
+            <h2 className="text-lg font-bold text-foreground px-1 flex items-center gap-2">
               <Trophy className="h-5 w-5 text-amber-500" />
               This Week's Performance
             </h2>
@@ -588,14 +588,14 @@ export function WriteupPage() {
           <Card className="bg-gradient-to-r from-violet-50 to-indigo-50 border-violet-200">
             <CardContent className="p-4 flex items-center gap-4">
               <div className="flex-1">
-                <h3 className="font-semibold text-gray-900">Full Weekly Newsletter</h3>
-                <p className="text-sm text-gray-600">
+                <h3 className="font-semibold text-foreground">Full Weekly Newsletter</h3>
+                <p className="text-sm text-muted-foreground">
                   See all player performances and analysis for this week
                 </p>
               </div>
               <Button
                 onClick={() => navigate(`/newsletters/${data.newsletter_id}`)}
-                className="bg-violet-600 hover:bg-violet-700 text-white"
+                className="bg-violet-600 hover:bg-violet-700 text-primary-foreground"
               >
                 <ExternalLink className="h-4 w-4 mr-2" />
                 View Newsletter

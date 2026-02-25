@@ -5,13 +5,7 @@ import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { Button } from '@/components/ui/button'
 import { Badge } from '@/components/ui/badge'
 import { Loader2 } from 'lucide-react'
-
-const STATUS_COLORS = {
-    first_team: 'bg-green-100 text-green-800 border-green-200',
-    on_loan: 'bg-blue-100 text-blue-800 border-blue-200',
-    academy: 'bg-yellow-100 text-yellow-800 border-yellow-200',
-    released: 'bg-gray-100 text-gray-800 border-gray-200',
-}
+import { STATUS_BADGE_CLASSES } from '../lib/theme-constants'
 
 export function CohortBrowser() {
     const navigate = useNavigate()
@@ -52,7 +46,7 @@ export function CohortBrowser() {
     }, [])
 
     const getStatusBadge = (status) => {
-        const colorClass = STATUS_COLORS[status] || 'bg-gray-100 text-gray-800 border-gray-200'
+        const colorClass = STATUS_BADGE_CLASSES[status] || 'bg-secondary text-foreground/80 border-border'
         return (
             <Badge className={colorClass}>
                 {status?.replace('_', ' ')}
@@ -61,12 +55,12 @@ export function CohortBrowser() {
     }
 
     return (
-        <div className="min-h-screen bg-gradient-to-b from-slate-50 to-slate-100">
+        <div className="min-h-screen bg-gradient-to-b from-secondary to-background">
             <div className="max-w-6xl mx-auto px-4 py-8">
                 {/* Header */}
                 <div className="flex items-center justify-between mb-8">
                     <div>
-                        <h1 className="text-3xl font-bold tracking-tight text-gray-900">Academy Cohorts</h1>
+                        <h1 className="text-3xl font-bold tracking-tight text-foreground">Academy Cohorts</h1>
                         <p className="text-muted-foreground mt-1">Browse academy cohorts by team to track player development pathways</p>
                     </div>
                     <Link to="/academy/analytics">
@@ -77,19 +71,19 @@ export function CohortBrowser() {
                 {/* Team Selection Grid */}
                 {teamsLoading ? (
                     <div className="flex items-center justify-center py-16">
-                        <Loader2 className="h-8 w-8 animate-spin text-blue-500" />
+                        <Loader2 className="h-8 w-8 animate-spin text-primary" />
                     </div>
                 ) : (
                     <div className="space-y-8">
                         <div>
-                            <h2 className="text-lg font-semibold text-gray-700 mb-4">Select a Team</h2>
+                            <h2 className="text-lg font-semibold text-foreground/80 mb-4">Select a Team</h2>
                             <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-4">
                                 {teams.map((team) => (
                                     <Card
                                         key={team.team_api_id}
-                                        className={`cursor-pointer transition-all hover:shadow-md hover:border-blue-300 ${
+                                        className={`cursor-pointer transition-all hover:shadow-md hover:border-primary/20 ${
                                             selectedTeam?.team_api_id === team.team_api_id
-                                                ? 'border-blue-500 ring-2 ring-blue-200'
+                                                ? 'border-primary ring-2 ring-primary/20'
                                                 : ''
                                         }`}
                                         onClick={() => handleTeamSelect(team)}
@@ -100,7 +94,7 @@ export function CohortBrowser() {
                                                 alt={team.team_name}
                                                 className="w-8 h-8 object-contain"
                                             />
-                                            <span className="font-medium text-gray-900 truncate">{team.team_name}</span>
+                                            <span className="font-medium text-foreground truncate">{team.team_name}</span>
                                         </CardContent>
                                     </Card>
                                 ))}
@@ -110,13 +104,13 @@ export function CohortBrowser() {
                         {/* Cohorts List */}
                         {selectedTeam && (
                             <div>
-                                <h2 className="text-lg font-semibold text-gray-700 mb-4">
+                                <h2 className="text-lg font-semibold text-foreground/80 mb-4">
                                     Cohorts for {selectedTeam.team_name}
                                 </h2>
 
                                 {cohortsLoading ? (
                                     <div className="flex items-center justify-center py-12">
-                                        <Loader2 className="h-8 w-8 animate-spin text-blue-500" />
+                                        <Loader2 className="h-8 w-8 animate-spin text-primary" />
                                     </div>
                                 ) : cohorts.length === 0 ? (
                                     <Card>
@@ -129,7 +123,7 @@ export function CohortBrowser() {
                                         {cohorts.map((cohort) => (
                                             <Card
                                                 key={cohort.id}
-                                                className="cursor-pointer transition-all hover:shadow-md hover:border-blue-300"
+                                                className="cursor-pointer transition-all hover:shadow-md hover:border-primary/20"
                                                 onClick={() => navigate(`/academy/cohorts/${cohort.id}`)}
                                             >
                                                 <CardHeader className="pb-2">

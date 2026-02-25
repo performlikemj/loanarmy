@@ -159,8 +159,8 @@ function TableCard({ data }) {
                         className={cn(
                           'text-xs whitespace-nowrap',
                           typeof cell === 'number' && 'tabular-nums text-right',
-                          columns[j]?.toLowerCase().includes('goal') && cell > 0 && 'font-bold text-green-700',
-                          columns[j]?.toLowerCase().includes('assist') && cell > 0 && 'font-bold text-blue-700',
+                          columns[j]?.toLowerCase().includes('goal') && cell > 0 && 'font-bold text-emerald-700',
+                          columns[j]?.toLowerCase().includes('assist') && cell > 0 && 'font-bold text-amber-700',
                         )}
                       >
                         {cell ?? '\u2013'}

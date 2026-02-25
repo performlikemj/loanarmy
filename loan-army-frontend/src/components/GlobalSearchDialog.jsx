@@ -397,7 +397,7 @@ export function GlobalSearchDialog({
                         {player.photo_url ? (
                           <AvatarImage src={player.photo_url} alt={player.player_name} />
                         ) : null}
-                        <AvatarFallback className="text-[10px] bg-gray-100">
+                        <AvatarFallback className="text-[10px] bg-secondary">
                           {(player.player_name || '?').substring(0, 1).toUpperCase()}
                         </AvatarFallback>
                       </Avatar>

@@ -20,7 +20,7 @@ export function SquadSummaryStrip({ placements }) {
   if (!stats) return null
 
   return (
-    <div className="flex items-center justify-center gap-4 sm:gap-6 py-2 px-4 bg-gray-900 text-white rounded-lg text-sm max-w-[520px] mx-auto">
+    <div className="flex items-center justify-center gap-4 sm:gap-6 py-2 px-4 bg-foreground text-primary-foreground rounded-lg text-sm max-w-[520px] mx-auto">
       <Stat value={stats.goals} label="goals" />
       <Sep />
       <Stat value={stats.assists} label="assists" />
@@ -36,13 +36,13 @@ function Stat({ value, label }) {
   return (
     <div className="flex items-baseline gap-1.5">
       <span className="text-lg font-bold tabular-nums">{value}</span>
-      <span className="text-xs text-gray-400">{label}</span>
+      <span className="text-xs text-muted-foreground/70">{label}</span>
     </div>
   )
 }
 
 function Sep() {
-  return <span className="text-gray-600">·</span>
+  return <span className="text-muted-foreground">·</span>
 }
 
 function formatMinutes(mins) {

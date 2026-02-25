@@ -124,9 +124,9 @@ export function AuthModal() {
                 {auth.token ? (
                     <div className="space-y-4">
                         <div className="rounded-md border bg-muted/40 p-3 text-sm">
-                            <div className="font-medium text-gray-900">Signed in as {auth.displayName || 'GOL supporter'}</div>
+                            <div className="font-medium text-foreground">Signed in as {auth.displayName || 'GOL supporter'}</div>
                             {auth.isAdmin && (
-                                <div className="text-xs text-gray-600 mt-1">
+                                <div className="text-xs text-muted-foreground mt-1">
                                     Admin access: {auth.hasApiKey ? 'ready' : 'missing API key'}
                                 </div>
                             )}

@@ -285,7 +285,7 @@ export function NewsletterPreviewDialog({ open, onOpenChange, newsletter, onStat
                         </ScrollArea>
                         <div className="p-4 border-t bg-background space-y-2" aria-live="polite">
                             {sendStatus && (
-                                <div className={`text-sm ${sendStatus.type === 'error' ? 'text-red-600' : 'text-green-700'}`}>
+                                <div className={`text-sm ${sendStatus.type === 'error' ? 'text-rose-600' : 'text-emerald-700'}`}>
                                     {sendStatus.text}
                                 </div>
                             )}
@@ -311,7 +311,7 @@ export function NewsletterPreviewDialog({ open, onOpenChange, newsletter, onStat
                     </div>
 
                     {/* Right Panel: Preview */}
-                    <div className="flex-1 bg-gray-100/50 relative overflow-hidden">
+                    <div className="flex-1 bg-secondary/50 relative overflow-hidden">
                         {loading && (
                             <div className="absolute inset-0 bg-background/50 backdrop-blur-sm flex items-center justify-center z-10">
                                 <Loader2 className="h-8 w-8 animate-spin text-primary" />

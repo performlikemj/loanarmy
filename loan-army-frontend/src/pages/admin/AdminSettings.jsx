@@ -159,9 +159,9 @@ export function AdminSettings() {
 
             {/* Message Display */}
             {message && (
-                <Alert className={message.type === 'error' ? 'border-red-500 bg-red-50' : message.type === 'success' ? 'border-green-500 bg-green-50' : 'border-blue-500 bg-blue-50'}>
-                    {message.type === 'error' ? <AlertCircle className="h-4 w-4 text-red-600" /> : <CheckCircle2 className="h-4 w-4 text-green-600" />}
-                    <AlertDescription className={message.type === 'error' ? 'text-red-800' : message.type === 'success' ? 'text-green-800' : 'text-blue-800'}>
+                <Alert className={message.type === 'error' ? 'border-rose-500 bg-rose-50' : message.type === 'success' ? 'border-emerald-500 bg-emerald-50' : 'border-primary/20 bg-primary/5'}>
+                    {message.type === 'error' ? <AlertCircle className="h-4 w-4 text-rose-600" /> : <CheckCircle2 className="h-4 w-4 text-emerald-600" />}
+                    <AlertDescription className={message.type === 'error' ? 'text-rose-800' : message.type === 'success' ? 'text-emerald-800' : 'text-primary'}>
                         {message.text}
                     </AlertDescription>
                 </Alert>
@@ -180,14 +180,14 @@ export function AdminSettings() {
                     {/* Status Indicators */}
                     <div className="grid gap-3">
                         <div className="flex items-center gap-3 p-3 rounded-lg border bg-muted/40">
-                            <div className={`h-2 w-2 rounded-full ${hasAdminToken ? 'bg-green-500' : 'bg-gray-300'}`} />
+                            <div className={`h-2 w-2 rounded-full ${hasAdminToken ? 'bg-emerald-500' : 'bg-muted-foreground/50'}`} />
                             <div className="flex-1">
                                 <div className="text-sm font-medium">Admin User Token</div>
                                 <p className="text-xs text-muted-foreground">Sign in with an approved admin email</p>
                             </div>
                         </div>
                         <div className="flex items-center gap-3 p-3 rounded-lg border bg-muted/40">
-                            <div className={`h-2 w-2 rounded-full ${hasStoredKey ? 'bg-green-500' : 'bg-gray-300'}`} />
+                            <div className={`h-2 w-2 rounded-full ${hasStoredKey ? 'bg-emerald-500' : 'bg-muted-foreground/50'}`} />
                             <div className="flex-1">
                                 <div className="text-sm font-medium">API Key</div>
                                 <p className="text-xs text-muted-foreground">Required for admin operations</p>
@@ -232,7 +232,7 @@ export function AdminSettings() {
                         <div className="flex items-start justify-between gap-3">
                             <div>
                                 <CardTitle className="flex items-center gap-2">
-                                    <KeyRound className="h-5 w-5 text-blue-600" />
+                                    <KeyRound className="h-5 w-5 text-primary" />
                                     API Key
                                 </CardTitle>
                                 <CardDescription>
@@ -327,7 +327,7 @@ export function AdminSettings() {
                                         type="checkbox"
                                         checked={!!settings[k]}
                                         onChange={(e) => setSettings({ ...settings, [k]: e.target.checked })}
-                                        className="h-4 w-4 rounded border-gray-300"
+                                        className="h-4 w-4 rounded border-border"
                                     />
                                     <span className="text-sm font-medium">{label}</span>
                                 </label>
@@ -343,7 +343,7 @@ export function AdminSettings() {
                                         name="newsletter_generation_preference"
                                         checked={settings.newsletter_generation_preference !== 'always_run'}
                                         onChange={() => setSettings({ ...settings, newsletter_generation_preference: 'always_ask' })}
-                                        className="h-4 w-4 border-gray-300"
+                                        className="h-4 w-4 border-border"
                                     />
                                     <div>
                                         <div className="text-sm font-medium">Always Ask (Default)</div>
@@ -356,7 +356,7 @@ export function AdminSettings() {
                                         name="newsletter_generation_preference"
                                         checked={settings.newsletter_generation_preference === 'always_run'}
                                         onChange={() => setSettings({ ...settings, newsletter_generation_preference: 'always_run' })}
-                                        className="h-4 w-4 border-gray-300"
+                                        className="h-4 w-4 border-border"
                                     />
                                     <div>
                                         <div className="text-sm font-medium">Always Run</div>

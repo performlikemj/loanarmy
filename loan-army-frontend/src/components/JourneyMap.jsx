@@ -129,7 +129,7 @@ export function JourneyMap({ journeyData, loading, error }) {
                         <MapPin className="h-5 w-5" />
                         Career Journey
                         {selectedNode && (
-                            <Badge variant="outline" className="text-xs ml-2 bg-blue-50 text-blue-700 border-blue-200">
+                            <Badge variant="outline" className="text-xs ml-2 bg-primary/5 text-primary border-primary/20">
                                 {selectedNode.years} — {selectedNode.clubName}
                             </Badge>
                         )}
@@ -266,7 +266,7 @@ export function JourneyMap({ journeyData, loading, error }) {
                         </ComposableMap>
 
                         {/* Legend */}
-                        <div className="absolute bottom-2 left-2 bg-white/90 rounded-lg p-2 text-xs shadow-md z-10">
+                        <div className="absolute bottom-2 left-2 bg-card/90 rounded-lg p-2 text-xs shadow-md z-10">
                             <div className="flex flex-wrap gap-2">
                                 <div className="flex items-center gap-1">
                                     <div className="w-3 h-3 rounded-full bg-purple-500" />

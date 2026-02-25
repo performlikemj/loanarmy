@@ -42,7 +42,7 @@ export function AdminLayout() {
 
     return (
         <BackgroundJobsProvider>
-            <div className="flex min-h-screen bg-gray-50">
+            <div className="flex min-h-screen bg-secondary">
                 <AdminSidebar
                     collapsed={collapsed}
                     className="hidden lg:flex"
@@ -62,7 +62,7 @@ export function AdminLayout() {
                 </Sheet>
 
                 <div className="flex-1 min-w-0 flex flex-col">
-                    <header className="sticky top-0 z-20 h-16 border-b bg-white/90 backdrop-blur flex items-center px-4 sm:px-6 justify-between gap-4">
+                    <header className="sticky top-0 z-20 h-16 border-b bg-card/90 backdrop-blur flex items-center px-4 sm:px-6 justify-between gap-4">
                         <div className="flex items-center gap-3 min-w-0">
                             <Button
                                 data-testid="admin-menu-toggle"
@@ -85,11 +85,11 @@ export function AdminLayout() {
                                 {collapsed ? <PanelLeftOpen className="h-5 w-5" /> : <PanelLeftClose className="h-5 w-5" />}
                             </Button>
                             <div className="min-w-0">
-                                <h1 className="text-lg sm:text-xl font-semibold text-gray-900 truncate">Admin Dashboard</h1>
-                                <p className="text-xs text-gray-500 hidden sm:block">Control center for journalists, loans, and newsletters</p>
+                                <h1 className="text-lg sm:text-xl font-semibold text-foreground truncate">Admin Dashboard</h1>
+                                <p className="text-xs text-muted-foreground hidden sm:block">Control center for journalists, loans, and newsletters</p>
                             </div>
                         </div>
-                        <div className="flex items-center gap-4 text-sm text-gray-600">
+                        <div className="flex items-center gap-4 text-sm text-muted-foreground">
                             <span className="hidden sm:inline">Logged in as Admin</span>
                         </div>
                     </header>

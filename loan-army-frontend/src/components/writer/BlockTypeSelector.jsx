@@ -28,7 +28,7 @@ const BLOCK_TYPES = [
     label: 'Text',
     description: 'Rich text with formatting',
     icon: Type,
-    color: 'bg-blue-50 text-blue-700 border-blue-200 hover:bg-blue-100',
+    color: 'bg-primary/5 text-primary border-primary/20 hover:bg-primary/10',
   },
   {
     type: 'quote',
@@ -42,7 +42,7 @@ const BLOCK_TYPES = [
     label: 'Divider',
     description: 'Visual section separator',
     icon: Minus,
-    color: 'bg-gray-50 text-gray-700 border-gray-200 hover:bg-gray-100',
+    color: 'bg-secondary text-foreground/80 border-border hover:bg-muted',
   },
 ]
 
@@ -99,7 +99,7 @@ function BlockOption({ type, chartType, label, description, icon: Icon, color, o
         </div>
         <div className="flex-1 min-w-0">
           <h4 className="font-semibold text-sm">{label}</h4>
-          <p className="text-xs text-gray-600 mt-0.5">{description}</p>
+          <p className="text-xs text-muted-foreground mt-0.5">{description}</p>
         </div>
       </CardContent>
     </Card>
@@ -116,7 +116,7 @@ export function BlockTypeSelector({ open, onOpenChange, onSelect }) {
       <DialogContent className="sm:max-w-[600px] max-h-[85vh] overflow-y-auto">
         <DialogHeader>
           <DialogTitle className="flex items-center gap-2">
-            <Sparkles className="h-5 w-5 text-blue-600" />
+            <Sparkles className="h-5 w-5 text-primary" />
             Add Content Block
           </DialogTitle>
           <DialogDescription>
@@ -127,7 +127,7 @@ export function BlockTypeSelector({ open, onOpenChange, onSelect }) {
         <div className="space-y-6 pt-4">
           {/* Basic blocks */}
           <div>
-            <h3 className="text-sm font-medium text-gray-700 mb-3">Content</h3>
+            <h3 className="text-sm font-medium text-foreground/80 mb-3">Content</h3>
             <div className="grid grid-cols-2 gap-3">
               {BLOCK_TYPES.map((block) => (
                 <BlockOption
@@ -142,7 +142,7 @@ export function BlockTypeSelector({ open, onOpenChange, onSelect }) {
           {/* Chart blocks */}
           <div>
             <div className="flex items-center justify-between mb-3">
-              <h3 className="text-sm font-medium text-gray-700">Data Visualizations</h3>
+              <h3 className="text-sm font-medium text-foreground/80">Data Visualizations</h3>
               <Badge variant="secondary" className="text-xs">
                 <BarChart3 className="h-3 w-3 mr-1" />
                 Player Stats
@@ -161,7 +161,7 @@ export function BlockTypeSelector({ open, onOpenChange, onSelect }) {
           </div>
 
           {/* Hint */}
-          <div className="text-xs text-gray-500 bg-gray-50 p-3 rounded-lg">
+          <div className="text-xs text-muted-foreground bg-secondary p-3 rounded-lg">
             <strong>Tip:</strong> You can mark any block as premium to make it visible only to subscribers.
             Drag blocks to reorder them.
           </div>

@@ -101,7 +101,7 @@ export function JournalistProfile() {
     if (!journalist) {
         return (
             <div className="max-w-4xl mx-auto p-8 text-center">
-                <h2 className="text-2xl font-bold text-gray-900">Journalist Not Found</h2>
+                <h2 className="text-2xl font-bold text-foreground">Journalist Not Found</h2>
                 <Button variant="link" onClick={() => navigate('/journalists')} className="mt-4">
                     <ArrowLeft className="mr-2 h-4 w-4" /> Back to Directory
                 </Button>
@@ -117,9 +117,9 @@ export function JournalistProfile() {
             </Button>
 
             {/* Header Profile Card */}
-            <div className="bg-white rounded-none border-b border-gray-200 pb-8">
+            <div className="bg-card rounded-none border-b border-border pb-8">
                 <div className="flex flex-col md:flex-row gap-8 items-start">
-                    <Avatar className="h-32 w-32 border border-gray-200 rounded-full">
+                    <Avatar className="h-32 w-32 border border-border rounded-full">
                         <AvatarImage src={journalist.profile_image_url} alt={journalist.display_name} className="object-cover" />
                         <AvatarFallback className="text-4xl bg-black text-white font-serif">
                             {journalist.display_name?.substring(0, 2).toUpperCase()}
@@ -129,8 +129,8 @@ export function JournalistProfile() {
                     <div className="flex-1 space-y-4">
                         <div className="flex justify-between items-start">
                             <div>
-                                <h1 className="text-4xl font-serif font-bold text-gray-900 tracking-tight">{journalist.display_name}</h1>
-                                <p className="text-lg text-gray-600 mt-2 font-serif leading-relaxed max-w-2xl">{journalist.bio || 'Football Scout & Analyst'}</p>
+                                <h1 className="text-4xl font-serif font-bold text-foreground tracking-tight">{journalist.display_name}</h1>
+                                <p className="text-lg text-muted-foreground mt-2 font-serif leading-relaxed max-w-2xl">{journalist.bio || 'Football Scout & Analyst'}</p>
 
                                 {(journalist.attribution_url || journalist.attribution_name) && (
                                     <div className="mt-3 flex items-center gap-2">
@@ -139,13 +139,13 @@ export function JournalistProfile() {
                                                 href={journalist.attribution_url}
                                                 target="_blank"
                                                 rel="noopener noreferrer"
-                                                className="inline-flex items-center gap-1 text-sm font-medium text-blue-600 hover:text-blue-800 hover:underline"
+                                                className="inline-flex items-center gap-1 text-sm font-medium text-primary hover:text-primary/80 hover:underline"
                                             >
                                                 {journalist.attribution_name || 'Visit Website'}
                                                 <ExternalLink className="h-3 w-3" />
                                             </a>
                                         ) : (
-                                            <span className="text-sm font-medium text-gray-600">
+                                            <span className="text-sm font-medium text-muted-foreground">
                                                 {journalist.attribution_name}
                                             </span>
                                         )}
@@ -158,8 +158,8 @@ export function JournalistProfile() {
                                 disabled={subscribing}
                                 variant={isSubscribed ? "outline" : "default"}
                                 className={isSubscribed
-                                    ? "border-gray-300 text-gray-700 hover:bg-gray-50 rounded-full"
-                                    : "bg-black text-white hover:bg-gray-800 rounded-full px-8"}
+                                    ? "border-border text-foreground/80 hover:bg-secondary rounded-full"
+                                    : "bg-foreground text-primary-foreground hover:bg-foreground/90 rounded-full px-8"}
                             >
                                 {subscribing ? (
                                     <Loader2 className="mr-2 h-4 w-4 animate-spin" />
@@ -173,22 +173,22 @@ export function JournalistProfile() {
                         </div>
 
                         {/* Stats Row */}
-                        <div className="flex flex-wrap gap-8 py-4 border-t border-gray-100 mt-6">
+                        <div className="flex flex-wrap gap-8 py-4 border-t border-border mt-6">
                             <div className="flex flex-col">
                                 <span className="text-2xl font-bold font-serif">{stats?.total_subscribers || 0}</span>
-                                <span className="text-xs uppercase tracking-wider text-gray-500">
+                                <span className="text-xs uppercase tracking-wider text-muted-foreground">
                                     {stats?.total_subscribers === 1 ? 'Subscriber' : 'Subscribers'}
                                 </span>
                             </div>
                             <div className="flex flex-col">
                                 <span className="text-2xl font-bold font-serif">{journalist.assigned_teams?.length || 0}</span>
-                                <span className="text-xs uppercase tracking-wider text-gray-500">
+                                <span className="text-xs uppercase tracking-wider text-muted-foreground">
                                     {journalist.assigned_teams?.length === 1 ? 'Team' : 'Teams'}
                                 </span>
                             </div>
                             <div className="flex flex-col">
                                 <span className="text-2xl font-bold font-serif">{new Date(journalist.created_at).getFullYear()}</span>
-                                <span className="text-xs uppercase tracking-wider text-gray-500">Joined</span>
+                                <span className="text-xs uppercase tracking-wider text-muted-foreground">Joined</span>
                             </div>
                         </div>
 
@@ -202,7 +202,7 @@ export function JournalistProfile() {
                                     >
                                         <Badge
                                             variant="outline"
-                                            className="px-3 py-1 text-sm flex items-center gap-2 border-gray-300 text-gray-700 rounded-full font-normal hover:bg-gray-100 hover:border-gray-400 cursor-pointer transition-colors"
+                                            className="px-3 py-1 text-sm flex items-center gap-2 border-border text-foreground/80 rounded-full font-normal hover:bg-secondary hover:border-border cursor-pointer transition-colors"
                                         >
                                             {team.logo && <img src={team.logo} alt="" className="w-4 h-4 object-contain" />}
                                             {team.name}
@@ -215,7 +215,7 @@ export function JournalistProfile() {
                 </div>
             </div>
 
-            <div className="bg-white border border-gray-200 rounded-lg p-6">
+            <div className="bg-card border border-border rounded-lg p-6">
                 <SubscribeToJournalist
                     journalistId={journalist.id}
                     journalistName={journalist.display_name}
@@ -225,16 +225,16 @@ export function JournalistProfile() {
 
             {/* Content Tabs */}
             <Tabs defaultValue="analysis" className="w-full">
-                <TabsList className="w-full justify-start border-b border-gray-200 bg-transparent p-0 h-auto gap-8 rounded-none">
+                <TabsList className="w-full justify-start border-b border-border bg-transparent p-0 h-auto gap-8 rounded-none">
                     <TabsTrigger
                         value="analysis"
-                        className="rounded-none border-b-2 border-transparent data-[state=active]:border-black data-[state=active]:bg-transparent data-[state=active]:shadow-none px-0 py-3 font-serif text-lg text-gray-500 data-[state=active]:text-black"
+                        className="rounded-none border-b-2 border-transparent data-[state=active]:border-black data-[state=active]:bg-transparent data-[state=active]:shadow-none px-0 py-3 font-serif text-lg text-muted-foreground data-[state=active]:text-foreground"
                     >
                         Latest Analysis
                     </TabsTrigger>
                     <TabsTrigger
                         value="about"
-                        className="rounded-none border-b-2 border-transparent data-[state=active]:border-black data-[state=active]:bg-transparent data-[state=active]:shadow-none px-0 py-3 font-serif text-lg text-gray-500 data-[state=active]:text-black"
+                        className="rounded-none border-b-2 border-transparent data-[state=active]:border-black data-[state=active]:bg-transparent data-[state=active]:shadow-none px-0 py-3 font-serif text-lg text-muted-foreground data-[state=active]:text-foreground"
                     >
                         About
                     </TabsTrigger>
@@ -242,17 +242,17 @@ export function JournalistProfile() {
 
                 <TabsContent value="analysis" className="mt-8 space-y-6">
                     {articles.length > 0 ? (
-                        <div className="grid gap-0 divide-y divide-gray-100">
-                            <div className="flex flex-col md:flex-row md:items-center md:justify-between gap-3 bg-gradient-to-r from-blue-50 to-gray-50 border border-blue-100 rounded-lg p-4 mb-4">
+                        <div className="grid gap-0 divide-y divide-border">
+                            <div className="flex flex-col md:flex-row md:items-center md:justify-between gap-3 bg-gradient-to-r from-secondary to-background border border-primary/10 rounded-lg p-4 mb-4">
                                 <div className="space-y-1">
-                                    <p className="text-sm font-semibold text-gray-900">Subscribe for more analysis</p>
-                                    <p className="text-sm text-gray-600">Get every premium writeup and match breakdown from {journalist.display_name}.</p>
+                                    <p className="text-sm font-semibold text-foreground">Subscribe for more analysis</p>
+                                    <p className="text-sm text-muted-foreground">Get every premium writeup and match breakdown from {journalist.display_name}.</p>
                                 </div>
                                 <Button
                                     size="sm"
                                     onClick={handleSubscribe}
                                     variant={isSubscribed ? "outline" : "default"}
-                                    className={isSubscribed ? "border-gray-300 text-gray-700" : "bg-black text-white"}
+                                    className={isSubscribed ? "border-border text-foreground/80" : "bg-foreground text-primary-foreground"}
                                     disabled={subscribing}
                                 >
                                     {subscribing ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : null}
@@ -273,21 +273,21 @@ export function JournalistProfile() {
                                     <div key={article.id} className="py-6 group cursor-pointer" onClick={handleClick}>
                                         <div className="flex justify-between items-start mb-2">
                                             <div className="flex items-center gap-2">
-                                                <span className="text-xs font-bold uppercase tracking-wider text-gray-900">
+                                                <span className="text-xs font-bold uppercase tracking-wider text-foreground">
                                                     {article.team_name}
                                                 </span>
-                                                <span className="text-xs text-gray-400">•</span>
-                                                <span className="text-xs text-gray-500">
+                                                <span className="text-xs text-muted-foreground/70">•</span>
+                                                <span className="text-xs text-muted-foreground">
                                                     {new Date(article.created_at).toLocaleDateString(undefined, {
                                                         year: 'numeric', month: 'long', day: 'numeric'
                                                     })}
                                                 </span>
                                             </div>
                                         </div>
-                                        <h3 className="text-xl font-bold font-serif text-gray-900 group-hover:underline mb-2 leading-tight">
+                                        <h3 className="text-xl font-bold font-serif text-foreground group-hover:underline mb-2 leading-tight">
                                             {article.title || `Weekly Analysis: ${article.team_name}`}
                                         </h3>
-                                        <p className="text-gray-600 line-clamp-2 font-serif leading-relaxed">
+                                        <p className="text-muted-foreground line-clamp-2 font-serif leading-relaxed">
                                             {article.content?.replace(/<[^>]*>/g, '').substring(0, 200)}...
                                         </p>
                                         <div className="mt-3 flex items-center gap-4">
@@ -297,7 +297,7 @@ export function JournalistProfile() {
                                                 </div>
                                             )}
                                             {article.applause_count > 0 && (
-                                                <div className="flex items-center text-gray-500 text-sm">
+                                                <div className="flex items-center text-muted-foreground text-sm">
                                                     <span className="mr-1">👏</span> {article.applause_count}
                                                 </div>
                                             )}
@@ -307,8 +307,8 @@ export function JournalistProfile() {
                             })}
                         </div>
                     ) : (
-                        <div className="text-center py-12 bg-gray-50 rounded-lg border border-dashed">
-                            <p className="text-gray-500">No analysis published yet.</p>
+                        <div className="text-center py-12 bg-secondary rounded-lg border border-dashed">
+                            <p className="text-muted-foreground">No analysis published yet.</p>
                         </div>
                     )}
                 </TabsContent>
@@ -319,7 +319,7 @@ export function JournalistProfile() {
                             <CardTitle>About {journalist.display_name}</CardTitle>
                         </CardHeader>
                         <CardContent>
-                            <div className="prose max-w-none text-gray-700">
+                            <div className="prose max-w-none text-foreground/80">
                                 <p>{journalist.bio || "No bio available."}</p>
                             </div>
                         </CardContent>

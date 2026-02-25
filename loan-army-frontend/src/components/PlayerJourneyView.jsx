@@ -15,8 +15,8 @@ export default function PlayerJourneyView() {
     if (!journeyData?.stops?.length) {
         return (
             <div className="flex flex-col items-center justify-center py-12">
-                <MapPin className="h-12 w-12 text-gray-300 mb-2" />
-                <p className="text-gray-500">No journey data available</p>
+                <MapPin className="h-12 w-12 text-muted-foreground/70 mb-2" />
+                <p className="text-muted-foreground">No journey data available</p>
             </div>
         )
     }

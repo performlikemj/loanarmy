@@ -15,7 +15,7 @@ export function CommunityTakesList({ data }) {
       <CardContent className="p-3">
         <div className="space-y-3">
           {takes.map((t, i) => (
-            <blockquote key={i} className="border-l-2 border-blue-400 pl-3 py-1">
+            <blockquote key={i} className="border-l-2 border-primary pl-3 py-1">
               <p className="text-sm italic">"{t.content}"</p>
               <footer className="text-muted-foreground mt-1">
                 — {t.author}

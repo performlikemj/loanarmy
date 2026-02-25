@@ -60,7 +60,7 @@ export function PlayerStatTable({ data }) {
 
   if (!tableData.length) {
     return (
-      <div className="text-center text-gray-500 py-4 text-sm">
+      <div className="text-center text-muted-foreground py-4 text-sm">
         No data available for stats table
       </div>
     )
@@ -69,22 +69,22 @@ export function PlayerStatTable({ data }) {
   return (
     <div className="space-y-3">
       {data?.player?.name && (
-        <div className="text-sm font-medium text-gray-700">
+        <div className="text-sm font-medium text-foreground/80">
           {data.player.name} - {data.matches_count || tableData.length} match{(data.matches_count || tableData.length) !== 1 ? 'es' : ''}
         </div>
       )}
 
       <div className="relative rounded-lg border">
         {canScrollLeft && (
-          <div className="absolute left-0 top-0 bottom-0 w-6 bg-gradient-to-r from-white to-transparent z-10 pointer-events-none rounded-l-lg" />
+          <div className="absolute left-0 top-0 bottom-0 w-6 bg-gradient-to-r from-card to-transparent z-10 pointer-events-none rounded-l-lg" />
         )}
         {canScrollRight && (
-          <div className="absolute right-0 top-0 bottom-0 w-6 bg-gradient-to-l from-white to-transparent z-10 pointer-events-none rounded-r-lg" />
+          <div className="absolute right-0 top-0 bottom-0 w-6 bg-gradient-to-l from-card to-transparent z-10 pointer-events-none rounded-r-lg" />
         )}
         <div ref={scrollRef} className="overflow-x-auto scrollbar-hide">
           <Table>
             <TableHeader>
-              <TableRow className="bg-gray-50">
+              <TableRow className="bg-secondary">
                 <TableHead className="text-xs font-semibold">Date</TableHead>
                 <TableHead className="text-xs font-semibold">Opponent</TableHead>
                 <TableHead className="text-xs font-semibold text-center">Result</TableHead>
@@ -104,7 +104,7 @@ export function PlayerStatTable({ data }) {
                 const isDraw = homeScore === awayScore
 
                 return (
-                  <TableRow key={idx} className="hover:bg-gray-50">
+                  <TableRow key={idx} className="hover:bg-secondary">
                     <TableCell className="text-xs">
                       {row.date ? new Date(row.date).toLocaleDateString('en-US', {
                         month: 'short',
@@ -115,7 +115,7 @@ export function PlayerStatTable({ data }) {
                       <div className="flex items-center gap-1">
                         <span className={cn(
                           'inline-block w-1.5 h-1.5 rounded-full',
-                          row.is_home ? 'bg-green-500' : 'bg-gray-400'
+                          row.is_home ? 'bg-emerald-500' : 'bg-muted-foreground/70'
                         )} />
                         {row.opponent}
                       </div>
@@ -125,9 +125,9 @@ export function PlayerStatTable({ data }) {
                         variant="outline"
                         className={cn(
                           'text-xs font-mono tabular-nums',
-                          isWin && 'bg-green-50 text-green-700 border-green-200',
-                          isDraw && 'bg-gray-50 text-gray-700 border-gray-200',
-                          !isWin && !isDraw && 'bg-red-50 text-red-700 border-red-200'
+                          isWin && 'bg-emerald-50 text-emerald-700 border-emerald-200',
+                          isDraw && 'bg-secondary text-foreground/80 border-border',
+                          !isWin && !isDraw && 'bg-rose-50 text-rose-700 border-rose-200'
                         )}
                       >
                         {row.result}
@@ -144,7 +144,7 @@ export function PlayerStatTable({ data }) {
                           key={key}
                           className={cn(
                             'text-xs text-center tabular-nums',
-                            isHighlight && 'font-bold text-green-700'
+                            isHighlight && 'font-bold text-emerald-700'
                           )}
                         >
                           {key === 'rating' && value ? value.toFixed(1) : (value ?? '-')}
@@ -157,7 +157,7 @@ export function PlayerStatTable({ data }) {
 
               {/* Totals row */}
               {Object.keys(totals).length > 0 && (
-                <TableRow className="bg-gray-100 font-semibold">
+                <TableRow className="bg-secondary font-semibold">
                   <TableCell className="text-xs" colSpan={3}>
                     Totals / Averages
                   </TableCell>

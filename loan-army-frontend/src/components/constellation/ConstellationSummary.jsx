@@ -12,7 +12,7 @@ function StatusCard({ status, count, isActive, onClick, label }) {
             className={`flex items-center gap-2 px-3 py-2 rounded-lg border text-sm font-medium transition-colors ${
                 isActive
                     ? 'bg-slate-800 text-white border-slate-600'
-                    : 'bg-white border-gray-200 text-gray-700 hover:bg-gray-50'
+                    : 'bg-card border-border text-foreground/80 hover:bg-secondary'
             }`}
         >
             <span
@@ -77,12 +77,12 @@ export function ConstellationSummary({ data, parentTeamName }) {
 
             {/* Expandable player list */}
             {expandedStatus && playersByStatus[expandedStatus] && (
-                <div className="bg-white rounded-lg border border-gray-200 divide-y divide-gray-100">
+                <div className="bg-card rounded-lg border border-border divide-y divide-border">
                     {playersByStatus[expandedStatus].map((player) => (
                         <Link
                             key={player.player_api_id}
                             to={`/players/${player.player_api_id}`}
-                            className="flex items-center gap-3 px-4 py-3 hover:bg-gray-50 transition-colors group"
+                            className="flex items-center gap-3 px-4 py-3 hover:bg-secondary transition-colors group"
                         >
                             {player.player_photo ? (
                                 <img
@@ -91,21 +91,21 @@ export function ConstellationSummary({ data, parentTeamName }) {
                                     className="w-8 h-8 rounded-full object-cover shrink-0"
                                 />
                             ) : (
-                                <div className="w-8 h-8 rounded-full bg-gray-200 flex items-center justify-center text-xs font-medium text-gray-500 shrink-0">
+                                <div className="w-8 h-8 rounded-full bg-muted flex items-center justify-center text-xs font-medium text-muted-foreground shrink-0">
                                     {player.player_name?.split(' ').map(n => n[0]).join('').slice(0, 2).toUpperCase()}
                                 </div>
                             )}
                             <div className="flex-1 min-w-0">
-                                <div className="text-sm font-medium text-gray-900 group-hover:text-blue-600 transition-colors truncate">
+                                <div className="text-sm font-medium text-foreground group-hover:text-primary transition-colors truncate">
                                     {player.player_name}
                                 </div>
                                 {player.current_club_name && (
-                                    <div className="text-xs text-gray-500 truncate">
+                                    <div className="text-xs text-muted-foreground truncate">
                                         {player.status === 'on_loan' ? 'at ' : ''}{player.current_club_name}
                                     </div>
                                 )}
                             </div>
-                            <div className="flex items-center gap-2 text-xs text-gray-500 shrink-0">
+                            <div className="flex items-center gap-2 text-xs text-muted-foreground shrink-0">
                                 {expandedStatus === 'first_team' ? (
                                     player.parent_club_appearances > 0 && (
                                         <span>{player.parent_club_appearances} apps</span>
@@ -116,7 +116,7 @@ export function ConstellationSummary({ data, parentTeamName }) {
                                     )
                                 )}
                             </div>
-                            <ChevronRight className="h-4 w-4 text-gray-300 group-hover:text-blue-400 shrink-0" />
+                            <ChevronRight className="h-4 w-4 text-muted-foreground/70 group-hover:text-primary shrink-0" />
                         </Link>
                     ))}
                 </div>
@@ -124,7 +124,7 @@ export function ConstellationSummary({ data, parentTeamName }) {
 
             {/* Full player list when no status is expanded */}
             {!expandedStatus && (
-                <div className="text-xs text-gray-400 text-center py-2">
+                <div className="text-xs text-muted-foreground/70 text-center py-2">
                     Click a status above to see players
                 </div>
             )}

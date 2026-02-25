@@ -103,13 +103,13 @@ export function CommentaryCard({
         <div className="flex-1 min-w-0">
           <div className="flex items-center flex-wrap gap-x-2 gap-y-1">
             <span className={cn(
-              'font-semibold text-gray-900 truncate',
+              'font-semibold text-foreground truncate',
               isCompact ? 'text-sm' : 'text-sm sm:text-base'
             )}>
               {displayName}
             </span>
             {hasContributor && commentary.author_name && (
-              <span className="text-xs text-gray-500">
+              <span className="text-xs text-muted-foreground">
                 via {commentary.author_name}
               </span>
             )}
@@ -120,7 +120,7 @@ export function CommentaryCard({
               </Badge>
             )}
           </div>
-          <div className="flex items-center gap-2 text-xs text-gray-500">
+          <div className="flex items-center gap-2 text-xs text-muted-foreground">
             {showTypeLabel && (
               <span className={cn('font-medium uppercase tracking-wide', colors.accent)}>
                 {typeLabel}
@@ -144,7 +144,7 @@ export function CommentaryCard({
       {/* Title if present */}
       {commentary.title && (
         <h4 className={cn(
-          'font-bold text-gray-900 leading-tight mb-2',
+          'font-bold text-foreground leading-tight mb-2',
           isCompact ? 'text-base' : 'text-base sm:text-lg'
         )}>
           {commentary.title}
@@ -172,7 +172,7 @@ export function CommentaryCard({
           {/* Footer */}
           {!isLocked && (
             <div className={cn(
-              'flex items-center justify-between border-t border-gray-200/50',
+              'flex items-center justify-between border-t border-border',
               isCompact ? 'mt-2 pt-2' : 'mt-3 pt-3'
             )}>
               <button
@@ -182,7 +182,7 @@ export function CommentaryCard({
                   'flex items-center gap-1.5 text-xs transition-all',
                   hasApplauded 
                     ? 'text-violet-600' 
-                    : 'text-gray-500 hover:text-violet-600'
+                    : 'text-muted-foreground hover:text-violet-600'
                 )}
               >
                 <ClapIcon className={cn(
@@ -212,18 +212,18 @@ export function CommentaryCard({
         // Legacy locked content
         <div className="relative">
           <div 
-            className="text-gray-600 text-sm leading-relaxed blur-[2px] select-none line-clamp-2"
+            className="text-muted-foreground text-sm leading-relaxed blur-[2px] select-none line-clamp-2"
             dangerouslySetInnerHTML={{ __html: formatTextToHtml(commentary.content) }}
           />
-          <div className="absolute inset-0 flex flex-col items-center justify-center bg-gradient-to-t from-white/95 via-white/80 to-transparent pt-4">
-            <Lock className="h-5 w-5 text-gray-400 mb-2" />
-            <p className="text-xs text-gray-500 mb-2 text-center px-4">
+          <div className="absolute inset-0 flex flex-col items-center justify-center bg-gradient-to-t from-card/95 via-card/80 to-transparent pt-4">
+            <Lock className="h-5 w-5 text-muted-foreground/70 mb-2" />
+            <p className="text-xs text-muted-foreground mb-2 text-center px-4">
               Subscribe to unlock
             </p>
             <Button 
               size="sm" 
               onClick={handleSubscribeClick}
-              className="bg-gray-900 hover:bg-gray-800 text-white rounded-full px-4 h-8 text-xs"
+              className="bg-foreground hover:bg-foreground/90 text-background rounded-full px-4 h-8 text-xs"
             >
               Subscribe
             </Button>
@@ -234,11 +234,11 @@ export function CommentaryCard({
         <>
           <div 
             className={cn(
-              'prose prose-sm max-w-none text-gray-700',
+              'prose prose-sm max-w-none text-foreground/80',
               'prose-p:my-2 prose-ul:my-2 prose-ol:my-2 prose-li:my-1',
               'prose-ul:pl-5 prose-ol:pl-5',
-              'prose-headings:text-gray-900 prose-headings:font-semibold',
-              'prose-strong:text-gray-900 prose-a:text-violet-600',
+              'prose-headings:text-foreground prose-headings:font-semibold',
+              'prose-strong:text-foreground prose-a:text-violet-600 text-foreground/80',
               isCompact ? 'text-sm leading-relaxed' : 'text-sm sm:text-base leading-relaxed'
             )}
             dangerouslySetInnerHTML={{ __html: formatTextToHtml(commentary.content) }}
@@ -246,7 +246,7 @@ export function CommentaryCard({
           
           {/* Footer */}
           <div className={cn(
-            'flex items-center justify-between border-t border-gray-200/50',
+            'flex items-center justify-between border-t border-border',
             isCompact ? 'mt-2 pt-2' : 'mt-3 pt-3'
           )}>
             <button
@@ -256,7 +256,7 @@ export function CommentaryCard({
                 'flex items-center gap-1.5 text-xs transition-all',
                 hasApplauded 
                   ? 'text-violet-600' 
-                  : 'text-gray-500 hover:text-violet-600'
+                  : 'text-muted-foreground hover:text-violet-600'
               )}
             >
               <ClapIcon className={cn(

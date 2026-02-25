@@ -651,7 +651,7 @@ export function AdminTeams() {
       </div>
 
       {message && (
-        <Alert className={message.type === 'error' ? 'border-red-500' : message.type === 'success' ? 'border-green-500' : 'border-blue-500'}>
+        <Alert className={message.type === 'error' ? 'border-rose-500' : message.type === 'success' ? 'border-emerald-500' : 'border-primary/20'}>
           <AlertCircle className="h-4 w-4" />
           <AlertDescription>{message.text}</AlertDescription>
         </Alert>
@@ -760,8 +760,8 @@ export function AdminTeams() {
                         key={team.id}
                         className={`flex items-center gap-3 p-3 border rounded-lg transition-colors ${isSelected
                           ? willBeDeleted
-                            ? 'bg-red-50 border-red-200'
-                            : 'bg-green-50 border-green-200'
+                            ? 'bg-rose-50 border-rose-200'
+                            : 'bg-emerald-50 border-emerald-200'
                           : 'hover:bg-muted/50'
                           }`}
                       >
@@ -1144,11 +1144,11 @@ export function AdminTeams() {
               </div>
 
               {/* Propagate to Old Data */}
-              <div className="p-4 bg-blue-50 border border-blue-200 rounded-lg">
+              <div className="p-4 bg-primary/5 border border-primary/20 rounded-lg">
                 <div className="flex flex-col sm:flex-row flex-wrap items-start sm:items-center justify-between gap-3 sm:gap-4">
                   <div>
-                    <h4 className="font-medium text-blue-900">Propagate Names to Old Data</h4>
-                    <p className="text-sm text-blue-700 mt-1">
+                    <h4 className="font-medium text-foreground">Propagate Names to Old Data</h4>
+                    <p className="text-sm text-foreground/80 mt-1">
                       Update old newsletters and loan records.
                     </p>
                   </div>
@@ -1181,7 +1181,7 @@ export function AdminTeams() {
                 </div>
               ) : placeholderTeams.length === 0 ? (
                 <div className="text-center py-8 text-muted-foreground">
-                  <CheckCircle className="h-12 w-12 mx-auto mb-3 text-green-500" />
+                  <CheckCircle className="h-12 w-12 mx-auto mb-3 text-emerald-500" />
                   <p className="font-medium">No placeholder team names found!</p>
                   <p className="text-sm mt-1">All teams have proper names. Click "Find Placeholder Names" to search.</p>
                 </div>
@@ -1288,7 +1288,7 @@ export function AdminTeams() {
         <TabsContent value="purge" className="space-y-4">
           <Card>
             <CardHeader>
-              <CardTitle className="flex items-center gap-2 text-red-600">
+              <CardTitle className="flex items-center gap-2 text-rose-600">
                 <Trash2 className="h-5 w-5" />
                 Purge All Data Except One Team
               </CardTitle>
@@ -1297,7 +1297,7 @@ export function AdminTeams() {
               </CardDescription>
             </CardHeader>
             <CardContent className="space-y-4">
-              <Alert className="border-red-500">
+              <Alert className="border-rose-500">
                 <AlertCircle className="h-4 w-4" />
                 <AlertDescription>
                   <strong>Warning:</strong> This will permanently delete all tracked players and their fixture stats
@@ -1420,7 +1420,7 @@ export function AdminTeams() {
                           <td className="px-4 py-3">{alias.canonical_name}</td>
                           <td className="px-4 py-3">
                             {alias.team_name ? (
-                              <Badge variant="outline" className="bg-green-50 text-green-700 border-green-200">
+                              <Badge variant="outline" className="bg-emerald-50 text-emerald-700 border-emerald-200">
                                 {alias.team_name}
                               </Badge>
                             ) : (
@@ -1431,7 +1431,7 @@ export function AdminTeams() {
                             <Button
                               variant="ghost"
                               size="sm"
-                              className="text-red-600 hover:text-red-700 hover:bg-red-50"
+                              className="text-rose-600 hover:text-rose-700 hover:bg-rose-50"
                               onClick={() => handleDeleteAlias(alias.id)}
                               aria-label={`Delete alias ${alias.alias}`}
                             >
@@ -1453,7 +1453,7 @@ export function AdminTeams() {
       <Dialog open={deleteDialogOpen} onOpenChange={setDeleteDialogOpen}>
         <DialogContent className="sm:max-w-xl max-h-[80vh] overflow-y-auto">
           <DialogHeader>
-            <DialogTitle className="flex items-center gap-2 text-red-600">
+            <DialogTitle className="flex items-center gap-2 text-rose-600">
               <Trash2 className="h-5 w-5" />
               {deleteTarget ? 'Delete Team Data' : `Delete Data for ${teamsToDelete.length} Teams`}
             </DialogTitle>
@@ -1493,8 +1493,8 @@ export function AdminTeams() {
                 </div>
               </div>
 
-              <div className="border rounded-lg p-4 bg-red-50">
-                <p className="font-medium text-red-800 mb-3">The following data will be deleted:</p>
+              <div className="border rounded-lg p-4 bg-rose-50">
+                <p className="font-medium text-rose-800 mb-3">The following data will be deleted:</p>
                 <div className="grid grid-cols-2 gap-2 text-sm">
                   <div className="flex justify-between">
                     <span>Loan Players:</span>
@@ -1528,14 +1528,14 @@ export function AdminTeams() {
             <div className="space-y-4 py-4">
               {/* Teams to keep (if any) */}
               {teamsToKeep.length > 0 && (
-                <div className="border rounded-lg p-3 bg-green-50">
-                  <p className="font-medium text-green-800 mb-2 flex items-center gap-2">
+                <div className="border rounded-lg p-3 bg-emerald-50">
+                  <p className="font-medium text-emerald-800 mb-2 flex items-center gap-2">
                     <Shield className="h-4 w-4" />
                     Teams that will be KEPT ({teamsToKeep.length}):
                   </p>
                   <div className="flex flex-wrap gap-2">
                     {teamsToKeep.map(team => (
-                      <Badge key={team.id} variant="outline" className="bg-white">
+                      <Badge key={team.id} variant="outline" className="bg-card">
                         {team.name}
                       </Badge>
                     ))}
@@ -1544,8 +1544,8 @@ export function AdminTeams() {
               )}
 
               {/* Teams to delete */}
-              <div className="border rounded-lg p-3 bg-red-50">
-                <p className="font-medium text-red-800 mb-2 flex items-center gap-2">
+              <div className="border rounded-lg p-3 bg-rose-50">
+                <p className="font-medium text-rose-800 mb-2 flex items-center gap-2">
                   <Trash2 className="h-4 w-4" />
                   Teams to DELETE ({teamsToDelete.length}):
                 </p>
@@ -1559,8 +1559,8 @@ export function AdminTeams() {
               </div>
 
               {/* Totals */}
-              <div className="border rounded-lg p-4 bg-red-50">
-                <p className="font-medium text-red-800 mb-3">
+              <div className="border rounded-lg p-4 bg-rose-50">
+                <p className="font-medium text-rose-800 mb-3">
                   Total data to be deleted{teamsToDelete.length > 10 && ' (estimated based on first 10 teams)'}:
                 </p>
                 <div className="grid grid-cols-2 gap-2 text-sm">

@@ -63,10 +63,10 @@ export function MiniProgressBar() {
         <div className="mt-2">
             <div className="relative">
                 {canScrollLeft && (
-                    <div className="absolute left-0 top-0 bottom-0 w-4 bg-gradient-to-r from-white to-transparent z-10 pointer-events-none" />
+                    <div className="absolute left-0 top-0 bottom-0 w-4 bg-gradient-to-r from-card to-transparent z-10 pointer-events-none" />
                 )}
                 {canScrollRight && (
-                    <div className="absolute right-0 top-0 bottom-0 w-4 bg-gradient-to-l from-white to-transparent z-10 pointer-events-none" />
+                    <div className="absolute right-0 top-0 bottom-0 w-4 bg-gradient-to-l from-card to-transparent z-10 pointer-events-none" />
                 )}
                 <div
                     ref={scrollRef}
@@ -82,7 +82,7 @@ export function MiniProgressBar() {
                             <button
                                 ref={isSelected ? selectedLogoRef : null}
                                 onClick={() => selectNode(isSelected && selectedNode ? null : node)}
-                                className="relative flex-shrink-0 p-1 focus-visible:ring-2 focus-visible:ring-blue-500 focus-visible:outline-none rounded-full"
+                                className="relative flex-shrink-0 p-1 focus-visible:ring-2 focus-visible:ring-ring focus-visible:outline-none rounded-full"
                                 aria-label={`${node.clubName} ${node.years}`}
                             >
                                 <motion.div
@@ -90,7 +90,7 @@ export function MiniProgressBar() {
                                         scale: isSelected ? 1.2 : 1,
                                     }}
                                     transition={{ type: 'spring', stiffness: 400, damping: 25 }}
-                                    className={`${isSelected ? 'ring-2 ring-blue-500 ring-offset-1' : ''} rounded-full`}
+                                    className={`${isSelected ? 'ring-2 ring-ring ring-offset-1' : ''} rounded-full`}
                                 >
                                     <Avatar className={`h-5 w-5 md:h-6 md:w-6 transition-opacity duration-300 ${visited ? 'opacity-100' : 'opacity-40'}`}>
                                         <AvatarImage src={node.clubLogo} alt={node.clubName} />
@@ -117,7 +117,7 @@ export function MiniProgressBar() {
                                         className="h-0.5 transition-colors duration-300"
                                         style={{
                                             width: '16px',
-                                            backgroundColor: i <= activeIndex ? '#3b82f6' : '#d1d5db',
+                                            backgroundColor: i <= activeIndex ? '#d97706' : '#d6d3d1',
                                             opacity: i <= activeIndex ? 0.8 : 0.4,
                                         }}
                                     />
@@ -144,7 +144,7 @@ export function MiniProgressBar() {
                                                     </Avatar>
                                                     <div className="flex-1 min-w-0">
                                                         <div className="font-semibold text-sm truncate">{node.clubName}</div>
-                                                        <div className="text-xs text-gray-500">{node.years}</div>
+                                                        <div className="text-xs text-muted-foreground">{node.years}</div>
                                                     </div>
                                                 </div>
                                                 {/* Level badges */}
@@ -161,21 +161,21 @@ export function MiniProgressBar() {
                                                 </div>
                                                 {/* Stats */}
                                                 <div className="grid grid-cols-3 gap-2 text-center">
-                                                    <div className="bg-gray-50 rounded p-1.5">
+                                                    <div className="bg-secondary rounded p-1.5">
                                                         <div className="text-sm font-bold tabular-nums">{node.stats.apps}</div>
-                                                        <div className="text-[10px] text-gray-500">Apps</div>
+                                                        <div className="text-[10px] text-muted-foreground">Apps</div>
                                                     </div>
-                                                    <div className="bg-gray-50 rounded p-1.5">
-                                                        <div className="text-sm font-bold text-blue-600 tabular-nums">{node.stats.goals}</div>
-                                                        <div className="text-[10px] text-gray-500">Goals</div>
+                                                    <div className="bg-secondary rounded p-1.5">
+                                                        <div className="text-sm font-bold text-emerald-600 tabular-nums">{node.stats.goals}</div>
+                                                        <div className="text-[10px] text-muted-foreground">Goals</div>
                                                     </div>
-                                                    <div className="bg-gray-50 rounded p-1.5">
-                                                        <div className="text-sm font-bold text-green-600 tabular-nums">{node.stats.assists}</div>
-                                                        <div className="text-[10px] text-gray-500">Assists</div>
+                                                    <div className="bg-secondary rounded p-1.5">
+                                                        <div className="text-sm font-bold text-amber-600 tabular-nums">{node.stats.assists}</div>
+                                                        <div className="text-[10px] text-muted-foreground">Assists</div>
                                                     </div>
                                                 </div>
                                                 {/* Hint */}
-                                                <p className="text-[10px] text-gray-400 text-center">Click to explore</p>
+                                                <p className="text-[10px] text-muted-foreground/70 text-center">Click to explore</p>
                                             </div>
                                         </HoverCardContent>
                                     </HoverCard>
@@ -189,10 +189,10 @@ export function MiniProgressBar() {
             </div>
 
             {/* Season labels (sparse — show first, last, and selected) */}
-            <div className="flex justify-between text-[10px] text-gray-400 mt-0.5 px-1">
+            <div className="flex justify-between text-[10px] text-muted-foreground/70 mt-0.5 px-1">
                 <span>{progressionNodes[0]?.years}</span>
                 {selectedNode && (
-                    <span className="text-blue-500 font-medium">{selectedNode.years}</span>
+                    <span className="text-primary font-medium">{selectedNode.years}</span>
                 )}
                 <span>{progressionNodes[progressionNodes.length - 1]?.years}</span>
             </div>

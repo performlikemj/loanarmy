@@ -118,10 +118,10 @@ export function JourneyTimeline({ journeyData, loading, error }) {
                                             {/* Content card */}
                                             <div className={`p-3 rounded-lg border transition-[background-color,border-color,box-shadow] duration-300 ${
                                                 isSelected
-                                                    ? 'bg-blue-50 border-blue-500 shadow-sm ring-1 ring-blue-200'
+                                                    ? 'bg-primary/5 border-primary shadow-sm ring-1 ring-primary/20'
                                                     : isLast
-                                                        ? 'bg-green-50 border-green-200 dark:bg-green-950/20 hover:border-gray-300'
-                                                        : 'bg-card hover:border-gray-300'
+                                                        ? 'bg-emerald-50 border-emerald-200 dark:bg-emerald-950/20 hover:border-border'
+                                                        : 'bg-card hover:border-border'
                                             }`}>
                                                 {/* Header */}
                                                 <div className="flex items-start gap-3">
@@ -237,7 +237,7 @@ export function JourneyTimeline({ journeyData, loading, error }) {
                                                 {isLast && !isFirst && '★'}
                                             </div>
 
-                                            <div className={`p-3 rounded-lg border ${isLast ? 'bg-green-50 border-green-200 dark:bg-green-950/20' : 'bg-card'}`}>
+                                            <div className={`p-3 rounded-lg border ${isLast ? 'bg-emerald-50 border-emerald-200 dark:bg-emerald-950/20' : 'bg-card'}`}>
                                                 <div className="flex items-start gap-3">
                                                     {stop.club_logo && (
                                                         <Avatar className="h-10 w-10">

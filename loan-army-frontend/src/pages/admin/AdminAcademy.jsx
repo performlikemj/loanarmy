@@ -34,6 +34,7 @@ import {
     ArrowRight
 } from 'lucide-react'
 import { Link } from 'react-router-dom'
+import { LEVEL_BADGE_CLASSES } from '../../lib/theme-constants'
 
 export function AdminAcademy() {
     // Stats
@@ -210,14 +211,8 @@ export function AdminAcademy() {
     }
 
     const getLevelBadge = (level) => {
-        const colors = {
-            U18: 'bg-blue-100 text-blue-800',
-            U21: 'bg-green-100 text-green-800',
-            U23: 'bg-purple-100 text-purple-800',
-            Reserve: 'bg-orange-100 text-orange-800',
-        }
         return (
-            <Badge className={colors[level] || 'bg-gray-100 text-gray-800'}>
+            <Badge className={LEVEL_BADGE_CLASSES[level] || 'bg-secondary text-muted-foreground'}>
                 {level}
             </Badge>
         )
@@ -232,9 +227,9 @@ export function AdminAcademy() {
 
             {/* Message Display */}
             {message && (
-                <Alert className={message.type === 'error' ? 'border-red-500 bg-red-50' : 'border-green-500 bg-green-50'}>
-                    {message.type === 'error' ? <AlertCircle className="h-4 w-4 text-red-600" /> : <CheckCircle2 className="h-4 w-4 text-green-600" />}
-                    <AlertDescription className={message.type === 'error' ? 'text-red-800' : 'text-green-800'}>
+                <Alert className={message.type === 'error' ? 'border-rose-500 bg-rose-50' : 'border-emerald-500 bg-emerald-50'}>
+                    {message.type === 'error' ? <AlertCircle className="h-4 w-4 text-rose-600" /> : <CheckCircle2 className="h-4 w-4 text-emerald-600" />}
+                    <AlertDescription className={message.type === 'error' ? 'text-rose-800' : 'text-emerald-800'}>
                         {message.text}
                     </AlertDescription>
                 </Alert>

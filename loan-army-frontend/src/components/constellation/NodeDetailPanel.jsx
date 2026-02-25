@@ -12,12 +12,12 @@ function MiniJourneyTrail({ journeyPath, selectedClubApiId }) {
                 const isSelected = stop.club_api_id === selectedClubApiId
                 return (
                     <span key={`${stop.club_api_id}-${i}`} className="flex items-center gap-0.5">
-                        {i > 0 && <span className="text-[10px] text-gray-400 mx-0.5">&rarr;</span>}
+                        {i > 0 && <span className="text-[10px] text-muted-foreground/70 mx-0.5">&rarr;</span>}
                         <img
                             src={stop.club_logo}
                             alt={stop.club_name}
                             title={stop.club_name}
-                            className={`w-5 h-5 object-contain rounded-full ${isSelected ? 'ring-2 ring-blue-500 ring-offset-1' : ''}`}
+                            className={`w-5 h-5 object-contain rounded-full ${isSelected ? 'ring-2 ring-ring ring-offset-1' : ''}`}
                             onError={e => { e.target.style.display = 'none' }}
                         />
                     </span>
@@ -50,15 +50,15 @@ export function NodeDetailPanel({ node, allPlayers, onClose }) {
                             />
                         )}
                         <div>
-                            <h4 className="text-sm font-semibold text-gray-900">{node.club_name}</h4>
-                            <p className="text-xs text-gray-500">
+                            <h4 className="text-sm font-semibold text-foreground">{node.club_name}</h4>
+                            <p className="text-xs text-muted-foreground">
                                 {playersAtNode.length} player{playersAtNode.length !== 1 ? 's' : ''}
                             </p>
                         </div>
                     </div>
                     <button
                         onClick={onClose}
-                        className="text-gray-400 hover:text-gray-600 p-1 rounded"
+                        className="text-muted-foreground/70 hover:text-muted-foreground p-1 rounded"
                     >
                         <X className="h-4 w-4" />
                     </button>
@@ -66,7 +66,7 @@ export function NodeDetailPanel({ node, allPlayers, onClose }) {
 
                 {/* Player list */}
                 {playersAtNode.length === 0 ? (
-                    <p className="text-xs text-gray-400">No player journey data available.</p>
+                    <p className="text-xs text-muted-foreground/70">No player journey data available.</p>
                 ) : (
                     <div className="space-y-2 max-h-64 overflow-y-auto">
                         {playersAtNode.map(player => (
@@ -80,7 +80,7 @@ export function NodeDetailPanel({ node, allPlayers, onClose }) {
                                 <div className="min-w-0 flex-1">
                                     <Link
                                         to={`/players/${player.player_api_id}`}
-                                        className="text-sm font-medium text-blue-600 hover:text-blue-800 hover:underline leading-tight block truncate"
+                                        className="text-sm font-medium text-primary hover:text-primary/90 hover:underline leading-tight block truncate"
                                     >
                                         {player.player_name}
                                     </Link>

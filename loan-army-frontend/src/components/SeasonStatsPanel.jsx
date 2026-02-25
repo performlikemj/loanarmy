@@ -25,27 +25,27 @@ export function SeasonStatsPanel() {
                     transition={{ duration: 0.25, ease: 'easeInOut' }}
                     className="overflow-hidden"
                 >
-                    <div className="bg-blue-50 border border-blue-200 rounded-lg p-3 sm:p-4 mb-4">
+                    <div className="bg-primary/5 border border-primary/20 rounded-lg p-3 sm:p-4 mb-4">
                         {/* Header row */}
                         <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-2 mb-3">
                             <button
                                 onClick={() => selectNode(null)}
                                 aria-label="Back to present"
-                                className="flex items-center gap-1 text-sm text-blue-600 hover:text-blue-800 transition-colors focus-visible:ring-2 focus-visible:ring-blue-500 focus-visible:outline-none rounded"
+                                className="flex items-center gap-1 text-sm text-primary hover:text-primary/90 transition-colors focus-visible:ring-2 focus-visible:ring-ring focus-visible:outline-none rounded"
                             >
                                 <ArrowLeft className="h-4 w-4" />
                                 Back to Present
                             </button>
                             <div className="flex items-center gap-2 flex-wrap">
-                                <span className="text-sm font-semibold text-gray-900">
+                                <span className="text-sm font-semibold text-foreground">
                                     {selectedNode.years}
                                 </span>
-                                <span className="text-sm text-gray-500">at</span>
+                                <span className="text-sm text-muted-foreground">at</span>
                                 <div className="flex items-center gap-1.5 min-w-0">
                                     {selectedNode.clubLogo && (
                                         <img src={selectedNode.clubLogo} alt="" width={20} height={20} className="w-5 h-5 rounded-full object-cover" />
                                     )}
-                                    <span className="text-sm font-medium text-gray-900 truncate">
+                                    <span className="text-sm font-medium text-foreground truncate">
                                         {selectedNode.clubName}
                                     </span>
                                 </div>
@@ -60,32 +60,32 @@ export function SeasonStatsPanel() {
 
                         {/* Stats summary */}
                         <div className="grid grid-cols-3 gap-2 sm:gap-4 mb-3">
-                            <div className="text-center p-2 bg-white rounded-lg">
-                                <div className="text-xl font-bold text-gray-900 tabular-nums">{selectedNode.stats.apps}</div>
-                                <div className="text-xs text-gray-500">Apps</div>
+                            <div className="text-center p-2 bg-card rounded-lg">
+                                <div className="text-xl font-bold text-foreground tabular-nums">{selectedNode.stats.apps}</div>
+                                <div className="text-xs text-muted-foreground">Apps</div>
                             </div>
-                            <div className="text-center p-2 bg-white rounded-lg">
-                                <div className="text-xl font-bold text-blue-600 tabular-nums">{selectedNode.stats.goals}</div>
-                                <div className="text-xs text-gray-500">Goals</div>
+                            <div className="text-center p-2 bg-card rounded-lg">
+                                <div className="text-xl font-bold text-emerald-600 tabular-nums">{selectedNode.stats.goals}</div>
+                                <div className="text-xs text-muted-foreground">Goals</div>
                             </div>
-                            <div className="text-center p-2 bg-white rounded-lg">
-                                <div className="text-xl font-bold text-green-600 tabular-nums">{selectedNode.stats.assists}</div>
-                                <div className="text-xs text-gray-500">Assists</div>
+                            <div className="text-center p-2 bg-card rounded-lg">
+                                <div className="text-xl font-bold text-amber-600 tabular-nums">{selectedNode.stats.assists}</div>
+                                <div className="text-xs text-muted-foreground">Assists</div>
                             </div>
                         </div>
 
                         {/* Competition breakdown */}
                         {selectedNode.competitions?.length > 0 && (
                             <div>
-                                <h4 className="text-xs font-medium text-gray-500 mb-1.5">Competitions</h4>
+                                <h4 className="text-xs font-medium text-muted-foreground mb-1.5">Competitions</h4>
                                 <div className="space-y-1">
                                     {selectedNode.competitions.map((comp, idx) => (
                                         <div
                                             key={idx}
                                             className="flex items-center justify-between text-sm bg-white rounded px-3 py-1.5"
                                         >
-                                            <span className="font-medium text-gray-700">{comp.league}</span>
-                                            <span className="text-gray-500">
+                                            <span className="font-medium text-foreground/80">{comp.league}</span>
+                                            <span className="text-muted-foreground">
                                                 {comp.apps} apps, {comp.goals}G {comp.assists}A
                                             </span>
                                         </div>

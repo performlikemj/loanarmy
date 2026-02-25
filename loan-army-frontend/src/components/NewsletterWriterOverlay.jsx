@@ -78,7 +78,7 @@ export function WriterDiscoveryBar({
 
   return (
     <div className={cn(
-      'bg-gradient-to-r from-slate-50 to-white border rounded-xl shadow-sm overflow-hidden',
+      'bg-gradient-to-r from-secondary to-card border rounded-xl shadow-sm overflow-hidden',
       className
     )}>
       {/* Header */}
@@ -91,10 +91,10 @@ export function WriterDiscoveryBar({
             <PenLine className="h-4 w-4 text-violet-600" />
           </div>
           <div className="text-left">
-            <h3 className="font-semibold text-gray-900 text-sm">
+            <h3 className="font-semibold text-foreground text-sm">
               {isPreviewMode ? 'Writer Preview Mode' : 'Expert Writers'}
             </h3>
-            <p className="text-xs text-gray-500">
+            <p className="text-xs text-muted-foreground">
               {isPreviewMode
                 ? 'See how your content appears to subscribers'
                 : `${writers.length} writer${writers.length !== 1 ? 's' : ''} covering this newsletter`
@@ -109,9 +109,9 @@ export function WriterDiscoveryBar({
             </Badge>
           )}
           {isExpanded ? (
-            <ChevronUp className="h-4 w-4 text-gray-400" />
+            <ChevronUp className="h-4 w-4 text-muted-foreground/70" />
           ) : (
-            <ChevronDown className="h-4 w-4 text-gray-400" />
+            <ChevronDown className="h-4 w-4 text-muted-foreground/70" />
           )}
         </div>
       </button>
@@ -122,7 +122,7 @@ export function WriterDiscoveryBar({
           {/* Search (only show if more than 3 writers) */}
           {writers.length > 3 && (
             <div className="relative">
-              <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-gray-400" />
+              <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground/70" />
               <input
                 type="text"
                 placeholder="Search writers..."
@@ -133,7 +133,7 @@ export function WriterDiscoveryBar({
               {searchQuery && (
                 <button
                   onClick={() => setSearchQuery('')}
-                  className="absolute right-3 top-1/2 -translate-y-1/2 text-gray-400 hover:text-gray-600"
+                  className="absolute right-3 top-1/2 -translate-y-1/2 text-muted-foreground/70 hover:text-muted-foreground"
                 >
                   <X className="h-4 w-4" />
                 </button>
@@ -144,7 +144,7 @@ export function WriterDiscoveryBar({
           {/* Active/subscribed writers */}
           {subscribedWriters.length > 0 && (
             <div className="space-y-2">
-              <p className="text-xs font-medium text-gray-500 uppercase tracking-wide">
+              <p className="text-xs font-medium text-muted-foreground uppercase tracking-wide">
                 {isPreviewMode ? 'Your Content' : 'Your Subscriptions'}
               </p>
               <div className="flex flex-wrap gap-2">
@@ -161,7 +161,7 @@ export function WriterDiscoveryBar({
                         'border-2',
                         isActive
                           ? cn(colors.bg, 'border-transparent text-white shadow-md')
-                          : cn('bg-white border-gray-200 hover:border-gray-300 text-gray-700')
+                          : cn('bg-card border-border hover:border-border text-foreground/80')
                       )}
                     >
                       <Avatar className="h-6 w-6 border-2 border-white/30">
@@ -170,7 +170,7 @@ export function WriterDiscoveryBar({
                         )}
                         <AvatarFallback className={cn(
                           'text-[10px] font-semibold',
-                          isActive ? 'bg-white/20 text-white' : cn(colors.bgLight, colors.text)
+                          isActive ? 'bg-card/20 text-white' : cn(colors.bgLight, colors.text)
                         )}>
                           {(writer.display_name || 'W').substring(0, 2).toUpperCase()}
                         </AvatarFallback>
@@ -182,7 +182,7 @@ export function WriterDiscoveryBar({
                         variant="secondary"
                         className={cn(
                           'text-[10px] px-1.5 py-0',
-                          isActive ? 'bg-white/20 text-white' : ''
+                          isActive ? 'bg-card/20 text-white' : ''
                         )}
                       >
                         {writer.writeup_count || 0}
@@ -198,7 +198,7 @@ export function WriterDiscoveryBar({
           {/* Discover new writers */}
           {unsubscribedWriters.length > 0 && !isPreviewMode && (
             <div className="space-y-2">
-              <p className="text-xs font-medium text-gray-500 uppercase tracking-wide">
+              <p className="text-xs font-medium text-muted-foreground uppercase tracking-wide">
                 Discover Writers
               </p>
               <div className="grid gap-2">
@@ -209,7 +209,7 @@ export function WriterDiscoveryBar({
                     <div
                       key={writer.id}
                       className={cn(
-                        'flex items-center gap-3 p-3 rounded-lg border bg-white',
+                        'flex items-center gap-3 p-3 rounded-lg border bg-card',
                         'hover:shadow-sm transition-shadow'
                       )}
                     >
@@ -224,7 +224,7 @@ export function WriterDiscoveryBar({
 
                       <div className="flex-1 min-w-0">
                         <div className="flex items-center gap-2">
-                          <span className="font-semibold text-gray-900 truncate">
+                          <span className="font-semibold text-foreground truncate">
                             {writer.display_name}
                           </span>
                           <Badge variant="outline" className="text-[10px] shrink-0">
@@ -232,7 +232,7 @@ export function WriterDiscoveryBar({
                           </Badge>
                         </div>
                         {(writer.attribution_url || writer.attribution_name) && (
-                          <div className="flex items-center gap-1 text-xs text-blue-600 mt-0.5">
+                          <div className="flex items-center gap-1 text-xs text-primary mt-0.5">
                             {writer.attribution_url ? (
                               <a
                                 href={writer.attribution_url}
@@ -245,12 +245,12 @@ export function WriterDiscoveryBar({
                                 <ExternalLink className="h-2.5 w-2.5" />
                               </a>
                             ) : (
-                              <span className="text-gray-500">{writer.attribution_name}</span>
+                              <span className="text-muted-foreground">{writer.attribution_name}</span>
                             )}
                           </div>
                         )}
                         {writer.bio && (
-                          <p className="text-xs text-gray-500 line-clamp-1 mt-0.5">
+                          <p className="text-xs text-muted-foreground line-clamp-1 mt-0.5">
                             {writer.bio}
                           </p>
                         )}
@@ -268,7 +268,7 @@ export function WriterDiscoveryBar({
                             Preview
                           </Button>
                         ) : (
-                          <Badge variant="outline" className="text-[10px] text-gray-400">
+                          <Badge variant="outline" className="text-[10px] text-muted-foreground/70">
                             <Lock className="h-2.5 w-2.5 mr-1" />
                             Premium
                           </Badge>
@@ -291,7 +291,7 @@ export function WriterDiscoveryBar({
 
           {/* Empty state */}
           {filteredWriters.length === 0 && searchQuery && (
-            <div className="text-center py-4 text-gray-500 text-sm">
+            <div className="text-center py-4 text-muted-foreground text-sm">
               No writers found matching "{searchQuery}"
             </div>
           )}
@@ -316,7 +316,7 @@ export function WriterSummarySection({
     <div className={cn('space-y-4', className)}>
       <div className="flex items-center gap-2">
         <Sparkles className="h-4 w-4 text-violet-500" />
-        <h3 className="font-semibold text-gray-900">Expert Analysis</h3>
+        <h3 className="font-semibold text-foreground">Expert Analysis</h3>
         <Badge variant="secondary" className="text-xs">
           {commentaries.length} writer{commentaries.length !== 1 ? 's' : ''}
         </Badge>
@@ -550,7 +550,7 @@ function PlayerCommentarySection({
     <div className={cn('space-y-4', className)}>
       <div className="flex items-center gap-2">
         <PenLine className="h-4 w-4 text-violet-500" />
-        <h3 className="font-semibold text-gray-900">Player Analysis</h3>
+        <h3 className="font-semibold text-foreground">Player Analysis</h3>
         <Badge variant="secondary" className="text-xs">
           {allPlayerComments.length} writeup{allPlayerComments.length !== 1 ? 's' : ''}
         </Badge>
@@ -558,9 +558,9 @@ function PlayerCommentarySection({
 
       <div className="space-y-4">
         {groupedByPlayer.map((group, idx) => (
-          <div key={idx} className="bg-white rounded-lg border shadow-sm overflow-hidden">
+          <div key={idx} className="bg-card rounded-lg border shadow-sm overflow-hidden">
             {/* Player header */}
-            <div className="p-3 sm:p-4 border-b bg-gradient-to-r from-gray-50 to-white flex items-center gap-3">
+            <div className="p-3 sm:p-4 border-b bg-gradient-to-r from-secondary to-card flex items-center gap-3">
               {group.player_photo ? (
                 <img
                   src={group.player_photo}
@@ -568,14 +568,14 @@ function PlayerCommentarySection({
                   className="h-12 w-12 rounded-full object-cover border-2 border-white shadow"
                 />
               ) : (
-                <div className="h-12 w-12 rounded-full bg-gray-200 flex items-center justify-center">
-                  <Users className="h-5 w-5 text-gray-400" />
+                <div className="h-12 w-12 rounded-full bg-muted flex items-center justify-center">
+                  <Users className="h-5 w-5 text-muted-foreground/70" />
                 </div>
               )}
               <div className="flex-1 min-w-0">
-                <h4 className="font-bold text-gray-900 truncate">{group.player_name}</h4>
+                <h4 className="font-bold text-foreground truncate">{group.player_name}</h4>
                 {group.loan_team && (
-                  <div className="flex items-center gap-1.5 text-sm text-gray-600">
+                  <div className="flex items-center gap-1.5 text-sm text-muted-foreground">
                     {group.loan_team_logo && (
                       <img src={group.loan_team_logo} alt="" className="h-4 w-4 object-contain" />
                     )}
@@ -844,7 +844,7 @@ export function PlayerWriteupsSection({ className }) {
 
   return (
     <div className={cn('mt-8 space-y-4 border-t pt-8', className)}>
-      <h3 className="text-xl font-bold text-gray-900 flex items-center gap-2">
+      <h3 className="text-xl font-bold text-foreground flex items-center gap-2">
         <Sparkles className="h-5 w-5 text-violet-500" />
         Expert Player Analysis
       </h3>
@@ -869,9 +869,9 @@ export function PlayerWriteupsSection({ className }) {
                     />
                   )}
                   <div>
-                    <span className="font-semibold text-gray-900">{playerInfo.name}</span>
+                    <span className="font-semibold text-foreground">{playerInfo.name}</span>
                     {playerInfo.loan_team && (
-                      <div className="flex items-center gap-1.5 text-sm text-gray-500">
+                      <div className="flex items-center gap-1.5 text-sm text-muted-foreground">
                         {playerInfo.loan_team_logo && (
                           <img src={playerInfo.loan_team_logo} alt="" className="h-4 w-4 object-contain" />
                         )}

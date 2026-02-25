@@ -219,15 +219,15 @@ export function PlayerStatsDrawer({ playerId, isOpen, onClose, playerName }) {
         if (active && payload && payload.length) {
             const data = payload[0].payload
             return (
-                <div className="bg-white p-3 border rounded shadow-lg text-xs z-50">
+                <div className="bg-card p-3 border rounded shadow-lg text-xs z-50">
                     <p className="font-bold">{data.opponent} ({data.is_home ? 'H' : 'A'})</p>
-                    <p className="text-gray-500">{label}</p>
+                    <p className="text-muted-foreground">{label}</p>
                     {payload.map((p, i) => (
                         <p key={i} style={{ color: p.color }} className="font-semibold">
                             {p.name}: {p.value}
                         </p>
                     ))}
-                    <p className="text-gray-400 italic mt-1">{data.competition}</p>
+                    <p className="text-muted-foreground/70 italic mt-1">{data.competition}</p>
                 </div>
             )
         }
@@ -245,7 +245,7 @@ export function PlayerStatsDrawer({ playerId, isOpen, onClose, playerName }) {
                             <div>
                                 <DrawerTitle className="text-xl">Player Analysis: {playerName}</DrawerTitle>
                                 <DrawerDescription className="flex items-center gap-2 mt-1">
-                                    <span className="bg-blue-100 text-blue-800 text-xs px-2 py-0.5 rounded font-medium">
+                                    <span className="bg-primary/10 text-primary text-xs px-2 py-0.5 rounded font-medium">
                                         {position}
                                     </span>
                                     <span>Performance metrics and historical data.</span>
@@ -259,17 +259,17 @@ export function PlayerStatsDrawer({ playerId, isOpen, onClose, playerName }) {
                         </div>
                     </DrawerHeader>
 
-                    <div className="flex-1 overflow-hidden p-4 bg-gray-50/50">
+                    <div className="flex-1 overflow-hidden p-4 bg-secondary/50">
                         {loading ? (
                             <div className="h-full flex items-center justify-center">
-                                <Loader2 className="h-8 w-8 animate-spin text-blue-500" />
+                                <Loader2 className="h-8 w-8 animate-spin text-primary" />
                             </div>
                         ) : error ? (
-                            <div className="h-full flex items-center justify-center text-red-500">
+                            <div className="h-full flex items-center justify-center text-rose-500">
                                 {error}
                             </div>
                         ) : stats.length === 0 ? (
-                            <div className="h-full flex items-center justify-center text-gray-500">
+                            <div className="h-full flex items-center justify-center text-muted-foreground">
                                 No stats available for this player.
                             </div>
                         ) : (
@@ -285,19 +285,19 @@ export function PlayerStatsDrawer({ playerId, isOpen, onClose, playerName }) {
                                     <div className="space-y-6 pb-8">
 
                                         {/* Metrics Selector */}
-                                        <div className="bg-white p-4 rounded-lg border shadow-sm">
-                                            <h3 className="text-sm font-medium mb-3 text-gray-700">Select Metrics</h3>
+                                        <div className="bg-card p-4 rounded-lg border shadow-sm">
+                                            <h3 className="text-sm font-medium mb-3 text-foreground/80">Select Metrics</h3>
                                             <div className="flex flex-wrap gap-2">
                                                 {currentConfig.options.map(opt => (
                                                     <button
                                                         key={opt.key}
                                                         onClick={() => toggleMetric(opt.key)}
                                                         className={`px-3 py-1.5 rounded-full text-xs font-medium transition-colors border ${selectedMetrics.includes(opt.key)
-                                                            ? 'bg-blue-50 border-blue-200 text-blue-700 ring-1 ring-blue-200'
-                                                            : 'bg-white border-gray-200 text-gray-600 hover:bg-gray-50'
+                                                            ? 'bg-primary/5 border-primary/20 text-primary ring-1 ring-primary/20'
+                                                            : 'bg-card border-border text-muted-foreground hover:bg-secondary'
                                                             }`}
                                                     >
-                                                        <span className={`inline-block w-2 h-2 rounded-full mr-2 ${selectedMetrics.includes(opt.key) ? '' : 'bg-gray-300'}`} style={{ backgroundColor: selectedMetrics.includes(opt.key) ? opt.color : undefined }}></span>
+                                                        <span className={`inline-block w-2 h-2 rounded-full mr-2 ${selectedMetrics.includes(opt.key) ? '' : 'bg-muted-foreground/50'}`} style={{ backgroundColor: selectedMetrics.includes(opt.key) ? opt.color : undefined }}></span>
                                                         {opt.label}
                                                     </button>
                                                 ))}
@@ -305,8 +305,8 @@ export function PlayerStatsDrawer({ playerId, isOpen, onClose, playerName }) {
                                         </div>
 
                                         {/* Main Chart */}
-                                        <div className="bg-white p-4 rounded-lg border shadow-sm">
-                                            <h3 className="text-sm font-medium mb-4 text-gray-700">Performance Trends</h3>
+                                        <div className="bg-card p-4 rounded-lg border shadow-sm">
+                                            <h3 className="text-sm font-medium mb-4 text-foreground/80">Performance Trends</h3>
                                             <div className="h-[300px] w-full">
                                                 <ResponsiveContainer width="100%" height="100%">
                                                     <LineChart data={chartData} onClick={handleChartClick} className="cursor-pointer">
@@ -347,8 +347,8 @@ export function PlayerStatsDrawer({ playerId, isOpen, onClose, playerName }) {
 
                                         <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
                                             {/* Rating History */}
-                                            <div className="bg-white p-4 rounded-lg border shadow-sm">
-                                                <h3 className="text-sm font-medium mb-4 text-gray-700">Match Ratings</h3>
+                                            <div className="bg-card p-4 rounded-lg border shadow-sm">
+                                                <h3 className="text-sm font-medium mb-4 text-foreground/80">Match Ratings</h3>
                                                 <div className="h-[200px] w-full">
                                                     <ResponsiveContainer width="100%" height="100%">
                                                         <LineChart data={chartData} onClick={handleChartClick} className="cursor-pointer">
@@ -364,8 +364,8 @@ export function PlayerStatsDrawer({ playerId, isOpen, onClose, playerName }) {
                                             </div>
 
                                             {/* Minutes Played */}
-                                            <div className="bg-white p-4 rounded-lg border shadow-sm">
-                                                <h3 className="text-sm font-medium mb-4 text-gray-700">Minutes Played</h3>
+                                            <div className="bg-card p-4 rounded-lg border shadow-sm">
+                                                <h3 className="text-sm font-medium mb-4 text-foreground/80">Minutes Played</h3>
                                                 <div className="h-[200px] w-full">
                                                     <ResponsiveContainer width="100%" height="100%">
                                                         <BarChart data={chartData}>
@@ -381,26 +381,26 @@ export function PlayerStatsDrawer({ playerId, isOpen, onClose, playerName }) {
                                         </div>
 
                                         {/* Key Stats Summary */}
-                                        <div className="bg-white p-4 rounded-lg border shadow-sm">
-                                            <h3 className="text-sm font-medium mb-4 text-gray-700">Season Totals</h3>
+                                        <div className="bg-card p-4 rounded-lg border shadow-sm">
+                                            <h3 className="text-sm font-medium mb-4 text-foreground/80">Season Totals</h3>
                                             <div className="grid grid-cols-2 sm:grid-cols-4 gap-4">
-                                                <div className="p-3 bg-gray-50 rounded text-center">
-                                                    <div className="text-2xl font-bold text-gray-900">{stats.reduce((acc, s) => acc + (s.minutes || 0), 0)}</div>
-                                                    <div className="text-xs text-gray-500 uppercase tracking-wider">Minutes</div>
+                                                <div className="p-3 bg-secondary rounded text-center">
+                                                    <div className="text-2xl font-bold text-foreground">{stats.reduce((acc, s) => acc + (s.minutes || 0), 0)}</div>
+                                                    <div className="text-xs text-muted-foreground uppercase tracking-wider">Minutes</div>
                                                 </div>
-                                                <div className="p-3 bg-gray-50 rounded text-center">
-                                                    <div className="text-2xl font-bold text-gray-900">{stats.reduce((acc, s) => acc + (s.goals || 0), 0)}</div>
-                                                    <div className="text-xs text-gray-500 uppercase tracking-wider">Goals</div>
+                                                <div className="p-3 bg-secondary rounded text-center">
+                                                    <div className="text-2xl font-bold text-foreground">{stats.reduce((acc, s) => acc + (s.goals || 0), 0)}</div>
+                                                    <div className="text-xs text-muted-foreground uppercase tracking-wider">Goals</div>
                                                 </div>
-                                                <div className="p-3 bg-gray-50 rounded text-center">
-                                                    <div className="text-2xl font-bold text-gray-900">{stats.reduce((acc, s) => acc + (s.assists || 0), 0)}</div>
-                                                    <div className="text-xs text-gray-500 uppercase tracking-wider">Assists</div>
+                                                <div className="p-3 bg-secondary rounded text-center">
+                                                    <div className="text-2xl font-bold text-foreground">{stats.reduce((acc, s) => acc + (s.assists || 0), 0)}</div>
+                                                    <div className="text-xs text-muted-foreground uppercase tracking-wider">Assists</div>
                                                 </div>
-                                                <div className="p-3 bg-gray-50 rounded text-center">
-                                                    <div className="text-2xl font-bold text-gray-900">
+                                                <div className="p-3 bg-secondary rounded text-center">
+                                                    <div className="text-2xl font-bold text-foreground">
                                                         {(stats.reduce((acc, s) => acc + (parseFloat(s.rating) || 0), 0) / (stats.filter(s => s.rating).length || 1)).toFixed(2)}
                                                     </div>
-                                                    <div className="text-xs text-gray-500 uppercase tracking-wider">Avg Rating</div>
+                                                    <div className="text-xs text-muted-foreground uppercase tracking-wider">Avg Rating</div>
                                                 </div>
                                             </div>
                                         </div>
@@ -408,16 +408,16 @@ export function PlayerStatsDrawer({ playerId, isOpen, onClose, playerName }) {
                                 </TabsContent>
 
                                 <TabsContent value="table" className="flex-1 overflow-hidden">
-                                    <ScrollArea className="h-full border rounded-md bg-white">
+                                    <ScrollArea className="h-full border rounded-md bg-card">
                                         <table className="w-full text-sm text-left">
-                                            <thead className="bg-gray-50 sticky top-0 z-10">
+                                            <thead className="bg-secondary sticky top-0 z-10">
                                                 <tr>
-                                                    <th className="p-3 font-medium text-gray-500">Date</th>
-                                                    <th className="p-3 font-medium text-gray-500">Match</th>
-                                                    <th className="p-3 font-medium text-gray-500">Min</th>
-                                                    <th className="p-3 font-medium text-gray-500">Rating</th>
-                                                    <th className="p-3 font-medium text-gray-500">G/A</th>
-                                                    <th className="p-3 font-medium text-gray-500">Key Stats</th>
+                                                    <th className="p-3 font-medium text-muted-foreground">Date</th>
+                                                    <th className="p-3 font-medium text-muted-foreground">Match</th>
+                                                    <th className="p-3 font-medium text-muted-foreground">Min</th>
+                                                    <th className="p-3 font-medium text-muted-foreground">Rating</th>
+                                                    <th className="p-3 font-medium text-muted-foreground">G/A</th>
+                                                    <th className="p-3 font-medium text-muted-foreground">Key Stats</th>
                                                 </tr>
                                             </thead>
                                             <tbody className="divide-y">
@@ -427,19 +427,19 @@ export function PlayerStatsDrawer({ playerId, isOpen, onClose, playerName }) {
                                                     const dateB = b.fixture_date ? new Date(b.fixture_date) : new Date(0)
                                                     return dateB - dateA
                                                 }).map((s, i) => (
-                                                    <tr key={i} className="hover:bg-gray-50 cursor-pointer transition-colors" onClick={() => handleRowClick(s)}>
+                                                    <tr key={i} className="hover:bg-secondary cursor-pointer transition-colors" onClick={() => handleRowClick(s)}>
                                                         <td className="p-3 whitespace-nowrap">
                                                             {s.fixture_date ? format(new Date(s.fixture_date), 'MMM d, yyyy') : '-'}
                                                         </td>
                                                         <td className="p-3">
                                                             <div className="font-medium">{s.opponent}</div>
-                                                            <div className="text-xs text-gray-500">{s.competition}</div>
+                                                            <div className="text-xs text-muted-foreground">{s.competition}</div>
                                                         </td>
                                                         <td className="p-3">{s.minutes}'</td>
                                                         <td className="p-3">
-                                                            <span className={`px-2 py-1 rounded text-xs font-medium ${parseFloat(s.rating) >= 7.5 ? 'bg-green-100 text-green-700' :
-                                                                parseFloat(s.rating) >= 6.0 ? 'bg-gray-100 text-gray-700' :
-                                                                    'bg-red-50 text-red-700'
+                                                            <span className={`px-2 py-1 rounded text-xs font-medium ${parseFloat(s.rating) >= 7.5 ? 'bg-emerald-100 text-emerald-700' :
+                                                                parseFloat(s.rating) >= 6.0 ? 'bg-secondary text-foreground/80' :
+                                                                    'bg-rose-50 text-rose-700'
                                                                 }`}>
                                                                 {s.rating || '-'}
                                                             </span>
@@ -447,9 +447,9 @@ export function PlayerStatsDrawer({ playerId, isOpen, onClose, playerName }) {
                                                         <td className="p-3">
                                                             {s.goals > 0 && <span className="mr-2">⚽ {s.goals}</span>}
                                                             {s.assists > 0 && <span>🅰️ {s.assists}</span>}
-                                                            {s.goals === 0 && s.assists === 0 && <span className="text-gray-300">-</span>}
+                                                            {s.goals === 0 && s.assists === 0 && <span className="text-muted-foreground/50">-</span>}
                                                         </td>
-                                                        <td className="p-3 text-xs text-gray-500">
+                                                        <td className="p-3 text-xs text-muted-foreground">
                                                             {s.passes_key > 0 && <div>{s.passes_key} Key Passes</div>}
                                                             {s.tackles_total > 0 && <div>{s.tackles_total} Tackles</div>}
                                                             {s.dribbles_success > 0 && <div>{s.dribbles_success} Dribbles</div>}
@@ -499,13 +499,13 @@ function FixtureDetailsDialog({ fixture, isOpen, onClose }) {
         if (entries.length === 0) return null
 
         return (
-            <div className="bg-gray-50 p-3 rounded-md">
-                <h4 className="text-xs font-bold text-gray-500 uppercase mb-2">{title}</h4>
+            <div className="bg-secondary p-3 rounded-md">
+                <h4 className="text-xs font-bold text-muted-foreground uppercase mb-2">{title}</h4>
                 <div className="grid grid-cols-2 gap-x-4 gap-y-1 text-sm">
                     {entries.map(([key, value]) => (
                         <div key={key} className="flex justify-between">
-                            <span className="text-gray-600 capitalize">{key.replace(/_/g, ' ')}</span>
-                            <span className="font-medium text-gray-900">{String(value)}</span>
+                            <span className="text-muted-foreground capitalize">{key.replace(/_/g, ' ')}</span>
+                            <span className="font-medium text-foreground">{String(value)}</span>
                         </div>
                     ))}
                 </div>
@@ -519,7 +519,7 @@ function FixtureDetailsDialog({ fixture, isOpen, onClose }) {
                 <DialogHeader>
                     <DialogTitle className="flex items-center gap-2">
                         <span>{fixture.opponent}</span>
-                        <span className={`text-sm font-normal px-2 py-0.5 rounded ${fixture.is_home ? 'bg-blue-100 text-blue-800' : 'bg-orange-100 text-orange-800'}`}>
+                        <span className={`text-sm font-normal px-2 py-0.5 rounded ${fixture.is_home ? 'bg-primary/10 text-primary' : 'bg-orange-100 text-orange-800'}`}>
                             {fixture.is_home ? 'Home' : 'Away'}
                         </span>
                     </DialogTitle>
@@ -531,13 +531,13 @@ function FixtureDetailsDialog({ fixture, isOpen, onClose }) {
                 <div className="space-y-6 py-4">
                     {/* Top Level Summary */}
                     <div className="grid grid-cols-4 gap-4 text-center">
-                        <div className="p-2 bg-blue-50 rounded">
-                            <div className="text-xl font-bold text-blue-700">{fixture.rating || '-'}</div>
-                            <div className="text-xs text-blue-600">Rating</div>
+                        <div className="p-2 bg-primary/5 rounded">
+                            <div className="text-xl font-bold text-primary">{fixture.rating || '-'}</div>
+                            <div className="text-xs text-primary">Rating</div>
                         </div>
-                        <div className="p-2 bg-green-50 rounded">
-                            <div className="text-xl font-bold text-green-700">{fixture.minutes}'</div>
-                            <div className="text-xs text-green-600">Minutes</div>
+                        <div className="p-2 bg-emerald-50 rounded">
+                            <div className="text-xl font-bold text-emerald-700">{fixture.minutes}'</div>
+                            <div className="text-xs text-emerald-600">Minutes</div>
                         </div>
                         <div className="p-2 bg-purple-50 rounded">
                             <div className="text-xl font-bold text-purple-700">{fixture.goals}</div>
@@ -570,7 +570,7 @@ function FixtureDetailsDialog({ fixture, isOpen, onClose }) {
                             })}
                         </div>
                     ) : (
-                        <div className="text-center text-gray-500 py-8">
+                        <div className="text-center text-muted-foreground py-8">
                             Detailed stats not available for this match.
                         </div>
                     )}

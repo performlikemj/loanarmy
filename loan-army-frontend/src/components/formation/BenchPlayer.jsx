@@ -29,7 +29,7 @@ export function BenchPlayer({ player }) {
       <div className="flex-1 min-w-0">
         <Link
           to={`/players/${player.player_id || player.id}`}
-          className="text-xs font-medium truncate block hover:text-blue-600 hover:underline transition-colors"
+          className="text-xs font-medium truncate block hover:text-primary hover:underline transition-colors"
           draggable={false}
           onClick={(e) => e.stopPropagation()}
         >

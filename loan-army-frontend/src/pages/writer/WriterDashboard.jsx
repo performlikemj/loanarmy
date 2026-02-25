@@ -85,17 +85,17 @@ export function WriterDashboard() {
 
     if (loading) {
         return (
-            <div className="min-h-screen flex items-center justify-center bg-gray-50">
-                <Loader2 className="h-8 w-8 animate-spin text-blue-600" />
+            <div className="min-h-screen flex items-center justify-center bg-background">
+                <Loader2 className="h-8 w-8 animate-spin text-primary" />
             </div>
         )
     }
 
     return (
-        <div className="min-h-screen bg-gray-50">
-            <header className="bg-white shadow">
+        <div className="min-h-screen bg-background">
+            <header className="bg-card shadow">
                 <div className="max-w-7xl mx-auto py-6 px-4 sm:px-6 lg:px-8 flex justify-between items-center">
-                    <h1 className="text-3xl font-bold text-gray-900">Writer Dashboard</h1>
+                    <h1 className="text-3xl font-bold text-foreground">Writer Dashboard</h1>
                     <div className="flex items-center gap-2">
                         <Button variant="outline" onClick={() => navigate('/writer/contributors')}>
                             <Users className="mr-2 h-4 w-4" /> Contributors
@@ -110,7 +110,7 @@ export function WriterDashboard() {
                 <div className="px-4 py-6 sm:px-0 space-y-6">
 
                     {error && (
-                        <div className="p-4 bg-red-50 text-red-700 rounded-md border border-red-200">
+                        <div className="p-4 bg-rose-50 text-rose-700 rounded-md border border-rose-200">
                             {error}
                         </div>
                     )}
@@ -119,31 +119,31 @@ export function WriterDashboard() {
                     {stats && (
                         <>
                             <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
-                                <Card className="bg-gradient-to-br from-blue-50 to-white border-blue-100">
+                                <Card className="bg-gradient-to-br from-primary/5 to-card border-primary/10">
                                     <CardHeader className="pb-3">
-                                        <CardDescription className="flex items-center text-blue-600">
+                                        <CardDescription className="flex items-center text-primary">
                                             <Users className="h-4 w-4 mr-1" />
                                             Total Subscribers
                                         </CardDescription>
-                                        <CardTitle className="text-3xl font-bold text-blue-900">
+                                        <CardTitle className="text-3xl font-bold text-foreground">
                                             {stats.total_subscribers || 0}
                                         </CardTitle>
                                     </CardHeader>
                                 </Card>
 
-                                <Card className="bg-gradient-to-br from-green-50 to-white border-green-100">
+                                <Card className="bg-gradient-to-br from-emerald-50 to-card border-emerald-100">
                                     <CardHeader className="pb-3">
-                                        <CardDescription className="flex items-center text-green-600">
+                                        <CardDescription className="flex items-center text-emerald-600">
                                             <TrendingUp className="h-4 w-4 mr-1" />
                                             Last 7 Days
                                         </CardDescription>
-                                        <CardTitle className="text-3xl font-bold text-green-900">
+                                        <CardTitle className="text-3xl font-bold text-emerald-900">
                                             +{stats.subscribers_last_7_days || 0}
                                         </CardTitle>
                                     </CardHeader>
                                 </Card>
 
-                                <Card className="bg-gradient-to-br from-purple-50 to-white border-purple-100">
+                                <Card className="bg-gradient-to-br from-purple-50 to-card border-purple-100">
                                     <CardHeader className="pb-3">
                                         <CardDescription className="flex items-center text-purple-600">
                                             <UserPlus className="h-4 w-4 mr-1" />
@@ -166,7 +166,7 @@ export function WriterDashboard() {
                                     <CardContent>
                                         <ResponsiveContainer width="100%" height={300}>
                                             <LineChart data={stats.timeline}>
-                                                <CartesianGrid strokeDasharray="3 3" className="stroke-gray-200" />
+                                                <CartesianGrid strokeDasharray="3 3" className="stroke-border" />
                                                 <XAxis
                                                     dataKey="week"
                                                     className="text-xs"
@@ -218,7 +218,7 @@ export function WriterDashboard() {
                                                             )}
                                                             {team.team_name}
                                                         </TableCell>
-                                                        <TableCell className="text-right text-lg font-semibold text-blue-600">
+                                                        <TableCell className="text-right text-lg font-semibold text-primary">
                                                             {team.subscriber_count}
                                                         </TableCell>
                                                     </TableRow>
@@ -251,13 +251,13 @@ export function WriterDashboard() {
                             {/* Parent Club Assignments */}
                             {teams.parent_club_assignments?.length > 0 && (
                                 <div>
-                                    <h4 className="text-sm font-medium text-gray-700 mb-2 flex items-center">
-                                        <Building2 className="h-4 w-4 mr-1 text-blue-600" />
+                                    <h4 className="text-sm font-medium text-foreground/80 mb-2 flex items-center">
+                                        <Building2 className="h-4 w-4 mr-1 text-primary" />
                                         Parent Clubs (all academy players)
                                     </h4>
                                     <div className="flex flex-wrap gap-2">
                                         {teams.parent_club_assignments.map(assignment => (
-                                            <Badge key={assignment.team_id} variant="secondary" className="text-sm py-1 px-3 bg-blue-50 text-blue-700 border-blue-200">
+                                            <Badge key={assignment.team_id} variant="secondary" className="text-sm py-1 px-3 bg-primary/5 text-primary border-primary/20">
                                                 {assignment.team_name}
                                             </Badge>
                                         ))}
@@ -268,8 +268,8 @@ export function WriterDashboard() {
                             {/* Loan Team Assignments */}
                             {teams.loan_team_assignments?.length > 0 && (
                                 <div>
-                                    <h4 className="text-sm font-medium text-gray-700 mb-2 flex items-center">
-                                        <MapPin className="h-4 w-4 mr-1 text-green-600" />
+                                    <h4 className="text-sm font-medium text-foreground/80 mb-2 flex items-center">
+                                        <MapPin className="h-4 w-4 mr-1 text-emerald-600" />
                                         Current Clubs (players currently there)
                                     </h4>
                                     <div className="flex flex-wrap gap-2">
@@ -279,7 +279,7 @@ export function WriterDashboard() {
                                                 variant="secondary"
                                                 className={`text-sm py-1 px-3 ${assignment.is_custom_team
                                                     ? 'bg-amber-50 text-amber-700 border-amber-200'
-                                                    : 'bg-green-50 text-green-700 border-green-200'
+                                                    : 'bg-emerald-50 text-emerald-700 border-emerald-200'
                                                     }`}
                                             >
                                                 {assignment.loan_team_name}
@@ -292,7 +292,7 @@ export function WriterDashboard() {
 
                             {/* Empty State */}
                             {!teams.parent_club_assignments?.length && !teams.loan_team_assignments?.length && (
-                                <p className="text-gray-500">No teams assigned yet.</p>
+                                <p className="text-muted-foreground">No teams assigned yet.</p>
                             )}
                         </CardContent>
                     </Card>
@@ -314,13 +314,13 @@ export function WriterDashboard() {
                             {commentaries.length > 0 ? (
                                 <div className="space-y-4">
                                     {commentaries.map(item => (
-                                        <div key={item.id} className="flex items-center justify-between p-4 border rounded-lg bg-white hover:bg-gray-50 transition-colors">
+                                        <div key={item.id} className="flex items-center justify-between p-4 border rounded-lg bg-card hover:bg-secondary transition-colors">
                                             <div>
-                                                <h3 className="font-medium text-gray-900">{item.title || 'Untitled Writeup'}</h3>
-                                                <div className="text-sm text-gray-500 flex gap-2 mt-1">
+                                                <h3 className="font-medium text-foreground">{item.title || 'Untitled Writeup'}</h3>
+                                                <div className="text-sm text-muted-foreground flex gap-2 mt-1">
                                                     <Badge variant="outline" className="text-xs">{item.commentary_type}</Badge>
-                                                    {item.team_name && <span className="text-gray-400">• {item.team_name}</span>}
-                                                    <span className="text-gray-400">• {new Date(item.created_at).toLocaleDateString()}</span>
+                                                    {item.team_name && <span className="text-muted-foreground/70">• {item.team_name}</span>}
+                                                    <span className="text-muted-foreground/70">• {new Date(item.created_at).toLocaleDateString()}</span>
                                                     {item.is_premium && <Badge className="bg-amber-100 text-amber-800 hover:bg-amber-200 border-amber-200">Premium</Badge>}
                                                 </div>
                                             </div>
@@ -332,7 +332,7 @@ export function WriterDashboard() {
                                                     variant="ghost"
                                                     size="sm"
                                                     onClick={() => confirmDelete(item.id)}
-                                                    className="text-red-600 hover:text-red-700 hover:bg-red-50"
+                                                    className="text-rose-600 hover:text-rose-700 hover:bg-rose-50"
                                                 >
                                                     <Trash2 className="h-4 w-4" />
                                                 </Button>
@@ -341,7 +341,7 @@ export function WriterDashboard() {
                                     ))}
                                 </div>
                             ) : (
-                                <div className="text-center py-8 text-gray-500">
+                                <div className="text-center py-8 text-muted-foreground">
                                     <p>No writeups found. Start by creating one!</p>
                                 </div>
                             )}
@@ -363,7 +363,7 @@ export function WriterDashboard() {
                         <AlertDialogCancel onClick={() => setDeletingId(null)}>Cancel</AlertDialogCancel>
                         <AlertDialogAction
                             onClick={handleDelete}
-                            className="bg-red-600 hover:bg-red-700"
+                            className="bg-rose-600 hover:bg-rose-700"
                         >
                             Delete
                         </AlertDialogAction>

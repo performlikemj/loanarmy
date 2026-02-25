@@ -131,7 +131,7 @@ export function QuoteBlockEditor({ open, onOpenChange, block, onSave }) {
                 ))}
               </SelectContent>
             </Select>
-            <p className="text-xs text-gray-500">
+            <p className="text-xs text-muted-foreground">
               {SOURCE_TYPES.find((t) => t.value === formData.source_type)?.description}
             </p>
           </div>
@@ -187,7 +187,7 @@ export function QuoteBlockEditor({ open, onOpenChange, block, onSave }) {
               value={formData.quote_date}
               onChange={(e) => setFormData((prev) => ({ ...prev, quote_date: e.target.value }))}
             />
-            <p className="text-xs text-gray-500">When was this quote given?</p>
+            <p className="text-xs text-muted-foreground">When was this quote given?</p>
           </div>
         </div>
 

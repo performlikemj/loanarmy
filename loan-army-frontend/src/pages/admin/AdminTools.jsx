@@ -17,7 +17,7 @@ function ToggleField({ label, description, checked, onChange }) {
                 type="checkbox"
                 checked={checked}
                 onChange={(e) => onChange(e.target.checked)}
-                className="h-4 w-4 mt-0.5 rounded border-gray-300"
+                className="h-4 w-4 mt-0.5 rounded border-border"
             />
             <div>
                 <div className="text-sm font-medium">{label}</div>
@@ -174,8 +174,8 @@ function ConfigEditor({ config, onSave, onCancel, saving }) {
                                 onClick={() => toggleLeague(l.league_id)}
                                 className={`flex items-center gap-2 px-3 py-1.5 rounded-full text-sm border transition-colors ${
                                     selected
-                                        ? 'bg-blue-600 text-white border-blue-600'
-                                        : 'bg-white text-gray-700 border-gray-300 hover:border-gray-400'
+                                        ? 'bg-primary text-primary-foreground border-primary'
+                                        : 'bg-card text-foreground/80 border-border hover:border-foreground/30'
                                 }`}
                             >
                                 {l.logo && <img src={l.logo} alt="" className="h-4 w-4" />}
@@ -197,13 +197,13 @@ function ConfigEditor({ config, onSave, onCancel, saving }) {
                     {Object.entries(draft.team_ids || {}).map(([id, name]) => (
                         <span
                             key={id}
-                            className="inline-flex items-center gap-1 px-2.5 py-1 rounded-full text-xs bg-blue-100 text-blue-800"
+                            className="inline-flex items-center gap-1 px-2.5 py-1 rounded-full text-xs bg-primary/10 text-primary"
                         >
                             {name}
                             <button
                                 type="button"
                                 onClick={() => removeTeam(id)}
-                                className="ml-0.5 hover:text-red-600"
+                                className="ml-0.5 hover:text-rose-600"
                             >
                                 <X className="h-3 w-3" />
                             </button>
@@ -221,7 +221,7 @@ function ConfigEditor({ config, onSave, onCancel, saving }) {
                         className="w-64"
                     />
                     {teamResults.length > 0 && (
-                        <div className="absolute z-10 mt-1 w-80 max-h-48 overflow-y-auto bg-white border rounded-lg shadow-lg">
+                        <div className="absolute z-10 mt-1 w-80 max-h-48 overflow-y-auto bg-card border rounded-lg shadow-lg">
                             {teamResults.map(t => {
                                 const tid = String(t.team_id || t.id)
                                 const already = !!draft.team_ids?.[tid]
@@ -268,7 +268,7 @@ function ConfigEditor({ config, onSave, onCancel, saving }) {
                             <button
                                 type="button"
                                 onClick={() => removeSeason(i)}
-                                className="p-1 text-gray-400 hover:text-red-500"
+                                className="p-1 text-muted-foreground/70 hover:text-rose-500"
                             >
                                 <X className="h-3.5 w-3.5" />
                             </button>
@@ -308,7 +308,7 @@ function ConfigEditor({ config, onSave, onCancel, saving }) {
                             <button
                                 type="button"
                                 onClick={() => removeLeague(i)}
-                                className="p-1 text-gray-400 hover:text-red-500"
+                                className="p-1 text-muted-foreground/70 hover:text-rose-500"
                             >
                                 <Trash2 className="h-3.5 w-3.5" />
                             </button>
@@ -406,7 +406,7 @@ function HistoryTimeline({ history }) {
         <div className="space-y-3">
             {history.map((entry) => (
                 <div key={entry.id} className="flex gap-3 text-sm">
-                    <div className="w-2 h-2 mt-1.5 rounded-full bg-blue-500 shrink-0" />
+                    <div className="w-2 h-2 mt-1.5 rounded-full bg-primary shrink-0" />
                     <div className="flex-1 min-w-0">
                         <div className="flex items-baseline gap-2 flex-wrap">
                             <span className="font-medium capitalize">{entry.action}</span>
@@ -418,11 +418,11 @@ function HistoryTimeline({ history }) {
                             <div className="mt-1 space-y-0.5">
                                 {Object.entries(entry.diff).map(([key, { old: oldVal, new: newVal }]) => (
                                     <div key={key} className="text-xs text-muted-foreground font-mono">
-                                        <span className="text-gray-600">{key}:</span>{' '}
-                                        <span className="text-red-500 line-through">
+                                        <span className="text-muted-foreground">{key}:</span>{' '}
+                                        <span className="text-rose-500 line-through">
                                             {typeof oldVal === 'object' ? JSON.stringify(oldVal) : String(oldVal)}
                                         </span>{' '}
-                                        <span className="text-green-600">
+                                        <span className="text-emerald-600">
                                             {typeof newVal === 'object' ? JSON.stringify(newVal) : String(newVal)}
                                         </span>
                                     </div>
@@ -458,11 +458,11 @@ function ApiFootballStatusCard() {
 
     const modeBadge = (mode) => {
         const variants = {
-            direct: { className: 'bg-green-100 text-green-800', label: 'Direct' },
-            rapidapi: { className: 'bg-blue-100 text-blue-800', label: 'RapidAPI' },
+            direct: { className: 'bg-emerald-50 text-emerald-800', label: 'Direct' },
+            rapidapi: { className: 'bg-primary/10 text-primary', label: 'RapidAPI' },
             stub: { className: 'bg-yellow-100 text-yellow-800', label: 'Stub' },
         }
-        const v = variants[(mode || '').toLowerCase()] || { className: 'bg-gray-100 text-gray-800', label: mode || 'Unknown' }
+        const v = variants[(mode || '').toLowerCase()] || { className: 'bg-secondary text-foreground', label: mode || 'Unknown' }
         return <span className={`px-2 py-0.5 rounded-full text-xs font-medium ${v.className}`}>{v.label}</span>
     }
 
@@ -480,7 +480,7 @@ function ApiFootballStatusCard() {
                         <Loader2 className="h-4 w-4 animate-spin" /> Checking status...
                     </div>
                 ) : error ? (
-                    <div className="flex items-center gap-2 text-sm text-red-600">
+                    <div className="flex items-center gap-2 text-sm text-rose-600">
                         <WifiOff className="h-4 w-4" /> {error}
                     </div>
                 ) : (
@@ -488,17 +488,17 @@ function ApiFootballStatusCard() {
                         <div>
                             <div className="text-xs font-semibold text-muted-foreground uppercase tracking-wider mb-1">Mode</div>
                             <div className="flex items-center gap-2">
-                                <Wifi className="h-3.5 w-3.5 text-green-600" />
+                                <Wifi className="h-3.5 w-3.5 text-emerald-600" />
                                 {modeBadge(status.mode)}
                             </div>
                         </div>
                         <div>
                             <div className="text-xs font-semibold text-muted-foreground uppercase tracking-wider mb-1">API Key</div>
                             <div className="flex items-center gap-1.5 text-sm">
-                                <div className={`h-2 w-2 rounded-full ${status.key_present ? 'bg-green-500' : 'bg-red-500'}`} />
+                                <div className={`h-2 w-2 rounded-full ${status.key_present ? 'bg-emerald-500' : 'bg-rose-500'}`} />
                                 {status.key_present
                                     ? <span className="font-mono text-xs">{status.key_prefix}****</span>
-                                    : <span className="text-red-600">Missing</span>
+                                    : <span className="text-rose-600">Missing</span>
                                 }
                             </div>
                         </div>
@@ -677,11 +677,11 @@ export function AdminTools() {
             </div>
 
             {message && (
-                <Alert className={message.type === 'error' ? 'border-red-500 bg-red-50' : 'border-green-500 bg-green-50'}>
+                <Alert className={message.type === 'error' ? 'border-rose-500 bg-rose-50' : 'border-emerald-500 bg-emerald-50'}>
                     {message.type === 'error'
-                        ? <AlertCircle className="h-4 w-4 text-red-600" />
-                        : <CheckCircle2 className="h-4 w-4 text-green-600" />}
-                    <AlertDescription className={message.type === 'error' ? 'text-red-800' : 'text-green-800'}>
+                        ? <AlertCircle className="h-4 w-4 text-rose-600" />
+                        : <CheckCircle2 className="h-4 w-4 text-emerald-600" />}
+                    <AlertDescription className={message.type === 'error' ? 'text-rose-800' : 'text-emerald-800'}>
                         {message.text}
                     </AlertDescription>
                 </Alert>
@@ -745,16 +745,16 @@ export function AdminTools() {
                                 <div
                                     key={c.id}
                                     className={`flex items-center gap-3 p-3 rounded-lg border transition-colors cursor-pointer ${
-                                        selectedId === c.id ? 'border-blue-500 bg-blue-50' : 'hover:bg-muted/40'
+                                        selectedId === c.id ? 'border-primary/20 bg-primary/5' : 'hover:bg-muted/40'
                                     }`}
                                     onClick={() => loadConfig(c.id)}
                                 >
-                                    <div className={`h-2.5 w-2.5 rounded-full shrink-0 ${c.is_active ? 'bg-green-500' : 'bg-gray-300'}`} />
+                                    <div className={`h-2.5 w-2.5 rounded-full shrink-0 ${c.is_active ? 'bg-emerald-500' : 'bg-muted-foreground/50'}`} />
                                     <div className="flex-1 min-w-0">
                                         <div className="flex items-center gap-2">
                                             <span className="font-medium text-sm">{c.name}</span>
                                             {c.is_active && (
-                                                <span className="text-[10px] font-semibold uppercase tracking-wider px-1.5 py-0.5 rounded bg-green-100 text-green-700">
+                                                <span className="text-[10px] font-semibold uppercase tracking-wider px-1.5 py-0.5 rounded bg-emerald-50 text-emerald-700">
                                                     Active
                                                 </span>
                                             )}
@@ -793,7 +793,7 @@ export function AdminTools() {
                                                 variant="ghost"
                                                 onClick={(e) => { e.stopPropagation(); handleDelete(c.id) }}
                                                 title="Delete"
-                                                className="text-red-500 hover:text-red-700"
+                                                className="text-rose-500 hover:text-rose-700"
                                             >
                                                 <Trash2 className="h-3.5 w-3.5" />
                                             </Button>
@@ -816,7 +816,7 @@ export function AdminTools() {
                                 <CardDescription>
                                     {selectedConfig.notes || 'No notes'}
                                     <button
-                                        className="ml-2 text-blue-600 hover:underline text-xs"
+                                        className="ml-2 text-primary hover:underline text-xs"
                                         onClick={() => {
                                             const notes = prompt('Edit notes:', selectedConfig.notes || '')
                                             if (notes !== null) handleUpdateNotes(notes)
@@ -865,7 +865,7 @@ export function AdminTools() {
                                         <div className="text-xs font-semibold text-muted-foreground uppercase tracking-wider mb-1">Individual Teams</div>
                                         <div className="flex flex-wrap gap-1">
                                             {Object.entries(selectedConfig.config?.team_ids || {}).map(([id, name]) => (
-                                                <span key={id} className="px-2 py-0.5 rounded-full text-xs bg-blue-100 text-blue-800">
+                                                <span key={id} className="px-2 py-0.5 rounded-full text-xs bg-primary/10 text-primary">
                                                     {name}
                                                 </span>
                                             ))}
@@ -879,7 +879,7 @@ export function AdminTools() {
                                     <div className="text-xs font-semibold text-muted-foreground uppercase tracking-wider mb-1">Seasons</div>
                                     <div className="flex flex-wrap gap-1">
                                         {(selectedConfig.config?.seasons || []).map(s => (
-                                            <span key={s} className="px-2 py-0.5 rounded-full text-xs bg-gray-100 text-gray-800">
+                                            <span key={s} className="px-2 py-0.5 rounded-full text-xs bg-secondary text-foreground">
                                                 {s}
                                             </span>
                                         ))}
@@ -905,7 +905,7 @@ export function AdminTools() {
                                         ['Full minutes assumed', selectedConfig.config?.assume_full_minutes],
                                     ].map(([label, val]) => (
                                         <div key={label} className="flex items-center gap-2 text-sm">
-                                            <div className={`h-2 w-2 rounded-full ${val ? 'bg-green-500' : 'bg-gray-300'}`} />
+                                            <div className={`h-2 w-2 rounded-full ${val ? 'bg-emerald-500' : 'bg-muted-foreground/50'}`} />
                                             {label}
                                         </div>
                                     ))}

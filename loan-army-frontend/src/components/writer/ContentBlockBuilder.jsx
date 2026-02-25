@@ -203,10 +203,10 @@ export function ContentBlockBuilder({
           strategy={verticalListSortingStrategy}
         >
           {normalizedBlocks.length === 0 ? (
-            <Card className="border-dashed border-2 border-gray-300">
+            <Card className="border-dashed border-2 border-border">
               <CardContent className="py-12 text-center">
-                <Type className="h-10 w-10 mx-auto text-gray-400 mb-4" />
-                <p className="text-gray-500 mb-4">Start building your article</p>
+                <Type className="h-10 w-10 mx-auto text-muted-foreground/70 mb-4" />
+                <p className="text-muted-foreground mb-4">Start building your article</p>
                 <Button
                   type="button"
                   variant="outline"
@@ -250,9 +250,9 @@ export function ContentBlockBuilder({
         {/* Drag overlay */}
         <DragOverlay>
           {activeBlock ? (
-            <Card className="opacity-90 shadow-xl border-2 border-blue-500">
+            <Card className="opacity-90 shadow-xl border-2 border-primary">
               <CardContent className="py-3">
-                <div className="flex items-center gap-2 text-sm text-gray-600">
+                <div className="flex items-center gap-2 text-sm text-muted-foreground">
                   <GripVertical className="h-4 w-4" />
                   <span className="font-medium">
                     {activeBlock.type === 'text' && 'Text Block'}

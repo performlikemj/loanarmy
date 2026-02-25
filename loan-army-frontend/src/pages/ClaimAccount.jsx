@@ -63,11 +63,11 @@ export function ClaimAccount() {
     // Validating state
     if (status === 'validating') {
         return (
-            <div className="min-h-screen flex items-center justify-center bg-gray-50 p-4">
+            <div className="min-h-screen flex items-center justify-center bg-background p-4">
                 <Card className="w-full max-w-md">
                     <CardContent className="pt-6">
                         <div className="flex flex-col items-center gap-4">
-                            <Loader2 className="h-12 w-12 animate-spin text-blue-600" />
+                            <Loader2 className="h-12 w-12 animate-spin text-primary" />
                             <p className="text-lg text-muted-foreground">Validating your claim link...</p>
                         </div>
                     </CardContent>
@@ -79,12 +79,12 @@ export function ClaimAccount() {
     // Invalid/Error state
     if (status === 'invalid') {
         return (
-            <div className="min-h-screen flex items-center justify-center bg-gray-50 p-4">
+            <div className="min-h-screen flex items-center justify-center bg-background p-4">
                 <Card className="w-full max-w-md">
                     <CardHeader>
                         <div className="flex items-center gap-3">
-                            <XCircle className="h-8 w-8 text-red-500" />
-                            <CardTitle className="text-red-700">Unable to Claim Account</CardTitle>
+                            <XCircle className="h-8 w-8 text-rose-500" />
+                            <CardTitle className="text-rose-700">Unable to Claim Account</CardTitle>
                         </div>
                     </CardHeader>
                     <CardContent>
@@ -108,12 +108,12 @@ export function ClaimAccount() {
     // Success state
     if (status === 'success') {
         return (
-            <div className="min-h-screen flex items-center justify-center bg-gray-50 p-4">
+            <div className="min-h-screen flex items-center justify-center bg-background p-4">
                 <Card className="w-full max-w-md">
                     <CardHeader>
                         <div className="flex items-center gap-3">
-                            <CheckCircle className="h-8 w-8 text-green-500" />
-                            <CardTitle className="text-green-700">Account Claimed!</CardTitle>
+                            <CheckCircle className="h-8 w-8 text-emerald-500" />
+                            <CardTitle className="text-emerald-700">Account Claimed!</CardTitle>
                         </div>
                     </CardHeader>
                     <CardContent>
@@ -131,12 +131,12 @@ export function ClaimAccount() {
 
     // Valid - ready to claim
     return (
-        <div className="min-h-screen flex items-center justify-center bg-gray-50 p-4">
+        <div className="min-h-screen flex items-center justify-center bg-background p-4">
             <Card className="w-full max-w-md">
                 <CardHeader>
                     <div className="flex items-center gap-3">
-                        <div className="h-12 w-12 rounded-full bg-blue-100 flex items-center justify-center">
-                            <User className="h-6 w-6 text-blue-600" />
+                        <div className="h-12 w-12 rounded-full bg-primary/10 flex items-center justify-center">
+                            <User className="h-6 w-6 text-primary" />
                         </div>
                         <div>
                             <CardTitle>Claim Your Account</CardTitle>
@@ -145,7 +145,7 @@ export function ClaimAccount() {
                     </div>
                 </CardHeader>
                 <CardContent className="space-y-4">
-                    <div className="p-4 bg-gray-50 rounded-lg space-y-2">
+                    <div className="p-4 bg-secondary rounded-lg space-y-2">
                         <div className="flex justify-between text-sm">
                             <span className="text-muted-foreground">Name:</span>
                             <span className="font-medium">{accountInfo?.display_name}</span>

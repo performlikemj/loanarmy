@@ -78,7 +78,7 @@ export function CommentSection({ newsletterId, playerId, title = 'Comments' }) {
           <MessageSquare className="h-4 w-4" />
           {title}
           {comments.length > 0 && (
-            <span className="text-sm font-normal text-gray-500">({comments.length})</span>
+            <span className="text-sm font-normal text-muted-foreground">({comments.length})</span>
           )}
         </CardTitle>
       </CardHeader>
@@ -86,29 +86,29 @@ export function CommentSection({ newsletterId, playerId, title = 'Comments' }) {
         {/* Comment list */}
         {loading ? (
           <div className="flex justify-center py-6">
-            <Loader2 className="h-5 w-5 animate-spin text-gray-400" />
+            <Loader2 className="h-5 w-5 animate-spin text-muted-foreground/70" />
           </div>
         ) : comments.length === 0 ? (
-          <p className="text-sm text-gray-500 text-center py-4">No comments yet. Be the first to share your thoughts.</p>
+          <p className="text-sm text-muted-foreground text-center py-4">No comments yet. Be the first to share your thoughts.</p>
         ) : (
           <div className="space-y-3">
             {comments.map((c) => (
               <div key={c.id} className="flex gap-3">
                 <Avatar className="h-8 w-8 flex-shrink-0">
-                  <AvatarFallback className="text-xs bg-gray-100 text-gray-600">
+                  <AvatarFallback className="text-xs bg-secondary text-muted-foreground">
                     {(c.author_display_name || c.author_name || '?').substring(0, 2).toUpperCase()}
                   </AvatarFallback>
                 </Avatar>
                 <div className="flex-1 min-w-0">
                   <div className="flex items-center gap-2 mb-0.5">
-                    <span className="text-sm font-medium text-gray-900 truncate">
+                    <span className="text-sm font-medium text-foreground truncate">
                       {c.author_display_name || c.author_name || 'Anonymous'}
                     </span>
-                    <span className="text-xs text-gray-400 flex-shrink-0">
+                    <span className="text-xs text-muted-foreground/70 flex-shrink-0">
                       {relativeTime(c.created_at)}
                     </span>
                   </div>
-                  <p className="text-sm text-gray-700 whitespace-pre-wrap break-words">{c.body}</p>
+                  <p className="text-sm text-foreground/80 whitespace-pre-wrap break-words">{c.body}</p>
                 </div>
               </div>
             ))}
@@ -140,7 +140,7 @@ export function CommentSection({ newsletterId, playerId, title = 'Comments' }) {
           </form>
         ) : (
           <div className="pt-3 border-t text-center">
-            <p className="text-sm text-gray-500">Sign in to join the discussion</p>
+            <p className="text-sm text-muted-foreground">Sign in to join the discussion</p>
           </div>
         )}
       </CardContent>

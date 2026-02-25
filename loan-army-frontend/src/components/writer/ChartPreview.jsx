@@ -63,7 +63,7 @@ export function ChartPreview({ block, playerId, weekRange, previewData: external
   if (loading) {
     return (
       <div className="flex items-center justify-center py-8">
-        <Loader2 className="h-6 w-6 animate-spin text-gray-400" />
+        <Loader2 className="h-6 w-6 animate-spin text-muted-foreground/70" />
       </div>
     )
   }
@@ -78,7 +78,7 @@ export function ChartPreview({ block, playerId, weekRange, previewData: external
 
   if (!data) {
     return (
-      <div className="text-center text-gray-500 py-4 text-sm">
+      <div className="text-center text-muted-foreground py-4 text-sm">
         No data available for this player
       </div>
     )
@@ -104,7 +104,7 @@ export function ChartPreview({ block, playerId, weekRange, previewData: external
 
     default:
       return (
-        <div className="text-center text-gray-500 py-4 text-sm">
+        <div className="text-center text-muted-foreground py-4 text-sm">
           Unknown chart type: {chartType}
         </div>
       )

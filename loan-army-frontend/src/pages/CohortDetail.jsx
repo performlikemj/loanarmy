@@ -6,20 +6,13 @@ import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { Button } from '@/components/ui/button'
 import { Badge } from '@/components/ui/badge'
 import { Loader2 } from 'lucide-react'
-
-const STATUS_COLORS = {
-    first_team: 'bg-green-100 text-green-800 border-green-200',
-    on_loan: 'bg-blue-100 text-blue-800 border-blue-200',
-    academy: 'bg-yellow-100 text-yellow-800 border-yellow-200',
-    released: 'bg-gray-100 text-gray-800 border-gray-200',
-    unknown: 'bg-purple-100 text-purple-800 border-purple-200',
-}
+import { STATUS_BADGE_CLASSES, CONSTELLATION_STATUS_COLORS } from '../lib/theme-constants'
 
 const CHART_COLORS = {
-    first_team: '#22c55e',
-    on_loan: '#3b82f6',
-    academy: '#eab308',
-    released: '#6b7280',
+    first_team: CONSTELLATION_STATUS_COLORS.first_team,
+    on_loan: CONSTELLATION_STATUS_COLORS.on_loan,
+    academy: CONSTELLATION_STATUS_COLORS.academy,
+    released: CONSTELLATION_STATUS_COLORS.released,
     unknown: '#a855f7',
 }
 
@@ -91,7 +84,7 @@ export function CohortDetail() {
     }
 
     const getStatusBadge = (status) => {
-        const colorClass = STATUS_COLORS[status] || STATUS_COLORS.unknown
+        const colorClass = STATUS_BADGE_CLASSES[status] || 'bg-purple-50 text-purple-800 border-purple-200'
         return (
             <Badge className={colorClass}>
                 {status?.replace('_', ' ') || 'unknown'}
@@ -112,7 +105,7 @@ export function CohortDetail() {
 
     const SortHeader = ({ field, label }) => (
         <th
-            className="p-3 font-medium text-gray-500 cursor-pointer hover:text-gray-900 select-none"
+            className="p-3 font-medium text-muted-foreground cursor-pointer hover:text-foreground select-none"
             onClick={() => handleSort(field)}
         >
             <span className="inline-flex items-center gap-1">
@@ -126,10 +119,10 @@ export function CohortDetail() {
 
     if (loading) {
         return (
-            <div className="min-h-screen flex items-center justify-center bg-gradient-to-b from-slate-50 to-slate-100">
+            <div className="min-h-screen flex items-center justify-center bg-gradient-to-b from-secondary to-background">
                 <div className="text-center">
-                    <Loader2 className="h-12 w-12 animate-spin text-blue-500 mx-auto mb-4" />
-                    <p className="text-gray-500">Loading cohort details...</p>
+                    <Loader2 className="h-12 w-12 animate-spin text-primary mx-auto mb-4" />
+                    <p className="text-muted-foreground">Loading cohort details...</p>
                 </div>
             </div>
         )
@@ -137,7 +130,7 @@ export function CohortDetail() {
 
     if (error) {
         return (
-            <div className="min-h-screen flex items-center justify-center bg-gradient-to-b from-slate-50 to-slate-100">
+            <div className="min-h-screen flex items-center justify-center bg-gradient-to-b from-secondary to-background">
                 <Card className="max-w-md">
                     <CardContent className="pt-6 text-center">
                         <p className="text-red-500 mb-4">{error}</p>
@@ -156,7 +149,7 @@ export function CohortDetail() {
     const analytics = cohort.analytics || {}
 
     return (
-        <div className="min-h-screen bg-gradient-to-b from-slate-50 to-slate-100">
+        <div className="min-h-screen bg-gradient-to-b from-secondary to-background">
             <div className="max-w-6xl mx-auto px-4 py-8">
                 {/* Header */}
                 <div className="flex items-center gap-4 mb-8">
@@ -171,7 +164,7 @@ export function CohortDetail() {
                         />
                     )}
                     <div>
-                        <h1 className="text-3xl font-bold tracking-tight text-gray-900">
+                        <h1 className="text-3xl font-bold tracking-tight text-foreground">
                             {cohort.team_name}
                         </h1>
                         <p className="text-muted-foreground">
@@ -193,18 +186,18 @@ export function CohortDetail() {
                     </Card>
                     <Card>
                         <CardHeader className="pb-2">
-                            <CardTitle className="text-sm text-green-600">First Team</CardTitle>
+                            <CardTitle className="text-sm text-emerald-600">First Team</CardTitle>
                         </CardHeader>
                         <CardContent>
-                            <div className="text-3xl font-bold text-green-600">{analytics.players_first_team || 0}</div>
+                            <div className="text-3xl font-bold text-emerald-600">{analytics.players_first_team || 0}</div>
                         </CardContent>
                     </Card>
                     <Card>
                         <CardHeader className="pb-2">
-                            <CardTitle className="text-sm text-blue-600">On Loan</CardTitle>
+                            <CardTitle className="text-sm text-amber-600">On Loan</CardTitle>
                         </CardHeader>
                         <CardContent>
-                            <div className="text-3xl font-bold text-blue-600">{analytics.players_on_loan || 0}</div>
+                            <div className="text-3xl font-bold text-amber-600">{analytics.players_on_loan || 0}</div>
                         </CardContent>
                     </Card>
                     <Card>
@@ -217,10 +210,10 @@ export function CohortDetail() {
                     </Card>
                     <Card>
                         <CardHeader className="pb-2">
-                            <CardTitle className="text-sm text-gray-500">Released</CardTitle>
+                            <CardTitle className="text-sm text-muted-foreground">Released</CardTitle>
                         </CardHeader>
                         <CardContent>
-                            <div className="text-3xl font-bold text-gray-500">{analytics.players_released || 0}</div>
+                            <div className="text-3xl font-bold text-muted-foreground">{analytics.players_released || 0}</div>
                         </CardContent>
                     </Card>
                 </div>
@@ -269,7 +262,7 @@ export function CohortDetail() {
                         ) : (
                             <div className="overflow-x-auto">
                                 <table className="w-full text-sm text-left">
-                                    <thead className="bg-gray-50">
+                                    <thead className="bg-secondary">
                                         <tr>
                                             <SortHeader field="player_name" label="Player" />
                                             <SortHeader field="position" label="Position" />
@@ -280,9 +273,9 @@ export function CohortDetail() {
                                             <SortHeader field="status" label="Status" />
                                         </tr>
                                     </thead>
-                                    <tbody className="divide-y">
+                                    <tbody className="divide-y divide-border">
                                         {sortedMembers().map((member, i) => (
-                                            <tr key={member.id || i} className="hover:bg-gray-50">
+                                            <tr key={member.id || i} className="hover:bg-secondary">
                                                 <td className="p-3">
                                                     <Link
                                                         to={`/players/${member.player_api_id}`}
@@ -295,18 +288,18 @@ export function CohortDetail() {
                                                                 className="w-8 h-8 rounded-full object-cover"
                                                             />
                                                         ) : (
-                                                            <div className="w-8 h-8 rounded-full bg-gray-200 flex items-center justify-center text-xs text-gray-500">
+                                                            <div className="w-8 h-8 rounded-full bg-muted flex items-center justify-center text-xs text-muted-foreground">
                                                                 {member.player_name?.charAt(0) || '?'}
                                                             </div>
                                                         )}
-                                                        <span className="font-medium text-blue-600">{member.player_name}</span>
+                                                        <span className="font-medium text-primary">{member.player_name}</span>
                                                     </Link>
                                                 </td>
-                                                <td className="p-3 text-gray-600">{member.position || '-'}</td>
-                                                <td className="p-3 text-gray-600">{member.nationality || '-'}</td>
-                                                <td className="p-3 text-gray-600">{member.cohort_stats?.appearances ?? '-'}</td>
-                                                <td className="p-3 text-gray-600">{member.cohort_stats?.goals ?? '-'}</td>
-                                                <td className="p-3 text-gray-600">{member.current?.club_name || '-'}</td>
+                                                <td className="p-3 text-muted-foreground">{member.position || '-'}</td>
+                                                <td className="p-3 text-muted-foreground">{member.nationality || '-'}</td>
+                                                <td className="p-3 text-muted-foreground">{member.cohort_stats?.appearances ?? '-'}</td>
+                                                <td className="p-3 text-muted-foreground">{member.cohort_stats?.goals ?? '-'}</td>
+                                                <td className="p-3 text-muted-foreground">{member.current?.club_name || '-'}</td>
                                                 <td className="p-3">{getStatusBadge(member.current?.status)}</td>
                                             </tr>
                                         ))}

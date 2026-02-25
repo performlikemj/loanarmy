@@ -6,17 +6,10 @@
  * focus on a single season at a time.
  */
 
-// Re-export for convenience
-export const LEVEL_COLORS = {
-    'U18': '#9333ea',
-    'U19': '#8b5cf6',
-    'U21': '#6366f1',
-    'U23': '#3b82f6',
-    'Reserve': '#06b6d4',
-    'First Team': '#22c55e',
-    'International': '#f59e0b',
-    'International Youth': '#d946ef',
-}
+import { JOURNEY_LEVEL_COLORS } from './theme-constants'
+
+// Re-export from theme-constants so existing consumers don't break
+export const LEVEL_COLORS = JOURNEY_LEVEL_COLORS
 
 /**
  * Build an array of ProgressionNodes from the API stops.

@@ -7,6 +7,7 @@ import { Label } from '@/components/ui/label'
 import { Alert, AlertDescription } from '@/components/ui/alert'
 import { Badge } from '@/components/ui/badge'
 import { Loader2, RefreshCw, GraduationCap, Users, Play, Trash2, AlertCircle, CheckCircle2 } from 'lucide-react'
+import { STATUS_BADGE_CLASSES } from '../../lib/theme-constants'
 
 export function AdminCohorts() {
     // Message
@@ -173,18 +174,19 @@ export function AdminCohorts() {
         }
     }
 
+    const COHORT_STATUS_COLORS = {
+        pending: 'bg-amber-50 text-amber-800 border-amber-200',
+        seeding: 'bg-primary/10 text-primary border-primary/20',
+        syncing_journeys: 'bg-primary/10 text-primary border-primary/20',
+        complete: 'bg-emerald-50 text-emerald-800 border-emerald-200',
+        partial: 'bg-amber-50 text-amber-800 border-amber-200',
+        no_data: 'bg-stone-100 text-stone-700 border-stone-200',
+        failed: 'bg-rose-50 text-rose-800 border-rose-200',
+    }
+
     const getStatusBadge = (status) => {
-        const colors = {
-            pending: 'bg-yellow-100 text-yellow-800',
-            seeding: 'bg-blue-100 text-blue-800',
-            syncing_journeys: 'bg-blue-100 text-blue-800',
-            complete: 'bg-green-100 text-green-800',
-            partial: 'bg-amber-100 text-amber-800',
-            no_data: 'bg-slate-100 text-slate-800',
-            failed: 'bg-red-100 text-red-800',
-        }
         return (
-            <Badge className={colors[status] || 'bg-gray-100 text-gray-800'}>
+            <Badge className={COHORT_STATUS_COLORS[status] || 'bg-secondary text-muted-foreground'}>
                 {status}
             </Badge>
         )
@@ -203,9 +205,9 @@ export function AdminCohorts() {
 
             {/* Message Display */}
             {message && (
-                <Alert className={message.type === 'error' ? 'border-red-500 bg-red-50' : 'border-green-500 bg-green-50'}>
-                    {message.type === 'error' ? <AlertCircle className="h-4 w-4 text-red-600" /> : <CheckCircle2 className="h-4 w-4 text-green-600" />}
-                    <AlertDescription className={message.type === 'error' ? 'text-red-800' : 'text-green-800'}>
+                <Alert className={message.type === 'error' ? 'border-rose-500 bg-rose-50' : 'border-emerald-500 bg-emerald-50'}>
+                    {message.type === 'error' ? <AlertCircle className="h-4 w-4 text-rose-600" /> : <CheckCircle2 className="h-4 w-4 text-emerald-600" />}
+                    <AlertDescription className={message.type === 'error' ? 'text-rose-800' : 'text-emerald-800'}>
                         {message.text}
                     </AlertDescription>
                 </Alert>
@@ -243,9 +245,9 @@ export function AdminCohorts() {
                                     <span>{big6Progress.current_item || 'Processing...'}</span>
                                     <span>{big6Progress.progress || 0} / {big6Progress.total || 0}</span>
                                 </div>
-                                <div className="w-full bg-gray-200 rounded-full h-2.5">
+                                <div className="w-full bg-muted rounded-full h-2.5">
                                     <div
-                                        className="bg-blue-600 h-2.5 rounded-full transition-all duration-300"
+                                        className="bg-primary h-2.5 rounded-full transition-all duration-300"
                                         style={{ width: `${big6ProgressPercent}%` }}
                                     />
                                 </div>

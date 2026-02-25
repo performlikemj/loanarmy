@@ -60,14 +60,14 @@ function ChartBlock({ block, playerId, weekRange }) {
   if (loading) {
     return (
       <div className="flex items-center justify-center py-8">
-        <Loader2 className="h-6 w-6 animate-spin text-gray-400" />
+        <Loader2 className="h-6 w-6 animate-spin text-muted-foreground/70" />
       </div>
     )
   }
 
   if (error || !data) {
     return (
-      <div className="text-center text-gray-500 py-4 text-sm">
+      <div className="text-center text-muted-foreground py-4 text-sm">
         {error || 'No chart data available'}
       </div>
     )
@@ -85,7 +85,7 @@ function ChartBlock({ block, playerId, weekRange }) {
     case 'stat_table':
       return <PlayerStatTable data={data} />
     default:
-      return <div className="text-gray-500">Unknown chart type</div>
+      return <div className="text-muted-foreground">Unknown chart type</div>
   }
 }
 
@@ -125,7 +125,7 @@ function QuoteAttribution({ block }) {
           href={source_url}
           target="_blank"
           rel="noopener noreferrer"
-          className="text-blue-600 hover:underline inline-flex items-center gap-1"
+          className="text-primary hover:underline inline-flex items-center gap-1"
         >
           {source_name}
           <ExternalLink className="h-3 w-3" />
@@ -179,10 +179,10 @@ function LockedBlock({ authorName, authorId, onSubscribe }) {
     <Card className="border-dashed border-2 border-amber-200 bg-amber-50/50">
       <CardContent className="py-8 text-center">
         <Lock className="h-8 w-8 text-amber-500 mx-auto mb-3" />
-        <p className="text-gray-700 font-medium mb-2">
+        <p className="text-foreground/80 font-medium mb-2">
           Premium Content
         </p>
-        <p className="text-sm text-gray-500 mb-4">
+        <p className="text-sm text-muted-foreground mb-4">
           Subscribe to {authorName || 'this writer'} to unlock this section
         </p>
         {onSubscribe && (
@@ -235,11 +235,11 @@ export function BlockRenderer({
             return (
               <div 
                 key={block.id || index}
-                className="prose prose-gray max-w-none
-                  prose-headings:text-gray-900 prose-headings:font-bold
-                  prose-p:text-gray-700 prose-p:leading-relaxed prose-p:my-2
+                className="prose prose-stone max-w-none
+                  prose-headings:text-foreground prose-headings:font-bold
+                  prose-p:text-foreground/80 prose-p:leading-relaxed prose-p:my-2
                   prose-ul:my-2 prose-ul:pl-5 prose-li:my-1
-                  prose-strong:text-gray-900
+                  prose-strong:text-foreground
                   prose-a:text-violet-600 prose-a:no-underline hover:prose-a:underline"
                 dangerouslySetInnerHTML={{ __html: formatTextToHtml(block.content) }}
               />
@@ -262,7 +262,7 @@ export function BlockRenderer({
             return (
               <hr
                 key={block.id || index}
-                className="border-t-2 border-gray-200 my-6"
+                className="border-t-2 border-border my-6"
               />
             )
 
@@ -270,10 +270,10 @@ export function BlockRenderer({
             return (
               <blockquote
                 key={block.id || index}
-                className="border-l-4 border-blue-400 pl-4 py-3 my-4 bg-blue-50/50 rounded-r"
+                className="border-l-4 border-primary pl-4 py-3 my-4 bg-primary/5 rounded-r"
               >
-                <p className="text-gray-800 italic text-lg">"{block.quote_text}"</p>
-                <footer className="mt-2 text-sm text-gray-600 flex items-center gap-1">
+                <p className="text-foreground italic text-lg">"{block.quote_text}"</p>
+                <footer className="mt-2 text-sm text-muted-foreground flex items-center gap-1">
                   <span>—</span>
                   <QuoteAttribution block={block} />
                 </footer>

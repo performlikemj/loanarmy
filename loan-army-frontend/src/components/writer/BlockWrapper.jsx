@@ -66,7 +66,7 @@ export function BlockWrapper({
   const renderBlockContent = () => {
     if (isCollapsed) {
       return (
-        <div className="text-sm text-gray-500 italic">
+        <div className="text-sm text-muted-foreground italic">
           {block.type === 'text' &&
             (block.content?.replace(/<[^>]*>/g, '').slice(0, 100) || 'Empty text block')}
           {block.type === 'quote' &&
@@ -93,11 +93,11 @@ export function BlockWrapper({
           <div className="space-y-3">
             {/* Quote preview */}
             <blockquote className="border-l-4 border-amber-400 pl-4 py-2 bg-amber-50/50 rounded-r">
-              <p className="text-gray-700 italic">
+              <p className="text-foreground/80 italic">
                 {block.quote_text ? `"${block.quote_text}"` : 'Click to add quote...'}
               </p>
               {block.source_name && (
-                <footer className="mt-1 text-sm text-gray-500">
+                <footer className="mt-1 text-sm text-muted-foreground">
                   — {block.source_name}
                   {block.source_type === 'direct_message' &&
                     block.source_platform &&
@@ -108,7 +108,7 @@ export function BlockWrapper({
                 </footer>
               )}
               {block.source_type === 'anonymous' && !block.source_name && (
-                <footer className="mt-1 text-sm text-gray-500">— according to sources</footer>
+                <footer className="mt-1 text-sm text-muted-foreground">— according to sources</footer>
               )}
             </blockquote>
             <Button type="button" variant="outline" size="sm" onClick={onEditQuote} className="w-full">
@@ -136,12 +136,12 @@ export function BlockWrapper({
       case 'divider':
         return (
           <div className="py-4">
-            <hr className="border-t-2 border-gray-200" />
+            <hr className="border-t-2 border-border" />
           </div>
         )
 
       default:
-        return <div className="text-gray-500">Unknown block type</div>
+        return <div className="text-muted-foreground">Unknown block type</div>
     }
   }
 
@@ -156,15 +156,15 @@ export function BlockWrapper({
       )}
     >
       {/* Block header with controls */}
-      <CardHeader className="py-2 px-3 flex flex-row items-center justify-between space-y-0 bg-gray-50/80 border-b">
+      <CardHeader className="py-2 px-3 flex flex-row items-center justify-between space-y-0 bg-secondary/80 border-b">
         <div className="flex items-center gap-2">
           {/* Drag handle */}
           <button
             {...attributes}
             {...listeners}
-            className="cursor-grab active:cursor-grabbing p-1 hover:bg-gray-200 rounded touch-none"
+            className="cursor-grab active:cursor-grabbing p-1 hover:bg-muted rounded touch-none"
           >
-            <GripVertical className="h-4 w-4 text-gray-400" />
+            <GripVertical className="h-4 w-4 text-muted-foreground/70" />
           </button>
 
           {/* Block type badge */}
@@ -193,9 +193,9 @@ export function BlockWrapper({
             title={isCollapsed ? 'Expand' : 'Collapse'}
           >
             {isCollapsed ? (
-              <Eye className="h-4 w-4 text-gray-500" />
+              <Eye className="h-4 w-4 text-muted-foreground" />
             ) : (
-              <EyeOff className="h-4 w-4 text-gray-500" />
+              <EyeOff className="h-4 w-4 text-muted-foreground" />
             )}
           </Button>
 
@@ -206,7 +206,7 @@ export function BlockWrapper({
             size="sm"
             className={cn(
               'h-7 w-7 p-0',
-              block.is_premium ? 'text-amber-600' : 'text-gray-500'
+              block.is_premium ? 'text-amber-600' : 'text-muted-foreground'
             )}
             onClick={onTogglePremium}
             title={block.is_premium ? 'Make public' : 'Make premium'}
@@ -228,7 +228,7 @@ export function BlockWrapper({
               onClick={onEditChart}
               title="Configure chart"
             >
-              <Settings className="h-4 w-4 text-gray-500" />
+              <Settings className="h-4 w-4 text-muted-foreground" />
             </Button>
           )}
 
@@ -242,7 +242,7 @@ export function BlockWrapper({
               onClick={onEditQuote}
               title="Edit quote"
             >
-              <Settings className="h-4 w-4 text-gray-500" />
+              <Settings className="h-4 w-4 text-muted-foreground" />
             </Button>
           )}
 

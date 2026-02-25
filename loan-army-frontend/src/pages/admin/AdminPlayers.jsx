@@ -12,6 +12,7 @@ import { Textarea } from '@/components/ui/textarea'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
 import { UserPlus, Search, AlertCircle, CheckCircle2, Trash2, RefreshCw, Pencil, X, Save, Loader2, CheckCircle, XCircle, Clock, User, Shield, Download } from 'lucide-react'
 import TeamSelect from '@/components/ui/TeamSelect'
+import { STATUS_BADGE_CLASSES } from '../../lib/theme-constants'
 
 const STATUS_OPTIONS = [
     { value: 'academy', label: 'Academy' },
@@ -32,14 +33,7 @@ const LEVEL_OPTIONS = [
 const POSITION_OPTIONS = ['Goalkeeper', 'Defender', 'Midfielder', 'Attacker']
 
 function StatusBadge({ status }) {
-    const colors = {
-        academy: 'bg-blue-100 text-blue-800',
-        on_loan: 'bg-yellow-100 text-yellow-800',
-        first_team: 'bg-green-100 text-green-800',
-        released: 'bg-red-100 text-red-800',
-        sold: 'bg-gray-100 text-gray-800',
-    }
-    return <Badge className={colors[status] || 'bg-gray-100 text-gray-800'}>{(status || '').replace('_', ' ')}</Badge>
+    return <Badge className={STATUS_BADGE_CLASSES[status] || 'bg-secondary text-muted-foreground'}>{(status || '').replace('_', ' ')}</Badge>
 }
 
 // ============================================================
@@ -321,9 +315,9 @@ function AllPlayersTab({ teams, setMessage }) {
                                 <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
                                     <div className="flex items-center gap-3">
                                         {p.photo_url ? (
-                                            <img src={p.photo_url} alt="" className="w-8 h-8 rounded-full object-cover bg-gray-100" />
+                                            <img src={p.photo_url} alt="" className="w-8 h-8 rounded-full object-cover bg-secondary" />
                                         ) : (
-                                            <div className="w-8 h-8 rounded-full bg-gray-200 flex items-center justify-center text-xs text-gray-500">
+                                            <div className="w-8 h-8 rounded-full bg-muted flex items-center justify-center text-xs text-muted-foreground">
                                                 {(p.player_name || '?')[0]}
                                             </div>
                                         )}
@@ -346,7 +340,7 @@ function AllPlayersTab({ teams, setMessage }) {
                                         <Button
                                             variant="ghost"
                                             size="sm"
-                                            className="text-red-600 hover:text-red-700"
+                                            className="text-rose-600 hover:text-rose-700"
                                             disabled={deletingId === p.id}
                                             onClick={() => deletePlayer(p.id, p.player_name)}
                                         >
@@ -418,7 +412,7 @@ function SubmissionsTab({ setMessage }) {
     }
 
     const getStatusBadge = (status) => {
-        if (status === 'approved') return <Badge className="bg-green-600"><CheckCircle className="h-3 w-3 mr-1" /> Approved</Badge>
+        if (status === 'approved') return <Badge className="bg-emerald-600"><CheckCircle className="h-3 w-3 mr-1" /> Approved</Badge>
         if (status === 'rejected') return <Badge variant="destructive"><XCircle className="h-3 w-3 mr-1" /> Rejected</Badge>
         return <Badge variant="secondary"><Clock className="h-3 w-3 mr-1" /> Pending</Badge>
     }
@@ -464,14 +458,14 @@ function SubmissionsTab({ setMessage }) {
                                     <div className="bg-muted/50 p-2 rounded text-sm mt-1">{sub.notes}</div>
                                 )}
                                 {sub.admin_notes && (
-                                    <div className="bg-blue-50 text-blue-800 p-2 rounded text-sm mt-1 border border-blue-100">
+                                    <div className="bg-primary/5 text-primary p-2 rounded text-sm mt-1 border border-primary/20">
                                         <Shield className="h-3 w-3 inline mr-1" /> {sub.admin_notes}
                                     </div>
                                 )}
                             </div>
                             {sub.status === 'pending' && (
                                 <div className="flex flex-col gap-2 min-w-[120px]">
-                                    <Button className="w-full bg-green-600 hover:bg-green-700" size="sm" onClick={() => { setReviewDialog({ open: true, submission: sub, action: 'approved' }); setAdminNotes('') }}>
+                                    <Button className="w-full bg-emerald-600 hover:bg-emerald-700" size="sm" onClick={() => { setReviewDialog({ open: true, submission: sub, action: 'approved' }); setAdminNotes('') }}>
                                         <CheckCircle className="h-4 w-4 mr-1" /> Approve
                                     </Button>
                                     <Button variant="destructive" size="sm" className="w-full" onClick={() => { setReviewDialog({ open: true, submission: sub, action: 'rejected' }); setAdminNotes('') }}>
@@ -502,7 +496,7 @@ function SubmissionsTab({ setMessage }) {
                             variant={reviewDialog.action === 'approved' ? 'default' : 'destructive'}
                             onClick={handleReview}
                             disabled={processing}
-                            className={reviewDialog.action === 'approved' ? 'bg-green-600 hover:bg-green-700' : ''}
+                            className={reviewDialog.action === 'approved' ? 'bg-emerald-600 hover:bg-emerald-700' : ''}
                         >
                             {processing && <Loader2 className="h-4 w-4 mr-1 animate-spin" />}
                             Confirm
@@ -584,9 +578,9 @@ function SeedTab({ teams, setMessage }) {
                     </Button>
 
                     {seedResult && (
-                        <div className={`mt-4 p-4 rounded-md border text-sm space-y-1 ${seedResult.created > 0 ? 'bg-green-50 border-green-200' : 'bg-amber-50 border-amber-200'}`}>
+                        <div className={`mt-4 p-4 rounded-md border text-sm space-y-1 ${seedResult.created > 0 ? 'bg-emerald-50 border-emerald-200' : 'bg-amber-50 border-amber-200'}`}>
                             <div className="flex items-center gap-2 font-medium">
-                                <CheckCircle2 className={`h-4 w-4 ${seedResult.created > 0 ? 'text-green-600' : 'text-amber-600'}`} />
+                                <CheckCircle2 className={`h-4 w-4 ${seedResult.created > 0 ? 'text-emerald-600' : 'text-amber-600'}`} />
                                 Seed Complete — {seedResult.team_name}
                             </div>
                             <div className="text-muted-foreground space-y-0.5">
@@ -747,9 +741,9 @@ export function AdminPlayers() {
             </div>
 
             {message && (
-                <Alert className={message.type === 'error' ? 'border-red-500 bg-red-50' : 'border-green-500 bg-green-50'}>
-                    {message.type === 'error' ? <AlertCircle className="h-4 w-4 text-red-600" /> : <CheckCircle2 className="h-4 w-4 text-green-600" />}
-                    <AlertDescription className={message.type === 'error' ? 'text-red-800' : 'text-green-800'}>
+                <Alert className={message.type === 'error' ? 'border-rose-500 bg-rose-50' : 'border-emerald-500 bg-emerald-50'}>
+                    {message.type === 'error' ? <AlertCircle className="h-4 w-4 text-rose-600" /> : <CheckCircle2 className="h-4 w-4 text-emerald-600" />}
+                    <AlertDescription className={message.type === 'error' ? 'text-rose-800' : 'text-emerald-800'}>
                         {message.text}
                         <Button variant="ghost" size="sm" className="ml-2 h-6 px-2" onClick={() => setMessage(null)}>
                             <X className="h-3 w-3" />

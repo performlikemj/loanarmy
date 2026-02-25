@@ -188,7 +188,7 @@ export function CommentaryManager({
                     )}
                   </div>
                 </div>
-                <p className="text-xs text-gray-500">By {commentary.author_name}</p>
+                <p className="text-xs text-muted-foreground">By {commentary.author_name}</p>
               </CardHeader>
               <CardContent>
                 {editingId === commentary.id ? (
@@ -242,7 +242,7 @@ export function CommentaryManager({
         {/* Players Tab */}
         <TabsContent value="players" className="space-y-4">
           {players.length === 0 ? (
-            <p className="text-center text-gray-500 py-8">
+            <p className="text-center text-muted-foreground py-8">
               No players found in newsletter
             </p>
           ) : (
@@ -261,7 +261,7 @@ export function CommentaryManager({
                     {playerCommentaries.map(commentary => (
                       <div key={commentary.id} className="border rounded-lg p-3">
                         <div className="flex items-center justify-between mb-2">
-                          <p className="text-xs text-gray-500">By {commentary.author_name}</p>
+                          <p className="text-xs text-muted-foreground">By {commentary.author_name}</p>
                           <div className="flex gap-2">
                             {editingId === commentary.id ? (
                               <>
@@ -385,7 +385,7 @@ export function CommentaryManager({
                     )}
                   </div>
                 </div>
-                <p className="text-xs text-gray-500">By {commentary.author_name}</p>
+                <p className="text-xs text-muted-foreground">By {commentary.author_name}</p>
               </CardHeader>
               <CardContent>
                 {editingId === commentary.id ? (

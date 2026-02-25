@@ -56,7 +56,7 @@ export default function SyncBanner() {
   if (!syncing || dismissed) return null
 
   return (
-    <div className="bg-gradient-to-r from-blue-50 to-indigo-50 border-b border-blue-200 px-4 py-3">
+    <div className="bg-gradient-to-r from-primary/5 to-primary/10 border-b border-primary/20 px-4 py-3">
       <div className="max-w-6xl mx-auto flex items-center justify-between gap-4 text-sm">
         <div className="flex items-center gap-3 min-w-0">
           {teams.length > 0 ? (
@@ -72,16 +72,16 @@ export default function SyncBanner() {
               ))}
             </div>
           ) : (
-            <div className="h-8 w-8 shrink-0 rounded-full bg-blue-100 animate-pulse" />
+            <div className="h-8 w-8 shrink-0 rounded-full bg-primary/10 animate-pulse" />
           )}
           <div className="min-w-0">
-            <p className="font-medium text-blue-900">
+            <p className="font-medium text-foreground">
               We're building the academy database — this may take a few minutes
             </p>
-            <p className="text-xs text-blue-600 truncate">
+            <p className="text-xs text-primary truncate">
               {progress?.stage || 'Starting...'}
               {progress?.total > 0 && (
-                <span className="ml-1 text-blue-500">
+                <span className="ml-1 text-primary/80">
                   ({progress.current}/{progress.total})
                 </span>
               )}
@@ -93,10 +93,10 @@ export default function SyncBanner() {
             sessionStorage.setItem(DISMISS_KEY, '1')
             setDismissed(true)
           }}
-          className="shrink-0 p-1 rounded hover:bg-blue-100 transition-colors"
+          className="shrink-0 p-1 rounded hover:bg-primary/10 transition-colors"
           aria-label="Dismiss banner"
         >
-          <X className="h-4 w-4 text-blue-400" />
+          <X className="h-4 w-4 text-muted-foreground/70" />
         </button>
       </div>
     </div>

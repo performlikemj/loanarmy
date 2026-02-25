@@ -8,13 +8,7 @@ import {
   ResponsiveContainer,
   Tooltip,
 } from 'recharts'
-
-const POSITION_COLORS = {
-  Forward: '#ef4444',     // Red
-  Midfielder: '#3b82f6',  // Blue
-  Defender: '#10b981',    // Green
-  Goalkeeper: '#f59e0b',  // Amber
-}
+import { CHART_POSITION_COLORS, CHART_AXIS_COLOR } from '../../lib/theme-constants'
 
 export function PlayerRadarChart({ data }) {
   const radarData = data?.data || []
@@ -24,7 +18,7 @@ export function PlayerRadarChart({ data }) {
   
   if (!radarData.length) {
     return (
-      <div className="text-center text-gray-500 py-4 text-sm">
+      <div className="text-center text-muted-foreground py-4 text-sm">
         No data available for radar chart
       </div>
     )
@@ -39,13 +33,13 @@ export function PlayerRadarChart({ data }) {
     maxValue: item.max_value,     // Position-adjusted max per game
   }))
   
-  const chartColor = POSITION_COLORS[positionCategory] || '#3b82f6'
+  const chartColor = CHART_POSITION_COLORS[positionCategory] || CHART_AXIS_COLOR
   
   return (
     <div className="space-y-2">
       <div className="flex items-center justify-between">
         {data?.player?.name && (
-          <div className="text-sm font-medium text-gray-700">
+          <div className="text-sm font-medium text-foreground/80">
             {data.player.name} - {matchesCount} match{matchesCount !== 1 ? 'es' : ''}
           </div>
         )}
@@ -68,7 +62,7 @@ export function PlayerRadarChart({ data }) {
             <PolarGrid gridType="polygon" />
             <PolarAngleAxis 
               dataKey="stat" 
-              tick={{ fontSize: 11, fill: '#6b7280' }}
+              tick={{ fontSize: 11, fill: CHART_AXIS_COLOR }}
             />
             <PolarRadiusAxis 
               angle={30} 
@@ -89,24 +83,24 @@ export function PlayerRadarChart({ data }) {
                 if (!active || !payload?.length) return null
                 const item = payload[0].payload
                 return (
-                  <div className="bg-white border shadow-lg rounded-lg px-3 py-2 min-w-[160px]">
-                    <div className="font-semibold text-sm text-gray-900 mb-1">{item.stat}</div>
+                  <div className="bg-card border shadow-lg rounded-lg px-3 py-2 min-w-[160px]">
+                    <div className="font-semibold text-sm text-foreground mb-1">{item.stat}</div>
                     <div className="space-y-0.5 text-xs">
                       <div className="flex justify-between">
-                        <span className="text-gray-500">Per game:</span>
+                        <span className="text-muted-foreground">Per game:</span>
                         <span className="font-medium">{item.avgPerGame}</span>
                       </div>
                       {matchesCount > 1 && (
                         <div className="flex justify-between">
-                          <span className="text-gray-500">Total:</span>
+                          <span className="text-muted-foreground">Total:</span>
                           <span className="font-medium">{item.total}</span>
                         </div>
                       )}
-                      <div className="flex justify-between text-gray-400 pt-1 border-t mt-1">
+                      <div className="flex justify-between text-muted-foreground/70 pt-1 border-t mt-1">
                         <span>vs {positionCategory} avg:</span>
                         <span className="font-medium" style={{ color: chartColor }}>{item.value}%</span>
                       </div>
-                      <div className="flex justify-between text-gray-400">
+                      <div className="flex justify-between text-muted-foreground/70">
                         <span>Expected max:</span>
                         <span>{item.maxValue}/game</span>
                       </div>
@@ -120,7 +114,7 @@ export function PlayerRadarChart({ data }) {
       </div>
       
       {/* Legend explanation */}
-      <div className="text-xs text-gray-500 text-center">
+      <div className="text-xs text-muted-foreground text-center">
         Values normalized to % of expected {positionCategory.toLowerCase()} performance per game
       </div>
     </div>

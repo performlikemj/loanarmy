@@ -9,23 +9,16 @@ import {
     Search, Loader2, AlertCircle, CheckCircle2, ArrowRight,
     ChevronDown, ChevronRight, User,
 } from 'lucide-react'
-
-const STATUS_COLORS = {
-    academy: 'bg-blue-100 text-blue-800',
-    first_team: 'bg-green-100 text-green-800',
-    on_loan: 'bg-yellow-100 text-yellow-800',
-    released: 'bg-red-100 text-red-800',
-    sold: 'bg-purple-100 text-purple-800',
-}
+import { STATUS_BADGE_CLASSES } from '../../lib/theme-constants'
 
 const RESULT_COLORS = {
-    match: 'bg-green-100 text-green-700 border-green-300',
-    pass: 'bg-gray-100 text-gray-600 border-gray-300',
+    match: 'bg-emerald-50 text-emerald-700 border-emerald-300',
+    pass: 'bg-secondary text-muted-foreground border-border',
 }
 
 function StatusBadge({ status }) {
     return (
-        <span className={`px-2 py-0.5 rounded-full text-xs font-medium ${STATUS_COLORS[status] || 'bg-gray-100 text-gray-700'}`}>
+        <span className={`px-2 py-0.5 rounded-full text-xs font-medium ${STATUS_BADGE_CLASSES[status] || 'bg-secondary text-muted-foreground'}`}>
             {status}
         </span>
     )
@@ -176,7 +169,7 @@ export function AdminSandbox() {
                     <div ref={searchRef} className="relative">
                         <Label className="text-sm font-medium">Search API-Football</Label>
                         <div className="relative mt-1">
-                            <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-gray-400" />
+                            <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground/70" />
                             <Input
                                 value={searchQuery}
                                 onChange={(e) => handleSearch(e.target.value)}
@@ -184,25 +177,25 @@ export function AdminSandbox() {
                                 className="pl-9"
                             />
                             {searching && (
-                                <Loader2 className="absolute right-3 top-1/2 -translate-y-1/2 h-4 w-4 animate-spin text-gray-400" />
+                                <Loader2 className="absolute right-3 top-1/2 -translate-y-1/2 h-4 w-4 animate-spin text-muted-foreground/70" />
                             )}
                         </div>
                         {showResults && searchResults.length > 0 && (
-                            <div className="absolute z-10 w-full mt-1 bg-white border rounded-lg shadow-lg max-h-60 overflow-y-auto">
+                            <div className="absolute z-10 w-full mt-1 bg-card border rounded-lg shadow-lg max-h-60 overflow-y-auto">
                                 {searchResults.map((p) => (
                                     <button
                                         key={p.id}
-                                        className="flex items-center gap-3 w-full px-3 py-2 hover:bg-gray-50 text-left"
+                                        className="flex items-center gap-3 w-full px-3 py-2 hover:bg-secondary text-left"
                                         onClick={() => selectPlayer(p)}
                                     >
                                         {p.photo ? (
                                             <img src={p.photo} alt="" className="h-8 w-8 rounded-full object-cover" />
                                         ) : (
-                                            <User className="h-8 w-8 p-1.5 rounded-full bg-gray-100 text-gray-400" />
+                                            <User className="h-8 w-8 p-1.5 rounded-full bg-secondary text-muted-foreground/70" />
                                         )}
                                         <div className="min-w-0 flex-1">
                                             <div className="text-sm font-medium truncate">{p.name}</div>
-                                            <div className="text-xs text-gray-500">{p.team} | {p.nationality} | ID: {p.id}</div>
+                                            <div className="text-xs text-muted-foreground">{p.team} | {p.nationality} | ID: {p.id}</div>
                                         </div>
                                     </button>
                                 ))}
@@ -245,15 +238,15 @@ export function AdminSandbox() {
                     {/* Selected Player + Options */}
                     {selectedPlayer && (
                         <div className="border-t pt-4 space-y-3">
-                            <div className="flex items-center gap-3 p-3 rounded-lg bg-blue-50 border border-blue-200">
+                            <div className="flex items-center gap-3 p-3 rounded-lg bg-primary/5 border border-primary/20">
                                 {selectedPlayer.photo ? (
                                     <img src={selectedPlayer.photo} alt="" className="h-10 w-10 rounded-full object-cover" />
                                 ) : (
-                                    <User className="h-10 w-10 p-2 rounded-full bg-blue-100 text-blue-500" />
+                                    <User className="h-10 w-10 p-2 rounded-full bg-primary/10 text-primary" />
                                 )}
                                 <div>
                                     <div className="font-medium">{selectedPlayer.name}</div>
-                                    <div className="text-xs text-gray-500">
+                                    <div className="text-xs text-muted-foreground">
                                         API ID: {selectedPlayer.id}
                                         {selectedPlayer.team && ` | ${selectedPlayer.team}`}
                                     </div>
@@ -275,7 +268,7 @@ export function AdminSandbox() {
                                         type="checkbox"
                                         checked={forceSync}
                                         onChange={(e) => setForceSync(e.target.checked)}
-                                        className="rounded border-gray-300"
+                                        className="rounded border-border"
                                     />
                                     Re-fetch from API
                                 </label>
@@ -296,9 +289,9 @@ export function AdminSandbox() {
             </Card>
 
             {error && (
-                <Alert className="border-red-500 bg-red-50">
-                    <AlertCircle className="h-4 w-4 text-red-600" />
-                    <AlertDescription className="text-red-800">{error}</AlertDescription>
+                <Alert className="border-rose-500 bg-rose-50">
+                    <AlertCircle className="h-4 w-4 text-rose-600" />
+                    <AlertDescription className="text-rose-800">{error}</AlertDescription>
                 </Alert>
             )}
 
@@ -312,18 +305,18 @@ export function AdminSandbox() {
                                 {result.player.photo ? (
                                     <img src={result.player.photo} alt="" className="h-16 w-16 rounded-full object-cover" />
                                 ) : (
-                                    <User className="h-16 w-16 p-4 rounded-full bg-gray-100 text-gray-400" />
+                                    <User className="h-16 w-16 p-4 rounded-full bg-secondary text-muted-foreground/70" />
                                 )}
                                 <div>
                                     <h3 className="text-xl font-bold">{result.player.name}</h3>
-                                    <div className="text-sm text-gray-600">
+                                    <div className="text-sm text-muted-foreground">
                                         {result.player.nationality}
                                         {result.player.birth_date && ` | Born: ${result.player.birth_date}`}
                                     </div>
-                                    <div className="text-sm text-gray-600 mt-0.5">
+                                    <div className="text-sm text-muted-foreground mt-0.5">
                                         Current: <span className="font-medium">{result.journey.current_club || 'Unknown'}</span>
                                         {result.journey.current_level && (
-                                            <span className="text-xs ml-1 text-gray-500">({result.journey.current_level})</span>
+                                            <span className="text-xs ml-1 text-muted-foreground">({result.journey.current_level})</span>
                                         )}
                                     </div>
                                 </div>
@@ -341,7 +334,7 @@ export function AdminSandbox() {
                                 <div className="space-y-2">
                                     {result.existing_tracked.map((et, i) => (
                                         <div key={i} className="flex items-center gap-3 text-sm">
-                                            <span className="text-gray-600">{et.parent_club_name}:</span>
+                                            <span className="text-muted-foreground">{et.parent_club_name}:</span>
                                             <StatusBadge status={et.current_status} />
                                             {et.would_change ? (
                                                 <>
@@ -350,7 +343,7 @@ export function AdminSandbox() {
                                                     <span className="text-xs text-orange-600 font-medium">CHANGED</span>
                                                 </>
                                             ) : (
-                                                <span className="text-xs text-green-600">no change</span>
+                                                <span className="text-xs text-emerald-600">no change</span>
                                             )}
                                         </div>
                                     ))}
@@ -373,14 +366,14 @@ export function AdminSandbox() {
                                         </CardTitle>
                                         <StatusBadge status={cls.status} />
                                         {cls.loan_club_name && (
-                                            <span className="text-sm text-gray-500">
+                                            <span className="text-sm text-muted-foreground">
                                                 at {cls.loan_club_name}
                                             </span>
                                         )}
                                     </div>
                                     {expandedClassification === idx
-                                        ? <ChevronDown className="h-4 w-4 text-gray-400" />
-                                        : <ChevronRight className="h-4 w-4 text-gray-400" />}
+                                        ? <ChevronDown className="h-4 w-4 text-muted-foreground/70" />
+                                        : <ChevronRight className="h-4 w-4 text-muted-foreground/70" />}
                                 </div>
                             </CardHeader>
                             {expandedClassification === idx && (
@@ -389,25 +382,25 @@ export function AdminSandbox() {
                                         <table className="w-full text-sm">
                                             <thead>
                                                 <tr className="border-b text-left">
-                                                    <th className="pb-2 pr-4 font-medium text-gray-500">Step</th>
-                                                    <th className="pb-2 pr-4 font-medium text-gray-500">Rule</th>
-                                                    <th className="pb-2 pr-4 font-medium text-gray-500">Check</th>
-                                                    <th className="pb-2 pr-4 font-medium text-gray-500">Result</th>
-                                                    <th className="pb-2 font-medium text-gray-500">Detail</th>
+                                                    <th className="pb-2 pr-4 font-medium text-muted-foreground">Step</th>
+                                                    <th className="pb-2 pr-4 font-medium text-muted-foreground">Rule</th>
+                                                    <th className="pb-2 pr-4 font-medium text-muted-foreground">Check</th>
+                                                    <th className="pb-2 pr-4 font-medium text-muted-foreground">Result</th>
+                                                    <th className="pb-2 font-medium text-muted-foreground">Detail</th>
                                                 </tr>
                                             </thead>
                                             <tbody>
                                                 {cls.reasoning.map((r, ri) => (
                                                     <tr key={ri} className="border-b last:border-0">
-                                                        <td className="py-2 pr-4 text-gray-400">{ri + 1}</td>
+                                                        <td className="py-2 pr-4 text-muted-foreground/70">{ri + 1}</td>
                                                         <td className="py-2 pr-4 font-mono text-xs">{r.rule}</td>
-                                                        <td className="py-2 pr-4 text-gray-600 text-xs max-w-[200px] truncate" title={r.check}>{r.check}</td>
+                                                        <td className="py-2 pr-4 text-muted-foreground text-xs max-w-[200px] truncate" title={r.check}>{r.check}</td>
                                                         <td className="py-2 pr-4">
                                                             <span className={`px-1.5 py-0.5 rounded text-xs font-medium border ${RESULT_COLORS[r.result] || ''}`}>
                                                                 {r.result}
                                                             </span>
                                                         </td>
-                                                        <td className="py-2 text-gray-700 text-xs">{r.detail}</td>
+                                                        <td className="py-2 text-foreground/80 text-xs">{r.detail}</td>
                                                     </tr>
                                                 ))}
                                             </tbody>
@@ -430,14 +423,14 @@ export function AdminSandbox() {
                                 <table className="w-full text-sm">
                                     <thead>
                                         <tr className="border-b text-left">
-                                            <th className="pb-2 pr-3 font-medium text-gray-500">Season</th>
-                                            <th className="pb-2 pr-3 font-medium text-gray-500">Club</th>
-                                            <th className="pb-2 pr-3 font-medium text-gray-500">League</th>
-                                            <th className="pb-2 pr-3 font-medium text-gray-500">Level</th>
-                                            <th className="pb-2 pr-3 font-medium text-gray-500">Type</th>
-                                            <th className="pb-2 pr-3 font-medium text-gray-500 text-right">Apps</th>
-                                            <th className="pb-2 pr-3 font-medium text-gray-500 text-right">Goals</th>
-                                            <th className="pb-2 font-medium text-gray-500 text-right">Mins</th>
+                                            <th className="pb-2 pr-3 font-medium text-muted-foreground">Season</th>
+                                            <th className="pb-2 pr-3 font-medium text-muted-foreground">Club</th>
+                                            <th className="pb-2 pr-3 font-medium text-muted-foreground">League</th>
+                                            <th className="pb-2 pr-3 font-medium text-muted-foreground">Level</th>
+                                            <th className="pb-2 pr-3 font-medium text-muted-foreground">Type</th>
+                                            <th className="pb-2 pr-3 font-medium text-muted-foreground text-right">Apps</th>
+                                            <th className="pb-2 pr-3 font-medium text-muted-foreground text-right">Goals</th>
+                                            <th className="pb-2 font-medium text-muted-foreground text-right">Mins</th>
                                         </tr>
                                     </thead>
                                     <tbody>
@@ -450,13 +443,13 @@ export function AdminSandbox() {
                                                         <span className="truncate max-w-[150px]">{e.club_name}</span>
                                                     </div>
                                                 </td>
-                                                <td className="py-1.5 pr-3 text-gray-600 text-xs truncate max-w-[120px]">{e.league_name}</td>
+                                                <td className="py-1.5 pr-3 text-muted-foreground text-xs truncate max-w-[120px]">{e.league_name}</td>
                                                 <td className="py-1.5 pr-3">
-                                                    <span className={`text-xs ${e.is_youth ? 'text-blue-600' : e.is_international ? 'text-purple-600' : 'text-green-700'}`}>
+                                                    <span className={`text-xs ${e.is_youth ? 'text-primary' : e.is_international ? 'text-purple-600' : 'text-emerald-700'}`}>
                                                         {e.level}
                                                     </span>
                                                 </td>
-                                                <td className="py-1.5 pr-3 text-xs text-gray-500">{e.entry_type}</td>
+                                                <td className="py-1.5 pr-3 text-xs text-muted-foreground">{e.entry_type}</td>
                                                 <td className="py-1.5 pr-3 text-right font-mono text-xs">{e.appearances || 0}</td>
                                                 <td className="py-1.5 pr-3 text-right font-mono text-xs">{e.goals || 0}</td>
                                                 <td className="py-1.5 text-right font-mono text-xs">{e.minutes || 0}</td>
@@ -479,10 +472,10 @@ export function AdminSandbox() {
                                     <table className="w-full text-sm">
                                         <thead>
                                             <tr className="border-b text-left">
-                                                <th className="pb-2 pr-4 font-medium text-gray-500">Date</th>
-                                                <th className="pb-2 pr-4 font-medium text-gray-500">From</th>
-                                                <th className="pb-2 pr-4 font-medium text-gray-500">To</th>
-                                                <th className="pb-2 font-medium text-gray-500">Type</th>
+                                                <th className="pb-2 pr-4 font-medium text-muted-foreground">Date</th>
+                                                <th className="pb-2 pr-4 font-medium text-muted-foreground">From</th>
+                                                <th className="pb-2 pr-4 font-medium text-muted-foreground">To</th>
+                                                <th className="pb-2 font-medium text-muted-foreground">Type</th>
                                             </tr>
                                         </thead>
                                         <tbody>
@@ -491,7 +484,7 @@ export function AdminSandbox() {
                                                     <td className="py-1.5 pr-4 font-mono text-xs">{t.date || '—'}</td>
                                                     <td className="py-1.5 pr-4">{t.from || '—'}</td>
                                                     <td className="py-1.5 pr-4">{t.to || '—'}</td>
-                                                    <td className="py-1.5 text-xs text-gray-600">{t.type || '—'}</td>
+                                                    <td className="py-1.5 text-xs text-muted-foreground">{t.type || '—'}</td>
                                                 </tr>
                                             ))}
                                         </tbody>

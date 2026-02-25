@@ -5,6 +5,7 @@ import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { Button } from '@/components/ui/button'
 import { Badge } from '@/components/ui/badge'
 import { Loader2 } from 'lucide-react'
+import { CHART_GRID_COLOR, CHART_AXIS_COLOR, CONSTELLATION_STATUS_COLORS } from '../lib/theme-constants'
 
 export function CohortAnalytics() {
     const [analytics, setAnalytics] = useState([])
@@ -68,7 +69,7 @@ export function CohortAnalytics() {
 
     const SortHeader = ({ field, label }) => (
         <th
-            className="p-3 font-medium text-gray-500 cursor-pointer hover:text-gray-900 select-none"
+            className="p-3 font-medium text-muted-foreground cursor-pointer hover:text-foreground select-none"
             onClick={() => handleSort(field)}
         >
             <span className="inline-flex items-center gap-1">
@@ -82,10 +83,10 @@ export function CohortAnalytics() {
 
     if (loading) {
         return (
-            <div className="min-h-screen flex items-center justify-center bg-gradient-to-b from-slate-50 to-slate-100">
+            <div className="min-h-screen flex items-center justify-center bg-gradient-to-b from-secondary to-background">
                 <div className="text-center">
-                    <Loader2 className="h-12 w-12 animate-spin text-blue-500 mx-auto mb-4" />
-                    <p className="text-gray-500">Loading analytics...</p>
+                    <Loader2 className="h-12 w-12 animate-spin text-primary mx-auto mb-4" />
+                    <p className="text-muted-foreground">Loading analytics...</p>
                 </div>
             </div>
         )
@@ -93,7 +94,7 @@ export function CohortAnalytics() {
 
     if (error) {
         return (
-            <div className="min-h-screen flex items-center justify-center bg-gradient-to-b from-slate-50 to-slate-100">
+            <div className="min-h-screen flex items-center justify-center bg-gradient-to-b from-secondary to-background">
                 <Card className="max-w-md">
                     <CardContent className="pt-6 text-center">
                         <p className="text-red-500 mb-4">{error}</p>
@@ -107,7 +108,7 @@ export function CohortAnalytics() {
     }
 
     return (
-        <div className="min-h-screen bg-gradient-to-b from-slate-50 to-slate-100">
+        <div className="min-h-screen bg-gradient-to-b from-secondary to-background">
             <div className="max-w-6xl mx-auto px-4 py-8">
                 {/* Header */}
                 <div className="flex items-center gap-4 mb-8">
@@ -115,7 +116,7 @@ export function CohortAnalytics() {
                         Back
                     </Button>
                     <div>
-                        <h1 className="text-3xl font-bold tracking-tight text-gray-900">Academy Analytics</h1>
+                        <h1 className="text-3xl font-bold tracking-tight text-foreground">Academy Analytics</h1>
                         <p className="text-muted-foreground mt-1">Compare academy-to-first-team conversion rates across clubs</p>
                     </div>
                 </div>
@@ -129,10 +130,10 @@ export function CohortAnalytics() {
                         <CardContent>
                             <ResponsiveContainer width="100%" height={400}>
                                 <BarChart data={chartData} margin={{ top: 20, right: 30, left: 20, bottom: 60 }}>
-                                    <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="#e5e7eb" />
+                                    <CartesianGrid strokeDasharray="3 3" vertical={false} stroke={CHART_GRID_COLOR} />
                                     <XAxis
                                         dataKey="team_name"
-                                        tick={{ fontSize: 11, fill: '#6b7280' }}
+                                        tick={{ fontSize: 11, fill: CHART_AXIS_COLOR }}
                                         angle={-45}
                                         textAnchor="end"
                                         height={80}
@@ -140,7 +141,7 @@ export function CohortAnalytics() {
                                         axisLine={false}
                                     />
                                     <YAxis
-                                        tick={{ fontSize: 11, fill: '#6b7280' }}
+                                        tick={{ fontSize: 11, fill: CHART_AXIS_COLOR }}
                                         tickLine={false}
                                         axisLine={false}
                                         unit="%"
@@ -152,7 +153,7 @@ export function CohortAnalytics() {
                                     <Legend />
                                     <Bar
                                         dataKey="conversion_rate"
-                                        fill="#22c55e"
+                                        fill={CONSTELLATION_STATUS_COLORS.first_team}
                                         radius={[4, 4, 0, 0]}
                                         name="Conversion Rate"
                                     />
@@ -173,7 +174,7 @@ export function CohortAnalytics() {
                         ) : (
                             <div className="overflow-x-auto">
                                 <table className="w-full text-sm text-left">
-                                    <thead className="bg-gray-50">
+                                    <thead className="bg-secondary">
                                         <tr>
                                             <SortHeader field="team_name" label="Team" />
                                             <SortHeader field="total_players" label="Total Players" />
@@ -184,9 +185,9 @@ export function CohortAnalytics() {
                                             <SortHeader field="conversion_rate" label="Conversion %" />
                                         </tr>
                                     </thead>
-                                    <tbody className="divide-y">
+                                    <tbody className="divide-y divide-border">
                                         {sortedAnalytics().map((team, i) => (
-                                            <tr key={team.team_name || i} className="hover:bg-gray-50">
+                                            <tr key={team.team_name || i} className="hover:bg-secondary">
                                                 <td className="p-3">
                                                     <div className="flex items-center gap-3">
                                                         {team.team_logo && (
@@ -196,30 +197,30 @@ export function CohortAnalytics() {
                                                                 className="w-6 h-6 object-contain"
                                                             />
                                                         )}
-                                                        <span className="font-medium text-gray-900">{team.team_name}</span>
+                                                        <span className="font-medium text-foreground">{team.team_name}</span>
                                                     </div>
                                                 </td>
-                                                <td className="p-3 text-gray-600">{team.total_players || 0}</td>
+                                                <td className="p-3 text-muted-foreground">{team.total_players || 0}</td>
                                                 <td className="p-3">
-                                                    <span className="text-green-700 font-medium">{team.players_first_team || 0}</span>
+                                                    <span className="text-emerald-700 font-medium">{team.players_first_team || 0}</span>
                                                 </td>
                                                 <td className="p-3">
-                                                    <span className="text-blue-700">{team.players_on_loan || 0}</span>
+                                                    <span className="text-amber-700">{team.players_on_loan || 0}</span>
                                                 </td>
                                                 <td className="p-3">
                                                     <span className="text-yellow-700">{team.players_still_academy || 0}</span>
                                                 </td>
                                                 <td className="p-3">
-                                                    <span className="text-gray-500">{team.players_released || 0}</span>
+                                                    <span className="text-muted-foreground">{team.players_released || 0}</span>
                                                 </td>
                                                 <td className="p-3">
                                                     <Badge
                                                         className={
                                                             (team.conversion_rate || 0) >= 20
-                                                                ? 'bg-green-100 text-green-800 border-green-200'
+                                                                ? 'bg-emerald-50 text-emerald-800 border-emerald-200'
                                                                 : (team.conversion_rate || 0) >= 10
-                                                                ? 'bg-yellow-100 text-yellow-800 border-yellow-200'
-                                                                : 'bg-gray-100 text-gray-800 border-gray-200'
+                                                                ? 'bg-amber-50 text-amber-800 border-amber-200'
+                                                                : 'bg-secondary text-foreground/80 border-border'
                                                         }
                                                     >
                                                         {team.conversion_rate || 0}%

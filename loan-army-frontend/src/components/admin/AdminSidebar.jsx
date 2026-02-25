@@ -121,7 +121,7 @@ export function AdminSidebar({ className, collapsed = false, onNavigate }) {
     return (
         <div
             className={cn(
-                'pb-10 min-h-screen bg-white border-r shadow-sm transition-[width] duration-200 ease-in-out flex flex-col',
+                'pb-10 min-h-screen bg-card border-r shadow-sm transition-[width] duration-200 ease-in-out flex flex-col',
                 collapsed ? 'w-16' : 'w-64',
                 className
             )}
@@ -136,8 +136,8 @@ export function AdminSidebar({ className, collapsed = false, onNavigate }) {
                             collapsed ? 'justify-center' : 'justify-start'
                         )}
                     >
-                        <div className="h-9 w-9 rounded-lg bg-blue-600 flex items-center justify-center">
-                            <GraduationCap className="h-5 w-5 text-white" />
+                        <div className="h-9 w-9 rounded-lg bg-primary flex items-center justify-center">
+                            <GraduationCap className="h-5 w-5 text-primary-foreground" />
                         </div>
                         {!collapsed && (
                             <h2 className="text-lg font-bold tracking-tight">The Academy Watch</h2>
@@ -158,7 +158,7 @@ export function AdminSidebar({ className, collapsed = false, onNavigate }) {
                             if (collapsed) {
                                 return (
                                     <div key={gi} className="space-y-1">
-                                        {gi > 0 && <hr className="my-2 border-gray-200" />}
+                                        {gi > 0 && <hr className="my-2 border-border" />}
                                         {group.items.map(renderItem)}
                                     </div>
                                 )
@@ -168,7 +168,7 @@ export function AdminSidebar({ className, collapsed = false, onNavigate }) {
                             return (
                                 <Collapsible key={gi} open={open} onOpenChange={() => toggleGroup(group.label)}>
                                     <CollapsibleTrigger asChild>
-                                        <button className="flex items-center justify-between w-full px-3 py-2 mt-3 text-xs font-semibold tracking-tight text-gray-500 uppercase hover:text-gray-700 transition-colors">
+                                        <button className="flex items-center justify-between w-full px-3 py-2 mt-3 text-xs font-semibold tracking-tight text-muted-foreground uppercase hover:text-foreground transition-colors">
                                             <span>{group.label}</span>
                                             <ChevronDown
                                                 className={cn(
@@ -192,7 +192,7 @@ export function AdminSidebar({ className, collapsed = false, onNavigate }) {
                 {/* Bottom section */}
                 <div className={cn('px-3 py-2 mt-auto', collapsed && 'px-2')}>
                     {!collapsed && (
-                        <h2 className="mb-2 px-3 text-sm font-semibold tracking-tight text-gray-500">
+                        <h2 className="mb-2 px-3 text-sm font-semibold tracking-tight text-muted-foreground">
                             Account
                         </h2>
                     )}
@@ -213,7 +213,7 @@ export function AdminSidebar({ className, collapsed = false, onNavigate }) {
                         <Button
                             variant="ghost"
                             className={cn(
-                                'w-full justify-start gap-3 text-red-600 hover:text-red-600 hover:bg-red-50',
+                                'w-full justify-start gap-3 text-rose-600 hover:text-rose-600 hover:bg-rose-50',
                                 collapsed && 'justify-center px-2'
                             )}
                             onClick={() => {

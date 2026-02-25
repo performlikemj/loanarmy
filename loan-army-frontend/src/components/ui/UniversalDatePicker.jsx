@@ -130,7 +130,7 @@ export function UniversalDatePicker({ onDateChange, className = "" }) {
             </div>
 
             {isCustomRange && (
-                <div className="flex items-center space-x-4 p-4 border rounded-lg bg-gray-50">
+                <div className="flex items-center space-x-4 p-4 border rounded-lg bg-secondary">
                     <div className="flex items-center space-x-2">
                         <Label htmlFor="start-date">Start Date:</Label>
                         <Input
@@ -162,7 +162,7 @@ export function UniversalDatePicker({ onDateChange, className = "" }) {
             )}
 
             {(startDate && endDate) && (
-                <div className="text-sm text-gray-600 bg-blue-50 p-2 rounded">
+                <div className="text-sm text-muted-foreground bg-primary/5 p-2 rounded">
                     Showing data from <strong>{new Date(startDate).toLocaleDateString()}</strong> to <strong>{new Date(endDate).toLocaleDateString()}</strong>
                 </div>
             )}

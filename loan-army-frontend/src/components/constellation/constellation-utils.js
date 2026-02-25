@@ -3,14 +3,10 @@
  * Data transforms, node sizing, and color helpers for the academy network graph.
  */
 
-// Status colors used across the constellation
-export const STATUS_COLORS = {
-    first_team: '#22c55e',
-    on_loan: '#3b82f6',
-    academy: '#eab308',
-    released: '#6b7280',
-    sold: '#f97316',
-}
+import { CONSTELLATION_STATUS_COLORS } from '../../lib/theme-constants'
+
+// Re-export from theme-constants so existing consumers don't break
+export const STATUS_COLORS = CONSTELLATION_STATUS_COLORS
 
 export const STATUS_LABELS = {
     first_team: 'First Team',
@@ -54,7 +50,7 @@ export function nodeColor(node) {
     const types = node.link_types || []
     if (types.includes('loan') && types.includes('permanent')) return '#8b5cf6' // purple mix
     if (types.includes('permanent')) return '#f97316' // orange
-    return '#3b82f6' // blue default (loan)
+    return '#d97706' // amber default (loan)
 }
 
 /**

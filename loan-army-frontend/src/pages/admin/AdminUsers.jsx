@@ -98,7 +98,7 @@ export function AdminUsers() {
     if (loading) {
         return (
             <div className="flex justify-center items-center min-h-screen">
-                <Loader2 className="h-8 w-8 animate-spin text-blue-600" />
+                <Loader2 className="h-8 w-8 animate-spin text-primary" />
             </div>
         )
     }
@@ -163,7 +163,7 @@ export function AdminUsers() {
                                             <td className="p-3 text-right">
                                                 <div className="flex items-center justify-end gap-2">
                                                     <Users className="h-4 w-4 text-muted-foreground" />
-                                                    <span className="text-lg font-semibold text-blue-600">
+                                                    <span className="text-lg font-semibold text-primary">
                                                         {journalist.total_subscribers}
                                                     </span>
                                                 </div>
@@ -205,7 +205,7 @@ export function AdminUsers() {
                                     <div className="flex flex-wrap items-center gap-2">
                                         <CardTitle className="text-lg">{user.display_name || 'No Name'}</CardTitle>
                                         {user.is_journalist && (
-                                            <Badge variant="default" className="bg-blue-600 hover:bg-blue-700">
+                                            <Badge variant="default" className="bg-primary hover:bg-primary/90">
                                                 <ShieldCheck className="h-3 w-3 mr-1" /> Journalist
                                             </Badge>
                                         )}

@@ -165,7 +165,7 @@ export function ChartBlockEditor({
       <DialogContent className="sm:max-w-[700px] max-h-[90vh] overflow-y-auto">
         <DialogHeader>
           <DialogTitle className="flex items-center gap-2">
-            <BarChart3 className="h-5 w-5 text-blue-600" />
+            <BarChart3 className="h-5 w-5 text-primary" />
             Configure Chart
           </DialogTitle>
           <DialogDescription>
@@ -187,8 +187,8 @@ export function ChartBlockEditor({
                     className={cn(
                       'flex flex-col items-center justify-center p-3 rounded-lg border-2 transition-all',
                       chartType === opt.value
-                        ? 'border-blue-500 bg-blue-50 text-blue-700'
-                        : 'border-gray-200 hover:border-gray-300'
+                        ? 'border-primary bg-primary/5 text-primary'
+                        : 'border-border hover:border-border'
                     )}
                     onClick={() => setChartType(opt.value)}
                   >
@@ -288,15 +288,15 @@ export function ChartBlockEditor({
               </Button>
             </div>
             
-            <Card className="bg-gray-50">
+            <Card className="bg-secondary">
               <CardContent className="p-4">
                 {!playerId ? (
-                  <div className="text-center text-gray-500 py-8">
+                  <div className="text-center text-muted-foreground py-8">
                     Select a player to preview chart data
                   </div>
                 ) : loading ? (
                   <div className="flex items-center justify-center py-8">
-                    <Loader2 className="h-6 w-6 animate-spin text-gray-400" />
+                    <Loader2 className="h-6 w-6 animate-spin text-muted-foreground/70" />
                   </div>
                 ) : (
                   <ChartPreview

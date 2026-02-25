@@ -66,7 +66,7 @@ export default function TeamSelect({
                     const active = t.id === value
                     return (
                       <CommandItem key={t.id} value={`${t.name}`} onSelect={() => select(t.id)}>
-                        <CheckCircle className={`h-4 w-4 mr-2 ${active ? 'text-blue-600' : 'opacity-20'}`} />
+                        <CheckCircle className={`h-4 w-4 mr-2 ${active ? 'text-primary' : 'opacity-20'}`} />
                         <span className="flex-1">{t.name}</span>
                       </CommandItem>
                     )

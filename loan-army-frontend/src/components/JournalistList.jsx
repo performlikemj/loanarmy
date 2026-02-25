@@ -186,7 +186,7 @@ export function JournalistList({ apiService = APIService }) {
                                     </Avatar>
                                     <div className="flex-1 min-w-0">
                                         <CardTitle
-                                            className="text-lg truncate cursor-pointer hover:text-blue-600 hover:underline"
+                                            className="text-lg truncate cursor-pointer hover:text-primary hover:underline"
                                             title={journalist.display_name}
                                             onClick={() => navigate(`/journalists/${journalist.id}`)}
                                         >
@@ -202,7 +202,7 @@ export function JournalistList({ apiService = APIService }) {
                                                         href={journalist.attribution_url}
                                                         target="_blank"
                                                         rel="noopener noreferrer"
-                                                        className="text-xs text-blue-600 hover:underline flex items-center gap-1"
+                                                        className="text-xs text-primary hover:underline flex items-center gap-1"
                                                         onClick={(e) => e.stopPropagation()}
                                                     >
                                                         {journalist.attribution_name || 'Visit Site'}

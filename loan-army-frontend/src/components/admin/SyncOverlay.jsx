@@ -38,10 +38,10 @@ export function SyncOverlay() {
     return (
         <>
             {isBlocking && blockingJob && (
-                <div className="absolute inset-0 z-30 bg-white/90 backdrop-blur-sm flex items-center justify-center">
-                    <div className="max-w-md w-full mx-4 bg-white border rounded-xl shadow-lg p-6 space-y-4">
+                <div className="absolute inset-0 z-30 bg-card/90 backdrop-blur-sm flex items-center justify-center">
+                    <div className="max-w-md w-full mx-4 bg-card border rounded-xl shadow-lg p-6 space-y-4">
                         <div className="flex items-center gap-3">
-                            <Loader2 className="h-6 w-6 animate-spin text-blue-600 shrink-0" />
+                            <Loader2 className="h-6 w-6 animate-spin text-primary shrink-0" />
                             <div>
                                 <h3 className="font-semibold text-lg">System Syncing</h3>
                                 <p className="text-sm text-muted-foreground">
@@ -49,7 +49,7 @@ export function SyncOverlay() {
                                 </p>
                             </div>
                         </div>
-                        <p className="text-sm text-gray-700">
+                        <p className="text-sm text-foreground/80">
                             {blockingJob.current_player || 'Starting...'}
                         </p>
                         <Progress value={((blockingJob.progress || 0) / (blockingJob.total || 1)) * 100} />
@@ -62,7 +62,7 @@ export function SyncOverlay() {
                         <button
                             onClick={() => handleCancel(blockingJob.id)}
                             disabled={cancelling === blockingJob.id}
-                            className="w-full flex items-center justify-center gap-2 px-4 py-2 text-sm font-medium text-red-700 bg-red-50 hover:bg-red-100 border border-red-200 rounded-lg transition-colors disabled:opacity-50"
+                            className="w-full flex items-center justify-center gap-2 px-4 py-2 text-sm font-medium text-rose-700 bg-rose-50 hover:bg-rose-100 border border-rose-200 rounded-lg transition-colors disabled:opacity-50"
                         >
                             {cancelling === blockingJob.id ? (
                                 <Loader2 className="h-4 w-4 animate-spin" />

@@ -1,12 +1,13 @@
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { Badge } from '@/components/ui/badge'
+import { STATUS_BADGE_CLASSES } from '../../../lib/theme-constants'
 
 const STATUS_COLORS = {
-  first_team: 'bg-green-100 text-green-800',
-  on_loan: 'bg-blue-100 text-blue-800',
-  academy: 'bg-yellow-100 text-yellow-800',
-  released: 'bg-gray-100 text-gray-800',
-  unknown: 'bg-purple-100 text-purple-800',
+  first_team: STATUS_BADGE_CLASSES.first_team,
+  on_loan: STATUS_BADGE_CLASSES.on_loan,
+  academy: STATUS_BADGE_CLASSES.academy,
+  released: STATUS_BADGE_CLASSES.released,
+  unknown: 'bg-violet-50 text-violet-800 border-violet-200',
 }
 
 export function CohortGrid({ data }) {

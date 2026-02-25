@@ -661,9 +661,9 @@ export function AdminNewsletters() {
 
             {/* Message Display */}
             {message && (
-                <Alert className={message.type === 'error' ? 'border-red-500 bg-red-50' : 'border-green-500 bg-green-50'}>
-                    {message.type === 'error' ? <AlertCircle className="h-4 w-4 text-red-600" /> : <CheckCircle2 className="h-4 w-4 text-green-600" />}
-                    <AlertDescription className={message.type === 'error' ? 'text-red-800' : 'text-green-800'}>
+                <Alert className={message.type === 'error' ? 'border-rose-500 bg-rose-50' : 'border-emerald-500 bg-emerald-50'}>
+                    {message.type === 'error' ? <AlertCircle className="h-4 w-4 text-rose-600" /> : <CheckCircle2 className="h-4 w-4 text-emerald-600" />}
+                    <AlertDescription className={message.type === 'error' ? 'text-rose-800' : 'text-emerald-800'}>
                         {message.text}
                     </AlertDescription>
                 </Alert>
@@ -704,7 +704,7 @@ export function AdminNewsletters() {
                                 id="force-refresh"
                                 checked={forceRefresh}
                                 onChange={(e) => setForceRefresh(e.target.checked)}
-                                className="h-4 w-4 rounded border-gray-300"
+                                className="h-4 w-4 rounded border-border"
                             />
                             <Label htmlFor="force-refresh" className="font-normal text-sm cursor-pointer">
                                 Force Refresh Data (clear cache)
@@ -721,7 +721,7 @@ export function AdminNewsletters() {
                             {readinessLoading ? (
                                 <Loader2 className="mr-2 h-4 w-4 animate-spin" />
                             ) : readinessData?.ready ? (
-                                <CheckCircle2 className="mr-2 h-4 w-4 text-green-600" />
+                                <CheckCircle2 className="mr-2 h-4 w-4 text-emerald-600" />
                             ) : readinessData ? (
                                 <AlertCircle className="mr-2 h-4 w-4 text-amber-500" />
                             ) : (
@@ -1405,7 +1405,7 @@ export function AdminNewsletters() {
             <Dialog open={readinessDialogOpen} onOpenChange={setReadinessDialogOpen}>
                 <DialogContent className="max-w-3xl max-h-[85vh] overflow-y-auto">
                     <DialogHeader>
-                        <DialogTitle className={`flex items-center gap-2 ${readinessData?.ready ? 'text-green-600' : 'text-amber-600'}`}>
+                        <DialogTitle className={`flex items-center gap-2 ${readinessData?.ready ? 'text-emerald-600' : 'text-amber-600'}`}>
                             {readinessData?.ready ? (
                                 <CheckCircle2 className="h-5 w-5" />
                             ) : (
@@ -1421,7 +1421,7 @@ export function AdminNewsletters() {
                     {readinessData && (
                         <div className="space-y-4 my-4">
                             {/* Summary */}
-                            <div className={`p-4 rounded-lg ${readinessData.ready ? 'bg-green-50 border border-green-200' : 'bg-amber-50 border border-amber-200'}`}>
+                            <div className={`p-4 rounded-lg ${readinessData.ready ? 'bg-emerald-50 border border-emerald-200' : 'bg-amber-50 border border-amber-200'}`}>
                                 <div className="flex items-center justify-between">
                                     <span className="font-medium">
                                         {readinessData.ready ? (
@@ -1431,7 +1431,7 @@ export function AdminNewsletters() {
                                         )}
                                     </span>
                                     <div className="flex gap-2">
-                                        <Badge variant="outline" className="bg-green-100">
+                                        <Badge variant="outline" className="bg-emerald-50">
                                             {readinessData.summary?.ready_count} ready
                                         </Badge>
                                         {readinessData.summary?.pending_count > 0 && (
@@ -1461,7 +1461,7 @@ export function AdminNewsletters() {
                                                 <tr key={idx} className={`border-t ${team.ready ? '' : 'bg-amber-50'}`}>
                                                     <td className="px-3 py-2 text-center">
                                                         {team.ready ? (
-                                                            <CheckCircle2 className="h-5 w-5 text-green-600 mx-auto" />
+                                                            <CheckCircle2 className="h-5 w-5 text-emerald-600 mx-auto" />
                                                         ) : (
                                                             <AlertCircle className="h-5 w-5 text-amber-500 mx-auto" />
                                                         )}
@@ -1490,7 +1490,7 @@ export function AdminNewsletters() {
                                                                 )}
                                                             </div>
                                                         ) : (
-                                                            <span className="text-green-600 text-xs">All complete</span>
+                                                            <span className="text-emerald-600 text-xs">All complete</span>
                                                         )}
                                                     </td>
                                                 </tr>

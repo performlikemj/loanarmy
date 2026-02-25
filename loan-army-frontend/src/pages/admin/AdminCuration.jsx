@@ -238,13 +238,13 @@ export function AdminCuration() {
 
     const getSourceBadge = (sourceType) => {
         const colors = {
-            editor: 'bg-blue-100 text-blue-800',
-            reddit: 'bg-orange-100 text-orange-800',
-            twitter: 'bg-sky-100 text-sky-800',
-            submission: 'bg-green-100 text-green-800',
+            editor: 'bg-primary/10 text-primary border-primary/20',
+            reddit: 'bg-orange-50 text-orange-800 border-orange-200',
+            twitter: 'bg-sky-50 text-sky-800 border-sky-200',
+            submission: 'bg-emerald-50 text-emerald-800 border-emerald-200',
         }
         return (
-            <Badge className={colors[sourceType] || 'bg-gray-100 text-gray-800'}>
+            <Badge className={colors[sourceType] || 'bg-secondary text-muted-foreground'}>
                 {sourceType}
             </Badge>
         )
@@ -252,12 +252,12 @@ export function AdminCuration() {
 
     const getStatusBadge = (status) => {
         const colors = {
-            pending: 'bg-yellow-100 text-yellow-800',
-            approved: 'bg-green-100 text-green-800',
-            rejected: 'bg-red-100 text-red-800',
+            pending: 'bg-amber-50 text-amber-800 border-amber-200',
+            approved: 'bg-emerald-50 text-emerald-800 border-emerald-200',
+            rejected: 'bg-rose-50 text-rose-800 border-rose-200',
         }
         return (
-            <Badge className={colors[status] || 'bg-gray-100 text-gray-800'}>
+            <Badge className={colors[status] || 'bg-secondary text-muted-foreground'}>
                 {status}
             </Badge>
         )
@@ -272,9 +272,9 @@ export function AdminCuration() {
 
             {/* Message Display */}
             {message && (
-                <Alert className={message.type === 'error' ? 'border-red-500 bg-red-50' : 'border-green-500 bg-green-50'}>
-                    {message.type === 'error' ? <AlertCircle className="h-4 w-4 text-red-600" /> : <CheckCircle2 className="h-4 w-4 text-green-600" />}
-                    <AlertDescription className={message.type === 'error' ? 'text-red-800' : 'text-green-800'}>
+                <Alert className={message.type === 'error' ? 'border-rose-500 bg-rose-50' : 'border-emerald-500 bg-emerald-50'}>
+                    {message.type === 'error' ? <AlertCircle className="h-4 w-4 text-rose-600" /> : <CheckCircle2 className="h-4 w-4 text-emerald-600" />}
+                    <AlertDescription className={message.type === 'error' ? 'text-rose-800' : 'text-emerald-800'}>
                         {message.text}
                     </AlertDescription>
                 </Alert>
@@ -385,7 +385,7 @@ export function AdminCuration() {
                                                                 href={take.source_url}
                                                                 target="_blank"
                                                                 rel="noopener noreferrer"
-                                                                className="ml-2 text-blue-600 hover:underline"
+                                                                className="ml-2 text-primary hover:underline"
                                                             >
                                                                 <ExternalLink className="h-3 w-3 inline" />
                                                             </a>
@@ -402,7 +402,7 @@ export function AdminCuration() {
                                                             <Button
                                                                 size="sm"
                                                                 variant="outline"
-                                                                className="text-green-600 border-green-600 hover:bg-green-50"
+                                                                className="text-emerald-600 border-emerald-600 hover:bg-emerald-50"
                                                                 onClick={() => handleApproveTake(take.id)}
                                                             >
                                                                 <Check className="h-4 w-4" />
@@ -410,7 +410,7 @@ export function AdminCuration() {
                                                             <Button
                                                                 size="sm"
                                                                 variant="outline"
-                                                                className="text-red-600 border-red-600 hover:bg-red-50"
+                                                                className="text-rose-600 border-rose-600 hover:bg-rose-50"
                                                                 onClick={() => {
                                                                     setRejectTarget(take)
                                                                     setRejectType('take')
@@ -491,7 +491,7 @@ export function AdminCuration() {
                                                         Submitted: {formatDate(sub.created_at)}
                                                     </p>
                                                     {sub.rejection_reason && (
-                                                        <p className="text-xs text-red-600 mt-1">
+                                                        <p className="text-xs text-rose-600 mt-1">
                                                             Rejection reason: {sub.rejection_reason}
                                                         </p>
                                                     )}
@@ -501,7 +501,7 @@ export function AdminCuration() {
                                                         <Button
                                                             size="sm"
                                                             variant="outline"
-                                                            className="text-green-600 border-green-600 hover:bg-green-50"
+                                                            className="text-emerald-600 border-emerald-600 hover:bg-emerald-50"
                                                             onClick={() => handleApproveSubmission(sub.id)}
                                                         >
                                                             <Check className="h-4 w-4 mr-1" />
@@ -510,7 +510,7 @@ export function AdminCuration() {
                                                         <Button
                                                             size="sm"
                                                             variant="outline"
-                                                            className="text-red-600 border-red-600 hover:bg-red-50"
+                                                            className="text-rose-600 border-rose-600 hover:bg-rose-50"
                                                             onClick={() => {
                                                                 setRejectTarget(sub)
                                                                 setRejectType('submission')

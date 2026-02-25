@@ -36,6 +36,7 @@ import { MiniProgressBar } from '@/components/MiniProgressBar'
 import { SeasonStatsPanel } from '@/components/SeasonStatsPanel'
 import { CommentSection } from '@/components/CommentSection'
 import { PlayerLinksSection } from '@/components/PlayerLinksSection'
+import { CHART_GRID_COLOR, CHART_AXIS_COLOR, CHART_TOOLTIP_BG, CHART_TOOLTIP_BORDER } from '../lib/theme-constants'
 
 /** Dims children when viewing a past career stop so SeasonStatsPanel takes focus. */
 function JourneyDimmer({ children, className = '' }) {
@@ -53,43 +54,43 @@ const METRIC_CONFIG = {
     'Attacker': {
         default: ['goals', 'shots_total', 'shots_on'],
         options: [
-            { key: 'goals', label: 'Goals', color: '#2563eb' },
-            { key: 'assists', label: 'Assists', color: '#16a34a' },
-            { key: 'shots_total', label: 'Shots', color: '#9333ea' },
-            { key: 'shots_on', label: 'Shots on Target', color: '#d946ef' },
-            { key: 'dribbles_success', label: 'Dribbles', color: '#f59e0b' },
-            { key: 'passes_key', label: 'Key Passes', color: '#06b6d4' },
+            { key: 'goals', label: 'Goals', color: '#059669' },
+            { key: 'assists', label: 'Assists', color: '#d97706' },
+            { key: 'shots_total', label: 'Shots', color: '#dc2626' },
+            { key: 'shots_on', label: 'Shots on Target', color: '#db2777' },
+            { key: 'dribbles_success', label: 'Dribbles', color: '#ea580c' },
+            { key: 'passes_key', label: 'Key Passes', color: '#0d9488' },
         ]
     },
     'Midfielder': {
         default: ['passes_total', 'passes_key', 'tackles_total'],
         options: [
-            { key: 'goals', label: 'Goals', color: '#2563eb' },
-            { key: 'assists', label: 'Assists', color: '#16a34a' },
-            { key: 'passes_total', label: 'Passes', color: '#9333ea' },
-            { key: 'passes_key', label: 'Key Passes', color: '#d946ef' },
-            { key: 'tackles_total', label: 'Tackles', color: '#f59e0b' },
-            { key: 'duels_won', label: 'Duels Won', color: '#06b6d4' },
-            { key: 'interceptions', label: 'Interceptions', color: '#ea580c' },
+            { key: 'goals', label: 'Goals', color: '#059669' },
+            { key: 'assists', label: 'Assists', color: '#d97706' },
+            { key: 'passes_total', label: 'Passes', color: '#7c3aed' },
+            { key: 'passes_key', label: 'Key Passes', color: '#0d9488' },
+            { key: 'tackles_total', label: 'Tackles', color: '#ea580c' },
+            { key: 'duels_won', label: 'Duels Won', color: '#0891b2' },
+            { key: 'interceptions', label: 'Interceptions', color: '#dc2626' },
         ]
     },
     'Defender': {
         default: ['tackles_total', 'duels_won', 'interceptions'],
         options: [
-            { key: 'tackles_total', label: 'Tackles', color: '#2563eb' },
-            { key: 'duels_won', label: 'Duels Won', color: '#16a34a' },
-            { key: 'interceptions', label: 'Interceptions', color: '#9333ea' },
-            { key: 'blocks', label: 'Blocks', color: '#d946ef' },
-            { key: 'clearances', label: 'Clearances', color: '#f59e0b' },
-            { key: 'passes_total', label: 'Passes', color: '#06b6d4' },
+            { key: 'tackles_total', label: 'Tackles', color: '#ea580c' },
+            { key: 'duels_won', label: 'Duels Won', color: '#059669' },
+            { key: 'interceptions', label: 'Interceptions', color: '#7c3aed' },
+            { key: 'blocks', label: 'Blocks', color: '#db2777' },
+            { key: 'clearances', label: 'Clearances', color: '#d97706' },
+            { key: 'passes_total', label: 'Passes', color: '#0891b2' },
         ]
     },
     'Goalkeeper': {
         default: ['saves', 'passes_total'],
         options: [
-            { key: 'saves', label: 'Saves', color: '#2563eb' },
-            { key: 'passes_total', label: 'Passes', color: '#16a34a' },
-            { key: 'rating', label: 'Rating', color: '#9333ea' },
+            { key: 'saves', label: 'Saves', color: '#059669' },
+            { key: 'passes_total', label: 'Passes', color: '#d97706' },
+            { key: 'rating', label: 'Rating', color: '#ca8a04' },
         ]
     }
 }
@@ -277,11 +278,11 @@ export function PlayerPage() {
         if (active && payload && payload.length) {
             const data = payload[0].payload
             return (
-                <div className="bg-white p-3 border rounded-lg shadow-lg text-xs z-50">
+                <div style={{ backgroundColor: CHART_TOOLTIP_BG, border: `1px solid ${CHART_TOOLTIP_BORDER}` }} className="p-3 rounded-lg shadow-lg text-xs z-50">
                     <p className="font-bold">{data.opponent} ({data.is_home ? 'H' : 'A'})</p>
-                    <p className="text-gray-500">{label}</p>
+                    <p className="text-muted-foreground">{label}</p>
                     {data.loan_team_name && (
-                        <p className="text-blue-600 text-xs mb-1">
+                        <p className="text-primary text-xs mb-1">
                             for {data.loan_team_name}
                             {data.loan_window && data.loan_window !== 'Summer' && ` (${data.loan_window})`}
                         </p>
@@ -291,7 +292,7 @@ export function PlayerPage() {
                             {p.name}: {p.value}
                         </p>
                     ))}
-                    <p className="text-gray-400 italic mt-1">{data.competition}</p>
+                    <p className="text-muted-foreground/70 italic mt-1">{data.competition}</p>
                 </div>
             )
         }
@@ -318,10 +319,10 @@ export function PlayerPage() {
 
     if (loading) {
         return (
-            <div className="min-h-screen flex items-center justify-center bg-gradient-to-b from-slate-50 to-slate-100">
+            <div className="min-h-screen flex items-center justify-center bg-gradient-to-b from-secondary to-background">
                 <div className="text-center">
-                    <Loader2 className="h-12 w-12 animate-spin text-blue-500 mx-auto mb-4" />
-                    <p className="text-gray-500">Loading player data...</p>
+                    <Loader2 className="h-12 w-12 animate-spin text-primary mx-auto mb-4" />
+                    <p className="text-muted-foreground">Loading player data...</p>
                 </div>
             </div>
         )
@@ -329,10 +330,10 @@ export function PlayerPage() {
 
     if (error) {
         return (
-            <div className="min-h-screen flex items-center justify-center bg-gradient-to-b from-slate-50 to-slate-100">
+            <div className="min-h-screen flex items-center justify-center bg-gradient-to-b from-secondary to-background">
                 <Card className="max-w-md">
                     <CardContent className="pt-6 text-center">
-                        <p className="text-red-500 mb-4">{error}</p>
+                        <p className="text-destructive mb-4">{error}</p>
                         <Button variant="outline" onClick={handleBack}>
                             <ArrowLeft className="mr-2 h-4 w-4" />
                             Go Back
@@ -345,9 +346,9 @@ export function PlayerPage() {
 
     return (
         <JourneyProvider journeyData={journeyData}>
-        <div className="min-h-screen bg-gradient-to-b from-slate-50 to-slate-100">
+        <div className="min-h-screen bg-gradient-to-b from-secondary to-background">
             {/* Header */}
-            <div className="bg-white border-b sticky top-0 z-10">
+            <div className="bg-card border-b sticky top-0 z-10">
                 <div className="max-w-4xl mx-auto px-4 sm:px-6 py-3 sm:py-4">
                     <div className="flex flex-col sm:flex-row sm:items-center gap-3 sm:gap-4">
                         <Button variant="ghost" size="sm" onClick={handleBack} className="self-start">
@@ -361,24 +362,24 @@ export function PlayerPage() {
                                     alt={playerName}
                                     width={64}
                                     height={64}
-                                    className="w-12 h-12 sm:w-16 sm:h-16 rounded-full object-cover border-2 border-gray-200 shadow-md flex-shrink-0"
+                                    className="w-12 h-12 sm:w-16 sm:h-16 rounded-full object-cover border-2 border-border shadow-md flex-shrink-0"
                                 />
                             ) : (
-                                <div className="w-12 h-12 sm:w-16 sm:h-16 rounded-full bg-gradient-to-br from-blue-500 to-blue-600 flex items-center justify-center shadow-md flex-shrink-0">
-                                    <User className="h-6 w-6 sm:h-8 sm:w-8 text-white" />
+                                <div className="w-12 h-12 sm:w-16 sm:h-16 rounded-full bg-gradient-to-br from-primary to-primary/80 flex items-center justify-center shadow-md flex-shrink-0">
+                                    <User className="h-6 w-6 sm:h-8 sm:w-8 text-primary-foreground" />
                                 </div>
                             )}
                             <div className="min-w-0">
-                                <h1 className="text-xl sm:text-2xl font-bold text-gray-900 text-balance">{playerName}</h1>
+                                <h1 className="text-xl sm:text-2xl font-bold text-foreground text-balance">{playerName}</h1>
                                 <div className="flex flex-wrap items-center gap-2 mt-1">
                                     <Badge variant="secondary">{position}</Badge>
                                     {profile?.age && (
-                                        <Badge variant="outline" className="bg-blue-50 text-blue-700 border-blue-200">
+                                        <Badge variant="outline" className="bg-primary/5 text-primary border-primary/20">
                                             {profile.age} yrs
                                         </Badge>
                                     )}
                                     {profile?.nationality && (
-                                        <Badge variant="outline" className="text-gray-600">{profile.nationality}</Badge>
+                                        <Badge variant="outline" className="text-muted-foreground">{profile.nationality}</Badge>
                                     )}
                                 </div>
                                 {/* Mini Progress Bar — career stops at a glance */}
@@ -388,13 +389,13 @@ export function PlayerPage() {
                                     <div className="mt-2">
                                         <button
                                             onClick={handleParentClubClick}
-                                            className="flex items-center gap-1.5 text-sm text-gray-600 hover:text-blue-600 transition-colors cursor-pointer group focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 rounded-md"
+                                            className="flex items-center gap-1.5 text-sm text-muted-foreground hover:text-primary transition-colors cursor-pointer group focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 rounded-md"
                                         >
                                             {profile.parent_team_logo && (
                                                 <img src={profile.parent_team_logo} alt="" width={20} height={20} className="w-5 h-5 rounded-full object-cover" />
                                             )}
                                             <span className="font-medium group-hover:underline">{profile.parent_team_name} Academy</span>
-                                            <Users className="w-3.5 h-3.5 opacity-0 group-hover:opacity-100 transition-opacity text-blue-500" />
+                                            <Users className="w-3.5 h-3.5 opacity-0 group-hover:opacity-100 transition-opacity text-primary" />
                                         </button>
                                     </div>
                                 )}
@@ -409,8 +410,8 @@ export function PlayerPage() {
                         {stats.length === 0 && seasonStats?.stats_coverage !== 'limited' ? (
                             <Card>
                                 <CardContent className="py-12 text-center">
-                                    <Target className="h-12 w-12 mx-auto text-gray-300 mb-4" />
-                                    <p className="text-gray-500">No match data available for this player yet.</p>
+                                    <Target className="h-12 w-12 mx-auto text-muted-foreground/50 mb-4" />
+                                    <p className="text-muted-foreground">No match data available for this player yet.</p>
                                 </CardContent>
                             </Card>
                         ) : stats.length === 0 && seasonStats?.stats_coverage === 'limited' ? (
@@ -435,26 +436,26 @@ export function PlayerPage() {
                                 <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
                                     <Card>
                                         <CardContent className="pt-4 text-center">
-                                            <div className="text-3xl font-bold text-gray-900">{seasonStats?.appearances || 0}</div>
-                                            <div className="text-xs text-gray-500 uppercase tracking-wider mt-1">Appearances</div>
+                                            <div className="text-3xl font-bold text-foreground">{seasonStats?.appearances || 0}</div>
+                                            <div className="text-xs text-muted-foreground uppercase tracking-wider mt-1">Appearances</div>
                                         </CardContent>
                                     </Card>
                                     <Card>
                                         <CardContent className="pt-4 text-center">
-                                            <div className="text-3xl font-bold text-blue-600">{seasonStats?.goals || 0}</div>
-                                            <div className="text-xs text-gray-500 uppercase tracking-wider mt-1">Goals</div>
+                                            <div className="text-3xl font-bold text-emerald-600">{seasonStats?.goals || 0}</div>
+                                            <div className="text-xs text-muted-foreground uppercase tracking-wider mt-1">Goals</div>
                                         </CardContent>
                                     </Card>
                                     <Card>
                                         <CardContent className="pt-4 text-center">
-                                            <div className="text-3xl font-bold text-green-600">{seasonStats?.assists || 0}</div>
-                                            <div className="text-xs text-gray-500 uppercase tracking-wider mt-1">Assists</div>
+                                            <div className="text-3xl font-bold text-amber-600">{seasonStats?.assists || 0}</div>
+                                            <div className="text-xs text-muted-foreground uppercase tracking-wider mt-1">Assists</div>
                                         </CardContent>
                                     </Card>
                                     <Card>
                                         <CardContent className="pt-4 text-center">
-                                            <div className="text-3xl font-bold text-yellow-600">{seasonStats?.yellows || 0}</div>
-                                            <div className="text-xs text-gray-500 uppercase tracking-wider mt-1">Yellow Cards</div>
+                                            <div className="text-3xl font-bold text-amber-600">{seasonStats?.yellows || 0}</div>
+                                            <div className="text-xs text-muted-foreground uppercase tracking-wider mt-1">Yellow Cards</div>
                                         </CardContent>
                                     </Card>
                                 </div>
@@ -478,7 +479,7 @@ export function PlayerPage() {
                                                 )}
                                                 <div>
                                                     <div className="font-semibold">{seasonStats.clubs[0].team_name}</div>
-                                                    <div className="text-sm text-gray-500">
+                                                    <div className="text-sm text-muted-foreground">
                                                         {seasonStats.clubs[0].appearances} appearances
                                                         {seasonStats.clubs[0].goals > 0 && ` · ${seasonStats.clubs[0].goals} goals`}
                                                         {seasonStats.clubs[0].assists > 0 && ` · ${seasonStats.clubs[0].assists} assists`}
@@ -496,28 +497,28 @@ export function PlayerPage() {
                         <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-5 gap-4">
                             <Card>
                                 <CardContent className="pt-4 text-center">
-                                    <div className="text-3xl font-bold text-gray-900 tabular-nums">{seasonTotals.appearances}</div>
-                                    <div className="text-xs text-gray-500 uppercase tracking-wider mt-1">Appearances</div>
+                                    <div className="text-3xl font-bold text-foreground tabular-nums">{seasonTotals.appearances}</div>
+                                    <div className="text-xs text-muted-foreground uppercase tracking-wider mt-1">Appearances</div>
                                 </CardContent>
                             </Card>
                             <Card>
                                 <CardContent className="pt-4 text-center">
-                                    <div className="text-3xl font-bold text-gray-900 tabular-nums">{seasonTotals.minutes}</div>
-                                    <div className="text-xs text-gray-500 uppercase tracking-wider mt-1">Minutes</div>
+                                    <div className="text-3xl font-bold text-foreground tabular-nums">{seasonTotals.minutes}</div>
+                                    <div className="text-xs text-muted-foreground uppercase tracking-wider mt-1">Minutes</div>
                                 </CardContent>
                             </Card>
                             {position === 'Goalkeeper' ? (
                                 <>
                                     <Card>
                                         <CardContent className="pt-4 text-center">
-                                            <div className="text-3xl font-bold text-blue-600 tabular-nums">{seasonTotals.saves}</div>
-                                            <div className="text-xs text-gray-500 uppercase tracking-wider mt-1">Saves</div>
+                                            <div className="text-3xl font-bold text-emerald-600 tabular-nums">{seasonTotals.saves}</div>
+                                            <div className="text-xs text-muted-foreground uppercase tracking-wider mt-1">Saves</div>
                                         </CardContent>
                                     </Card>
                                     <Card>
                                         <CardContent className="pt-4 text-center">
                                             <div className="text-3xl font-bold text-orange-600 tabular-nums">{seasonTotals.goalsConceded}</div>
-                                            <div className="text-xs text-gray-500 uppercase tracking-wider mt-1">Conceded</div>
+                                            <div className="text-xs text-muted-foreground uppercase tracking-wider mt-1">Conceded</div>
                                         </CardContent>
                                     </Card>
                                 </>
@@ -525,22 +526,22 @@ export function PlayerPage() {
                                 <>
                                     <Card>
                                         <CardContent className="pt-4 text-center">
-                                            <div className="text-3xl font-bold text-blue-600 tabular-nums">{seasonTotals.goals}</div>
-                                            <div className="text-xs text-gray-500 uppercase tracking-wider mt-1">Goals</div>
+                                            <div className="text-3xl font-bold text-emerald-600 tabular-nums">{seasonTotals.goals}</div>
+                                            <div className="text-xs text-muted-foreground uppercase tracking-wider mt-1">Goals</div>
                                         </CardContent>
                                     </Card>
                                     <Card>
                                         <CardContent className="pt-4 text-center">
-                                            <div className="text-3xl font-bold text-green-600 tabular-nums">{seasonTotals.assists}</div>
-                                            <div className="text-xs text-gray-500 uppercase tracking-wider mt-1">Assists</div>
+                                            <div className="text-3xl font-bold text-amber-600 tabular-nums">{seasonTotals.assists}</div>
+                                            <div className="text-xs text-muted-foreground uppercase tracking-wider mt-1">Assists</div>
                                         </CardContent>
                                     </Card>
                                 </>
                             )}
                             <Card>
                                 <CardContent className="pt-4 text-center">
-                                    <div className="text-3xl font-bold text-purple-600 tabular-nums">{seasonTotals.avgRating}</div>
-                                    <div className="text-xs text-gray-500 uppercase tracking-wider mt-1">Avg Rating</div>
+                                    <div className="text-3xl font-bold text-violet-600 tabular-nums">{seasonTotals.avgRating}</div>
+                                    <div className="text-xs text-muted-foreground uppercase tracking-wider mt-1">Avg Rating</div>
                                 </CardContent>
                             </Card>
                         </div>
@@ -564,7 +565,7 @@ export function PlayerPage() {
                                         {seasonStats.clubs.map((club, idx) => (
                                             <div 
                                                 key={idx} 
-                                                className={`p-4 rounded-lg border ${club.is_current ? 'bg-blue-50 border-blue-200' : 'bg-gray-50 border-gray-200'}`}
+                                                className={`p-4 rounded-lg border ${club.is_current ? 'bg-primary/5 border-primary/20' : 'bg-secondary border-border'}`}
                                             >
                                                 <div className="flex items-center gap-2 mb-3">
                                                     {club.team_logo && (
@@ -573,42 +574,42 @@ export function PlayerPage() {
                                                     <span className="font-semibold">{club.team_name}</span>
                                                     <Badge 
                                                         variant="outline" 
-                                                        className={`text-xs ${club.is_current 
-                                                            ? 'bg-blue-100 text-blue-700 border-blue-300' 
-                                                            : 'bg-gray-100 text-gray-600 border-gray-300'}`}
+                                                        className={`text-xs ${club.is_current
+                                                            ? 'bg-primary/10 text-primary border-primary/20'
+                                                            : 'bg-secondary text-muted-foreground border-border'}`}
                                                     >
                                                         {club.window_type}
                                                     </Badge>
                                                 </div>
                                                 <div className="grid grid-cols-4 gap-3 text-center">
                                                     <div>
-                                                        <div className="text-lg font-bold text-gray-900">{club.appearances}</div>
-                                                        <div className="text-xs text-gray-500">Apps</div>
+                                                        <div className="text-lg font-bold text-foreground">{club.appearances}</div>
+                                                        <div className="text-xs text-muted-foreground">Apps</div>
                                                     </div>
                                                     <div>
-                                                        <div className="text-lg font-bold text-gray-900">{club.minutes}</div>
-                                                        <div className="text-xs text-gray-500">Mins</div>
+                                                        <div className="text-lg font-bold text-foreground">{club.minutes}</div>
+                                                        <div className="text-xs text-muted-foreground">Mins</div>
                                                     </div>
                                                     {position === 'Goalkeeper' ? (
                                                         <>
                                                             <div>
-                                                                <div className="text-lg font-bold text-blue-600">{club.saves ?? 0}</div>
-                                                                <div className="text-xs text-gray-500">Saves</div>
+                                                                <div className="text-lg font-bold text-emerald-600">{club.saves ?? 0}</div>
+                                                                <div className="text-xs text-muted-foreground">Saves</div>
                                                             </div>
                                                             <div>
                                                                 <div className="text-lg font-bold text-orange-600">{club.goals_conceded ?? 0}</div>
-                                                                <div className="text-xs text-gray-500">Conceded</div>
+                                                                <div className="text-xs text-muted-foreground">Conceded</div>
                                                             </div>
                                                         </>
                                                     ) : (
                                                         <>
                                                             <div>
-                                                                <div className="text-lg font-bold text-blue-600">{club.goals}</div>
-                                                                <div className="text-xs text-gray-500">Goals</div>
+                                                                <div className="text-lg font-bold text-emerald-600">{club.goals}</div>
+                                                                <div className="text-xs text-muted-foreground">Goals</div>
                                                             </div>
                                                             <div>
-                                                                <div className="text-lg font-bold text-green-600">{club.assists}</div>
-                                                                <div className="text-xs text-gray-500">Assists</div>
+                                                                <div className="text-lg font-bold text-amber-600">{club.assists}</div>
+                                                                <div className="text-xs text-muted-foreground">Assists</div>
                                                             </div>
                                                         </>
                                                     )}
@@ -643,8 +644,8 @@ export function PlayerPage() {
                                     <TabsContent value="charts" className="mt-0">
                                         <div className="space-y-6">
                                             {/* Metrics Selector */}
-                                            <div className="p-4 bg-gray-50 rounded-lg">
-                                                <h3 className="text-sm font-medium mb-3 text-gray-700">Select Metrics to Compare</h3>
+                                            <div className="p-4 bg-secondary rounded-lg">
+                                                <h3 className="text-sm font-medium mb-3 text-foreground/80">Select Metrics to Compare</h3>
                                                 <div className="flex flex-wrap gap-2">
                                                     {currentConfig.options.map(opt => (
                                                         <button
@@ -652,13 +653,13 @@ export function PlayerPage() {
                                                             onClick={() => toggleMetric(opt.key)}
                                                             aria-label={`${selectedMetrics.includes(opt.key) ? 'Remove' : 'Add'} ${opt.label} metric`}
                                                             aria-pressed={selectedMetrics.includes(opt.key)}
-                                                            className={`px-3 py-1.5 rounded-full text-xs font-medium transition-colors border focus-visible:ring-2 focus-visible:ring-blue-500 focus-visible:outline-none ${selectedMetrics.includes(opt.key)
-                                                                ? 'bg-blue-50 border-blue-200 text-blue-700 ring-1 ring-blue-200'
-                                                                : 'bg-white border-gray-200 text-gray-600 hover:bg-gray-50'
+                                                            className={`px-3 py-1.5 rounded-full text-xs font-medium transition-colors border focus-visible:ring-2 focus-visible:ring-ring focus-visible:outline-none ${selectedMetrics.includes(opt.key)
+                                                                ? 'bg-primary/5 border-primary/20 text-primary ring-1 ring-primary/20'
+                                                                : 'bg-card border-border text-muted-foreground hover:bg-secondary'
                                                                 }`}
                                                         >
                                                             <span 
-                                                                className={`inline-block w-2 h-2 rounded-full mr-2 ${selectedMetrics.includes(opt.key) ? '' : 'bg-gray-300'}`} 
+                                                                className={`inline-block w-2 h-2 rounded-full mr-2 ${selectedMetrics.includes(opt.key) ? '' : 'bg-muted-foreground/50'}`} 
                                                                 style={{ backgroundColor: selectedMetrics.includes(opt.key) ? opt.color : undefined }}
                                                             />
                                                             {opt.label}
@@ -669,20 +670,20 @@ export function PlayerPage() {
 
                                             {/* Main Performance Chart */}
                                             <div>
-                                                <h3 className="text-sm font-medium mb-4 text-gray-700">Performance Trends</h3>
+                                                <h3 className="text-sm font-medium mb-4 text-foreground/80">Performance Trends</h3>
                                                 <div className="h-[300px] w-full">
                                                     <ResponsiveContainer width="100%" height="100%">
                                                         <LineChart data={chartData}>
-                                                            <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="#e5e7eb" />
+                                                            <CartesianGrid strokeDasharray="3 3" vertical={false} stroke={CHART_GRID_COLOR} />
                                                             <XAxis
                                                                 dataKey="date"
-                                                                tick={{ fontSize: 10, fill: '#6b7280' }}
+                                                                tick={{ fontSize: 10, fill: CHART_AXIS_COLOR }}
                                                                 interval="preserveStartEnd"
                                                                 tickLine={false}
                                                                 axisLine={false}
                                                             />
                                                             <YAxis
-                                                                tick={{ fontSize: 10, fill: '#6b7280' }}
+                                                                tick={{ fontSize: 10, fill: CHART_AXIS_COLOR }}
                                                                 tickLine={false}
                                                                 axisLine={false}
                                                             />
@@ -707,29 +708,29 @@ export function PlayerPage() {
                                             {/* Rating & Minutes Charts Side by Side */}
                                             <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
                                                 <div>
-                                                    <h3 className="text-sm font-medium mb-4 text-gray-700">Match Ratings</h3>
+                                                    <h3 className="text-sm font-medium mb-4 text-foreground/80">Match Ratings</h3>
                                                     <div className="h-[250px] sm:h-[200px] w-full">
                                                         <ResponsiveContainer width="100%" height="100%">
                                                             <LineChart data={chartData}>
-                                                                <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="#e5e7eb" />
-                                                                <XAxis dataKey="date" tick={{ fontSize: 10, fill: '#6b7280' }} interval="preserveStartEnd" tickLine={false} axisLine={false} />
-                                                                <YAxis domain={[0, 10]} tick={{ fontSize: 10, fill: '#6b7280' }} tickLine={false} axisLine={false} />
+                                                                <CartesianGrid strokeDasharray="3 3" vertical={false} stroke={CHART_GRID_COLOR} />
+                                                                <XAxis dataKey="date" tick={{ fontSize: 10, fill: CHART_AXIS_COLOR }} interval="preserveStartEnd" tickLine={false} axisLine={false} />
+                                                                <YAxis domain={[0, 10]} tick={{ fontSize: 10, fill: CHART_AXIS_COLOR }} tickLine={false} axisLine={false} />
                                                                 <Tooltip content={<CustomTooltip />} />
-                                                                <ReferenceLine y={7} stroke="#16a34a" strokeDasharray="3 3" label={{ value: 'Good (7.0)', position: 'insideTopRight', fontSize: 10, fill: '#16a34a' }} />
-                                                                <Line type="monotone" dataKey="rating" stroke="#2563eb" strokeWidth={2} dot={{ r: 3 }} activeDot={{ r: 5 }} name="Rating" />
+                                                                <ReferenceLine y={7} stroke="#059669" strokeDasharray="3 3" label={{ value: 'Good (7.0)', position: 'insideTopRight', fontSize: 10, fill: '#059669' }} />
+                                                                <Line type="monotone" dataKey="rating" stroke="#ca8a04" strokeWidth={2} dot={{ r: 3 }} activeDot={{ r: 5 }} name="Rating" />
                                                             </LineChart>
                                                         </ResponsiveContainer>
                                                     </div>
                                                 </div>
 
                                                 <div>
-                                                    <h3 className="text-sm font-medium mb-4 text-gray-700">Minutes Played</h3>
+                                                    <h3 className="text-sm font-medium mb-4 text-foreground/80">Minutes Played</h3>
                                                     <div className="h-[250px] sm:h-[200px] w-full">
                                                         <ResponsiveContainer width="100%" height="100%">
                                                             <BarChart data={chartData}>
-                                                                <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="#e5e7eb" />
-                                                                <XAxis dataKey="date" tick={{ fontSize: 10, fill: '#6b7280' }} interval="preserveStartEnd" tickLine={false} axisLine={false} />
-                                                                <YAxis domain={[0, 90]} tick={{ fontSize: 10, fill: '#6b7280' }} tickLine={false} axisLine={false} />
+                                                                <CartesianGrid strokeDasharray="3 3" vertical={false} stroke={CHART_GRID_COLOR} />
+                                                                <XAxis dataKey="date" tick={{ fontSize: 10, fill: CHART_AXIS_COLOR }} interval="preserveStartEnd" tickLine={false} axisLine={false} />
+                                                                <YAxis domain={[0, 90]} tick={{ fontSize: 10, fill: CHART_AXIS_COLOR }} tickLine={false} axisLine={false} />
                                                                 <Tooltip content={<CustomTooltip />} />
                                                                 <Bar dataKey="minutes" fill="#0f172a" radius={[4, 4, 0, 0]} name="Minutes" />
                                                             </BarChart>
@@ -743,22 +744,22 @@ export function PlayerPage() {
                                     <TabsContent value="matches" className="mt-0">
                                         <ScrollArea className="h-[500px]">
                                             <table className="w-full text-sm text-left">
-                                                <thead className="bg-gray-50 sticky top-0 z-10">
+                                                <thead className="bg-secondary sticky top-0 z-10">
                                                     <tr>
-                                                        <th className="px-2 py-2.5 sm:p-3 font-medium text-gray-500">Date</th>
-                                                        <th className="px-2 py-2.5 sm:p-3 font-medium text-gray-500 hidden sm:table-cell">Club</th>
-                                                        <th className="px-2 py-2.5 sm:p-3 font-medium text-gray-500">Match</th>
-                                                        <th className="px-2 py-2.5 sm:p-3 font-medium text-gray-500">Min</th>
-                                                        <th className="px-2 py-2.5 sm:p-3 font-medium text-gray-500">Rating</th>
-                                                        <th className="px-2 py-2.5 sm:p-3 font-medium text-gray-500">{position === 'Goalkeeper' ? 'Performance' : 'G/A'}</th>
-                                                        <th className="px-2 py-2.5 sm:p-3 font-medium text-gray-500 hidden sm:table-cell">Key Stats</th>
+                                                        <th className="px-2 py-2.5 sm:p-3 font-medium text-muted-foreground">Date</th>
+                                                        <th className="px-2 py-2.5 sm:p-3 font-medium text-muted-foreground hidden sm:table-cell">Club</th>
+                                                        <th className="px-2 py-2.5 sm:p-3 font-medium text-muted-foreground">Match</th>
+                                                        <th className="px-2 py-2.5 sm:p-3 font-medium text-muted-foreground">Min</th>
+                                                        <th className="px-2 py-2.5 sm:p-3 font-medium text-muted-foreground">Rating</th>
+                                                        <th className="px-2 py-2.5 sm:p-3 font-medium text-muted-foreground">{position === 'Goalkeeper' ? 'Performance' : 'G/A'}</th>
+                                                        <th className="px-2 py-2.5 sm:p-3 font-medium text-muted-foreground hidden sm:table-cell">Key Stats</th>
                                                     </tr>
                                                 </thead>
-                                                <tbody className="divide-y">
+                                                <tbody className="divide-y divide-border">
                                                     {stats.slice().reverse().map((s, i) => (
                                                         <tr
                                                             key={i}
-                                                            className="hover:bg-blue-50 cursor-pointer transition-colors group focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500 focus-visible:ring-inset"
+                                                            className="hover:bg-primary/5 cursor-pointer transition-colors group focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-inset"
                                                             tabIndex={0}
                                                             role="button"
                                                             aria-label={`View match details: ${s.opponent} on ${s.fixture_date ? format(new Date(s.fixture_date), 'MMM d') : 'unknown date'}`}
@@ -782,7 +783,7 @@ export function PlayerPage() {
                                                                     {s.loan_team_logo && (
                                                                         <img src={s.loan_team_logo} alt="" width={16} height={16} className="w-4 h-4 rounded-full" />
                                                                     )}
-                                                                    <span className="text-xs text-gray-600 font-medium truncate max-w-[80px]">
+                                                                    <span className="text-xs text-muted-foreground font-medium truncate max-w-[80px]">
                                                                         {s.loan_team_name || 'Unknown'}
                                                                     </span>
                                                                 </div>
@@ -795,17 +796,17 @@ export function PlayerPage() {
                                                             <td className="px-2 py-2.5 sm:p-3">
                                                                 <div className="flex items-center gap-2 min-w-0">
                                                                     <div className="min-w-0">
-                                                                        <div className="font-medium group-hover:text-blue-700 transition-colors truncate">{s.opponent}</div>
-                                                                        <div className="text-xs text-gray-500 truncate">{s.competition}</div>
+                                                                        <div className="font-medium group-hover:text-primary transition-colors truncate">{s.opponent}</div>
+                                                                        <div className="text-xs text-muted-foreground truncate">{s.competition}</div>
                                                                     </div>
-                                                                    <ExternalLink className="h-3.5 w-3.5 text-gray-300 group-hover:text-blue-500 transition-colors opacity-0 group-hover:opacity-100 flex-shrink-0" />
+                                                                    <ExternalLink className="h-3.5 w-3.5 text-muted-foreground/50 group-hover:text-primary transition-colors opacity-0 group-hover:opacity-100 flex-shrink-0" />
                                                                 </div>
                                                             </td>
                                                             <td className="px-2 py-2.5 sm:p-3 tabular-nums">{s.minutes}'</td>
                                                             <td className="px-2 py-2.5 sm:p-3">
-                                                                <span className={`px-1.5 sm:px-2 py-1 rounded text-xs font-medium tabular-nums ${parseFloat(s.rating) >= 7.5 ? 'bg-green-100 text-green-700' :
-                                                                    parseFloat(s.rating) >= 6.0 ? 'bg-gray-100 text-gray-700' :
-                                                                        'bg-red-50 text-red-700'
+                                                                <span className={`px-1.5 sm:px-2 py-1 rounded text-xs font-medium tabular-nums ${parseFloat(s.rating) >= 7.5 ? 'bg-emerald-100 text-emerald-700' :
+                                                                    parseFloat(s.rating) >= 6.0 ? 'bg-secondary text-foreground/80' :
+                                                                        'bg-rose-50 text-rose-700'
                                                                     }`}>
                                                                     {s.rating || '-'}
                                                                 </span>
@@ -814,25 +815,25 @@ export function PlayerPage() {
                                                                 {position === 'Goalkeeper' ? (
                                                                     <div className="flex flex-col gap-0.5">
                                                                         {(s.saves > 0 || s.saves === 0) && (
-                                                                            <span className="text-blue-600 text-xs font-medium">{s.saves} {s.saves === 1 ? 'save' : 'saves'}</span>
+                                                                            <span className="text-emerald-600 text-xs font-medium">{s.saves} {s.saves === 1 ? 'save' : 'saves'}</span>
                                                                         )}
                                                                         {s.goals_conceded === 0 && (
-                                                                            <span className="text-green-600 text-xs font-medium">Clean sheet</span>
+                                                                            <span className="text-emerald-600 text-xs font-medium">Clean sheet</span>
                                                                         )}
                                                                         {s.goals_conceded > 0 && (
                                                                             <span className="text-orange-600 text-xs">{s.goals_conceded} conceded</span>
                                                                         )}
-                                                                        {s.saves === undefined && s.goals_conceded === undefined && <span className="text-gray-300">-</span>}
+                                                                        {s.saves === undefined && s.goals_conceded === undefined && <span className="text-muted-foreground/50">-</span>}
                                                                     </div>
                                                                 ) : (
                                                                     <>
                                                                         {s.goals > 0 && <span className="mr-2">⚽ {s.goals}</span>}
                                                                         {s.assists > 0 && <span>🅰️ {s.assists}</span>}
-                                                                        {s.goals === 0 && s.assists === 0 && <span className="text-gray-300">-</span>}
+                                                                        {s.goals === 0 && s.assists === 0 && <span className="text-muted-foreground/50">-</span>}
                                                                     </>
                                                                 )}
                                                             </td>
-                                                            <td className="px-2 py-2.5 sm:p-3 text-xs text-gray-500 hidden sm:table-cell">
+                                                            <td className="px-2 py-2.5 sm:p-3 text-xs text-muted-foreground hidden sm:table-cell">
                                                                 {position === 'Goalkeeper' ? (
                                                                     <>
                                                                         {s.passes?.total > 0 && <div>{s.passes.total} Passes</div>}
@@ -877,29 +878,29 @@ export function PlayerPage() {
                                 <CardContent>
                                     {/* Featured Authors */}
                                     <div className="mb-6">
-                                        <h3 className="text-sm font-medium text-gray-700 mb-3">Writers covering this player</h3>
+                                        <h3 className="text-sm font-medium text-foreground/80 mb-3">Writers covering this player</h3>
                                         <div className="flex flex-wrap gap-3">
                                             {commentaries.authors.map((author) => (
                                                 <Link
                                                     key={author.id}
                                                     to={`/journalists/${author.id}`}
-                                                    className="flex items-center gap-2 px-3 py-2 bg-gray-50 hover:bg-gray-100 rounded-lg transition-colors group"
+                                                    className="flex items-center gap-2 px-3 py-2 bg-secondary hover:bg-muted rounded-lg transition-colors group"
                                                 >
                                                     <Avatar className="h-8 w-8">
                                                         <AvatarImage src={author.profile_image_url} alt={author.display_name} />
-                                                        <AvatarFallback className="text-xs bg-blue-100 text-blue-700">
+                                                        <AvatarFallback className="text-xs bg-primary/10 text-primary">
                                                             {author.display_name?.charAt(0) || 'W'}
                                                         </AvatarFallback>
                                                     </Avatar>
                                                     <div className="text-left">
-                                                        <div className="text-sm font-medium text-gray-900 group-hover:text-blue-600 transition-colors">
+                                                        <div className="text-sm font-medium text-foreground group-hover:text-primary transition-colors">
                                                             {author.display_name}
                                                         </div>
-                                                        <div className="text-xs text-gray-500">
+                                                        <div className="text-xs text-muted-foreground">
                                                             {author.commentary_count} writeup{author.commentary_count !== 1 ? 's' : ''}
                                                         </div>
                                                     </div>
-                                                    <ChevronRight className="h-4 w-4 text-gray-400 group-hover:text-blue-500 transition-colors" />
+                                                    <ChevronRight className="h-4 w-4 text-muted-foreground/70 group-hover:text-primary transition-colors" />
                                                 </Link>
                                             ))}
                                         </div>
@@ -907,26 +908,26 @@ export function PlayerPage() {
 
                                     {/* Recent Writeups */}
                                     <div>
-                                        <h3 className="text-sm font-medium text-gray-700 mb-3">Recent writeups</h3>
+                                        <h3 className="text-sm font-medium text-foreground/80 mb-3">Recent writeups</h3>
                                         <div className="space-y-3">
                                             {commentaries.commentaries.slice(0, 5).map((commentary) => (
                                                 <Link
                                                     key={commentary.id}
                                                     to={`/writeups/${commentary.id}`}
-                                                    className="block p-4 bg-gray-50 hover:bg-gray-100 rounded-lg transition-colors group"
+                                                    className="block p-4 bg-secondary hover:bg-muted rounded-lg transition-colors group"
                                                 >
                                                     <div className="flex items-start gap-3">
                                                         {commentary.author && (
                                                             <Avatar className="h-10 w-10 flex-shrink-0">
                                                                 <AvatarImage src={commentary.author.profile_image_url} alt={commentary.author.display_name} />
-                                                                <AvatarFallback className="text-sm bg-blue-100 text-blue-700">
+                                                                <AvatarFallback className="text-sm bg-primary/10 text-primary">
                                                                     {commentary.author.display_name?.charAt(0) || 'W'}
                                                                 </AvatarFallback>
                                                             </Avatar>
                                                         )}
                                                         <div className="flex-1 min-w-0">
                                                             <div className="flex items-center gap-2 mb-1">
-                                                                <span className="font-medium text-gray-900 group-hover:text-blue-600 transition-colors">
+                                                                <span className="font-medium text-foreground group-hover:text-primary transition-colors">
                                                                     {commentary.author?.display_name || 'Anonymous'}
                                                                 </span>
                                                                 {commentary.is_premium && (
@@ -936,12 +937,12 @@ export function PlayerPage() {
                                                                 )}
                                                             </div>
                                                             {commentary.title && (
-                                                                <div className="text-sm font-medium text-gray-800 mb-1">{commentary.title}</div>
+                                                                <div className="text-sm font-medium text-foreground mb-1">{commentary.title}</div>
                                                             )}
-                                                            <div className="text-sm text-gray-600 line-clamp-2">
+                                                            <div className="text-sm text-muted-foreground line-clamp-2">
                                                                 {commentary.content?.substring(0, 150)}...
                                                             </div>
-                                                            <div className="flex items-center gap-2 mt-2 text-xs text-gray-500">
+                                                            <div className="flex items-center gap-2 mt-2 text-xs text-muted-foreground">
                                                                 {commentary.newsletter && (
                                                                     <span>{commentary.newsletter.team_name}</span>
                                                                 )}
@@ -953,14 +954,14 @@ export function PlayerPage() {
                                                                 )}
                                                             </div>
                                                         </div>
-                                                        <ChevronRight className="h-5 w-5 text-gray-400 group-hover:text-blue-500 transition-colors flex-shrink-0" />
+                                                        <ChevronRight className="h-5 w-5 text-muted-foreground/70 group-hover:text-primary transition-colors flex-shrink-0" />
                                                     </div>
                                                 </Link>
                                             ))}
                                         </div>
                                         {commentaries.total_count > 5 && (
                                             <div className="mt-4 text-center">
-                                                <span className="text-sm text-gray-500">
+                                                <span className="text-sm text-muted-foreground">
                                                     Showing 5 of {commentaries.total_count} writeups
                                                 </span>
                                             </div>
@@ -975,7 +976,7 @@ export function PlayerPage() {
 
                         {/* Community */}
                         <section aria-label="Community" className="space-y-6">
-                            <h2 className="text-lg font-semibold text-gray-900 text-pretty">Community</h2>
+                            <h2 className="text-lg font-semibold text-foreground text-pretty">Community</h2>
                             <CommentSection playerId={parseInt(playerId)} title="Discussion" />
                             <PlayerLinksSection playerId={parseInt(playerId)} />
                         </section>
@@ -991,7 +992,7 @@ export function PlayerPage() {
                                 <img
                                     src={profile.parent_team_logo}
                                     alt=""
-                                    className="w-10 h-10 rounded-full object-cover border-2 border-gray-200"
+                                    className="w-10 h-10 rounded-full object-cover border-2 border-border"
                                 />
                             )}
                             <div>
@@ -1009,10 +1010,10 @@ export function PlayerPage() {
                     <div className="p-4 max-h-[60vh] overflow-y-auto">
                         {loadingTeamPlayers ? (
                             <div className="flex items-center justify-center py-8">
-                                <Loader2 className="h-6 w-6 animate-spin text-blue-500" />
+                                <Loader2 className="h-6 w-6 animate-spin text-primary" />
                             </div>
                         ) : teamPlayers.length === 0 ? (
-                            <p className="text-center text-gray-500 py-8">No other tracked academy players</p>
+                            <p className="text-center text-muted-foreground py-8">No other tracked academy players</p>
                         ) : (
                             <div className="space-y-2">
                                 {teamPlayers.map((player) => (
@@ -1020,42 +1021,42 @@ export function PlayerPage() {
                                         key={player.player_id}
                                         to={`/players/${player.player_id}`}
                                         onClick={() => setDrawerOpen(false)}
-                                        className="flex items-center gap-3 p-3 rounded-lg hover:bg-gray-50 active:bg-gray-100 transition-colors group"
+                                        className="flex items-center gap-3 p-3 rounded-lg hover:bg-secondary active:bg-muted transition-colors group"
                                     >
                                         {player.player_photo ? (
                                             <img 
                                                 src={player.player_photo} 
                                                 alt={player.player_name}
-                                                className="w-12 h-12 rounded-full object-cover border-2 border-gray-200"
+                                                className="w-12 h-12 rounded-full object-cover border-2 border-border"
                                             />
                                         ) : (
-                                            <div className="w-12 h-12 rounded-full bg-gradient-to-br from-blue-500 to-blue-600 flex items-center justify-center flex-shrink-0">
-                                                <User className="h-6 w-6 text-white" />
+                                            <div className="w-12 h-12 rounded-full bg-gradient-to-br from-primary to-primary/80 flex items-center justify-center flex-shrink-0">
+                                                <User className="h-6 w-6 text-primary-foreground" />
                                             </div>
                                         )}
                                         <div className="flex-1 min-w-0">
-                                            <div className="font-medium text-gray-900 group-hover:text-blue-600 transition-colors">
+                                            <div className="font-medium text-foreground group-hover:text-primary transition-colors">
                                                 {player.player_name}
                                             </div>
                                             {player.loan_team_name && (
-                                                <div className="flex items-center gap-2 text-sm text-gray-500">
-                                                    {player.is_active && <span className="text-gray-400">at</span>}
+                                                <div className="flex items-center gap-2 text-sm text-muted-foreground">
+                                                    {player.is_active && <span className="text-muted-foreground/70">at</span>}
                                                     {player.loan_team_logo && (
                                                         <img src={player.loan_team_logo} alt="" className="w-4 h-4 rounded-full" />
                                                     )}
                                                     <span className="truncate">{player.loan_team_name}</span>
-                                                    {!player.is_active && <span className="text-gray-400 text-xs">(ended)</span>}
+                                                    {!player.is_active && <span className="text-muted-foreground/70 text-xs">(ended)</span>}
                                                 </div>
                                             )}
                                             {(player.appearances > 0 || player.goals > 0 || player.assists > 0 || player.saves > 0) && (
-                                                <div className="text-xs text-gray-400 mt-0.5">
+                                                <div className="text-xs text-muted-foreground/70 mt-0.5">
                                                     {player.appearances || 0} apps · {player.position === 'G' || player.position === 'Goalkeeper' 
                                                         ? `${player.saves || 0} saves · ${player.goals_conceded || 0} conceded`
                                                         : `${player.goals || 0}G · ${player.assists || 0}A`}
                                                 </div>
                                             )}
                                         </div>
-                                        <ChevronRight className="h-5 w-5 text-gray-300 group-hover:text-blue-500 transition-colors flex-shrink-0" />
+                                        <ChevronRight className="h-5 w-5 text-muted-foreground/50 group-hover:text-primary transition-colors flex-shrink-0" />
                                     </Link>
                                 ))}
                             </div>

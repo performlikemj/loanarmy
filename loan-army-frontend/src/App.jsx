@@ -306,21 +306,21 @@ function HistoricalNewslettersPage() {
     <div className="max-w-7xl mx-auto py-6 sm:px-6 lg:px-8">
       <div className="px-4 py-6 sm:px-0">
         <div className="mb-8">
-          <h1 className="text-3xl font-bold text-gray-900 mb-4">
+          <h1 className="text-3xl font-bold text-foreground mb-4">
             Historical Newsletters
           </h1>
-          <p className="text-lg text-gray-600">
+          <p className="text-lg text-muted-foreground">
             Generate newsletters for any date. Select teams and a date to see academy player activities for that week.
           </p>
           {currentSeason !== null && (
-            <p className="text-sm text-gray-500">Latest season detected: {currentSeason}–{String(currentSeason + 1).slice(-2)}</p>
+            <p className="text-sm text-muted-foreground">Latest season detected: {currentSeason}–{String(currentSeason + 1).slice(-2)}</p>
           )}
         </div>
 
         {message && (
           <div className={`mb-6 p-4 rounded-md ${message.type === 'error'
-            ? 'bg-red-50 border border-red-200 text-red-700'
-            : 'bg-green-50 border border-green-200 text-green-700'
+            ? 'bg-rose-50 border border-rose-200 text-rose-700'
+            : 'bg-emerald-50 border border-emerald-200 text-emerald-700'
             }`}>
             {message.text}
           </div>
@@ -342,9 +342,9 @@ function HistoricalNewslettersPage() {
                   type="date"
                   value={selectedDate}
                   onChange={(e) => setSelectedDate(e.target.value)}
-                  className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500"
+                  className="w-full px-3 py-2 border border-border rounded-md focus:outline-none focus:ring-2 focus:ring-ring"
                 />
-                <p className="text-sm text-gray-500 mt-2">
+                <p className="text-sm text-muted-foreground mt-2">
                   Select any date to generate newsletters for that week
                 </p>
               </CardContent>
@@ -359,7 +359,7 @@ function HistoricalNewslettersPage() {
               <CardContent>
                 {loading ? (
                   <div className="text-center py-8">
-                    <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-blue-600 mx-auto"></div>
+                    <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-primary mx-auto"></div>
                   </div>
                 ) : (
                   <div className="space-y-4">
@@ -377,8 +377,8 @@ function HistoricalNewslettersPage() {
                           <AccordionContent>
                             <div className="grid grid-cols-1 gap-2 px-4 pb-2">
                               {leagueTeams.map((team) => (
-                                <label key={team.id} className="flex items-center space-x-2 cursor-pointer hover:bg-gray-50 p-2 rounded">
-                                  <input type="checkbox" checked={selectedTeams.includes(team.id)} onChange={() => handleTeamToggle(team.id)} className="rounded border-gray-300 text-blue-600 focus:ring-blue-500" />
+                                <label key={team.id} className="flex items-center space-x-2 cursor-pointer hover:bg-secondary p-2 rounded">
+                                  <input type="checkbox" checked={selectedTeams.includes(team.id)} onChange={() => handleTeamToggle(team.id)} className="rounded border-border text-primary focus:ring-ring" />
                                   <span className="text-sm">{team.name}</span>
                                 </label>
                               ))}
@@ -397,7 +397,7 @@ function HistoricalNewslettersPage() {
               onClick={generateNewsletters}
               disabled={generating || !selectedDate || selectedTeams.length === 0}
               size="lg"
-              className="w-full bg-blue-600 hover:bg-blue-700"
+              className="w-full bg-primary hover:bg-primary/90"
             >
               {generating ? (
                 <>
@@ -433,10 +433,10 @@ function HistoricalNewslettersPage() {
                         <h3 className="font-semibold text-lg mb-2">
                           {newsletter.teamName}
                         </h3>
-                        <h4 className="font-medium text-gray-800 mb-2">
+                        <h4 className="font-medium text-foreground mb-2">
                           {newsletter.title}
                         </h4>
-                        <div className="text-sm text-gray-600 whitespace-pre-wrap">
+                        <div className="text-sm text-muted-foreground whitespace-pre-wrap">
                           {typeof newsletter.content === 'string'
                             ? JSON.parse(newsletter.content).summary || newsletter.content
                             : newsletter.content?.summary || 'No content available'
@@ -446,7 +446,7 @@ function HistoricalNewslettersPage() {
                     ))}
                   </div>
                 ) : (
-                  <div className="text-center py-12 text-gray-500">
+                  <div className="text-center py-12 text-muted-foreground">
                     <Mail className="h-12 w-12 mx-auto mb-4 opacity-50" />
                     <p>No newsletters generated yet</p>
                     <p className="text-sm">Select teams and a date above</p>
@@ -590,32 +590,32 @@ function AdminNewsletterDetailPage() {
       const sections = Array.isArray(obj.sections) ? obj.sections : []
       return (
         <div className="space-y-6">
-          <div className="bg-gradient-to-r from-blue-50 to-gray-50 p-6 rounded-lg border-l-4 border-blue-500">
-            <h2 className="text-2xl font-bold text-gray-900 mb-3">{obj.title || newsletter.title}</h2>
+          <div className="bg-gradient-to-r from-secondary to-background p-6 rounded-lg border-l-4 border-primary/20">
+            <h2 className="text-2xl font-bold text-foreground mb-3">{obj.title || newsletter.title}</h2>
             {obj.range && (
-              <div className="text-sm text-gray-600 mb-3">
+              <div className="text-sm text-muted-foreground mb-3">
                 📅 Week: {obj.range[0]} - {obj.range[1]}
               </div>
             )}
             {obj.summary && (
-              <div className="text-gray-700 leading-relaxed text-lg">
+              <div className="text-foreground/80 leading-relaxed text-lg">
                 {obj.summary}
               </div>
             )}
           </div>
 
           {highlights.length > 0 && (
-            <div className="bg-yellow-50 p-5 rounded-lg border-l-4 border-yellow-400">
-              <h3 className="text-lg font-bold text-gray-900 mb-3 flex items-center">
+            <div className="bg-amber-50 p-5 rounded-lg border-l-4 border-amber-400">
+              <h3 className="text-lg font-bold text-foreground mb-3 flex items-center">
                 ⭐ Key Highlights
               </h3>
               <ul className="space-y-2">
                 {highlights.map((highlight, idx) => (
                   <li key={idx} className="flex items-start">
-                    <span className="bg-yellow-400 text-yellow-900 rounded-full w-6 h-6 flex items-center justify-center text-xs font-bold mr-3 mt-0.5 flex-shrink-0">
+                    <span className="bg-amber-400 text-amber-900 rounded-full w-6 h-6 flex items-center justify-center text-xs font-bold mr-3 mt-0.5 flex-shrink-0">
                       {idx + 1}
                     </span>
-                    <span className="text-gray-700">{highlight}</span>
+                    <span className="text-foreground/80">{highlight}</span>
                   </li>
                 ))}
               </ul>
@@ -629,22 +629,22 @@ function AdminNewsletterDetailPage() {
               <div key={index} className="space-y-4">
                 {section?.title && (
                   <div className="border-b pb-2">
-                    <h3 className="text-xl font-semibold text-gray-900">{section.title}</h3>
+                    <h3 className="text-xl font-semibold text-foreground">{section.title}</h3>
                     {section?.subtitle && (
-                      <p className="text-sm text-gray-600">{section.subtitle}</p>
+                      <p className="text-sm text-muted-foreground">{section.subtitle}</p>
                     )}
                   </div>
                 )}
                 <div className="space-y-4">
                   {items.map((item, itemIdx) => (
-                    <div key={itemIdx} className="border rounded-lg p-4 bg-white shadow-sm">
+                    <div key={itemIdx} className="border rounded-lg p-4 bg-card shadow-sm">
                       <div className="flex items-start gap-3">
                         {/* Player Photo */}
                         {item.player_photo && (
                           <img
                             src={item.player_photo}
                             alt={item.player_name}
-                            className="w-14 h-14 rounded-full object-cover bg-gray-100 flex-shrink-0 border-2 border-white shadow-sm"
+                            className="w-14 h-14 rounded-full object-cover bg-secondary flex-shrink-0 border-2 border-white shadow-sm"
                           />
                         )}
                         <div className="flex-1">
@@ -653,56 +653,56 @@ function AdminNewsletterDetailPage() {
                               {(item.player_api_id || item.player_id) ? (
                                 <Link
                                   to={`/players/${item.player_api_id || item.player_id}`}
-                                  className="text-lg font-semibold text-gray-900 hover:text-blue-600 hover:underline transition-colors"
+                                  className="text-lg font-semibold text-foreground hover:text-primary hover:underline transition-colors"
                                 >
                                   {item.player_name}
                                 </Link>
                               ) : (
-                                <div className="text-lg font-semibold text-gray-900">{item.player_name}</div>
+                                <div className="text-lg font-semibold text-foreground">{item.player_name}</div>
                               )}
                               {/* Loan Team with Logo */}
-                              <div className="flex items-center gap-2 text-sm text-gray-600">
+                              <div className="flex items-center gap-2 text-sm text-muted-foreground">
                                 {item.loan_team_logo && (
                                   <img
                                     src={item.loan_team_logo}
                                     alt={item.loan_team || item.loan_team_name}
-                                    className="w-5 h-5 rounded-full object-cover bg-gray-100"
+                                    className="w-5 h-5 rounded-full object-cover bg-secondary"
                                   />
                                 )}
                                 <span>{item.loan_team || item.loan_team_name}</span>
                               </div>
                             </div>
-                            <div className="text-sm text-gray-500">
+                            <div className="text-sm text-muted-foreground">
                               {item.competition || item.match_name}
                             </div>
                           </div>
                         </div>
                       </div>
                       {item.week_summary && (
-                        <p className="mt-3 text-gray-700 leading-relaxed">{item.week_summary}</p>
+                        <p className="mt-3 text-foreground/80 leading-relaxed">{item.week_summary}</p>
                       )}
                       {/* This Week's Matches with Opponent Logos */}
                       {item.matches && Array.isArray(item.matches) && item.matches.length > 0 && (
-                        <div className="mt-3 p-3 bg-gray-50 rounded-lg border border-gray-200">
-                          <h5 className="text-sm font-semibold text-gray-700 mb-2">⚽ This Week's Matches</h5>
+                        <div className="mt-3 p-3 bg-secondary rounded-lg border border-border">
+                          <h5 className="text-sm font-semibold text-foreground/80 mb-2">⚽ This Week's Matches</h5>
                           <div className="space-y-2">
                             {item.matches.map((match, mIdx) => (
-                              <div key={mIdx} className="flex items-center gap-3 p-2 bg-white rounded border border-gray-100">
+                              <div key={mIdx} className="flex items-center gap-3 p-2 bg-card rounded border border-border">
                                 {match.opponent_logo && (
                                   <img
                                     src={match.opponent_logo}
                                     alt={match.opponent}
-                                    className="w-7 h-7 rounded-full object-cover bg-gray-100 flex-shrink-0"
+                                    className="w-7 h-7 rounded-full object-cover bg-secondary flex-shrink-0"
                                   />
                                 )}
                                 <div className="flex-1">
                                   <span className="font-medium text-sm">{match.home ? 'vs' : '@'} {match.opponent}</span>
-                                  {match.competition && <span className="text-xs text-gray-500 ml-2">({match.competition})</span>}
+                                  {match.competition && <span className="text-xs text-muted-foreground ml-2">({match.competition})</span>}
                                 </div>
                                 {match.score && (
-                                  <span className={`px-2 py-1 rounded text-xs font-bold ${match.result === 'W' ? 'bg-green-100 text-green-800' :
-                                    match.result === 'D' ? 'bg-gray-100 text-gray-700' :
-                                      'bg-red-100 text-red-800'
+                                  <span className={`px-2 py-1 rounded text-xs font-bold ${match.result === 'W' ? 'bg-emerald-50 text-emerald-800' :
+                                    match.result === 'D' ? 'bg-secondary text-foreground/80' :
+                                      'bg-rose-50 text-rose-800'
                                     }`}>
                                     {match.score.home ?? 0}-{match.score.away ?? 0}
                                   </span>
@@ -713,7 +713,7 @@ function AdminNewsletterDetailPage() {
                         </div>
                       )}
                       {item.match_notes && Array.isArray(item.match_notes) && item.match_notes.length > 0 && !item.matches && (
-                        <ul className="mt-3 list-disc space-y-1 pl-5 text-sm text-gray-600">
+                        <ul className="mt-3 list-disc space-y-1 pl-5 text-sm text-muted-foreground">
                           {item.match_notes.map((note, noteIndex) => (
                             <li key={noteIndex}>{note}</li>
                           ))}
@@ -731,11 +731,11 @@ function AdminNewsletterDetailPage() {
                               scrolling="no"
                               className="h-[568px] w-full max-w-xs rounded-md border"
                             />
-                            <p className="mt-2 text-xs text-gray-500">
+                            <p className="mt-2 text-xs text-muted-foreground">
                               Player stats provided by{' '}
                               <a
                                 href="https://sofascore.com/"
-                                className="text-blue-600 hover:underline"
+                                className="text-primary hover:underline"
                                 target="_blank"
                                 rel="noopener"
                               >
@@ -755,9 +755,9 @@ function AdminNewsletterDetailPage() {
       )
     } catch (err) {
       return (
-        <div className="bg-gray-50 p-4 rounded-lg">
-          <h3 className="text-lg font-medium text-gray-900 mb-2">Newsletter Content</h3>
-          <div className="whitespace-pre-wrap text-gray-700">{newsletter.content}</div>
+        <div className="bg-secondary p-4 rounded-lg">
+          <h3 className="text-lg font-medium text-foreground mb-2">Newsletter Content</h3>
+          <div className="whitespace-pre-wrap text-foreground/80">{newsletter.content}</div>
         </div>
       )
     }
@@ -790,14 +790,14 @@ function AdminNewsletterDetailPage() {
       </Button>
 
       {loading ? (
-        <div className="flex flex-col items-center justify-center py-20 text-gray-600">
+        <div className="flex flex-col items-center justify-center py-20 text-muted-foreground">
           <Loader2 className="h-10 w-10 animate-spin mb-4" />
           Loading newsletter…
         </div>
       ) : error ? (
         <Card>
           <CardHeader>
-            <CardTitle className="text-lg text-red-600">Unable to load newsletter</CardTitle>
+            <CardTitle className="text-lg text-rose-600">Unable to load newsletter</CardTitle>
             <CardDescription>{error}</CardDescription>
           </CardHeader>
           <CardFooter>
@@ -813,7 +813,7 @@ function AdminNewsletterDetailPage() {
               <div className="flex flex-wrap items-center justify-between gap-3">
                 <div>
                   <CardTitle className="text-2xl">{newsletter?.title || 'Newsletter detail'}</CardTitle>
-                  <CardDescription className="text-sm text-gray-600">
+                  <CardDescription className="text-sm text-muted-foreground">
                     Review the generated newsletter and metadata before sending.
                   </CardDescription>
                 </div>
@@ -822,7 +822,7 @@ function AdminNewsletterDetailPage() {
                     {newsletter?.published ? 'Published' : 'Draft'}
                   </Badge>
                   {newsletter?.email_sent && (
-                    <Badge variant="outline" className="border-green-300 text-green-700">
+                    <Badge variant="outline" className="border-emerald-200 text-emerald-700">
                       Email sent
                     </Badge>
                   )}
@@ -837,9 +837,9 @@ function AdminNewsletterDetailPage() {
               {metaEntries.length > 0 && (
                 <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 text-sm">
                   {metaEntries.map((item) => (
-                    <div key={item.label} className="flex flex-col rounded border bg-gray-50 p-3">
-                      <span className="text-xs uppercase tracking-wide text-gray-500">{item.label}</span>
-                      <span className="text-gray-900 font-medium break-words">{item.value || '—'}</span>
+                    <div key={item.label} className="flex flex-col rounded border bg-secondary p-3">
+                      <span className="text-xs uppercase tracking-wide text-muted-foreground">{item.label}</span>
+                      <span className="text-foreground font-medium break-words">{item.value || '—'}</span>
                     </div>
                   ))}
                 </div>
@@ -850,17 +850,17 @@ function AdminNewsletterDetailPage() {
                   Open web preview
                 </Button>
                 {htmlError && (
-                  <span className="text-sm text-red-600">{htmlError}</span>
+                  <span className="text-sm text-rose-600">{htmlError}</span>
                 )}
               </div>
 
-              <div className="rounded-lg border bg-white p-6">
+              <div className="rounded-lg border bg-card p-6">
                 {renderHtml ? (
                   <div dangerouslySetInnerHTML={{ __html: renderHtml }} className="prose max-w-none" />
                 ) : fallbackContent ? (
                   fallbackContent
                 ) : (
-                  <div className="text-sm text-gray-500">No content available for this newsletter.</div>
+                  <div className="text-sm text-muted-foreground">No content available for this newsletter.</div>
                 )}
               </div>
             </CardContent>
@@ -3416,10 +3416,10 @@ function AdminPage({ defaultTab = 'newsletters', includeSandbox = true, forcedTa
         {message && (
           <div
             className={`p-3 rounded ${message.type === 'error'
-              ? 'bg-red-100 text-red-700'
+              ? 'bg-rose-50 text-rose-800'
               : message.type === 'warning'
-                ? 'bg-amber-100 text-amber-800'
-                : 'bg-green-100 text-green-700'}`}
+                ? 'bg-amber-50 text-amber-800'
+                : 'bg-emerald-50 text-emerald-800'}`}
           >
             {message.text}
           </div>
@@ -3432,7 +3432,7 @@ function AdminPage({ defaultTab = 'newsletters', includeSandbox = true, forcedTa
         )}
 
         <div className="space-y-6">
-          <div id="admin-access" className="rounded-lg border bg-white/80 p-4 shadow-sm space-y-4">
+          <div id="admin-access" className="rounded-lg border bg-card/80 p-4 shadow-sm space-y-4">
             <div className="flex items-center justify-between gap-3">
               <div>
                 <h2 className="text-lg font-semibold flex items-center gap-2">
@@ -3502,11 +3502,11 @@ function AdminPage({ defaultTab = 'newsletters', includeSandbox = true, forcedTa
           </div>
 
           {hasAdminToken && (
-            <div id="admin-api" className="rounded-lg border bg-white/90 p-4 shadow-sm space-y-4">
+            <div id="admin-api" className="rounded-lg border bg-card/90 p-4 shadow-sm space-y-4">
               <div className="flex items-start justify-between gap-3">
                 <div>
                   <h2 className="text-lg font-semibold flex items-center gap-2">
-                    <KeyRound className="h-4 w-4 text-blue-600" />
+                    <KeyRound className="h-4 w-4 text-primary" />
                     API Key
                   </h2>
                   <p className="text-sm text-muted-foreground">
@@ -3739,7 +3739,7 @@ function AdminPage({ defaultTab = 'newsletters', includeSandbox = true, forcedTa
                         ) : (
                           <div className="grid grid-cols-1 md:grid-cols-2 gap-2">
                             <div className="border rounded">
-                              <div className="px-2 py-1 text-xs font-semibold bg-gray-50 border-b">Newsletter Runs</div>
+                              <div className="px-2 py-1 text-xs font-semibold bg-secondary border-b">Newsletter Runs</div>
                               <div className="max-h-48 overflow-auto">
                                 <table className="w-full text-xs">
                                   <thead>
@@ -3760,7 +3760,7 @@ function AdminPage({ defaultTab = 'newsletters', includeSandbox = true, forcedTa
                               </div>
                             </div>
                             <div className="border rounded">
-                              <div className="px-2 py-1 text-xs font-semibold bg-gray-50 border-b">Seeding Runs</div>
+                              <div className="px-2 py-1 text-xs font-semibold bg-secondary border-b">Seeding Runs</div>
                               <div className="max-h-48 overflow-auto">
                                 <table className="w-full text-xs">
                                   <thead>
@@ -3909,7 +3909,7 @@ function AdminPage({ defaultTab = 'newsletters', includeSandbox = true, forcedTa
                                       </td>
                                       <td className="px-4 py-3 text-center">
                                         {team.newsletters_active ? (
-                                          <Badge variant="default" className="bg-green-600">Active</Badge>
+                                          <Badge variant="default" className="bg-emerald-600">Active</Badge>
                                         ) : (
                                           <Badge variant="outline">Inactive</Badge>
                                         )}
@@ -4212,7 +4212,7 @@ function AdminPage({ defaultTab = 'newsletters', includeSandbox = true, forcedTa
                         <AccordionTrigger className="px-4 py-3 hover:no-underline">
                           <div className="flex items-center justify-between w-full pr-4">
                             <h2 className="font-semibold text-lg">Players & Loans Manager</h2>
-                            <div className="text-sm text-gray-600">
+                            <div className="text-sm text-muted-foreground">
                               {playersHubData.items.length} player{playersHubData.items.length !== 1 ? 's' : ''}
                             </div>
                           </div>
@@ -4226,11 +4226,11 @@ function AdminPage({ defaultTab = 'newsletters', includeSandbox = true, forcedTa
 
                           {/* Add Player Form */}
                           {showAddPlayerForm && (
-                            <div className="bg-gradient-to-r from-green-50 to-blue-50 border border-green-200 rounded-lg p-4 mb-4">
+                            <div className="bg-gradient-to-r from-emerald-50 to-secondary border border-emerald-200 rounded-lg p-4 mb-4">
                               <h3 className="text-sm font-semibold mb-3">Create New Player</h3>
                               <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
                                 <div className="md:col-span-2">
-                                  <label className="text-xs font-medium text-gray-700 block mb-1">Player Name *</label>
+                                  <label className="text-xs font-medium text-foreground/80 block mb-1">Player Name *</label>
                                   <input
                                     type="text"
                                     className="border rounded p-2 text-sm w-full"
@@ -4241,8 +4241,8 @@ function AdminPage({ defaultTab = 'newsletters', includeSandbox = true, forcedTa
                                 </div>
                                 <div>
                                   <div className="flex items-center justify-between mb-1">
-                                    <label className="text-xs font-medium text-gray-700">Primary Team (Parent Club) *</label>
-                                    <label className="flex items-center gap-1 text-xs text-gray-600 cursor-pointer">
+                                    <label className="text-xs font-medium text-foreground/80">Primary Team (Parent Club) *</label>
+                                    <label className="flex items-center gap-1 text-xs text-muted-foreground cursor-pointer">
                                       <input
                                         type="checkbox"
                                         checked={addPlayerForm.use_custom_primary_team}
@@ -4275,8 +4275,8 @@ function AdminPage({ defaultTab = 'newsletters', includeSandbox = true, forcedTa
                                 </div>
                                 <div>
                                   <div className="flex items-center justify-between mb-1">
-                                    <label className="text-xs font-medium text-gray-700">Loan Team (Current Club) *</label>
-                                    <label className="flex items-center gap-1 text-xs text-gray-600 cursor-pointer">
+                                    <label className="text-xs font-medium text-foreground/80">Loan Team (Current Club) *</label>
+                                    <label className="flex items-center gap-1 text-xs text-muted-foreground cursor-pointer">
                                       <input
                                         type="checkbox"
                                         checked={addPlayerForm.use_custom_loan_team}
@@ -4308,7 +4308,7 @@ function AdminPage({ defaultTab = 'newsletters', includeSandbox = true, forcedTa
                                   )}
                                 </div>
                                 <div className="md:col-span-2">
-                                  <label className="text-xs font-medium text-gray-700 block mb-1">Season / Window *</label>
+                                  <label className="text-xs font-medium text-foreground/80 block mb-1">Season / Window *</label>
                                   <select
                                     className="border rounded p-2 text-sm w-full"
                                     value={addPlayerForm.window_key}
@@ -4321,7 +4321,7 @@ function AdminPage({ defaultTab = 'newsletters', includeSandbox = true, forcedTa
                                   </select>
                                 </div>
                                 <div>
-                                  <label className="text-xs font-medium text-gray-700 block mb-1">Position</label>
+                                  <label className="text-xs font-medium text-foreground/80 block mb-1">Position</label>
                                   <select
                                     className="border rounded p-2 text-sm w-full"
                                     value={addPlayerForm.position}
@@ -4344,7 +4344,7 @@ function AdminPage({ defaultTab = 'newsletters', includeSandbox = true, forcedTa
                                   )}
                                 </div>
                                 <div>
-                                  <label className="text-xs font-medium text-gray-700 block mb-1">Nationality</label>
+                                  <label className="text-xs font-medium text-foreground/80 block mb-1">Nationality</label>
                                   <select
                                     className="border rounded p-2 text-sm w-full"
                                     value={addPlayerForm.nationality}
@@ -4367,7 +4367,7 @@ function AdminPage({ defaultTab = 'newsletters', includeSandbox = true, forcedTa
                                   )}
                                 </div>
                                 <div>
-                                  <label className="text-xs font-medium text-gray-700 block mb-1">Age</label>
+                                  <label className="text-xs font-medium text-foreground/80 block mb-1">Age</label>
                                   <input
                                     type="number"
                                     className="border rounded p-2 text-sm w-full"
@@ -4377,7 +4377,7 @@ function AdminPage({ defaultTab = 'newsletters', includeSandbox = true, forcedTa
                                   />
                                 </div>
                                 <div>
-                                  <label className="text-xs font-medium text-gray-700 block mb-1">Sofascore ID</label>
+                                  <label className="text-xs font-medium text-foreground/80 block mb-1">Sofascore ID</label>
                                   <input
                                     type="number"
                                     className="border rounded p-2 text-sm w-full"
@@ -4417,7 +4417,7 @@ function AdminPage({ defaultTab = 'newsletters', includeSandbox = true, forcedTa
                           )}
 
                           {/* Filters Section */}
-                          <div className="bg-gray-50 border rounded-lg p-4 mb-4">
+                          <div className="bg-secondary border rounded-lg p-4 mb-4">
                             <div className="flex items-center justify-between mb-3">
                               <h3 className="font-medium text-sm">Filters</h3>
                               <div className="flex gap-2">
@@ -4431,7 +4431,7 @@ function AdminPage({ defaultTab = 'newsletters', includeSandbox = true, forcedTa
                             </div>
                             <div className="grid grid-cols-1 md:grid-cols-5 gap-3">
                               <div>
-                                <label className="text-xs font-medium text-gray-700 block mb-1">Team</label>
+                                <label className="text-xs font-medium text-foreground/80 block mb-1">Team</label>
                                 <TeamSelect
                                   teams={runTeams}
                                   value={playersHubFilters.team_id}
@@ -4440,7 +4440,7 @@ function AdminPage({ defaultTab = 'newsletters', includeSandbox = true, forcedTa
                                 />
                               </div>
                               <div>
-                                <label className="text-xs font-medium text-gray-700 block mb-1">Player Name</label>
+                                <label className="text-xs font-medium text-foreground/80 block mb-1">Player Name</label>
                                 <input
                                   className="border rounded p-2 text-sm w-full"
                                   placeholder="Search by name..."
@@ -4450,7 +4450,7 @@ function AdminPage({ defaultTab = 'newsletters', includeSandbox = true, forcedTa
                                 />
                               </div>
                               <div>
-                                <label className="text-xs font-medium text-gray-700 block mb-1">Position</label>
+                                <label className="text-xs font-medium text-foreground/80 block mb-1">Position</label>
                                 <select
                                   className="border rounded p-2 text-sm w-full"
                                   value={playersHubFilters.position || ''}
@@ -4463,7 +4463,7 @@ function AdminPage({ defaultTab = 'newsletters', includeSandbox = true, forcedTa
                                 </select>
                               </div>
                               <div>
-                                <label className="text-xs font-medium text-gray-700 block mb-1">Sofascore ID</label>
+                                <label className="text-xs font-medium text-foreground/80 block mb-1">Sofascore ID</label>
                                 <select
                                   className="border rounded p-2 text-sm w-full"
                                   value={playersHubFilters.has_sofascore}
@@ -4475,7 +4475,7 @@ function AdminPage({ defaultTab = 'newsletters', includeSandbox = true, forcedTa
                                 </select>
                               </div>
                               <div>
-                                <label className="text-xs font-medium text-gray-700 block mb-1">Status</label>
+                                <label className="text-xs font-medium text-foreground/80 block mb-1">Status</label>
                                 <select
                                   className="border rounded p-2 text-sm w-full"
                                   value={playersHubFilters.is_active || ''}
@@ -4491,7 +4491,7 @@ function AdminPage({ defaultTab = 'newsletters', includeSandbox = true, forcedTa
 
                           {/* Bulk Actions */}
                           {selectedPlayersForBulk.length > 0 && (
-                            <div className="bg-blue-50 border border-blue-200 rounded-lg p-3 mb-4">
+                            <div className="bg-primary/5 border border-primary/20 rounded-lg p-3 mb-4">
                               <div className="flex items-center justify-between">
                                 <span className="text-sm font-medium">{selectedPlayersForBulk.length} player(s) selected</span>
                                 <div className="flex gap-2">
@@ -4515,12 +4515,12 @@ function AdminPage({ defaultTab = 'newsletters', includeSandbox = true, forcedTa
                           <Accordion type="single" collapsible className="mb-4">
                             <AccordionItem value="advanced" className="border rounded-lg">
                               <AccordionTrigger className="px-4 py-2 hover:no-underline">
-                                <span className="text-sm font-medium text-gray-700">🔧 Advanced Tools & Backfill Helpers</span>
+                                <span className="text-sm font-medium text-foreground/80">🔧 Advanced Tools & Backfill Helpers</span>
                               </AccordionTrigger>
                               <AccordionContent className="px-4 pb-4">
                                 <div className="space-y-3">
                                   <div>
-                                    <div className="text-xs font-medium text-gray-700 mb-2">Backfill Operations</div>
+                                    <div className="text-xs font-medium text-foreground/80 mb-2">Backfill Operations</div>
                                     <div className="flex flex-wrap gap-2">
                                       <Button size="sm" variant="outline" onClick={backfillTeamLeagues}>
                                         Backfill Team Leagues
@@ -4532,10 +4532,10 @@ function AdminPage({ defaultTab = 'newsletters', includeSandbox = true, forcedTa
                                   </div>
 
                                   <div>
-                                    <div className="text-xs font-medium text-gray-700 mb-2">Missing Names Checker</div>
+                                    <div className="text-xs font-medium text-foreground/80 mb-2">Missing Names Checker</div>
                                     <div className="flex flex-wrap gap-2 items-end">
                                       <div className="flex-1 min-w-[200px]">
-                                        <label className="text-xs text-gray-600 block mb-1">Team (optional)</label>
+                                        <label className="text-xs text-muted-foreground block mb-1">Team (optional)</label>
                                         <TeamSelect
                                           teams={runTeams}
                                           value={mnTeamDbId}
@@ -4544,7 +4544,7 @@ function AdminPage({ defaultTab = 'newsletters', includeSandbox = true, forcedTa
                                         />
                                       </div>
                                       <div className="w-32">
-                                        <label className="text-xs text-gray-600 block mb-1">Team API ID</label>
+                                        <label className="text-xs text-muted-foreground block mb-1">Team API ID</label>
                                         <input
                                           className="border rounded p-2 text-sm w-full"
                                           placeholder="API ID"
@@ -4562,12 +4562,12 @@ function AdminPage({ defaultTab = 'newsletters', includeSandbox = true, forcedTa
 
                                     {missingNames && missingNames.length > 0 && (
                                       <div className="mt-3 border rounded-lg overflow-hidden">
-                                        <div className="bg-yellow-50 px-3 py-2 text-xs font-medium text-yellow-800">
+                                        <div className="bg-amber-50 px-3 py-2 text-xs font-medium text-amber-800">
                                           Found {missingNames.length} loans with missing names
                                         </div>
                                         <div className="max-h-48 overflow-auto">
                                           <table className="min-w-full text-xs">
-                                            <thead className="bg-gray-50 sticky top-0">
+                                            <thead className="bg-secondary sticky top-0">
                                               <tr className="text-left">
                                                 <th className="p-2">Loan ID</th>
                                                 <th className="p-2">Player ID</th>
@@ -4579,10 +4579,10 @@ function AdminPage({ defaultTab = 'newsletters', includeSandbox = true, forcedTa
                                             </thead>
                                             <tbody>
                                               {missingNames.map(m => (
-                                                <tr key={m.id} className="border-t hover:bg-gray-50">
+                                                <tr key={m.id} className="border-t hover:bg-secondary">
                                                   <td className="p-2 whitespace-nowrap">{m.id}</td>
                                                   <td className="p-2 whitespace-nowrap">{m.player_id}</td>
-                                                  <td className="p-2 text-gray-500 italic">{m.player_name || '(empty)'}</td>
+                                                  <td className="p-2 text-muted-foreground italic">{m.player_name || '(empty)'}</td>
                                                   <td className="p-2 whitespace-nowrap">{m.primary_team_name}</td>
                                                   <td className="p-2 whitespace-nowrap">{m.loan_team_name}</td>
                                                   <td className="p-2 whitespace-nowrap">{m.window_key}</td>
@@ -4601,12 +4601,12 @@ function AdminPage({ defaultTab = 'newsletters', includeSandbox = true, forcedTa
 
                           {/* Players Table */}
                           {playersHubLoading ? (
-                            <div className="text-center py-8 text-gray-500">
+                            <div className="text-center py-8 text-muted-foreground">
                               <Loader2 className="h-6 w-6 animate-spin mx-auto mb-2" />
                               Loading players...
                             </div>
                           ) : playersHubData.items.length === 0 ? (
-                            <div className="text-center py-8 text-gray-500 border rounded-lg bg-gray-50">
+                            <div className="text-center py-8 text-muted-foreground border rounded-lg bg-secondary">
                               <div className="text-sm font-medium mb-1">No players found</div>
                               <div className="text-xs">Try adjusting your filters or add a new player</div>
                             </div>
@@ -4615,7 +4615,7 @@ function AdminPage({ defaultTab = 'newsletters', includeSandbox = true, forcedTa
                               <div className="border rounded-lg overflow-hidden mb-4">
                                 <div className="overflow-x-auto">
                                   <table className="min-w-full text-sm">
-                                    <thead className="bg-gray-50 border-b">
+                                    <thead className="bg-secondary border-b">
                                       <tr className="text-left">
                                         <th className="p-3">
                                           <input
@@ -4639,7 +4639,7 @@ function AdminPage({ defaultTab = 'newsletters', includeSandbox = true, forcedTa
                                         const draftName = isEditingName ? inlinePlayerNameEdits[player.player_id] : ''
                                         const isSavingName = !!inlinePlayerNameSaving[player.player_id]
                                         return (
-                                          <tr key={player.player_id} className="hover:bg-gray-50">
+                                          <tr key={player.player_id} className="hover:bg-secondary">
                                             <td className="p-3">
                                               <input
                                                 type="checkbox"
@@ -4690,13 +4690,13 @@ function AdminPage({ defaultTab = 'newsletters', includeSandbox = true, forcedTa
                                                       </Button>
                                                     </div>
                                                   )}
-                                                  <div className="text-xs text-gray-500 mt-1">ID: {player.player_id}</div>
+                                                  <div className="text-xs text-muted-foreground mt-1">ID: {player.player_id}</div>
                                                   {player.position && (
-                                                    <div className="text-xs text-gray-500">{player.position}</div>
+                                                    <div className="text-xs text-muted-foreground">{player.position}</div>
                                                   )}
                                                 </div>
                                                 {player.player_id < 0 && (
-                                                  <span className="inline-flex items-center px-1.5 py-0.5 rounded text-xs font-medium bg-green-100 text-green-800" title="Manual Player">
+                                                  <span className="inline-flex items-center px-1.5 py-0.5 rounded text-xs font-medium bg-emerald-50 text-emerald-800" title="Manual Player">
                                                     M
                                                   </span>
                                                 )}
@@ -4705,7 +4705,7 @@ function AdminPage({ defaultTab = 'newsletters', includeSandbox = true, forcedTa
                                             <td className="p-3">
                                               <div className="space-y-2">
                                                 <div>
-                                                  <div className="text-xs text-gray-600 mb-1">Parent Club</div>
+                                                  <div className="text-xs text-muted-foreground mb-1">Parent Club</div>
                                                   <div className="text-sm font-medium mb-1">{player.primary_team_name}</div>
                                                   <TeamSelect
                                                     teams={runTeams}
@@ -4716,7 +4716,7 @@ function AdminPage({ defaultTab = 'newsletters', includeSandbox = true, forcedTa
                                                   />
                                                 </div>
                                                 <div>
-                                                  <div className="text-xs text-gray-600 mb-1">Loan Club</div>
+                                                  <div className="text-xs text-muted-foreground mb-1">Loan Club</div>
                                                   <div className="text-sm font-medium mb-1">{player.loan_team_name}</div>
                                                   <TeamSelect
                                                     teams={runTeams}
@@ -4730,7 +4730,7 @@ function AdminPage({ defaultTab = 'newsletters', includeSandbox = true, forcedTa
                                             </td>
                                             <td className="p-3">
                                               <div className="text-sm">
-                                                {player.loan_season || player.window_key || <span className="text-gray-400">No season</span>}
+                                                {player.loan_season || player.window_key || <span className="text-muted-foreground/70">No season</span>}
                                               </div>
                                             </td>
                                             <td className="p-3">
@@ -4776,12 +4776,12 @@ function AdminPage({ defaultTab = 'newsletters', includeSandbox = true, forcedTa
                                                       href={`https://www.sofascore.com/player/_/${player.sofascore_id}`}
                                                       target="_blank"
                                                       rel="noopener noreferrer"
-                                                      className="text-blue-600 hover:underline text-sm"
+                                                      className="text-primary hover:underline text-sm"
                                                     >
                                                       {player.sofascore_id}
                                                     </a>
                                                   ) : (
-                                                    <span className="text-gray-400 text-sm">—</span>
+                                                    <span className="text-muted-foreground/70 text-sm">—</span>
                                                   )}
                                                   <Button
                                                     size="sm"
@@ -4798,11 +4798,11 @@ function AdminPage({ defaultTab = 'newsletters', includeSandbox = true, forcedTa
                                             </td>
                                             <td className="p-3 text-center">
                                               {player.has_sofascore_id ? (
-                                                <span className="inline-flex items-center px-2 py-1 rounded-full text-xs font-medium bg-green-100 text-green-800">
+                                                <span className="inline-flex items-center px-2 py-1 rounded-full text-xs font-medium bg-emerald-50 text-emerald-800">
                                                   ✓ Has ID
                                                 </span>
                                               ) : (
-                                                <span className="inline-flex items-center px-2 py-1 rounded-full text-xs font-medium bg-yellow-100 text-yellow-800">
+                                                <span className="inline-flex items-center px-2 py-1 rounded-full text-xs font-medium bg-amber-50 text-amber-800">
                                                   ⚠ Missing
                                                 </span>
                                               )}
@@ -4840,8 +4840,8 @@ function AdminPage({ defaultTab = 'newsletters', includeSandbox = true, forcedTa
 
                               {/* Pagination */}
                               {playersHubData.total_pages > 1 && (
-                                <div className="flex items-center justify-between border-t border-gray-200 pt-3">
-                                  <span className="text-sm text-gray-600">
+                                <div className="flex items-center justify-between border-t border-border pt-3">
+                                  <span className="text-sm text-muted-foreground">
                                     Page {playersHubData.page} of {playersHubData.total_pages}
                                   </span>
                                   <div className="flex gap-2">
@@ -4872,7 +4872,7 @@ function AdminPage({ defaultTab = 'newsletters', includeSandbox = true, forcedTa
                   </div>
                   <div id="admin-supplemental-loans" className="border rounded p-4 md:col-span-2">
                     <h2 className="font-semibold mb-3">Manual Player Entries</h2>
-                    <p className="text-sm text-gray-600 mb-4">
+                    <p className="text-sm text-muted-foreground mb-4">
                       Add players who aren't tracked by the API-Football service. Use this for players at teams outside the API's coverage,
                       or for players missing from the automated data feeds. These entries won't have automatic stats updates.
                     </p>
@@ -4905,11 +4905,11 @@ function AdminPage({ defaultTab = 'newsletters', includeSandbox = true, forcedTa
                       </div>
                       <div className="mt-4">
                         {supplementalLoans.length === 0 ? (
-                          <div className="text-sm text-gray-600">No manual players found. Click "Apply Filters" to load or add a new one above.</div>
+                          <div className="text-sm text-muted-foreground">No manual players found. Click "Apply Filters" to load or add a new one above.</div>
                         ) : (
                           <div className="overflow-x-auto">
                             <table className="min-w-full text-sm border">
-                              <thead className="bg-gray-50">
+                              <thead className="bg-secondary">
                                 <tr className="text-left border-b">
                                   <th className="p-2">Player</th>
                                   <th className="p-2">Parent Team</th>
@@ -4923,7 +4923,7 @@ function AdminPage({ defaultTab = 'newsletters', includeSandbox = true, forcedTa
                                   <tr key={sl.id} className="border-b">
                                     <td className="p-2 whitespace-nowrap">
                                       <div className="font-medium">{sl.player_name}</div>
-                                      <div className="text-gray-500 text-xs">ID: {sl.id}</div>
+                                      <div className="text-muted-foreground text-xs">ID: {sl.id}</div>
                                     </td>
                                     <td className="p-2">{sl.parent_team_name}</td>
                                     <td className="p-2">{sl.loan_team_name}</td>
@@ -4984,11 +4984,11 @@ function AdminPage({ defaultTab = 'newsletters', includeSandbox = true, forcedTa
                     </div>
                     <div className="mt-4">
                       {newslettersAdmin.length === 0 ? (
-                        <div className="text-sm text-gray-600">No newsletters.</div>
+                        <div className="text-sm text-muted-foreground">No newsletters.</div>
                       ) : (
                         <>
                           <div className="flex flex-wrap items-center gap-2 mb-2">
-                            <label className="flex items-center gap-2 text-xs text-gray-600">
+                            <label className="flex items-center gap-2 text-xs text-muted-foreground">
                               <input
                                 type="checkbox"
                                 checked={allFilteredSelected}
@@ -4996,11 +4996,11 @@ function AdminPage({ defaultTab = 'newsletters', includeSandbox = true, forcedTa
                               />
                               <span>Select all filtered</span>
                             </label>
-                            <span className="text-xs text-gray-500">Total {totalFilteredCount}</span>
+                            <span className="text-xs text-muted-foreground">Total {totalFilteredCount}</span>
                             {allFilteredSelected && (
-                              <span className="text-xs text-gray-500">Excluding {selectedNewsletterIds.length}</span>
+                              <span className="text-xs text-muted-foreground">Excluding {selectedNewsletterIds.length}</span>
                             )}
-                            <span className="text-xs text-gray-600">Selected {selectedNewsletterCount}</span>
+                            <span className="text-xs text-muted-foreground">Selected {selectedNewsletterCount}</span>
                             <Button
                               size="sm"
                               onClick={sendAdminPreviewSelected}
@@ -5096,7 +5096,7 @@ function AdminPage({ defaultTab = 'newsletters', includeSandbox = true, forcedTa
                                         aria-label={`Select newsletter ${n.id}`}
                                       />
                                     </td>
-                                    <td className="p-2 align-top text-sm text-gray-600">#{n.id}</td>
+                                    <td className="p-2 align-top text-sm text-muted-foreground">#{n.id}</td>
                                     <td className="p-2 whitespace-nowrap">{n.team_name}</td>
                                     <td className="p-2">{n.title}</td>
                                     <td className="p-2">{n.week_start_date ? `${n.week_start_date} → ${n.week_end_date}` : ''}</td>
@@ -5115,7 +5115,7 @@ function AdminPage({ defaultTab = 'newsletters', includeSandbox = true, forcedTa
                                         </Button>
                                         <Button size="sm" variant="outline" onClick={() => startEditNewsletter(n)}>View/Edit</Button>
                                         <Button size="sm" variant="ghost" asChild>
-                                          <Link to={`/admin/newsletters/${n.id}`} className="text-blue-600 hover:underline">
+                                          <Link to={`/admin/newsletters/${n.id}`} className="text-primary hover:underline">
                                             Open detail
                                           </Link>
                                         </Button>
@@ -5142,7 +5142,7 @@ function AdminPage({ defaultTab = 'newsletters', includeSandbox = true, forcedTa
                               </tbody>
                             </table>
                           </div>
-                          <div className="flex flex-wrap items-center justify-between gap-3 border-t border-gray-200 pt-4 mt-4 text-sm text-gray-600">
+                          <div className="flex flex-wrap items-center justify-between gap-3 border-t border-border pt-4 mt-4 text-sm text-muted-foreground">
                             <span>
                               Page {adminNewsPage} of {adminTotalPages}
                               {adminPageStart > 0 ? ` • Showing ${adminPageStart}–${adminPageEnd} of ${newslettersAdmin.length}` : ''}
@@ -5190,23 +5190,23 @@ function AdminPage({ defaultTab = 'newsletters', includeSandbox = true, forcedTa
                           </DialogHeader>
                           <div className="flex-1 overflow-auto">
                             {reviewFinalizeBusy ? (
-                              <div className="flex h-full flex-col items-center justify-center gap-3 text-sm text-gray-600">
+                              <div className="flex h-full flex-col items-center justify-center gap-3 text-sm text-muted-foreground">
                                 <Loader2 className="h-6 w-6 animate-spin" />
                                 Finalizing bulk actions…
                               </div>
                             ) : (
                               <div className="grid h-full grid-cols-1 gap-4 lg:grid-cols-5">
-                                <div className="flex h-full flex-col gap-3 rounded-md border bg-gray-50 p-4 lg:col-span-2">
+                                <div className="flex h-full flex-col gap-3 rounded-md border bg-secondary p-4 lg:col-span-2">
                                   <div className="space-y-1 overflow-y-auto">
-                                    <div className="text-sm font-semibold text-gray-800">{currentReviewItem?.title || 'Untitled newsletter'}</div>
-                                    <div className="text-xs text-gray-500">Team: {reviewDetail?.team_name || currentReviewItem?.team_name || '—'}</div>
-                                    <div className="text-xs text-gray-500">Issue date: {reviewDetail?.issue_date || currentReviewItem?.issue_date || '—'}</div>
-                                    <div className="text-xs text-gray-500">Week: {reviewDetail?.week_start_date && reviewDetail?.week_end_date ? `${reviewDetail.week_start_date} → ${reviewDetail.week_end_date}` : (currentReviewItem?.week_start_date ? `${currentReviewItem.week_start_date} → ${currentReviewItem.week_end_date}` : '—')}</div>
-                                    <div className="text-xs text-gray-500">Published: {reviewDetail?.published ? `Yes (${reviewDetail?.published_date?.slice(0, 10) || ''})` : 'No'}</div>
+                                    <div className="text-sm font-semibold text-foreground">{currentReviewItem?.title || 'Untitled newsletter'}</div>
+                                    <div className="text-xs text-muted-foreground">Team: {reviewDetail?.team_name || currentReviewItem?.team_name || '—'}</div>
+                                    <div className="text-xs text-muted-foreground">Issue date: {reviewDetail?.issue_date || currentReviewItem?.issue_date || '—'}</div>
+                                    <div className="text-xs text-muted-foreground">Week: {reviewDetail?.week_start_date && reviewDetail?.week_end_date ? `${reviewDetail.week_start_date} → ${reviewDetail.week_end_date}` : (currentReviewItem?.week_start_date ? `${currentReviewItem.week_start_date} → ${currentReviewItem.week_end_date}` : '—')}</div>
+                                    <div className="text-xs text-muted-foreground">Published: {reviewDetail?.published ? `Yes (${reviewDetail?.published_date?.slice(0, 10) || ''})` : 'No'}</div>
                                     {reviewMode === 'auto' && (
-                                      <div className="text-xs text-gray-500">Queued skips: {reviewBatchExclude.length} • Queued deletes: {reviewBatchDelete.length}</div>
+                                      <div className="text-xs text-muted-foreground">Queued skips: {reviewBatchExclude.length} • Queued deletes: {reviewBatchDelete.length}</div>
                                     )}
-                                    <div className="text-xs text-gray-500">
+                                    <div className="text-xs text-muted-foreground">
                                       Keyboard: Arrow keys or j/k to navigate, space to {reviewMode === 'auto' ? 'approve & move next' : 'publish'}.
                                     </div>
                                   </div>
@@ -5218,9 +5218,9 @@ function AdminPage({ defaultTab = 'newsletters', includeSandbox = true, forcedTa
                                       <TabsTrigger value="email">Email preview</TabsTrigger>
                                     </TabsList>
                                   </Tabs>
-                                  <div className="flex-1 overflow-auto rounded-md border bg-white p-4">
+                                  <div className="flex-1 overflow-auto rounded-md border bg-card p-4">
                                     {reviewLoadingDetail ? (
-                                      <div className="flex h-full items-center justify-center gap-2 text-sm text-gray-500">
+                                      <div className="flex h-full items-center justify-center gap-2 text-sm text-muted-foreground">
                                         <Loader2 className="h-4 w-4 animate-spin" />
                                         Loading newsletter…
                                       </div>
@@ -5228,16 +5228,16 @@ function AdminPage({ defaultTab = 'newsletters', includeSandbox = true, forcedTa
                                       reviewRenderedContent.email ? (
                                         <div className="prose max-w-none" dangerouslySetInnerHTML={{ __html: reviewRenderedContent.email }} />
                                       ) : reviewRenderedContent.emailError ? (
-                                        <div className="text-sm text-red-600">{reviewRenderedContent.emailError}</div>
+                                        <div className="text-sm text-rose-600">{reviewRenderedContent.emailError}</div>
                                       ) : (
-                                        <div className="text-xs text-gray-500">Email preview not loaded yet.</div>
+                                        <div className="text-xs text-muted-foreground">Email preview not loaded yet.</div>
                                       )
                                     ) : reviewRenderedContent.web ? (
                                       <div className="prose max-w-none" dangerouslySetInnerHTML={{ __html: reviewRenderedContent.web }} />
                                     ) : reviewRenderedContent.webError ? (
-                                      <div className="text-sm text-red-600">{reviewRenderedContent.webError}</div>
+                                      <div className="text-sm text-rose-600">{reviewRenderedContent.webError}</div>
                                     ) : (
-                                      <div className="text-xs text-gray-500">Preview not available.</div>
+                                      <div className="text-xs text-muted-foreground">Preview not available.</div>
                                     )}
                                   </div>
                                 </div>
@@ -5310,11 +5310,11 @@ function AdminPage({ defaultTab = 'newsletters', includeSandbox = true, forcedTa
                         {enhancedEditorMode === 'visual' ? (
                           <div className="space-y-4">
                             {/* Metadata Section */}
-                            <div className="bg-gradient-to-r from-blue-50 to-gray-50 p-4 rounded-lg border border-blue-200">
-                              <h3 className="text-sm font-semibold mb-3 text-gray-900">Newsletter Metadata</h3>
+                            <div className="bg-gradient-to-r from-secondary to-background p-4 rounded-lg border border-primary/20">
+                              <h3 className="text-sm font-semibold mb-3 text-foreground">Newsletter Metadata</h3>
                               <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
                                 <div>
-                                  <label className="text-xs text-gray-600 mb-1 block">Title</label>
+                                  <label className="text-xs text-muted-foreground mb-1 block">Title</label>
                                   <input
                                     className="border rounded p-2 text-sm w-full"
                                     value={editingNl.title || ''}
@@ -5322,7 +5322,7 @@ function AdminPage({ defaultTab = 'newsletters', includeSandbox = true, forcedTa
                                   />
                                 </div>
                                 <div>
-                                  <label className="text-xs text-gray-600 mb-1 block">Issue Date</label>
+                                  <label className="text-xs text-muted-foreground mb-1 block">Issue Date</label>
                                   <input
                                     type="date"
                                     className="border rounded p-2 text-sm w-full"
@@ -5331,7 +5331,7 @@ function AdminPage({ defaultTab = 'newsletters', includeSandbox = true, forcedTa
                                   />
                                 </div>
                                 <div>
-                                  <label className="text-xs text-gray-600 mb-1 block">Week Start</label>
+                                  <label className="text-xs text-muted-foreground mb-1 block">Week Start</label>
                                   <input
                                     type="date"
                                     className="border rounded p-2 text-sm w-full"
@@ -5340,7 +5340,7 @@ function AdminPage({ defaultTab = 'newsletters', includeSandbox = true, forcedTa
                                   />
                                 </div>
                                 <div>
-                                  <label className="text-xs text-gray-600 mb-1 block">Week End</label>
+                                  <label className="text-xs text-muted-foreground mb-1 block">Week End</label>
                                   <input
                                     type="date"
                                     className="border rounded p-2 text-sm w-full"
@@ -5373,8 +5373,8 @@ function AdminPage({ defaultTab = 'newsletters', includeSandbox = true, forcedTa
                                   <div className="space-y-4">
                                     {/* Newsletter Summary */}
                                     {content.summary && (
-                                      <div className="bg-yellow-50 p-4 rounded-lg border border-yellow-200">
-                                        <div className="text-sm font-semibold mb-2 text-gray-900">Newsletter Summary</div>
+                                      <div className="bg-amber-50 p-4 rounded-lg border border-amber-200">
+                                        <div className="text-sm font-semibold mb-2 text-foreground">Newsletter Summary</div>
                                         <textarea
                                           className="w-full border rounded p-2 text-sm"
                                           rows="3"
@@ -5390,7 +5390,7 @@ function AdminPage({ defaultTab = 'newsletters', includeSandbox = true, forcedTa
                                     {/* Highlights */}
                                     {content.highlights && Array.isArray(content.highlights) && (
                                       <div className="bg-amber-50 p-4 rounded-lg border border-amber-200">
-                                        <div className="text-sm font-semibold mb-2 text-gray-900">Key Highlights</div>
+                                        <div className="text-sm font-semibold mb-2 text-foreground">Key Highlights</div>
                                         <div className="space-y-2">
                                           {content.highlights.map((h, idx) => (
                                             <div key={idx} className="flex gap-2">
@@ -5422,11 +5422,11 @@ function AdminPage({ defaultTab = 'newsletters', includeSandbox = true, forcedTa
                                     {filteredSections.map((section, sectionIdx) => {
                                       const originalSectionIdx = sections.findIndex(s => s === section)
                                       return (
-                                        <div key={sectionIdx} className="bg-white border-2 border-gray-200 rounded-lg overflow-hidden">
-                                          <div className="bg-gradient-to-r from-gray-100 to-gray-50 px-4 py-3 border-b border-gray-200">
+                                        <div key={sectionIdx} className="bg-card border-2 border-border rounded-lg overflow-hidden">
+                                          <div className="bg-gradient-to-r from-secondary to-background px-4 py-3 border-b border-border">
                                             <div className="flex items-center justify-between">
-                                              <h3 className="font-semibold text-gray-900">{section.title || 'Untitled Section'}</h3>
-                                              <div className="text-xs text-gray-600">{section.items?.length || 0} players</div>
+                                              <h3 className="font-semibold text-foreground">{section.title || 'Untitled Section'}</h3>
+                                              <div className="text-xs text-muted-foreground">{section.items?.length || 0} players</div>
                                             </div>
                                           </div>
                                           <div className="p-4 space-y-3">
@@ -5439,12 +5439,12 @@ function AdminPage({ defaultTab = 'newsletters', includeSandbox = true, forcedTa
                                                 )
 
                                                 return (
-                                                  <div key={itemIdx} className={`border rounded-lg p-3 ${isEditing ? 'border-blue-500 bg-blue-50' : 'border-gray-200 bg-gray-50 hover:bg-white'} transition-colors`}>
+                                                  <div key={itemIdx} className={`border rounded-lg p-3 ${isEditing ? 'border-primary bg-primary/5' : 'border-border bg-secondary hover:bg-card'} transition-colors`}>
                                                     {isEditing ? (
                                                       <div className="space-y-3">
                                                         <div className="grid grid-cols-2 gap-2">
                                                           <div>
-                                                            <label className="text-xs font-medium text-gray-700">Player Name</label>
+                                                            <label className="text-xs font-medium text-foreground/80">Player Name</label>
                                                             <input
                                                               className="w-full border rounded p-2 text-sm mt-1"
                                                               value={editingPlayerCard.data.player_name || ''}
@@ -5455,7 +5455,7 @@ function AdminPage({ defaultTab = 'newsletters', includeSandbox = true, forcedTa
                                                             />
                                                           </div>
                                                           <div>
-                                                            <label className="text-xs font-medium text-gray-700">Loan Team</label>
+                                                            <label className="text-xs font-medium text-foreground/80">Loan Team</label>
                                                             <input
                                                               className="w-full border rounded p-2 text-sm mt-1"
                                                               value={editingPlayerCard.data.loan_team || ''}
@@ -5468,7 +5468,7 @@ function AdminPage({ defaultTab = 'newsletters', includeSandbox = true, forcedTa
                                                         </div>
                                                         <div className="grid grid-cols-3 gap-2">
                                                           <div>
-                                                            <label className="text-xs font-medium text-gray-700">Goals</label>
+                                                            <label className="text-xs font-medium text-foreground/80">Goals</label>
                                                             <input
                                                               type="number"
                                                               className="w-full border rounded p-2 text-sm mt-1"
@@ -5483,7 +5483,7 @@ function AdminPage({ defaultTab = 'newsletters', includeSandbox = true, forcedTa
                                                             />
                                                           </div>
                                                           <div>
-                                                            <label className="text-xs font-medium text-gray-700">Assists</label>
+                                                            <label className="text-xs font-medium text-foreground/80">Assists</label>
                                                             <input
                                                               type="number"
                                                               className="w-full border rounded p-2 text-sm mt-1"
@@ -5498,7 +5498,7 @@ function AdminPage({ defaultTab = 'newsletters', includeSandbox = true, forcedTa
                                                             />
                                                           </div>
                                                           <div>
-                                                            <label className="text-xs font-medium text-gray-700">Minutes</label>
+                                                            <label className="text-xs font-medium text-foreground/80">Minutes</label>
                                                             <input
                                                               type="number"
                                                               className="w-full border rounded p-2 text-sm mt-1"
@@ -5514,7 +5514,7 @@ function AdminPage({ defaultTab = 'newsletters', includeSandbox = true, forcedTa
                                                           </div>
                                                         </div>
                                                         <div>
-                                                          <label className="text-xs font-medium text-gray-700">Week Summary</label>
+                                                          <label className="text-xs font-medium text-foreground/80">Week Summary</label>
                                                           <textarea
                                                             className="w-full border rounded p-2 text-sm mt-1"
                                                             rows="3"
@@ -5546,16 +5546,16 @@ function AdminPage({ defaultTab = 'newsletters', includeSandbox = true, forcedTa
                                                         <div className="flex items-start justify-between mb-2">
                                                           <div className="flex-1">
                                                             <div className="flex items-center gap-2 flex-wrap">
-                                                              <span className="font-semibold text-gray-900">{item.player_name}</span>
+                                                              <span className="font-semibold text-foreground">{item.player_name}</span>
                                                               {item.loan_team && (
-                                                                <span className="bg-blue-100 text-blue-800 px-2 py-0.5 rounded text-xs font-medium">
+                                                                <span className="bg-primary/10 text-primary px-2 py-0.5 rounded text-xs font-medium">
                                                                   → {item.loan_team}
                                                                 </span>
                                                               )}
                                                               {item.stats && (
                                                                 <div className="flex gap-1">
                                                                   {item.stats.goals > 0 && (
-                                                                    <span className="bg-green-100 text-green-800 px-2 py-0.5 rounded text-xs font-medium">
+                                                                    <span className="bg-emerald-50 text-emerald-800 px-2 py-0.5 rounded text-xs font-medium">
                                                                       {item.stats.goals}G
                                                                     </span>
                                                                   )}
@@ -5565,7 +5565,7 @@ function AdminPage({ defaultTab = 'newsletters', includeSandbox = true, forcedTa
                                                                     </span>
                                                                   )}
                                                                   {item.stats.minutes > 0 && (
-                                                                    <span className="bg-blue-100 text-blue-800 px-2 py-0.5 rounded text-xs font-medium">
+                                                                    <span className="bg-primary/10 text-primary px-2 py-0.5 rounded text-xs font-medium">
                                                                       {item.stats.minutes}'
                                                                     </span>
                                                                   )}
@@ -5576,14 +5576,14 @@ function AdminPage({ defaultTab = 'newsletters', includeSandbox = true, forcedTa
                                                                   href={playerYoutubeLink.youtube_link}
                                                                   target="_blank"
                                                                   rel="noopener noreferrer"
-                                                                  className="bg-red-100 text-red-800 px-2 py-0.5 rounded text-xs font-medium hover:bg-red-200"
+                                                                  className="bg-rose-50 text-rose-800 px-2 py-0.5 rounded text-xs font-medium hover:bg-rose-200"
                                                                 >
                                                                   🎬 Highlights
                                                                 </a>
                                                               )}
                                                             </div>
                                                             {item.week_summary && (
-                                                              <p className="text-sm text-gray-700 mt-2 leading-relaxed">{item.week_summary}</p>
+                                                              <p className="text-sm text-foreground/80 mt-2 leading-relaxed">{item.week_summary}</p>
                                                             )}
                                                           </div>
                                                           <div className="flex gap-1 ml-2">
@@ -5633,7 +5633,7 @@ function AdminPage({ defaultTab = 'newsletters', includeSandbox = true, forcedTa
                                                 )
                                               })
                                             ) : (
-                                              <div className="text-center py-4 text-sm text-gray-500">
+                                              <div className="text-center py-4 text-sm text-muted-foreground">
                                                 No players in this section
                                               </div>
                                             )}
@@ -5645,7 +5645,7 @@ function AdminPage({ defaultTab = 'newsletters', includeSandbox = true, forcedTa
                                 )
                               } catch (error) {
                                 return (
-                                  <div className="bg-red-50 border border-red-200 rounded p-4 text-sm text-red-700">
+                                  <div className="bg-rose-50 border border-rose-200 rounded p-4 text-sm text-rose-700">
                                     Unable to parse newsletter content. Switch to JSON Editor to fix.
                                   </div>
                                 )
@@ -5658,7 +5658,7 @@ function AdminPage({ defaultTab = 'newsletters', includeSandbox = true, forcedTa
                                 🎬 YouTube Links for Players
                               </h3>
                               <div className="mb-3 space-y-2">
-                                <div className="text-xs text-gray-600">Add YouTube highlight links to players in this newsletter</div>
+                                <div className="text-xs text-muted-foreground">Add YouTube highlight links to players in this newsletter</div>
                                 <div className="grid grid-cols-1 sm:grid-cols-3 gap-2">
                                   <select
                                     className="border rounded p-2 text-sm"
@@ -5690,10 +5690,10 @@ function AdminPage({ defaultTab = 'newsletters', includeSandbox = true, forcedTa
                               </div>
                               <div className="space-y-2">
                                 {nlYoutubeLinks.length === 0 ? (
-                                  <div className="text-xs text-gray-500">No YouTube links added yet</div>
+                                  <div className="text-xs text-muted-foreground">No YouTube links added yet</div>
                                 ) : (
                                   nlYoutubeLinks.map((link) => (
-                                    <div key={link.id} className="bg-white border rounded p-2 flex items-center gap-2">
+                                    <div key={link.id} className="bg-card border rounded p-2 flex items-center gap-2">
                                       <div className="flex-1">
                                         <div className="text-sm font-medium">{link.player_name}</div>
                                         {editingNlYoutubeLink?.id === link.id ? (
@@ -5703,7 +5703,7 @@ function AdminPage({ defaultTab = 'newsletters', includeSandbox = true, forcedTa
                                             onChange={(e) => setEditingNlYoutubeLink({ ...editingNlYoutubeLink, youtube_link: e.target.value })}
                                           />
                                         ) : (
-                                          <a href={link.youtube_link} target="_blank" rel="noopener noreferrer" className="text-xs text-blue-600 hover:underline truncate block">
+                                          <a href={link.youtube_link} target="_blank" rel="noopener noreferrer" className="text-xs text-primary hover:underline truncate block">
                                             {link.youtube_link}
                                           </a>
                                         )}
@@ -5741,7 +5741,7 @@ function AdminPage({ defaultTab = 'newsletters', includeSandbox = true, forcedTa
 
                             {/* Preview Section */}
                             <div className="border rounded-lg overflow-hidden">
-                              <div className="bg-gray-100 px-4 py-2 border-b flex items-center justify-between">
+                              <div className="bg-secondary px-4 py-2 border-b flex items-center justify-between">
                                 <span className="text-sm font-semibold">Live Preview</span>
                                 <div className="flex items-center gap-2">
                                   <Button size="sm" variant={previewFormat === 'web' ? 'default' : 'outline'} onClick={() => setPreviewFormat('web')}>Web</Button>
@@ -5749,15 +5749,15 @@ function AdminPage({ defaultTab = 'newsletters', includeSandbox = true, forcedTa
                                   <Button size="sm" variant="ghost" onClick={refreshPreview}>Reload</Button>
                                 </div>
                               </div>
-                              <div className="bg-white max-h-[520px] overflow-auto p-4">
+                              <div className="bg-card max-h-[520px] overflow-auto p-4">
                                 {previewError ? (
-                                  <div className="p-3 text-sm text-red-700 bg-red-50 border border-red-200 rounded">
+                                  <div className="p-3 text-sm text-rose-700 bg-rose-50 border border-rose-200 rounded">
                                     {previewError}
                                   </div>
                                 ) : previewHtml ? (
                                   <div dangerouslySetInnerHTML={{ __html: previewHtml }} />
                                 ) : (
-                                  <div className="p-3 text-sm text-gray-500">No preview loaded yet. Click "Reload" to generate.</div>
+                                  <div className="p-3 text-sm text-muted-foreground">No preview loaded yet. Click "Reload" to generate.</div>
                                 )}
                               </div>
                             </div>
@@ -5782,7 +5782,7 @@ function AdminPage({ defaultTab = 'newsletters', includeSandbox = true, forcedTa
                             </div>
                             <div className="flex flex-col gap-2">
                               <div className="text-sm font-medium">Preview</div>
-                              <div className="border rounded bg-white p-4 max-h-[600px] overflow-auto">
+                              <div className="border rounded bg-card p-4 max-h-[600px] overflow-auto">
                                 {(() => {
                                   try {
                                     const obj = (() => { try { return typeof editingNl.content === 'string' ? JSON.parse(editingNl.content) : (editingNl.content || {}) } catch { return {} } })()
@@ -5791,45 +5791,45 @@ function AdminPage({ defaultTab = 'newsletters', includeSandbox = true, forcedTa
                                       : []
                                     return (
                                       <div className="space-y-4">
-                                        <div className="bg-gradient-to-r from-blue-50 to-gray-50 p-4 rounded border-l-4 border-blue-500">
-                                          <div className="text-xl font-bold text-gray-900 mb-1">{obj.title || editingNl.title}</div>
+                                        <div className="bg-gradient-to-r from-secondary to-background p-4 rounded border-l-4 border-primary/20">
+                                          <div className="text-xl font-bold text-foreground mb-1">{obj.title || editingNl.title}</div>
                                           {obj.range && (
-                                            <div className="text-xs text-gray-600">Week: {obj.range[0]} - {obj.range[1]}</div>
+                                            <div className="text-xs text-muted-foreground">Week: {obj.range[0]} - {obj.range[1]}</div>
                                           )}
                                           {obj.summary && (
-                                            <div className="text-gray-700 leading-relaxed mt-2">{obj.summary}</div>
+                                            <div className="text-foreground/80 leading-relaxed mt-2">{obj.summary}</div>
                                           )}
                                         </div>
                                         {obj.highlights && Array.isArray(obj.highlights) && obj.highlights.length > 0 && (
-                                          <div className="bg-yellow-50 p-3 rounded border-l-4 border-yellow-400">
-                                            <div className="text-sm font-semibold text-gray-900 mb-2">Key Highlights</div>
+                                          <div className="bg-amber-50 p-3 rounded border-l-4 border-amber-400">
+                                            <div className="text-sm font-semibold text-foreground mb-2">Key Highlights</div>
                                             <ul className="list-disc ml-5 space-y-1">
-                                              {obj.highlights.map((h, i) => (<li key={i} className="text-sm text-gray-700">{h}</li>))}
+                                              {obj.highlights.map((h, i) => (<li key={i} className="text-sm text-foreground/80">{h}</li>))}
                                             </ul>
                                           </div>
                                         )}
                                         {previewSections.length > 0 && (
                                           <div className="space-y-3">
                                             {previewSections.map((sec, si) => (
-                                              <div key={si} className="bg-white border rounded">
+                                              <div key={si} className="bg-card border rounded">
                                                 {sec.title && (
-                                                  <div className="bg-gray-100 px-3 py-2 border-b text-sm font-semibold">{sec.title}</div>
+                                                  <div className="bg-secondary px-3 py-2 border-b text-sm font-semibold">{sec.title}</div>
                                                 )}
                                                 <div className="p-3 space-y-2">
                                                   {sec.items && sec.items.map((it, ii) => (
-                                                    <div key={ii} className="border-l-4 border-blue-200 pl-3 py-1">
+                                                    <div key={ii} className="border-l-4 border-primary/20 pl-3 py-1">
                                                       <div className="flex flex-wrap items-center gap-2">
-                                                        {it.player_name && (<span className="font-semibold text-gray-900">{it.player_name}</span>)}
-                                                        {it.loan_team && (<span className="bg-blue-100 text-blue-800 px-2 py-0.5 rounded text-xs">→ {it.loan_team}</span>)}
+                                                        {it.player_name && (<span className="font-semibold text-foreground">{it.player_name}</span>)}
+                                                        {it.loan_team && (<span className="bg-primary/10 text-primary px-2 py-0.5 rounded text-xs">→ {it.loan_team}</span>)}
                                                         {it.stats && (
                                                           <div className="flex gap-1 text-xs">
-                                                            {it.stats.goals > 0 && (<span className="bg-green-100 text-green-800 px-1 rounded">{it.stats.goals}G</span>)}
+                                                            {it.stats.goals > 0 && (<span className="bg-emerald-50 text-emerald-800 px-1 rounded">{it.stats.goals}G</span>)}
                                                             {it.stats.assists > 0 && (<span className="bg-purple-100 text-purple-800 px-1 rounded">{it.stats.assists}A</span>)}
-                                                            {it.stats.minutes > 0 && (<span className="bg-blue-100 text-blue-800 px-1 rounded">{it.stats.minutes}'</span>)}
+                                                            {it.stats.minutes > 0 && (<span className="bg-primary/10 text-primary px-1 rounded">{it.stats.minutes}'</span>)}
                                                           </div>
                                                         )}
                                                       </div>
-                                                      {it.week_summary && (<div className="text-sm text-gray-700">{it.week_summary}</div>)}
+                                                      {it.week_summary && (<div className="text-sm text-foreground/80">{it.week_summary}</div>)}
                                                     </div>
                                                   ))}
                                                 </div>
@@ -5840,7 +5840,7 @@ function AdminPage({ defaultTab = 'newsletters', includeSandbox = true, forcedTa
                                       </div>
                                     )
                                   } catch {
-                                    return <div className="text-sm text-gray-600">Unable to render preview. Check JSON syntax.</div>
+                                    return <div className="text-sm text-muted-foreground">Unable to render preview. Check JSON syntax.</div>
                                   }
                                 })()}
                               </div>
@@ -5874,13 +5874,13 @@ function AdminPage({ defaultTab = 'newsletters', includeSandbox = true, forcedTa
                   )}
 
                   {sandboxLoading && !sandboxTasks.length ? (
-                    <div className="rounded-lg border bg-white p-6 text-sm text-gray-600">
+                    <div className="rounded-lg border bg-card p-6 text-sm text-muted-foreground">
                       Loading sandbox tasks…
                     </div>
                   ) : null}
 
                   {!sandboxLoading && !sandboxTasks.length && !sandboxError ? (
-                    <div className="rounded-lg border bg-white p-6 text-sm text-gray-600">
+                    <div className="rounded-lg border bg-card p-6 text-sm text-muted-foreground">
                       No sandbox tasks are currently registered.
                     </div>
                   ) : null}
@@ -5905,11 +5905,11 @@ function AdminPage({ defaultTab = 'newsletters', includeSandbox = true, forcedTa
                             </div>
                             <div className="flex items-center gap-2">
                               {outcome?.status === 'ok' ? (
-                                <span className="text-xs font-medium text-green-600">Success</span>
+                                <span className="text-xs font-medium text-emerald-600">Success</span>
                               ) : null}
                               {outcome?.status === 'error' ? (
                                 <span
-                                  className="max-w-[12rem] truncate text-xs font-medium text-red-600"
+                                  className="max-w-[12rem] truncate text-xs font-medium text-rose-600"
                                   title={outcome.message}
                                 >
                                   {outcome.message}
@@ -5919,7 +5919,7 @@ function AdminPage({ defaultTab = 'newsletters', includeSandbox = true, forcedTa
                                 type="button"
                                 onClick={() => toggleSandboxTaskCollapsed(task.task_id)}
                                 aria-expanded={!isCollapsed}
-                                className="inline-flex items-center gap-1 rounded-md border border-gray-200 bg-gray-100 px-2 py-1 text-xs font-medium text-gray-700 transition hover:bg-gray-200"
+                                className="inline-flex items-center gap-1 rounded-md border border-border bg-secondary px-2 py-1 text-xs font-medium text-foreground/80 transition hover:bg-muted"
                               >
                                 <ToggleIcon className="h-4 w-4" />
                                 {isCollapsed ? 'Expand' : 'Collapse'}
@@ -5950,7 +5950,7 @@ function AdminPage({ defaultTab = 'newsletters', includeSandbox = true, forcedTa
                                         : null
 
                                       return (
-                                        <label key={param.name} className="flex flex-col gap-2 text-sm font-medium text-gray-700">
+                                        <label key={param.name} className="flex flex-col gap-2 text-sm font-medium text-foreground/80">
                                           <span>{param.label}</span>
                                           {param.type === 'checkbox' ? (
                                             <div className="flex items-center gap-2 text-sm font-normal">
@@ -5959,7 +5959,7 @@ function AdminPage({ defaultTab = 'newsletters', includeSandbox = true, forcedTa
                                                 checked={!!values[param.name]}
                                                 onChange={handleSandboxInputChange(task.task_id, param.name, param.type)}
                                               />
-                                              {param.help ? <span className="text-gray-600">{param.help}</span> : null}
+                                              {param.help ? <span className="text-muted-foreground">{param.help}</span> : null}
                                             </div>
                                           ) : hasSelect ? (
                                             <Select
@@ -6002,33 +6002,33 @@ function AdminPage({ defaultTab = 'newsletters', includeSandbox = true, forcedTa
                                             />
                                           )}
                                           {param.type !== 'checkbox' && param.help ? (
-                                            <span className="text-xs font-normal text-gray-500">{param.help}</span>
+                                            <span className="text-xs font-normal text-muted-foreground">{param.help}</span>
                                           ) : null}
                                         </label>
                                       )
                                     })}
                                   </div>
                                 ) : (
-                                  <p className="text-sm text-gray-600">No parameters required.</p>
+                                  <p className="text-sm text-muted-foreground">No parameters required.</p>
                                 )}
                                 <div className="flex items-center gap-3">
                                   <Button type="submit" size="sm" disabled={isRunning}>
                                     {isRunning ? 'Running…' : 'Run task'}
                                   </Button>
                                   {outcome?.status === 'ok' && (
-                                    <span className="text-sm text-green-600">Success</span>
+                                    <span className="text-sm text-emerald-600">Success</span>
                                   )}
                                   {outcome?.status === 'error' && (
-                                    <span className="text-sm text-red-600">{outcome.message}</span>
+                                    <span className="text-sm text-rose-600">{outcome.message}</span>
                                   )}
                                 </div>
                                 {task.task_id !== 'list-missing-sofascore-ids' && outcome?.status === 'ok' && outcome.result && (
-                                  <pre className="mt-3 max-h-64 overflow-auto rounded-md bg-gray-900 p-3 text-xs text-gray-100">
+                                  <pre className="mt-3 max-h-64 overflow-auto rounded-md bg-foreground p-3 text-xs text-card">
                                     {JSON.stringify(outcome.result, null, 2)}
                                   </pre>
                                 )}
                                 {outcome?.status === 'error' && outcome.detail && (
-                                  <pre className="mt-3 max-h-64 overflow-auto rounded-md bg-red-900/80 p-3 text-xs text-red-100">
+                                  <pre className="mt-3 max-h-64 overflow-auto rounded-md bg-rose-900/80 p-3 text-xs text-rose-100">
                                     {typeof outcome.detail === 'string'
                                       ? outcome.detail
                                       : JSON.stringify(outcome.detail, null, 2)}
@@ -6043,14 +6043,14 @@ function AdminPage({ defaultTab = 'newsletters', includeSandbox = true, forcedTa
                                     </Alert>
                                   )}
                                   {sofascorePlayers.length === 0 ? (
-                                    <p className="text-sm text-gray-600">
+                                    <p className="text-sm text-muted-foreground">
                                       Run the task to load players missing Sofascore ids.
                                     </p>
                                   ) : (
                                     <div className="overflow-auto">
                                       <table className="min-w-full text-sm">
                                         <thead>
-                                          <tr className="text-left text-xs uppercase tracking-wide text-gray-500">
+                                          <tr className="text-left text-xs uppercase tracking-wide text-muted-foreground">
                                             <th className="pb-2 pr-4">Player</th>
                                             <th className="pb-2 pr-4">Parent Club</th>
                                             <th className="pb-2 pr-4">Loan Club</th>
@@ -6069,13 +6069,13 @@ function AdminPage({ defaultTab = 'newsletters', includeSandbox = true, forcedTa
                                                 : '—'
                                             const value = sofascoreInputs[rowKey] ?? (player?.sofascore_id ? String(player.sofascore_id) : '')
                                             return (
-                                              <tr key={rowKey} className="border-t border-gray-100 last:border-b">
+                                              <tr key={rowKey} className="border-t border-border last:border-b">
                                                 <td className="py-2 pr-4 align-top">
-                                                  <div className="font-medium text-gray-900">{player?.player_name || (player?.player_id ? `Player #${player.player_id}` : 'Supplemental player')}</div>
-                                                  <div className="text-xs text-gray-500">{apiLabel}</div>
+                                                  <div className="font-medium text-foreground">{player?.player_name || (player?.player_id ? `Player #${player.player_id}` : 'Supplemental player')}</div>
+                                                  <div className="text-xs text-muted-foreground">{apiLabel}</div>
                                                 </td>
-                                                <td className="py-2 pr-4 align-top text-gray-600">{player?.primary_team || '—'}</td>
-                                                <td className="py-2 pr-4 align-top text-gray-600">{player?.loan_team || '—'}</td>
+                                                <td className="py-2 pr-4 align-top text-muted-foreground">{player?.primary_team || '—'}</td>
+                                                <td className="py-2 pr-4 align-top text-muted-foreground">{player?.loan_team || '—'}</td>
                                                 <td className="py-2 pr-4 align-top">
                                                   <Input
                                                     aria-label={`Sofascore id for ${player?.player_name || apiLabel}`}
@@ -6158,7 +6158,7 @@ function AdminPage({ defaultTab = 'newsletters', includeSandbox = true, forcedTa
                 <div className="border rounded p-4">
                   <h2 className="font-semibold mb-3">Pending Player Flags</h2>
                   {flags.length === 0 ? (
-                    <p className="text-sm text-gray-600">No pending flags.</p>
+                    <p className="text-sm text-muted-foreground">No pending flags.</p>
                   ) : (
                     <div className="space-y-3">
                       {flags.map(f => {
@@ -6169,12 +6169,12 @@ function AdminPage({ defaultTab = 'newsletters', includeSandbox = true, forcedTa
                         return (
                           <div key={f.id} className="border rounded p-3">
                             <div className="text-sm font-semibold">Flag #{f.id}</div>
-                            <div className="mt-1 grid gap-1 text-sm text-gray-700">
+                            <div className="mt-1 grid gap-1 text-sm text-foreground/80">
                               <div>Player API: {f.player_api_id}</div>
                               <div>Primary Team API: {f.primary_team_api_id}</div>
                               {f.loan_team_api_id && <div>Loan Team API: {f.loan_team_api_id}</div>}
                               {f.season && <div>Season: {f.season}</div>}
-                              <div className="text-gray-800">Reason: {f.reason}</div>
+                              <div className="text-foreground">Reason: {f.reason}</div>
                             </div>
                             <div className="mt-2 flex flex-wrap gap-2">
                               <Button
@@ -6189,18 +6189,18 @@ function AdminPage({ defaultTab = 'newsletters', includeSandbox = true, forcedTa
                               <Button size="sm" variant="outline" onClick={() => resolveFlag(f.id, true)}>Resolve + Deactivate Loan</Button>
                             </div>
                             {editor && (
-                              <div className="mt-3 space-y-3 rounded border border-dashed bg-white/70 p-3 text-sm">
+                              <div className="mt-3 space-y-3 rounded border border-dashed bg-card/70 p-3 text-sm">
                                 {editor.loading ? (
-                                  <div className="flex items-center gap-2 text-gray-600">
+                                  <div className="flex items-center gap-2 text-muted-foreground">
                                     <Loader2 className="h-4 w-4 animate-spin" /> Loading loan details…
                                   </div>
                                 ) : editor.error ? (
-                                  <div className="rounded border border-red-200 bg-red-50 p-2 text-red-700">{editor.error}</div>
+                                  <div className="rounded border border-rose-200 bg-rose-50 p-2 text-rose-700">{editor.error}</div>
                                 ) : (
                                   <>
                                     {loanOptions.length > 1 && (
                                       <div className="grid gap-1">
-                                        <Label className="text-xs uppercase tracking-wide text-gray-500">Loan record</Label>
+                                        <Label className="text-xs uppercase tracking-wide text-muted-foreground">Loan record</Label>
                                         <Select
                                           value={String(editor.selectedLoanId)}
                                           onValueChange={(value) => selectFlagLoanRecord(f.id, value)}
@@ -6219,13 +6219,13 @@ function AdminPage({ defaultTab = 'newsletters', includeSandbox = true, forcedTa
                                       </div>
                                     )}
                                     {selectedLoan && (
-                                      <div className="rounded bg-gray-50 p-2 text-xs text-gray-600">
+                                      <div className="rounded bg-secondary p-2 text-xs text-muted-foreground">
                                         Current assignment: {selectedLoan.primary_team_name} → {selectedLoan.loan_team_name}
                                       </div>
                                     )}
                                     <div className="grid gap-3 sm:grid-cols-2">
                                       <div className="space-y-1">
-                                        <Label className="text-xs uppercase tracking-wide text-gray-500">Primary team</Label>
+                                        <Label className="text-xs uppercase tracking-wide text-muted-foreground">Primary team</Label>
                                         <TeamSelect
                                           teams={teamOptions}
                                           value={editor.primaryTeamId ?? null}
@@ -6234,7 +6234,7 @@ function AdminPage({ defaultTab = 'newsletters', includeSandbox = true, forcedTa
                                         />
                                       </div>
                                       <div className="space-y-1">
-                                        <Label className="text-xs uppercase tracking-wide text-gray-500">Loan team</Label>
+                                        <Label className="text-xs uppercase tracking-wide text-muted-foreground">Loan team</Label>
                                         <TeamSelect
                                           teams={teamOptions}
                                           value={editor.loanTeamId ?? null}
@@ -6294,13 +6294,13 @@ function AdminPage({ defaultTab = 'newsletters', includeSandbox = true, forcedTa
         {/* Edit Player Dialog */}
         {editingPlayerDialog && (
           <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center p-4 z-50" onClick={() => setEditingPlayerDialog(null)}>
-            <div className="bg-white rounded-lg p-6 max-w-2xl w-full max-h-[90vh] overflow-y-auto" onClick={(e) => e.stopPropagation()}>
+            <div className="bg-card rounded-lg p-6 max-w-2xl w-full max-h-[90vh] overflow-y-auto" onClick={(e) => e.stopPropagation()}>
               <h2 className="text-xl font-semibold mb-4">Edit Player</h2>
 
               <div className="space-y-4">
                 {/* Player Name */}
                 <div>
-                  <label className="text-sm font-medium text-gray-700 block mb-1">Player Name *</label>
+                  <label className="text-sm font-medium text-foreground/80 block mb-1">Player Name *</label>
                   <input
                     type="text"
                     className="border rounded p-2 text-sm w-full"
@@ -6312,7 +6312,7 @@ function AdminPage({ defaultTab = 'newsletters', includeSandbox = true, forcedTa
                 <div className="grid grid-cols-2 gap-4">
                   {/* Position */}
                   <div>
-                    <label className="text-sm font-medium text-gray-700 block mb-1">Position</label>
+                    <label className="text-sm font-medium text-foreground/80 block mb-1">Position</label>
                     <select
                       className="border rounded p-2 text-sm w-full"
                       value={editPlayerForm.position}
@@ -6327,7 +6327,7 @@ function AdminPage({ defaultTab = 'newsletters', includeSandbox = true, forcedTa
 
                   {/* Nationality */}
                   <div>
-                    <label className="text-sm font-medium text-gray-700 block mb-1">Nationality</label>
+                    <label className="text-sm font-medium text-foreground/80 block mb-1">Nationality</label>
                     <select
                       className="border rounded p-2 text-sm w-full"
                       value={editPlayerForm.nationality}
@@ -6344,7 +6344,7 @@ function AdminPage({ defaultTab = 'newsletters', includeSandbox = true, forcedTa
                 <div className="grid grid-cols-2 gap-4">
                   {/* Age */}
                   <div>
-                    <label className="text-sm font-medium text-gray-700 block mb-1">Age</label>
+                    <label className="text-sm font-medium text-foreground/80 block mb-1">Age</label>
                     <input
                       type="number"
                       className="border rounded p-2 text-sm w-full"
@@ -6355,7 +6355,7 @@ function AdminPage({ defaultTab = 'newsletters', includeSandbox = true, forcedTa
 
                   {/* Sofascore ID */}
                   <div>
-                    <label className="text-sm font-medium text-gray-700 block mb-1">Sofascore ID</label>
+                    <label className="text-sm font-medium text-foreground/80 block mb-1">Sofascore ID</label>
                     <input
                       type="number"
                       className="border rounded p-2 text-sm w-full"
@@ -6368,8 +6368,8 @@ function AdminPage({ defaultTab = 'newsletters', includeSandbox = true, forcedTa
                 {/* Primary Team */}
                 <div>
                   <div className="flex items-center justify-between mb-1">
-                    <label className="text-sm font-medium text-gray-700">Primary Team (Parent Club) *</label>
-                    <label className="flex items-center gap-1 text-xs text-gray-600 cursor-pointer">
+                    <label className="text-sm font-medium text-foreground/80">Primary Team (Parent Club) *</label>
+                    <label className="flex items-center gap-1 text-xs text-muted-foreground cursor-pointer">
                       <input
                         type="checkbox"
                         checked={editPlayerForm.use_custom_primary_team}
@@ -6404,8 +6404,8 @@ function AdminPage({ defaultTab = 'newsletters', includeSandbox = true, forcedTa
                 {/* Loan Team */}
                 <div>
                   <div className="flex items-center justify-between mb-1">
-                    <label className="text-sm font-medium text-gray-700">Loan Team (Current Club) *</label>
-                    <label className="flex items-center gap-1 text-xs text-gray-600 cursor-pointer">
+                    <label className="text-sm font-medium text-foreground/80">Loan Team (Current Club) *</label>
+                    <label className="flex items-center gap-1 text-xs text-muted-foreground cursor-pointer">
                       <input
                         type="checkbox"
                         checked={editPlayerForm.use_custom_loan_team}
@@ -6439,7 +6439,7 @@ function AdminPage({ defaultTab = 'newsletters', includeSandbox = true, forcedTa
 
                 {/* Season/Window */}
                 <div>
-                  <label className="text-sm font-medium text-gray-700 block mb-1">Season / Window</label>
+                  <label className="text-sm font-medium text-foreground/80 block mb-1">Season / Window</label>
                   <select
                     className="border rounded p-2 text-sm w-full"
                     value={editPlayerForm.window_key}
@@ -6564,7 +6564,7 @@ function SoccerBallToggleIcon({ spinning }) {
   return (
     <svg
       viewBox="0 0 64 64"
-      className="h-10 w-10 text-gray-800"
+      className="h-10 w-10 text-foreground"
       style={{ transform: spinning ? 'rotate(360deg)' : 'rotate(0deg)', transition: 'transform 0.6s ease' }}
       aria-hidden="true"
     >
@@ -6867,13 +6867,13 @@ function AdminSandboxPage() {
       )}
 
       {loading && !tasks.length ? (
-        <div className="rounded-lg border bg-white p-6 text-sm text-gray-600">
+        <div className="rounded-lg border bg-card p-6 text-sm text-muted-foreground">
           Loading sandbox tasks…
         </div>
       ) : null}
 
       {!loading && !tasks.length && !error ? (
-        <div className="rounded-lg border bg-white p-6 text-sm text-gray-600">
+        <div className="rounded-lg border bg-card p-6 text-sm text-muted-foreground">
           No sandbox tasks are currently registered.
         </div>
       ) : null}
@@ -6890,19 +6890,19 @@ function AdminSandboxPage() {
           const ToggleIcon = isCollapsed ? ChevronRight : ChevronDown
 
           return (
-            <div key={task.task_id} className="rounded-xl border bg-white shadow-sm">
+            <div key={task.task_id} className="rounded-xl border bg-card shadow-sm">
               <div className={sandboxCardHeaderClasses('shadow-sm')}>
                 <div className="space-y-1">
                   <h2 className="text-lg font-semibold">{task.label}</h2>
-                  <p className="text-sm text-gray-600">{task.description}</p>
+                  <p className="text-sm text-muted-foreground">{task.description}</p>
                 </div>
                 <div className="flex items-center gap-2">
                   {outcome?.status === 'ok' ? (
-                    <span className="text-xs font-medium text-green-600">Success</span>
+                    <span className="text-xs font-medium text-emerald-600">Success</span>
                   ) : null}
                   {outcome?.status === 'error' ? (
                     <span
-                      className="max-w-[12rem] truncate text-xs font-medium text-red-600"
+                      className="max-w-[12rem] truncate text-xs font-medium text-rose-600"
                       title={outcome.message}
                     >
                       {outcome.message}
@@ -6912,7 +6912,7 @@ function AdminSandboxPage() {
                     type="button"
                     onClick={() => toggleTaskCollapsed(task.task_id)}
                     aria-expanded={!isCollapsed}
-                    className="inline-flex items-center gap-1 rounded-md border border-gray-200 bg-gray-100 px-2 py-1 text-xs font-medium text-gray-700 transition hover:bg-gray-200"
+                    className="inline-flex items-center gap-1 rounded-md border border-border bg-secondary px-2 py-1 text-xs font-medium text-foreground/80 transition hover:bg-muted"
                   >
                     <ToggleIcon className="h-4 w-4" />
                     {isCollapsed ? 'Expand' : 'Collapse'}
@@ -6943,7 +6943,7 @@ function AdminSandboxPage() {
                             : null
 
                           return (
-                            <label key={param.name} className="flex flex-col gap-2 text-sm font-medium text-gray-700">
+                            <label key={param.name} className="flex flex-col gap-2 text-sm font-medium text-foreground/80">
                               <span>{param.label}</span>
                               {param.type === 'checkbox' ? (
                                 <div className="flex items-center gap-2 text-sm font-normal">
@@ -6952,7 +6952,7 @@ function AdminSandboxPage() {
                                     checked={!!values[param.name]}
                                     onChange={handleInputChange(task.task_id, param.name, param.type)}
                                   />
-                                  {param.help ? <span className="text-gray-600">{param.help}</span> : null}
+                                  {param.help ? <span className="text-muted-foreground">{param.help}</span> : null}
                                 </div>
                               ) : hasSelect ? (
                                 <Select
@@ -6995,33 +6995,33 @@ function AdminSandboxPage() {
                                 />
                               )}
                               {param.type !== 'checkbox' && param.help ? (
-                                <span className="text-xs font-normal text-gray-500">{param.help}</span>
+                                <span className="text-xs font-normal text-muted-foreground">{param.help}</span>
                               ) : null}
                             </label>
                           )
                         })}
                       </div>
                     ) : (
-                      <p className="text-sm text-gray-600">No parameters required.</p>
+                      <p className="text-sm text-muted-foreground">No parameters required.</p>
                     )}
                     <div className="flex items-center gap-3">
                       <Button type="submit" size="sm" disabled={isRunning}>
                         {isRunning ? 'Running…' : 'Run task'}
                       </Button>
                       {outcome?.status === 'ok' && (
-                        <span className="text-sm text-green-600">Success</span>
+                        <span className="text-sm text-emerald-600">Success</span>
                       )}
                       {outcome?.status === 'error' && (
-                        <span className="text-sm text-red-600">{outcome.message}</span>
+                        <span className="text-sm text-rose-600">{outcome.message}</span>
                       )}
                     </div>
                     {task.task_id !== 'list-missing-sofascore-ids' && outcome?.status === 'ok' && outcome.result && (
-                      <pre className="mt-3 max-h-64 overflow-auto rounded-md bg-gray-900 p-3 text-xs text-gray-100">
+                      <pre className="mt-3 max-h-64 overflow-auto rounded-md bg-foreground p-3 text-xs text-card">
                         {JSON.stringify(outcome.result, null, 2)}
                       </pre>
                     )}
                     {outcome?.status === 'error' && outcome.detail && (
-                      <pre className="mt-3 max-h-64 overflow-auto rounded-md bg-red-900/80 p-3 text-xs text-red-100">
+                      <pre className="mt-3 max-h-64 overflow-auto rounded-md bg-rose-900/80 p-3 text-xs text-rose-100">
                         {typeof outcome.detail === 'string'
                           ? outcome.detail
                           : JSON.stringify(outcome.detail, null, 2)}
@@ -7036,14 +7036,14 @@ function AdminSandboxPage() {
                         </Alert>
                       )}
                       {sofascorePlayers.length === 0 ? (
-                        <p className="text-sm text-gray-600">
+                        <p className="text-sm text-muted-foreground">
                           Run the task to load players missing Sofascore ids.
                         </p>
                       ) : (
                         <div className="overflow-auto">
                           <table className="min-w-full text-sm">
                             <thead>
-                              <tr className="text-left text-xs uppercase tracking-wide text-gray-500">
+                              <tr className="text-left text-xs uppercase tracking-wide text-muted-foreground">
                                 <th className="pb-2 pr-4">Player</th>
                                 <th className="pb-2 pr-4">Parent Club</th>
                                 <th className="pb-2 pr-4">Loan Club</th>
@@ -7062,13 +7062,13 @@ function AdminSandboxPage() {
                                     : '—'
                                 const value = sofascoreInputs[rowKey] ?? (player?.sofascore_id ? String(player.sofascore_id) : '')
                                 return (
-                                  <tr key={rowKey} className="border-t border-gray-100 last:border-b">
+                                  <tr key={rowKey} className="border-t border-border last:border-b">
                                     <td className="py-2 pr-4 align-top">
-                                      <div className="font-medium text-gray-900">{player?.player_name || (player?.player_id ? `Player #${player.player_id}` : 'Supplemental player')}</div>
-                                      <div className="text-xs text-gray-500">{apiLabel}</div>
+                                      <div className="font-medium text-foreground">{player?.player_name || (player?.player_id ? `Player #${player.player_id}` : 'Supplemental player')}</div>
+                                      <div className="text-xs text-muted-foreground">{apiLabel}</div>
                                     </td>
-                                    <td className="py-2 pr-4 align-top text-gray-600">{player?.primary_team || '—'}</td>
-                                    <td className="py-2 pr-4 align-top text-gray-600">{player?.loan_team || '—'}</td>
+                                    <td className="py-2 pr-4 align-top text-muted-foreground">{player?.primary_team || '—'}</td>
+                                    <td className="py-2 pr-4 align-top text-muted-foreground">{player?.loan_team || '—'}</td>
                                     <td className="py-2 pr-4 align-top">
                                       <Input
                                         aria-label={`Sofascore id for ${player?.player_name || apiLabel}`}
@@ -7161,8 +7161,8 @@ function Navigation() {
   const linkClasses = (isActive) => (
     `inline-flex items-center gap-2 rounded-full px-3 py-2 text-sm font-medium transition-colors sm:px-3 whitespace-nowrap no-underline hover:no-underline ` +
     (isActive
-      ? 'text-blue-700 bg-blue-50 shadow-inner'
-      : 'text-gray-700 hover:text-gray-900 hover:bg-gray-100'
+      ? 'text-primary bg-primary/5 shadow-inner'
+      : 'text-foreground/80 hover:text-foreground hover:bg-secondary'
     )
   )
 
@@ -7197,15 +7197,15 @@ function Navigation() {
   })
 
   return (
-    <nav className="border-b bg-white/90 backdrop-blur supports-[backdrop-filter]:bg-white/70">
+    <nav className="border-b bg-background/90 backdrop-blur supports-[backdrop-filter]:bg-background/70">
       <div className="mx-auto flex h-16 max-w-7xl items-center justify-between px-4 sm:px-6 lg:px-8 gap-4">
-        <Link to="/" className="flex items-center gap-2 text-gray-900 no-underline hover:no-underline sm:gap-3 shrink-0">
+        <Link to="/" className="flex items-center gap-2 text-foreground no-underline hover:no-underline sm:gap-3 shrink-0">
           <span className="inline-flex h-10 w-10 items-center justify-center rounded bg-slate-900 shadow">
             <img src={BRAND_LOGO_SRC} alt="The Academy Watch logo" className="h-7 w-7" />
           </span>
           <div className="flex flex-col leading-tight">
             <span className="text-lg font-semibold">The Academy Watch</span>
-            <span className="hidden text-xs text-gray-500 sm:block">Academy player tracker</span>
+            <span className="hidden text-xs text-muted-foreground sm:block">Academy player tracker</span>
           </div>
         </Link>
 
@@ -7214,7 +7214,7 @@ function Navigation() {
             <DrawerTrigger asChild>
               <button
                 type="button"
-                className="inline-flex items-center justify-center rounded-full border border-gray-300 bg-gray-100 p-2 shadow-sm transition hover:bg-gray-200"
+                className="inline-flex items-center justify-center rounded-full border border-border bg-secondary p-2 shadow-sm transition hover:bg-muted"
                 aria-label="Toggle navigation menu"
                 aria-expanded={drawerOpen}
               >
@@ -7231,7 +7231,7 @@ function Navigation() {
                   <button
                     type="button"
                     onClick={() => { setDrawerOpen(false); openSearch(); }}
-                    className="inline-flex items-center gap-2 rounded-full px-3 py-2 text-sm font-medium text-gray-700 hover:text-gray-900 hover:bg-gray-100 transition-colors justify-start"
+                    className="inline-flex items-center gap-2 rounded-full px-3 py-2 text-sm font-medium text-foreground/80 hover:text-foreground hover:bg-secondary transition-colors justify-start"
                   >
                     <Search className="h-4 w-4" />
                     Search
@@ -7253,12 +7253,12 @@ function Navigation() {
               <button
                 type="button"
                 onClick={openSearch}
-                className="inline-flex items-center gap-2 rounded-md border border-gray-200 bg-white px-3 py-1.5 text-sm text-gray-500 shadow-sm hover:bg-gray-50 hover:text-gray-700 transition-colors"
+                className="inline-flex items-center gap-2 rounded-md border border-border bg-card px-3 py-1.5 text-sm text-muted-foreground shadow-sm hover:bg-secondary hover:text-foreground/80 transition-colors"
                 aria-label="Search"
               >
                 <Search className="h-4 w-4" />
                 <span className="hidden sm:inline">Search</span>
-                <kbd className="hidden sm:inline-flex items-center gap-1 rounded border border-gray-200 bg-gray-100 px-1.5 font-mono text-xs text-gray-500">
+                <kbd className="hidden sm:inline-flex items-center gap-1 rounded border border-border bg-secondary px-1.5 font-mono text-xs text-muted-foreground">
                   <span className="text-xs">⌘</span>K
                 </kbd>
               </button>
@@ -7332,7 +7332,7 @@ function AuthControls({ isMobile = false, onNavigate }) {
       )}
       <div className="flex items-center gap-2 text-sm">
         <span
-          className="max-w-[140px] truncate font-semibold text-gray-900 sm:max-w-[200px]"
+          className="max-w-[140px] truncate font-semibold text-foreground sm:max-w-[200px]"
           title={displayName || 'Signed in'}
         >
           {displayName || 'Signed in'}
@@ -7364,13 +7364,13 @@ function AuthControls({ isMobile = false, onNavigate }) {
               <DialogContent className="max-w-sm space-y-3 sm:max-w-md">
                 <DialogHeader>
                   <DialogTitle className="text-base">Add admin API key</DialogTitle>
-                  <DialogDescription className="text-xs text-gray-600">
+                  <DialogDescription className="text-xs text-muted-foreground">
                     Paste the API key supplied in admin settings to unlock admin tools on this device.
                   </DialogDescription>
                 </DialogHeader>
                 <form className="space-y-3" onSubmit={handleAdminKeySubmit}>
                   <div className="space-y-1.5">
-                    <Label htmlFor={`nav-admin-api-key-${isMobile ? 'mobile' : 'desktop'}`} className="text-xs text-gray-500">
+                    <Label htmlFor={`nav-admin-api-key-${isMobile ? 'mobile' : 'desktop'}`} className="text-xs text-muted-foreground">
                       API key
                     </Label>
                     <Input
@@ -7382,7 +7382,7 @@ function AuthControls({ isMobile = false, onNavigate }) {
                     />
                   </div>
                   {apiKeyError && (
-                    <p className="text-xs text-red-600">{apiKeyError}</p>
+                    <p className="text-xs text-rose-600">{apiKeyError}</p>
                   )}
                   <Button type="submit" size="sm" className="w-full" disabled={savingApiKey}>
                     {savingApiKey && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
@@ -7412,14 +7412,14 @@ function AuthControls({ isMobile = false, onNavigate }) {
               </PopoverTrigger>
               <PopoverContent align="end" className="w-72 space-y-3">
                 <div className="space-y-1">
-                  <p className="text-sm font-semibold text-gray-900">Add admin API key</p>
-                  <p className="text-xs text-gray-600">
+                  <p className="text-sm font-semibold text-foreground">Add admin API key</p>
+                  <p className="text-xs text-muted-foreground">
                     Paste the API key supplied in admin settings to unlock admin tools on this device.
                   </p>
                 </div>
                 <form className="space-y-3" onSubmit={handleAdminKeySubmit}>
                   <div className="space-y-1.5">
-                    <Label htmlFor={`nav-admin-api-key-${isMobile ? 'mobile' : 'desktop'}`} className="text-xs text-gray-500">
+                    <Label htmlFor={`nav-admin-api-key-${isMobile ? 'mobile' : 'desktop'}`} className="text-xs text-muted-foreground">
                       API key
                     </Label>
                     <Input
@@ -7431,7 +7431,7 @@ function AuthControls({ isMobile = false, onNavigate }) {
                     />
                   </div>
                   {apiKeyError && (
-                    <p className="text-xs text-red-600">{apiKeyError}</p>
+                    <p className="text-xs text-rose-600">{apiKeyError}</p>
                   )}
                   <Button type="submit" size="sm" className="w-full" disabled={savingApiKey}>
                     {savingApiKey && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
@@ -7493,13 +7493,13 @@ function HomePage() {
         <div className="flex-1 min-w-0 px-4 py-6 sm:px-0">
           {/* Hero Section */}
           <div className="text-center mb-16">
-            <p className="text-sm text-gray-500 tracking-wide uppercase mb-4">
+            <p className="text-sm text-muted-foreground tracking-wide uppercase mb-4">
               The Academy Watch
             </p>
-            <h1 className="text-5xl sm:text-6xl font-bold text-gray-900 tracking-tight mb-4">
+            <h1 className="text-5xl sm:text-6xl font-bold text-foreground tracking-tight mb-4">
               Follow Every Academy Prospect
             </h1>
-            <p className="text-lg text-gray-500 max-w-2xl mx-auto mb-8">
+            <p className="text-lg text-muted-foreground max-w-2xl mx-auto mb-8">
               Career journeys, stats, and insights for academy players from Europe's top clubs — plus AI-powered newsletters.
             </p>
 
@@ -7508,13 +7508,13 @@ function HomePage() {
               <button
                 type="button"
                 onClick={openSearch}
-                className="w-full relative flex items-center justify-between gap-3 rounded-xl border border-gray-200 bg-white px-4 py-3.5 text-left shadow-sm hover:border-gray-300 transition-all cursor-text"
+                className="w-full relative flex items-center justify-between gap-3 rounded-xl border border-border bg-card px-4 py-3.5 text-left shadow-sm hover:border-border transition-all cursor-text"
               >
-                <div className="flex items-center gap-3 text-gray-400">
+                <div className="flex items-center gap-3 text-muted-foreground/70">
                   <Search className="h-5 w-5" />
                   <span className="text-base">Search for your club...</span>
                 </div>
-                <kbd className="hidden sm:inline-flex items-center gap-1 rounded border border-gray-200 bg-gray-100 px-2 py-1 font-mono text-xs text-gray-500">
+                <kbd className="hidden sm:inline-flex items-center gap-1 rounded border border-border bg-secondary px-2 py-1 font-mono text-xs text-muted-foreground">
                   <span>⌘</span>K
                 </kbd>
               </button>
@@ -7549,29 +7549,29 @@ function HomePage() {
           {loading ? (
             <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-8 mb-16">
               {[1, 2, 3].map((i) => (
-                <div key={i} className="bg-white rounded-xl border border-gray-100 p-6">
-                  <div className="h-4 w-24 bg-gray-100 rounded animate-pulse mb-3" />
-                  <div className="h-8 w-16 bg-gray-100 rounded animate-pulse mb-2" />
-                  <div className="h-3 w-32 bg-gray-50 rounded animate-pulse" />
+                <div key={i} className="bg-card rounded-xl border border-border p-6">
+                  <div className="h-4 w-24 bg-secondary rounded animate-pulse mb-3" />
+                  <div className="h-8 w-16 bg-secondary rounded animate-pulse mb-2" />
+                  <div className="h-3 w-32 bg-secondary rounded animate-pulse" />
                 </div>
               ))}
             </div>
           ) : stats ? (
             <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-8 mb-16">
-              <div className="bg-white rounded-xl border border-gray-100 p-6">
-                <p className="text-sm text-gray-500 mb-1">Academies Tracked</p>
-                <p className="text-3xl font-bold text-gray-900">{stats.teams_with_loans}</p>
-                <p className="text-xs text-gray-400 mt-1">From Europe's top clubs</p>
+              <div className="bg-card rounded-xl border border-border p-6">
+                <p className="text-sm text-muted-foreground mb-1">Academies Tracked</p>
+                <p className="text-3xl font-bold text-foreground">{stats.teams_with_loans}</p>
+                <p className="text-xs text-muted-foreground/70 mt-1">From Europe's top clubs</p>
               </div>
-              <div className="bg-white rounded-xl border border-gray-100 p-6">
-                <p className="text-sm text-gray-500 mb-1">Players Tracked</p>
-                <p className="text-3xl font-bold text-gray-900">{stats.total_active_loans}</p>
-                <p className="text-xs text-gray-400 mt-1">Academy prospects tracked</p>
+              <div className="bg-card rounded-xl border border-border p-6">
+                <p className="text-sm text-muted-foreground mb-1">Players Tracked</p>
+                <p className="text-3xl font-bold text-foreground">{stats.total_active_loans}</p>
+                <p className="text-xs text-muted-foreground/70 mt-1">Academy prospects tracked</p>
               </div>
-              <div className="bg-white rounded-xl border border-gray-100 p-6">
-                <p className="text-sm text-gray-500 mb-1">Newsletters</p>
-                <p className="text-3xl font-bold text-gray-900">{stats.total_newsletters}</p>
-                <p className="text-xs text-gray-400 mt-1">AI-generated reports</p>
+              <div className="bg-card rounded-xl border border-border p-6">
+                <p className="text-sm text-muted-foreground mb-1">Newsletters</p>
+                <p className="text-3xl font-bold text-foreground">{stats.total_newsletters}</p>
+                <p className="text-xs text-muted-foreground/70 mt-1">AI-generated reports</p>
               </div>
             </div>
           ) : null}
@@ -7579,32 +7579,32 @@ function HomePage() {
           {/* Features Section */}
           <div className="max-w-3xl mx-auto">
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-6">
-              <Link to="/dream-team" className="group flex items-start gap-4 p-4 rounded-xl hover:bg-gray-50 transition-colors">
-                <Trophy className="h-5 w-5 text-gray-400 mt-0.5 shrink-0" />
+              <Link to="/dream-team" className="group flex items-start gap-4 p-4 rounded-xl hover:bg-secondary transition-colors">
+                <Trophy className="h-5 w-5 text-muted-foreground/70 mt-0.5 shrink-0" />
                 <div>
-                  <h3 className="font-semibold text-gray-900 group-hover:text-blue-600 transition-colors mb-1">Dream XI Builder</h3>
-                  <p className="text-sm text-gray-500">Build your ideal lineup from academy prospects</p>
+                  <h3 className="font-semibold text-foreground group-hover:text-primary transition-colors mb-1">Dream XI Builder</h3>
+                  <p className="text-sm text-muted-foreground">Build your ideal lineup from academy prospects</p>
                 </div>
               </Link>
-              <Link to="/academy" className="group flex items-start gap-4 p-4 rounded-xl hover:bg-gray-50 transition-colors">
-                <Star className="h-5 w-5 text-gray-400 mt-0.5 shrink-0" />
+              <Link to="/academy" className="group flex items-start gap-4 p-4 rounded-xl hover:bg-secondary transition-colors">
+                <Star className="h-5 w-5 text-muted-foreground/70 mt-0.5 shrink-0" />
                 <div>
-                  <h3 className="font-semibold text-gray-900 group-hover:text-blue-600 transition-colors mb-1">Academy Tracker</h3>
-                  <p className="text-sm text-gray-500">Follow player development pathways through cohorts</p>
+                  <h3 className="font-semibold text-foreground group-hover:text-primary transition-colors mb-1">Academy Tracker</h3>
+                  <p className="text-sm text-muted-foreground">Follow player development pathways through cohorts</p>
                 </div>
               </Link>
-              <Link to="/teams" className="group flex items-start gap-4 p-4 rounded-xl hover:bg-gray-50 transition-colors">
-                <Globe className="h-5 w-5 text-gray-400 mt-0.5 shrink-0" />
+              <Link to="/teams" className="group flex items-start gap-4 p-4 rounded-xl hover:bg-secondary transition-colors">
+                <Globe className="h-5 w-5 text-muted-foreground/70 mt-0.5 shrink-0" />
                 <div>
-                  <h3 className="font-semibold text-gray-900 group-hover:text-blue-600 transition-colors mb-1">Player Journeys</h3>
-                  <p className="text-sm text-gray-500">Follow the journey of academy players across clubs</p>
+                  <h3 className="font-semibold text-foreground group-hover:text-primary transition-colors mb-1">Player Journeys</h3>
+                  <p className="text-sm text-muted-foreground">Follow the journey of academy players across clubs</p>
                 </div>
               </Link>
-              <Link to="/newsletters" className="group flex items-start gap-4 p-4 rounded-xl hover:bg-gray-50 transition-colors">
-                <Mail className="h-5 w-5 text-gray-400 mt-0.5 shrink-0" />
+              <Link to="/newsletters" className="group flex items-start gap-4 p-4 rounded-xl hover:bg-secondary transition-colors">
+                <Mail className="h-5 w-5 text-muted-foreground/70 mt-0.5 shrink-0" />
                 <div>
-                  <h3 className="font-semibold text-gray-900 group-hover:text-blue-600 transition-colors mb-1">Weekly Newsletters</h3>
-                  <p className="text-sm text-gray-500">AI-powered analysis delivered to your inbox</p>
+                  <h3 className="font-semibold text-foreground group-hover:text-primary transition-colors mb-1">Weekly Newsletters</h3>
+                  <p className="text-sm text-muted-foreground">AI-powered analysis delivered to your inbox</p>
                 </div>
               </Link>
             </div>
@@ -7739,16 +7739,16 @@ function SubscribePage() {
     <div className="max-w-4xl mx-auto py-6 sm:px-6 lg:px-8">
       <div className="px-4 py-6 sm:px-0">
         <div className="text-center mb-8">
-          <h1 className="text-3xl font-bold text-gray-900 mb-4">
+          <h1 className="text-3xl font-bold text-foreground mb-4">
             Subscribe to Team Updates
           </h1>
-          <p className="text-lg text-gray-600">
+          <p className="text-lg text-muted-foreground">
             Get AI-powered newsletters about your favorite teams' academy players
           </p>
         </div>
 
         {message && (
-          <Alert className={`mb-6 ${message.type === 'error' ? 'border-red-500' : 'border-green-500'}`}>
+          <Alert className={`mb-6 ${message.type === 'error' ? 'border-rose-500' : 'border-emerald-500'}`}>
             {message.type === 'error' ? (
               <AlertCircle className="h-4 w-4" />
             ) : (
@@ -7774,7 +7774,7 @@ function SubscribePage() {
                   placeholder="your.email@example.com"
                   required
                 />
-                <p className="mt-1 text-xs text-gray-500">
+                <p className="mt-1 text-xs text-muted-foreground">
                   We’ll email you a confirmation link to comply with anti-spam rules.
                 </p>
               </div>
@@ -7789,7 +7789,7 @@ function SubscribePage() {
             <CardContent>
               {loading ? (
                 <div className="text-center py-8">
-                  <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-blue-600 mx-auto"></div>
+                  <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-primary mx-auto"></div>
                 </div>
               ) : (
                 <div className="space-y-4">
@@ -7807,13 +7807,13 @@ function SubscribePage() {
                         <AccordionContent>
                           <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-3 px-4 pb-2">
                             {leagueTeams.map((team) => (
-                              <div key={team.id} className={`p-3 border rounded-lg cursor-pointer transition-colors ${selectedTeams.includes(team.id) ? 'border-blue-500 bg-blue-50' : 'border-gray-200 hover:border-gray-300'}`} onClick={() => handleTeamToggle(team.id)}>
+                              <div key={team.id} className={`p-3 border rounded-lg cursor-pointer transition-colors ${selectedTeams.includes(team.id) ? 'border-primary bg-primary/5' : 'border-border hover:border-border'}`} onClick={() => handleTeamToggle(team.id)}>
                                 <div className="flex items-center justify-between">
                                   <div>
                                     <div className="font-medium">{team.name}</div>
-                                    <div className="text-sm text-gray-500">{team.current_loaned_out_count} players tracked</div>
+                                    <div className="text-sm text-muted-foreground">{team.current_loaned_out_count} players tracked</div>
                                   </div>
-                                  {selectedTeams.includes(team.id) && (<CheckCircle className="h-5 w-5 text-blue-600" />)}
+                                  {selectedTeams.includes(team.id) && (<CheckCircle className="h-5 w-5 text-primary" />)}
                                 </div>
                               </div>
                             ))}
@@ -7832,7 +7832,7 @@ function SubscribePage() {
               type="submit"
               size="lg"
               disabled={submitting || selectedTeams.length === 0}
-              className="bg-blue-600 hover:bg-blue-700"
+              className="bg-primary hover:bg-primary/90"
             >
               {submitting ? (
                 <>
@@ -7936,27 +7936,27 @@ function TeamsPage() {
     <Link
       key={team.id}
       to={`/teams/${team.slug || team.id}`}
-      className="flex items-center gap-3 p-3 rounded-lg border bg-white text-left transition-all w-full border-gray-200 hover:border-gray-300 hover:shadow-sm"
+      className="flex items-center gap-3 p-3 rounded-lg border bg-card text-left transition-all w-full border-border hover:border-border hover:shadow-sm"
     >
       <Avatar className="h-9 w-9 shrink-0">
         {team.logo ? <AvatarImage src={team.logo} alt={team.name} /> : null}
-        <AvatarFallback className="text-xs bg-gray-100">
+        <AvatarFallback className="text-xs bg-secondary">
           {team.name.split(' ').map(n => n[0]).join('').slice(0, 2).toUpperCase()}
         </AvatarFallback>
       </Avatar>
       <div className="flex-1 min-w-0">
-        <p className="text-sm font-medium text-gray-900 truncate">{team.name}</p>
-        {team.league_name && <p className="text-xs text-gray-400 truncate">{team.league_name}</p>}
+        <p className="text-sm font-medium text-foreground truncate">{team.name}</p>
+        {team.league_name && <p className="text-xs text-muted-foreground/70 truncate">{team.league_name}</p>}
       </div>
       {team.is_tracked !== false && (
-        <span className="text-xs text-gray-400 tabular-nums shrink-0">
+        <span className="text-xs text-muted-foreground/70 tabular-nums shrink-0">
           {team.tracked_player_count ?? team.current_loaned_out_count ?? 0}
         </span>
       )}
       {team.is_tracked === false && (
         <span className="text-xs text-amber-500 shrink-0">untracked</span>
       )}
-      <ChevronRight className="h-3.5 w-3.5 text-gray-300 shrink-0" />
+      <ChevronRight className="h-3.5 w-3.5 text-muted-foreground/50 shrink-0" />
     </Link>
   )
 
@@ -7966,9 +7966,9 @@ function TeamsPage() {
         {/* Main Content */}
         <div className="flex-1 min-w-0 px-4 py-6 sm:px-0">
           {/* Sticky header */}
-          <div className="sticky top-0 z-10 bg-white/90 backdrop-blur py-3 px-1 -mx-1 mb-6 border-b border-gray-100">
+          <div className="sticky top-0 z-10 bg-card/90 backdrop-blur py-3 px-1 -mx-1 mb-6 border-b border-border">
             <div className="flex items-center gap-3 mb-3">
-              <h1 className="text-2xl font-semibold text-gray-900">European Teams</h1>
+              <h1 className="text-2xl font-semibold text-foreground">European Teams</h1>
               <div className="ml-auto flex items-center gap-2">
                 <Button variant="outline" size="sm" className="text-xs" onClick={() => setSubscribeOpen(true)}>
                   <Mail className="h-3.5 w-3.5 mr-1" />
@@ -7986,7 +7986,7 @@ function TeamsPage() {
               </div>
             </div>
             <div className="relative">
-              <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-gray-400" />
+              <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground/70" />
               <Input
                 type="text"
                 placeholder="Search teams..."
@@ -7997,7 +7997,7 @@ function TeamsPage() {
               {teamSearch && (
                 <button
                   onClick={() => setTeamSearch('')}
-                  className="absolute right-3 top-1/2 -translate-y-1/2 text-gray-400 hover:text-gray-600"
+                  className="absolute right-3 top-1/2 -translate-y-1/2 text-muted-foreground/70 hover:text-muted-foreground"
                 >
                   <X className="h-4 w-4" />
                 </button>
@@ -8006,7 +8006,7 @@ function TeamsPage() {
           </div>
 
           {message && (
-            <Alert className={`mb-4 ${message.type === 'error' ? 'border-red-500' : message.type === 'info' ? 'border-blue-500' : 'border-green-500'}`}>
+            <Alert className={`mb-4 ${message.type === 'error' ? 'border-rose-500' : message.type === 'info' ? 'border-primary/20' : 'border-emerald-500'}`}>
               <AlertCircle className="h-4 w-4" />
               <AlertDescription>{message.text}</AlertDescription>
             </Alert>
@@ -8014,12 +8014,12 @@ function TeamsPage() {
 
           {loading ? (
             <div className="flex items-center justify-center py-16">
-              <Loader2 className="h-6 w-6 animate-spin text-gray-400" />
+              <Loader2 className="h-6 w-6 animate-spin text-muted-foreground/70" />
             </div>
           ) : isSearching ? (
             <div className="space-y-3">
               <div className="flex items-center justify-between px-1">
-                <p className="text-sm text-gray-500">
+                <p className="text-sm text-muted-foreground">
                   {filteredTeams.length === 0
                     ? 'No teams found'
                     : `${filteredTeams.length} team${filteredTeams.length !== 1 ? 's' : ''} found`
@@ -8039,8 +8039,8 @@ function TeamsPage() {
                 <div key={league}>
                   <div className="flex items-center gap-3 mb-3 pl-1">
                     <div className="w-1 h-5 rounded-full" style={{ backgroundColor: LEAGUE_COLORS[league] || '#9ca3af' }} />
-                    <h2 className="text-sm font-semibold text-gray-900">{league}</h2>
-                    <span className="text-xs text-gray-400">{leagueTeams.length}</span>
+                    <h2 className="text-sm font-semibold text-foreground">{league}</h2>
+                    <span className="text-xs text-muted-foreground/70">{leagueTeams.length}</span>
                   </div>
                   <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-2">
                     {leagueTeams.map((team) => renderTeamCard(team))}
@@ -8055,7 +8055,7 @@ function TeamsPage() {
             <DialogContent className="sm:max-w-md">
               <DialogHeader>
                 <DialogTitle className="flex items-center gap-2">
-                  <Mail className="h-5 w-5 text-blue-600" />
+                  <Mail className="h-5 w-5 text-primary" />
                   Subscribe to Team Updates
                 </DialogTitle>
                 <DialogDescription>
@@ -8704,14 +8704,14 @@ function NewslettersPage() {
         {/* Main Content */}
         <div className="flex-1 min-w-0 max-w-4xl py-6 sm:px-0 overflow-hidden">
           <div className="text-center mb-8">
-            <h1 className="text-2xl sm:text-3xl font-bold text-gray-900 mb-4">
+            <h1 className="text-2xl sm:text-3xl font-bold text-foreground mb-4">
               Published Newsletters
             </h1>
-            <p className="text-lg text-gray-600">
+            <p className="text-lg text-muted-foreground">
               Insights about European academy prospects
             </p>
             {latestSeason !== null && (
-              <p className="text-sm text-gray-500">
+              <p className="text-sm text-muted-foreground">
                 Showing season {latestSeason}–{String(latestSeason + 1).slice(-2)} newsletters
               </p>
             )}
@@ -8724,21 +8724,21 @@ function NewslettersPage() {
                 </Button>
               </div>
               {viewingJournalist && (
-                <Alert className="bg-blue-50 border-blue-200">
+                <Alert className="bg-primary/5 border-primary/20">
                   <div className="flex items-center gap-4">
-                    <Avatar className="h-10 w-10 border border-blue-200">
+                    <Avatar className="h-10 w-10 border border-primary/20">
                       <AvatarImage src={viewingJournalist.profile_image_url} />
                       <AvatarFallback>{viewingJournalist.display_name?.substring(0, 2).toUpperCase()}</AvatarFallback>
                     </Avatar>
                     <div>
-                      <AlertDescription className="text-blue-900 font-medium">
+                      <AlertDescription className="text-primary font-medium">
                         Viewing analysis by {viewingJournalist.display_name}
                       </AlertDescription>
-                      <p className="text-sm text-blue-700">
+                      <p className="text-sm text-primary">
                         Showing only commentaries written by this journalist.
                       </p>
                     </div>
-                    <Button variant="outline" size="sm" className="ml-auto bg-white hover:bg-blue-50 text-blue-700 border-blue-200" onClick={() => navigate(`/journalists/${viewingJournalist.id}`)}>
+                    <Button variant="outline" size="sm" className="ml-auto bg-card hover:bg-primary/5 text-primary border-primary/20" onClick={() => navigate(`/journalists/${viewingJournalist.id}`)}>
                       View Profile
                     </Button>
                   </div>
@@ -8757,7 +8757,7 @@ function NewslettersPage() {
                   {/* Team info */}
                   <div className="flex items-center gap-3 flex-1 min-w-0">
                     {filteredTeam?.logo && (
-                      <div className="shrink-0 w-12 h-12 sm:w-14 sm:h-14 bg-white rounded-lg p-2 shadow-sm">
+                      <div className="shrink-0 w-12 h-12 sm:w-14 sm:h-14 bg-card rounded-lg p-2 shadow-sm">
                         <img
                           src={filteredTeam.logo}
                           alt={teamName}
@@ -8779,7 +8779,7 @@ function NewslettersPage() {
                   <Button
                     variant="secondary"
                     size="sm"
-                    className="w-full sm:w-auto bg-white/10 hover:bg-white/20 text-white border-0 backdrop-blur-sm"
+                    className="w-full sm:w-auto bg-card/10 hover:bg-card/20 text-white border-0 backdrop-blur-sm"
                     onClick={() => navigate('/newsletters')}
                   >
                     <XCircle className="w-4 h-4 mr-2" />
@@ -8813,7 +8813,7 @@ function NewslettersPage() {
               <CardContent className="space-y-4">
                 {followedTeamOptions.length > 0 && (
                   <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
-                    <Label className="text-sm font-medium text-gray-700">Teams you follow</Label>
+                    <Label className="text-sm font-medium text-foreground/80">Teams you follow</Label>
                     <div className="flex w-full flex-col gap-2 sm:w-auto sm:flex-row sm:items-center">
                       <Select
                         value={followedTeamFilter || 'all'}
@@ -8834,7 +8834,7 @@ function NewslettersPage() {
                 )}
 
                 <div className="space-y-2">
-                  <Label className="text-sm font-medium text-gray-700">Browse by league</Label>
+                  <Label className="text-sm font-medium text-foreground/80">Browse by league</Label>
                   <div className="flex flex-col gap-2 sm:flex-row sm:items-center">
                     <Select
                       value={leagueFilter || 'all'}
@@ -8868,14 +8868,14 @@ function NewslettersPage() {
                   </div>
                 </div>
 
-                <div className="flex flex-wrap items-center justify-between gap-2 text-sm text-gray-600">
+                <div className="flex flex-wrap items-center justify-between gap-2 text-sm text-muted-foreground">
                   <span>{filtersActive ? 'Filters applied' : 'No team filters applied'}</span>
                   <Button variant="ghost" size="sm" onClick={clearFilters} disabled={!filtersActive}>
                     Clear filters
                   </Button>
                 </div>
                 {auth.token && trackedTeamIds.length > 0 && (
-                  <div className="flex flex-wrap items-center justify-between gap-2 rounded-md bg-gray-50 p-3 text-sm text-gray-700 border border-gray-200">
+                  <div className="flex flex-wrap items-center justify-between gap-2 rounded-md bg-secondary p-3 text-sm text-foreground/80 border border-border">
                     <span>You’re following {trackedTeamIds.length} team{trackedTeamIds.length === 1 ? '' : 's'}.</span>
                     <Button
                       variant="outline"
@@ -8903,14 +8903,14 @@ function NewslettersPage() {
 
           {loading ? (
             <div className="text-center py-12">
-              <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-blue-600 mx-auto"></div>
-              <p className="mt-4 text-gray-600">Loading newsletters...</p>
+              <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-primary mx-auto"></div>
+              <p className="mt-4 text-muted-foreground">Loading newsletters...</p>
             </div>
           ) : newsletters.length === 0 ? (
             <div className="text-center py-12">
-              <FileText className="h-12 w-12 text-gray-400 mx-auto mb-4" />
-              <h3 className="text-lg font-medium text-gray-900 mb-2">No newsletters yet</h3>
-              <p className="text-gray-600">
+              <FileText className="h-12 w-12 text-muted-foreground/70 mx-auto mb-4" />
+              <h3 className="text-lg font-medium text-foreground mb-2">No newsletters yet</h3>
+              <p className="text-muted-foreground">
                 Newsletters will appear here once they are generated and published.
               </p>
             </div>
@@ -8925,9 +8925,9 @@ function NewslettersPage() {
             </div>
           ) : (!focusedViewActive && filteredNewsletters.length === 0) ? (
             <div className="text-center py-12">
-              <FileText className="h-12 w-12 text-gray-400 mx-auto mb-4" />
-              <h3 className="text-lg font-medium text-gray-900 mb-2">No newsletters match your filters</h3>
-              <p className="text-gray-600 mb-4">
+              <FileText className="h-12 w-12 text-muted-foreground/70 mx-auto mb-4" />
+              <h3 className="text-lg font-medium text-foreground mb-2">No newsletters match your filters</h3>
+              <p className="text-muted-foreground mb-4">
                 Try adjusting the team filters or clearing them to see all newsletters.
               </p>
               <Button variant="outline" onClick={clearFilters} disabled={!filtersActive}>
@@ -8937,7 +8937,7 @@ function NewslettersPage() {
           ) : (
             <div className="space-y-6">
               {!focusedViewActive && trackedTeamIdSet.size > 0 && (
-                <div className="rounded-md border border-blue-100 bg-blue-50 px-3 py-2 text-sm text-blue-700">
+                <div className="rounded-md border border-primary/20 bg-primary/5 px-3 py-2 text-sm text-primary">
                   Newsletters from teams you follow appear first.
                 </div>
               )}
@@ -8958,13 +8958,13 @@ function NewslettersPage() {
                         </div>
                         <div className="flex flex-wrap items-center gap-2">
                           {readingTime && (
-                            <Badge variant="outline" className="text-gray-500 border-gray-200">
+                            <Badge variant="outline" className="text-muted-foreground border-border">
                               <Clock className="h-3 w-3 mr-1" />
                               {readingTime}
                             </Badge>
                           )}
                           {isTrackedTeam && (
-                            <Badge variant="outline" className="border-green-300 bg-green-50 text-green-700">
+                            <Badge variant="outline" className="border-emerald-200 bg-emerald-50 text-emerald-700">
                               Tracking
                             </Badge>
                           )}
@@ -8995,13 +8995,13 @@ function NewslettersPage() {
                       </div>
                       {/* Content excerpt - shown when not expanded */}
                       {!isExpanded && excerpt && (
-                        <p className="text-sm text-gray-600 line-clamp-2">
+                        <p className="text-sm text-muted-foreground line-clamp-2">
                           {excerpt}
                         </p>
                       )}
                     </CardHeader>
                     <CardContent className="overflow-hidden">
-                      <div className="text-sm text-gray-500 mb-2">
+                      <div className="text-sm text-muted-foreground mb-2">
                         <Calendar className="h-4 w-4 inline mr-1" />
                         {newsletter.week_start_date && newsletter.week_end_date && (
                           `${new Date(newsletter.week_start_date).toLocaleDateString()} - ${new Date(newsletter.week_end_date).toLocaleDateString()}`
@@ -9028,15 +9028,15 @@ function NewslettersPage() {
                                   return (
                                     <div className="space-y-6 newsletter-content overflow-hidden">
                                       {/* Newsletter Header */}
-                                      <div className="bg-gradient-to-r from-blue-50 to-gray-50 p-4 sm:p-6 rounded-lg border-l-4 border-blue-500">
-                                        <h2 className="text-xl sm:text-2xl font-bold text-gray-900 mb-3 break-words">{obj.title || newsletter.title}</h2>
+                                      <div className="bg-gradient-to-r from-secondary to-background p-4 sm:p-6 rounded-lg border-l-4 border-primary/20">
+                                        <h2 className="text-xl sm:text-2xl font-bold text-foreground mb-3 break-words">{obj.title || newsletter.title}</h2>
                                         {obj.range && (
-                                          <div className="text-sm text-gray-600 mb-3">
+                                          <div className="text-sm text-muted-foreground mb-3">
                                             📅 Week: {obj.range[0]} - {obj.range[1]}
                                           </div>
                                         )}
                                         {obj.summary && (
-                                          <div className="text-gray-700 leading-relaxed text-base sm:text-lg break-words">
+                                          <div className="text-foreground/80 leading-relaxed text-base sm:text-lg break-words">
                                             {obj.summary}
                                           </div>
                                         )}
@@ -9044,17 +9044,17 @@ function NewslettersPage() {
 
                                       {/* Key Highlights Section */}
                                       {obj.highlights && Array.isArray(obj.highlights) && obj.highlights.length > 0 && (
-                                        <div className="bg-yellow-50 p-5 rounded-lg border-l-4 border-yellow-400">
-                                          <h3 className="text-lg font-bold text-gray-900 mb-3 flex items-center">
+                                        <div className="bg-amber-50 p-5 rounded-lg border-l-4 border-amber-400">
+                                          <h3 className="text-lg font-bold text-foreground mb-3 flex items-center">
                                             ⭐ Key Highlights
                                           </h3>
                                           <ul className="space-y-2">
                                             {obj.highlights.map((highlight, idx) => (
                                               <li key={idx} className="flex items-start">
-                                                <span className="bg-yellow-400 text-yellow-900 rounded-full w-6 h-6 flex items-center justify-center text-xs font-bold mr-3 mt-0.5 flex-shrink-0">
+                                                <span className="bg-amber-400 text-amber-900 rounded-full w-6 h-6 flex items-center justify-center text-xs font-bold mr-3 mt-0.5 flex-shrink-0">
                                                   {idx + 1}
                                                 </span>
-                                                <span className="text-gray-700">{highlight}</span>
+                                                <span className="text-foreground/80">{highlight}</span>
                                               </li>
                                             ))}
                                           </ul>
@@ -9063,21 +9063,21 @@ function NewslettersPage() {
 
                                       {/* Performance Stats */}
                                       {obj.by_numbers && (
-                                        <div className="bg-gray-50 p-5 rounded-lg">
-                                          <h3 className="text-lg font-bold text-gray-900 mb-4 flex items-center">
+                                        <div className="bg-secondary p-5 rounded-lg">
+                                          <h3 className="text-lg font-bold text-foreground mb-4 flex items-center">
                                             📊 By The Numbers
                                           </h3>
                                           <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                                             {obj.by_numbers.minutes_leaders && obj.by_numbers.minutes_leaders.length > 0 && (
-                                              <div className="bg-white p-4 rounded-lg shadow-sm border">
-                                                <h4 className="font-semibold text-gray-900 mb-3 flex items-center">
+                                              <div className="bg-card p-4 rounded-lg shadow-sm border">
+                                                <h4 className="font-semibold text-foreground mb-3 flex items-center">
                                                   ⏱️ Minutes Leaders
                                                 </h4>
                                                 <div className="space-y-2">
                                                   {obj.by_numbers.minutes_leaders.map((player, idx) => (
                                                     <div key={idx} className="flex justify-between items-center">
-                                                      <span className="font-medium text-gray-700">{player.player}</span>
-                                                      <span className="bg-blue-100 text-blue-800 px-2 py-1 rounded text-sm font-bold">
+                                                      <span className="font-medium text-foreground/80">{player.player}</span>
+                                                      <span className="bg-primary/10 text-primary px-2 py-1 rounded text-sm font-bold">
                                                         {player.minutes}'
                                                       </span>
                                                     </div>
@@ -9087,16 +9087,16 @@ function NewslettersPage() {
                                             )}
 
                                             {obj.by_numbers.ga_leaders && obj.by_numbers.ga_leaders.length > 0 && (
-                                              <div className="bg-white p-4 rounded-lg shadow-sm border">
-                                                <h4 className="font-semibold text-gray-900 mb-3 flex items-center">
+                                              <div className="bg-card p-4 rounded-lg shadow-sm border">
+                                                <h4 className="font-semibold text-foreground mb-3 flex items-center">
                                                   ⚽ Goal Contributors
                                                 </h4>
                                                 <div className="space-y-2">
                                                   {obj.by_numbers.ga_leaders.map((player, idx) => (
                                                     <div key={idx} className="flex justify-between items-center">
-                                                      <span className="font-medium text-gray-700">{player.player}</span>
+                                                      <span className="font-medium text-foreground/80">{player.player}</span>
                                                       <div className="flex space-x-1">
-                                                        <span className="bg-green-100 text-green-800 px-2 py-1 rounded text-sm font-bold">
+                                                        <span className="bg-emerald-50 text-emerald-800 px-2 py-1 rounded text-sm font-bold">
                                                           {player.g}G
                                                         </span>
                                                         <span className="bg-purple-100 text-purple-800 px-2 py-1 rounded text-sm font-bold">
@@ -9115,31 +9115,31 @@ function NewslettersPage() {
                                       {/* Detailed Sections */}
                                       {detailedSections.length > 0 && (
                                         <div className="space-y-4">
-                                          <h3 className="text-lg font-bold text-gray-900 flex items-center">
+                                          <h3 className="text-lg font-bold text-foreground flex items-center">
                                             📋 Detailed Report
                                           </h3>
                                           {detailedSections.map((sec, idx) => (
-                                            <div key={idx} className="bg-white border rounded-lg overflow-hidden shadow-sm">
+                                            <div key={idx} className="bg-card border rounded-lg overflow-hidden shadow-sm">
                                               {sec.title && (
-                                                <div className="bg-gray-100 px-5 py-3 border-b">
-                                                  <h4 className="font-semibold text-gray-900">{sec.title}</h4>
+                                                <div className="bg-secondary px-5 py-3 border-b">
+                                                  <h4 className="font-semibold text-foreground">{sec.title}</h4>
                                                 </div>
                                               )}
                                               <div className="p-5">
                                                 {sec.content && (
-                                                  <div className="text-gray-700 mb-4">{sec.content}</div>
+                                                  <div className="text-foreground/80 mb-4">{sec.content}</div>
                                                 )}
                                                 {sec.items && Array.isArray(sec.items) && (
                                                   <div className="space-y-4">
                                                     {sec.items.map((it, j) => (
-                                                      <div key={j} className="border-l-4 border-blue-200 pl-4 py-2">
+                                                      <div key={j} className="border-l-4 border-primary/20 pl-4 py-2">
                                                         <div className="flex items-start gap-3 mb-3">
                                                           {/* Player Photo */}
                                                           {it.player_photo && (
                                                             <img
                                                               src={it.player_photo}
                                                               alt={it.player_name}
-                                                              className="w-14 h-14 rounded-full object-cover bg-gray-100 flex-shrink-0 border-2 border-white shadow-sm"
+                                                              className="w-14 h-14 rounded-full object-cover bg-secondary flex-shrink-0 border-2 border-white shadow-sm"
                                                             />
                                                           )}
                                                           <div className="flex-1">
@@ -9148,12 +9148,12 @@ function NewslettersPage() {
                                                                 (it.player_api_id || it.player_id) ? (
                                                                   <Link
                                                                     to={`/players/${it.player_api_id || it.player_id}`}
-                                                                    className="font-semibold text-lg text-gray-900 hover:text-blue-600 hover:underline transition-colors"
+                                                                    className="font-semibold text-lg text-foreground hover:text-primary hover:underline transition-colors"
                                                                   >
                                                                     {it.player_name}
                                                                   </Link>
                                                                 ) : (
-                                                                  <span className="font-semibold text-lg text-gray-900">
+                                                                  <span className="font-semibold text-lg text-foreground">
                                                                     {it.player_name}
                                                                   </span>
                                                                 )
@@ -9161,7 +9161,7 @@ function NewslettersPage() {
                                                               {it.stats && (
                                                                 <div className="flex gap-1">
                                                                   {it.stats.goals > 0 && (
-                                                                    <span className="bg-green-100 text-green-800 px-2 py-1 rounded text-xs">
+                                                                    <span className="bg-emerald-50 text-emerald-800 px-2 py-1 rounded text-xs">
                                                                       {it.stats.goals}G
                                                                     </span>
                                                                   )}
@@ -9171,7 +9171,7 @@ function NewslettersPage() {
                                                                     </span>
                                                                   )}
                                                                   {it.stats.minutes > 0 && (
-                                                                    <span className="bg-blue-100 text-blue-800 px-2 py-1 rounded text-xs">
+                                                                    <span className="bg-primary/10 text-primary px-2 py-1 rounded text-xs">
                                                                       {it.stats.minutes}'
                                                                     </span>
                                                                   )}
@@ -9180,12 +9180,12 @@ function NewslettersPage() {
                                                             </div>
                                                             {/* Loan Team with Logo */}
                                                             {(it.loan_team || it.loan_team_name) && (
-                                                              <div className="flex items-center gap-2 text-sm text-gray-600">
+                                                              <div className="flex items-center gap-2 text-sm text-muted-foreground">
                                                                 {it.loan_team_logo && (
                                                                   <img
                                                                     src={it.loan_team_logo}
                                                                     alt={it.loan_team || it.loan_team_name}
-                                                                    className="w-5 h-5 rounded-full object-cover bg-gray-100"
+                                                                    className="w-5 h-5 rounded-full object-cover bg-secondary"
                                                                   />
                                                                 )}
                                                                 <span>→ {it.loan_team || it.loan_team_name}</span>
@@ -9194,37 +9194,37 @@ function NewslettersPage() {
                                                           </div>
                                                         </div>
                                                         {it.week_summary && (
-                                                          <p className="text-gray-700 leading-relaxed">{it.week_summary}</p>
+                                                          <p className="text-foreground/80 leading-relaxed">{it.week_summary}</p>
                                                         )}
 
                                                         {/* This Week's Matches with Opponent Logos */}
                                                         {it.matches && Array.isArray(it.matches) && it.matches.length > 0 && (
-                                                          <div className="mt-4 p-3 bg-gray-50 rounded-lg border border-gray-200">
-                                                            <h5 className="text-sm font-semibold text-gray-700 mb-3 flex items-center gap-1">
+                                                          <div className="mt-4 p-3 bg-secondary rounded-lg border border-border">
+                                                            <h5 className="text-sm font-semibold text-foreground/80 mb-3 flex items-center gap-1">
                                                               ⚽ This Week's Matches
                                                             </h5>
                                                             <div className="space-y-2">
                                                               {it.matches.map((match, mIdx) => (
-                                                                <div key={mIdx} className="flex items-center gap-3 p-2 bg-white rounded border border-gray-100">
+                                                                <div key={mIdx} className="flex items-center gap-3 p-2 bg-card rounded border border-border">
                                                                   {match.opponent_logo && (
                                                                     <img
                                                                       src={match.opponent_logo}
                                                                       alt={match.opponent}
-                                                                      className="w-8 h-8 rounded-full object-cover bg-gray-100 flex-shrink-0"
+                                                                      className="w-8 h-8 rounded-full object-cover bg-secondary flex-shrink-0"
                                                                     />
                                                                   )}
                                                                   <div className="flex-1 min-w-0">
-                                                                    <div className="font-medium text-gray-900 text-sm">
+                                                                    <div className="font-medium text-foreground text-sm">
                                                                       {match.home ? 'vs' : '@'} {match.opponent}
                                                                     </div>
-                                                                    <div className="text-xs text-gray-500">
+                                                                    <div className="text-xs text-muted-foreground">
                                                                       {match.competition}{match.date && ` • ${new Date(match.date).toLocaleDateString()}`}
                                                                     </div>
                                                                   </div>
                                                                   {match.score && (
-                                                                    <span className={`px-2 py-1 rounded text-sm font-bold flex-shrink-0 ${match.result === 'W' ? 'bg-green-100 text-green-800' :
-                                                                      match.result === 'D' ? 'bg-gray-100 text-gray-700' :
-                                                                        'bg-red-100 text-red-800'
+                                                                    <span className={`px-2 py-1 rounded text-sm font-bold flex-shrink-0 ${match.result === 'W' ? 'bg-emerald-50 text-emerald-800' :
+                                                                      match.result === 'D' ? 'bg-secondary text-foreground/80' :
+                                                                        'bg-rose-50 text-rose-800'
                                                                       }`}>
                                                                       {match.score.home ?? 0}-{match.score.away ?? 0}
                                                                     </span>
@@ -9237,26 +9237,26 @@ function NewslettersPage() {
 
                                                         {/* Fixtures (Upcoming & Results) */}
                                                         {it.upcoming_fixtures && Array.isArray(it.upcoming_fixtures) && it.upcoming_fixtures.length > 0 && (
-                                                          <div className="mt-4 p-3 bg-blue-50 rounded-lg border border-blue-200">
-                                                            <h5 className="text-sm font-semibold text-blue-900 mb-3 flex items-center gap-1">
+                                                          <div className="mt-4 p-3 bg-primary/5 rounded-lg border border-primary/20">
+                                                            <h5 className="text-sm font-semibold text-primary mb-3 flex items-center gap-1">
                                                               📅 Look Ahead: Fixtures
                                                             </h5>
                                                             <div className="space-y-2">
                                                               {it.upcoming_fixtures.map((fixture, fIdx) => {
                                                                 const isCompleted = fixture.status === 'completed' && fixture.result
                                                                 const resultColors = {
-                                                                  W: 'bg-green-50 border-green-200',
-                                                                  L: 'bg-red-50 border-red-200',
-                                                                  D: 'bg-gray-100 border-gray-300'
+                                                                  W: 'bg-emerald-50 border-emerald-200',
+                                                                  L: 'bg-rose-50 border-rose-200',
+                                                                  D: 'bg-secondary border-border'
                                                                 }
                                                                 const badgeColors = {
-                                                                  W: 'bg-green-500 text-white',
-                                                                  L: 'bg-red-500 text-white',
-                                                                  D: 'bg-gray-500 text-white'
+                                                                  W: 'bg-emerald-500 text-white',
+                                                                  L: 'bg-rose-500 text-white',
+                                                                  D: 'bg-muted-foreground text-white'
                                                                 }
                                                                 const baseClass = isCompleted
-                                                                  ? resultColors[fixture.result] || 'bg-white/60 border-blue-100'
-                                                                  : 'bg-white/60 border-blue-100'
+                                                                  ? resultColors[fixture.result] || 'bg-card/60 border-primary/20'
+                                                                  : 'bg-card/60 border-primary/20'
 
                                                                 return (
                                                                   <div key={fIdx} className={`flex items-center gap-3 p-2 rounded border ${baseClass}`}>
@@ -9264,11 +9264,11 @@ function NewslettersPage() {
                                                                       <img
                                                                         src={fixture.opponent_logo}
                                                                         alt={fixture.opponent}
-                                                                        className="w-7 h-7 rounded-full object-cover bg-gray-100 flex-shrink-0"
+                                                                        className="w-7 h-7 rounded-full object-cover bg-secondary flex-shrink-0"
                                                                       />
                                                                     )}
                                                                     <div className="flex-1 min-w-0">
-                                                                      <div className="font-medium text-gray-900 text-sm flex items-center gap-2">
+                                                                      <div className="font-medium text-foreground text-sm flex items-center gap-2">
                                                                         {fixture.is_home ? 'vs' : '@'} {fixture.opponent}
                                                                         {isCompleted && (
                                                                           <span className="text-sm font-bold">
@@ -9276,13 +9276,13 @@ function NewslettersPage() {
                                                                           </span>
                                                                         )}
                                                                       </div>
-                                                                      <div className="text-xs text-gray-500">
+                                                                      <div className="text-xs text-muted-foreground">
                                                                         {fixture.competition && `${fixture.competition} • `}
                                                                         {fixture.date && new Date(fixture.date).toLocaleDateString()}
                                                                       </div>
                                                                     </div>
                                                                     {isCompleted && (
-                                                                      <span className={`text-xs font-bold px-2 py-0.5 rounded ${badgeColors[fixture.result] || 'bg-gray-400 text-white'}`}>
+                                                                      <span className={`text-xs font-bold px-2 py-0.5 rounded ${badgeColors[fixture.result] || 'bg-muted-foreground/70 text-white'}`}>
                                                                         {fixture.result}
                                                                       </span>
                                                                     )}
@@ -9293,13 +9293,13 @@ function NewslettersPage() {
                                                           </div>
                                                         )}
                                                         {it.can_fetch_stats && (!it.upcoming_fixtures || it.upcoming_fixtures.length === 0) && (
-                                                          <div className="mt-4 p-2 bg-gray-50 border-l-4 border-gray-300 rounded">
-                                                            <p className="text-xs text-gray-500 italic">No scheduled fixtures in the coming week</p>
+                                                          <div className="mt-4 p-2 bg-secondary border-l-4 border-border rounded">
+                                                            <p className="text-xs text-muted-foreground italic">No scheduled fixtures in the coming week</p>
                                                           </div>
                                                         )}
 
                                                         {it.match_notes && Array.isArray(it.match_notes) && it.match_notes.length > 0 && (
-                                                          <ul className="mt-2 list-disc space-y-1 pl-5 text-sm text-gray-600">
+                                                          <ul className="mt-2 list-disc space-y-1 pl-5 text-sm text-muted-foreground">
                                                             {it.match_notes.map((note, noteIndex) => (
                                                               <li key={noteIndex}>{note}</li>
                                                             ))}
@@ -9317,13 +9317,13 @@ function NewslettersPage() {
                                                                 scrolling="no"
                                                                 className="h-[568px] w-full max-w-xs rounded-md border"
                                                               />
-                                                              <p className="mt-2 text-xs text-gray-500">
+                                                              <p className="mt-2 text-xs text-muted-foreground">
                                                                 Player stats provided by{' '}
                                                                 <a
                                                                   href="https://sofascore.com/"
                                                                   target="_blank"
                                                                   rel="noopener"
-                                                                  className="text-blue-600 hover:underline"
+                                                                  className="text-primary hover:underline"
                                                                 >
                                                                   Sofascore
                                                                 </a>
@@ -9333,8 +9333,8 @@ function NewslettersPage() {
                                                         })()}
                                                         {it.links && Array.isArray(it.links) && it.links.length > 0 && (
                                                           <div className="mt-3 space-y-2">
-                                                            <div className="text-xs font-semibold uppercase tracking-wide text-gray-500">Further reading</div>
-                                                            <ul className="space-y-1 text-sm text-blue-600">
+                                                            <div className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">Further reading</div>
+                                                            <ul className="space-y-1 text-sm text-primary">
                                                               {it.links.map((link, linkIdx) => {
                                                                 const linkObj = typeof link === 'string' ? { url: link, title: null } : link
                                                                 if (!linkObj || !linkObj.url) return null
@@ -9379,9 +9379,9 @@ function NewslettersPage() {
                                 } catch {
                                   return (
                                     <div className="prose max-w-none">
-                                      <div className="bg-gray-50 p-4 rounded-lg">
-                                        <h3 className="text-lg font-medium text-gray-900 mb-2">Newsletter Content</h3>
-                                        <div className="whitespace-pre-wrap text-gray-700">{newsletter.content}</div>
+                                      <div className="bg-secondary p-4 rounded-lg">
+                                        <h3 className="text-lg font-medium text-foreground mb-2">Newsletter Content</h3>
+                                        <div className="whitespace-pre-wrap text-foreground/80">{newsletter.content}</div>
                                       </div>
                                     </div>
                                   )
@@ -9398,7 +9398,7 @@ function NewslettersPage() {
                             <div className="mt-10 space-y-4 border-t pt-6">
                               <div className="flex flex-wrap items-center justify-between gap-2">
                                 <div className="flex items-center gap-2">
-                                  <MessageCircle className="h-5 w-5 text-blue-600" />
+                                  <MessageCircle className="h-5 w-5 text-primary" />
                                   <h3 className="text-lg font-semibold">Comments</h3>
                                   {(commentsByNewsletter[newsletter.id] || []).length > 0 && (
                                     <Badge variant="secondary">{(commentsByNewsletter[newsletter.id] || []).length}</Badge>
@@ -9415,42 +9415,42 @@ function NewslettersPage() {
                                 </Button>
                               </div>
                               {commentsError[newsletter.id] && (
-                                <div className="text-sm text-red-600">{commentsError[newsletter.id]}</div>
+                                <div className="text-sm text-rose-600">{commentsError[newsletter.id]}</div>
                               )}
                               {commentsLoading[newsletter.id] ? (
-                                <div className="flex items-center gap-2 text-sm text-gray-500">
+                                <div className="flex items-center gap-2 text-sm text-muted-foreground">
                                   <Loader2 className="h-4 w-4 animate-spin" />
                                   Loading comments...
                                 </div>
                               ) : (commentsByNewsletter[newsletter.id] || []).length === 0 ? (
-                                <div className="rounded-md border border-dashed bg-gray-50 p-4 text-sm text-gray-600">
+                                <div className="rounded-md border border-dashed bg-secondary p-4 text-sm text-muted-foreground">
                                   No comments yet. Be the first to share your take.
                                 </div>
                               ) : (
                                 <div className="space-y-3">
                                   {(commentsByNewsletter[newsletter.id] || []).map((comment) => (
-                                    <div key={comment.id} className="rounded-md border bg-white p-4 shadow-sm">
+                                    <div key={comment.id} className="rounded-md border bg-card p-4 shadow-sm">
                                       <div className="flex flex-wrap items-center justify-between gap-2 text-xs text-muted-foreground">
-                                        <span className="text-sm font-semibold text-gray-900">
+                                        <span className="text-sm font-semibold text-foreground">
                                           {comment.author_display_name || comment.author_name || 'GOL supporter'}
                                         </span>
                                         <span>{formatRelativeTime(comment.created_at)}</span>
                                       </div>
-                                      <div className="mt-2 whitespace-pre-wrap text-sm text-gray-700">
+                                      <div className="mt-2 whitespace-pre-wrap text-sm text-foreground/80">
                                         {comment.body}
                                       </div>
                                     </div>
                                   ))}
                                 </div>
                               )}
-                              <div className="rounded-lg border bg-white p-4 shadow-sm space-y-3">
+                              <div className="rounded-lg border bg-card p-4 shadow-sm space-y-3">
                                 {canComment ? (
                                   <>
-                                    <div className="flex flex-wrap items-center gap-2 text-sm text-gray-600">
+                                    <div className="flex flex-wrap items-center gap-2 text-sm text-muted-foreground">
                                       <span>Commenting as</span>
-                                      <span className="font-semibold text-gray-900">{auth.displayName || 'GOL supporter'}</span>
+                                      <span className="font-semibold text-foreground">{auth.displayName || 'GOL supporter'}</span>
                                       {auth.isAdmin && auth.hasApiKey && (
-                                        <Badge variant="outline" className="border-blue-200 text-blue-600">Admin</Badge>
+                                        <Badge variant="outline" className="border-primary/20 text-primary">Admin</Badge>
                                       )}
                                       {!auth.displayNameConfirmed && (
                                         <Badge variant="outline" className="border-amber-300 text-amber-700">Name pending</Badge>
@@ -9492,14 +9492,14 @@ function NewslettersPage() {
                                           </Button>
                                         </div>
                                         {displayNameStatus && (
-                                          <p className={`text-xs ${displayNameStatus.type === 'error' ? 'text-red-600' : 'text-emerald-600'}`}>
+                                          <p className={`text-xs ${displayNameStatus.type === 'error' ? 'text-rose-600' : 'text-emerald-600'}`}>
                                             {displayNameStatus.message}
                                           </p>
                                         )}
                                       </form>
                                     )}
                                     {!displayNameEditing && displayNameStatus && (
-                                      <p className={`text-xs ${displayNameStatus.type === 'error' ? 'text-red-600' : 'text-emerald-600'}`}>
+                                      <p className={`text-xs ${displayNameStatus.type === 'error' ? 'text-rose-600' : 'text-emerald-600'}`}>
                                         {displayNameStatus.message}
                                       </p>
                                     )}
@@ -9523,7 +9523,7 @@ function NewslettersPage() {
                                     </div>
                                   </>
                                 ) : (
-                                  <div className="flex flex-col items-start gap-2 text-sm text-gray-600">
+                                  <div className="flex flex-col items-start gap-2 text-sm text-muted-foreground">
                                     <p>Sign in to share your thoughts.</p>
                                     <Button size="sm" onClick={() => { setExpandedId(newsletter.id); openLoginModal() }}>
                                       <LogIn className="mr-2 h-4 w-4" /> Sign in to comment
@@ -9544,7 +9544,7 @@ function NewslettersPage() {
                                   <div className="space-y-3">
                                     {/* Summary */}
                                     {obj.summary && (
-                                      <div className="text-gray-700 leading-relaxed">
+                                      <div className="text-foreground/80 leading-relaxed">
                                         {obj.summary}
                                       </div>
                                     )}
@@ -9552,10 +9552,10 @@ function NewslettersPage() {
                                     {/* Key Highlights */}
                                     {obj.highlights && Array.isArray(obj.highlights) && obj.highlights.length > 0 && (
                                       <div>
-                                        <div className="text-sm font-semibold text-gray-900 mb-2">Key Highlights:</div>
+                                        <div className="text-sm font-semibold text-foreground mb-2">Key Highlights:</div>
                                         <ul className="list-disc ml-5 space-y-1">
                                           {obj.highlights.slice(0, 3).map((highlight, idx) => (
-                                            <li key={idx} className="text-sm text-gray-700">{highlight}</li>
+                                            <li key={idx} className="text-sm text-foreground/80">{highlight}</li>
                                           ))}
                                         </ul>
                                       </div>
@@ -9565,11 +9565,11 @@ function NewslettersPage() {
                                     {obj.by_numbers && (
                                       <div className="grid grid-cols-1 md:grid-cols-2 gap-4 mt-3">
                                         {obj.by_numbers.minutes_leaders && obj.by_numbers.minutes_leaders.length > 0 && (
-                                          <div className="bg-gray-50 p-3 rounded-lg">
-                                            <div className="text-sm font-semibold text-gray-900 mb-2">Minutes Leaders:</div>
+                                          <div className="bg-secondary p-3 rounded-lg">
+                                            <div className="text-sm font-semibold text-foreground mb-2">Minutes Leaders:</div>
                                             <div className="space-y-1">
                                               {obj.by_numbers.minutes_leaders.slice(0, 2).map((player, idx) => (
-                                                <div key={idx} className="text-sm text-gray-700">
+                                                <div key={idx} className="text-sm text-foreground/80">
                                                   <span className="font-medium">{player.player}</span>: {player.minutes}'
                                                 </div>
                                               ))}
@@ -9578,11 +9578,11 @@ function NewslettersPage() {
                                         )}
 
                                         {obj.by_numbers.ga_leaders && obj.by_numbers.ga_leaders.length > 0 && (
-                                          <div className="bg-gray-50 p-3 rounded-lg">
-                                            <div className="text-sm font-semibold text-gray-900 mb-2">Goal Contributors:</div>
+                                          <div className="bg-secondary p-3 rounded-lg">
+                                            <div className="text-sm font-semibold text-foreground mb-2">Goal Contributors:</div>
                                             <div className="space-y-1">
                                               {obj.by_numbers.ga_leaders.slice(0, 2).map((player, idx) => (
-                                                <div key={idx} className="text-sm text-gray-700">
+                                                <div key={idx} className="text-sm text-foreground/80">
                                                   <span className="font-medium">{player.player}</span>: {player.g}G {player.a}A
                                                 </div>
                                               ))}
@@ -9595,13 +9595,13 @@ function NewslettersPage() {
                                     {/* Preview of sections */}
                                     {obj.sections && obj.sections.length > 0 && (
                                       <div className="mt-3">
-                                        <div className="text-sm font-semibold text-gray-900 mb-2">This Week's Activity:</div>
+                                        <div className="text-sm font-semibold text-foreground mb-2">This Week's Activity:</div>
                                         <div className="space-y-2">
                                           {obj.sections.slice(0, 2).map((section, idx) => (
-                                            <div key={idx} className="border-l-2 border-blue-200 pl-3">
-                                              <div className="text-sm font-medium text-gray-800">{section.title}</div>
+                                            <div key={idx} className="border-l-2 border-primary/20 pl-3">
+                                              <div className="text-sm font-medium text-foreground">{section.title}</div>
                                               {section.items && section.items.length > 0 && (
-                                                <div className="text-sm text-gray-600 mt-1">
+                                                <div className="text-sm text-muted-foreground mt-1">
                                                   {section.items.length} player{section.items.length !== 1 ? 's' : ''} featured
                                                 </div>
                                               )}
@@ -9612,7 +9612,7 @@ function NewslettersPage() {
                                     )}
 
                                     {/* Read More indicator */}
-                                    <div className="mt-4 pt-3 border-t border-gray-200">
+                                    <div className="mt-4 pt-3 border-t border-border">
                                       <Button
                                         variant="link"
                                         size="sm"
@@ -9630,10 +9630,10 @@ function NewslettersPage() {
                                 if (content.length > 200) {
                                   return (
                                     <div className="space-y-3">
-                                      <div className="text-gray-700 leading-relaxed">
+                                      <div className="text-foreground/80 leading-relaxed">
                                         {content.substring(0, 200)}...
                                       </div>
-                                      <div className="pt-3 border-t border-gray-200">
+                                      <div className="pt-3 border-t border-border">
                                         <Button
                                           variant="link"
                                           size="sm"
@@ -9648,10 +9648,10 @@ function NewslettersPage() {
                                 }
                                 return (
                                   <div className="space-y-3">
-                                    <div className="text-gray-700 leading-relaxed">
+                                    <div className="text-foreground/80 leading-relaxed">
                                       {content}
                                     </div>
-                                    <div className="pt-3 border-t border-gray-200">
+                                    <div className="pt-3 border-t border-border">
                                       <Button
                                         variant="link"
                                         size="sm"
@@ -9670,13 +9670,13 @@ function NewslettersPage() {
                             const preview = (commentsByNewsletter[newsletter.id] || []).slice(0, 3)
                             if (!preview.length) return null
                             return (
-                              <div className="mt-6 rounded-lg border bg-white p-4 shadow-sm space-y-2">
-                                <div className="text-xs font-semibold text-gray-500 uppercase tracking-wide">Top comments</div>
+                              <div className="mt-6 rounded-lg border bg-card p-4 shadow-sm space-y-2">
+                                <div className="text-xs font-semibold text-muted-foreground uppercase tracking-wide">Top comments</div>
                                 <div className="space-y-2">
                                   {preview.map((comment) => (
-                                    <div key={comment.id} className="rounded border bg-gray-50 px-3 py-2">
-                                      <div className="text-xs text-gray-500">{comment.author_display_name || comment.author_name || 'GOL supporter'}</div>
-                                      <div className="mt-1 text-sm text-gray-700 line-clamp-3">{comment.body}</div>
+                                    <div key={comment.id} className="rounded border bg-secondary px-3 py-2">
+                                      <div className="text-xs text-muted-foreground">{comment.author_display_name || comment.author_name || 'GOL supporter'}</div>
+                                      <div className="mt-1 text-sm text-foreground/80 line-clamp-3">{comment.body}</div>
                                     </div>
                                   ))}
                                 </div>
@@ -9691,8 +9691,8 @@ function NewslettersPage() {
               })}
               {
                 !focusedViewActive && totalPages > 1 && (
-                  <div className="flex flex-wrap items-center justify-between gap-3 border-t border-gray-200 pt-4">
-                    <span className="text-sm text-gray-600">
+                  <div className="flex flex-wrap items-center justify-between gap-3 border-t border-border pt-4">
+                    <span className="text-sm text-muted-foreground">
                       Page {currentPage} of {totalPages}
                       {pageStart > 0 && pageEnd >= pageStart ? ` • Showing ${pageStart}–${pageEnd} of ${filteredTotal}` : ''}
                     </span>
@@ -10003,7 +10003,7 @@ function SettingsPage() {
             <CardDescription>Sign in with the email you use for newsletters to manage your account.</CardDescription>
           </CardHeader>
           <CardContent>
-            <div className="space-y-4 text-sm text-gray-600">
+            <div className="space-y-4 text-sm text-muted-foreground">
               <p>To view your settings, please sign in using the one-time code flow.</p>
               <Button onClick={openLoginModal}>
                 <LogIn className="mr-2 h-4 w-4" /> Sign in
@@ -10019,19 +10019,19 @@ function SettingsPage() {
     <div className="max-w-4xl mx-auto py-8 sm:px-6 lg:px-8">
       <div className="px-4 sm:px-0">
         <div className="text-center mb-8">
-          <h1 className="text-3xl font-bold text-gray-900 mb-2">Account Settings</h1>
-          <p className="text-lg text-gray-600">Update your profile and choose which teams send you newsletters.</p>
+          <h1 className="text-3xl font-bold text-foreground mb-2">Account Settings</h1>
+          <p className="text-lg text-muted-foreground">Update your profile and choose which teams send you newsletters.</p>
         </div>
 
         {message && (
-          <Alert className={`mb-6 ${message.type === 'error' ? 'border-red-500' : 'border-green-500'}`}>
+          <Alert className={`mb-6 ${message.type === 'error' ? 'border-rose-500' : 'border-emerald-500'}`}>
             <AlertCircle className="h-4 w-4" />
             <AlertDescription>{message.text}</AlertDescription>
           </Alert>
         )}
 
         {initialError && (
-          <Alert className="mb-6 border-red-500">
+          <Alert className="mb-6 border-rose-500">
             <AlertCircle className="h-4 w-4" />
             <AlertDescription>{initialError}</AlertDescription>
           </Alert>
@@ -10039,8 +10039,8 @@ function SettingsPage() {
 
         {loading ? (
           <div className="text-center py-12">
-            <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-blue-600 mx-auto"></div>
-            <p className="mt-4 text-gray-600">Loading your preferences…</p>
+            <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-primary mx-auto"></div>
+            <p className="mt-4 text-muted-foreground">Loading your preferences…</p>
           </div>
         ) : (
           <div className="space-y-6">
@@ -10061,7 +10061,7 @@ function SettingsPage() {
                       placeholder="Your public name"
                     />
                     {displayNameStatus && (
-                      <p className={`text-xs ${displayNameStatus.type === 'error' ? 'text-red-600' : 'text-emerald-600'}`}>
+                      <p className={`text-xs ${displayNameStatus.type === 'error' ? 'text-rose-600' : 'text-emerald-600'}`}>
                         {displayNameStatus.message}
                       </p>
                     )}
@@ -10091,20 +10091,20 @@ function SettingsPage() {
                 <div className="space-y-3">
                   <div
                     className={`flex items-start gap-3 p-4 rounded-lg border-2 cursor-pointer transition-colors ${emailPreference === 'individual'
-                      ? 'border-blue-500 bg-blue-50'
-                      : 'border-gray-200 hover:border-gray-300'
+                      ? 'border-primary bg-primary/5'
+                      : 'border-border hover:border-border'
                       } ${emailPrefLoading ? 'opacity-50 pointer-events-none' : ''}`}
                     onClick={() => handleEmailPreferenceChange('individual')}
                   >
-                    <div className={`mt-0.5 w-4 h-4 rounded-full border-2 flex items-center justify-center ${emailPreference === 'individual' ? 'border-blue-500' : 'border-gray-400'
+                    <div className={`mt-0.5 w-4 h-4 rounded-full border-2 flex items-center justify-center ${emailPreference === 'individual' ? 'border-primary' : 'border-border'
                       }`}>
                       {emailPreference === 'individual' && (
-                        <div className="w-2 h-2 rounded-full bg-blue-500" />
+                        <div className="w-2 h-2 rounded-full bg-primary" />
                       )}
                     </div>
                     <div className="flex-1">
-                      <div className="font-medium text-gray-900">Individual emails</div>
-                      <div className="text-sm text-gray-600">
+                      <div className="font-medium text-foreground">Individual emails</div>
+                      <div className="text-sm text-muted-foreground">
                         Receive each newsletter as a separate email when it's published (typically once per week per team).
                       </div>
                     </div>
@@ -10112,20 +10112,20 @@ function SettingsPage() {
 
                   <div
                     className={`flex items-start gap-3 p-4 rounded-lg border-2 cursor-pointer transition-colors ${emailPreference === 'digest'
-                      ? 'border-blue-500 bg-blue-50'
-                      : 'border-gray-200 hover:border-gray-300'
+                      ? 'border-primary bg-primary/5'
+                      : 'border-border hover:border-border'
                       } ${emailPrefLoading ? 'opacity-50 pointer-events-none' : ''}`}
                     onClick={() => handleEmailPreferenceChange('digest')}
                   >
-                    <div className={`mt-0.5 w-4 h-4 rounded-full border-2 flex items-center justify-center ${emailPreference === 'digest' ? 'border-blue-500' : 'border-gray-400'
+                    <div className={`mt-0.5 w-4 h-4 rounded-full border-2 flex items-center justify-center ${emailPreference === 'digest' ? 'border-primary' : 'border-border'
                       }`}>
                       {emailPreference === 'digest' && (
-                        <div className="w-2 h-2 rounded-full bg-blue-500" />
+                        <div className="w-2 h-2 rounded-full bg-primary" />
                       )}
                     </div>
                     <div className="flex-1">
-                      <div className="font-medium text-gray-900">Weekly digest</div>
-                      <div className="text-sm text-gray-600">
+                      <div className="font-medium text-foreground">Weekly digest</div>
+                      <div className="text-sm text-muted-foreground">
                         Combine all your subscribed newsletters into one weekly email. Best if you follow multiple teams.
                       </div>
                     </div>
@@ -10133,13 +10133,13 @@ function SettingsPage() {
                 </div>
 
                 {emailPrefStatus && (
-                  <p className={`text-sm ${emailPrefStatus.type === 'error' ? 'text-red-600' : 'text-emerald-600'}`}>
+                  <p className={`text-sm ${emailPrefStatus.type === 'error' ? 'text-rose-600' : 'text-emerald-600'}`}>
                     {emailPrefStatus.message}
                   </p>
                 )}
 
                 {emailPrefLoading && (
-                  <div className="flex items-center gap-2 text-sm text-gray-500">
+                  <div className="flex items-center gap-2 text-sm text-muted-foreground">
                     <Loader2 className="h-4 w-4 animate-spin" />
                     Saving preference...
                   </div>
@@ -10216,7 +10216,7 @@ function SettingsPage() {
                     </div>
 
                     {journalistStatus && (
-                      <Alert className={journalistStatus.type === 'error' ? 'border-red-500 text-red-600' : 'border-green-500 text-green-600'}>
+                      <Alert className={journalistStatus.type === 'error' ? 'border-rose-500 text-rose-600' : 'border-emerald-500 text-emerald-600'}>
                         <AlertDescription>{journalistStatus.message}</AlertDescription>
                       </Alert>
                     )}
@@ -10255,14 +10255,14 @@ function SettingsPage() {
                           </Avatar>
                           <div>
                             <div className="font-semibold">{sub.journalist_name || 'Unknown Journalist'}</div>
-                            <div className="text-sm text-gray-500">{sub.journalist_email}</div>
+                            <div className="text-sm text-muted-foreground">{sub.journalist_email}</div>
                             {sub.assigned_teams && sub.assigned_teams.length > 0 && (
                               <div className="flex items-center gap-1 mt-1">
                                 {sub.assigned_teams.slice(0, 3).map((team) => (
                                   <img key={team.id} src={team.logo} alt={team.name} className="w-4 h-4" title={team.name} />
                                 ))}
                                 {sub.assigned_teams.length > 3 && (
-                                  <span className="text-xs text-gray-400">+{sub.assigned_teams.length - 3}</span>
+                                  <span className="text-xs text-muted-foreground/70">+{sub.assigned_teams.length - 3}</span>
                                 )}
                               </div>
                             )}
@@ -10271,10 +10271,10 @@ function SettingsPage() {
                         <Badge
                           variant="outline"
                           className={sub.cancel_at_period_end
-                            ? 'bg-yellow-50 text-yellow-700 border-yellow-200'
+                            ? 'bg-amber-50 text-amber-700 border-amber-200'
                             : sub.status === 'active'
-                              ? 'bg-green-50 text-green-700 border-green-200'
-                              : 'bg-gray-50'
+                              ? 'bg-emerald-50 text-emerald-700 border-emerald-200'
+                              : 'bg-secondary'
                           }
                         >
                           {sub.cancel_at_period_end ? 'Canceling' : sub.status}
@@ -10282,15 +10282,15 @@ function SettingsPage() {
                       </div>
 
                       {sub.current_period_end && (
-                        <div className="text-sm text-gray-600">
+                        <div className="text-sm text-muted-foreground">
                           <Calendar className="h-4 w-4 inline mr-1" />
                           {sub.cancel_at_period_end ? 'Ends' : 'Renews'}: {new Date(sub.current_period_end).toLocaleDateString()}
                         </div>
                       )}
 
                       {sub.cancel_at_period_end && (
-                        <Alert className="bg-yellow-50 border-yellow-200">
-                          <AlertDescription className="text-yellow-800">
+                        <Alert className="bg-amber-50 border-amber-200">
+                          <AlertDescription className="text-amber-800">
                             This subscription will end on {new Date(sub.current_period_end).toLocaleDateString()}.
                             You can reactivate it anytime before then.
                           </AlertDescription>
@@ -10350,7 +10350,7 @@ function SettingsPage() {
                       <Link
                         key={follow.id}
                         to={`/journalists/${follow.journalist_id}`}
-                        className="flex items-center gap-3 p-3 border rounded-lg bg-gray-50 hover:bg-gray-100 hover:border-gray-300 transition-colors group"
+                        className="flex items-center gap-3 p-3 border rounded-lg bg-secondary hover:bg-secondary hover:border-border transition-colors group"
                       >
                         <Avatar className="h-10 w-10">
                           <AvatarImage src={follow.journalist_profile_image} />
@@ -10359,26 +10359,26 @@ function SettingsPage() {
                           </AvatarFallback>
                         </Avatar>
                         <div className="flex-1 min-w-0">
-                          <div className="font-medium text-gray-900 truncate group-hover:text-blue-600 transition-colors">{follow.journalist_name || 'Unknown'}</div>
+                          <div className="font-medium text-foreground truncate group-hover:text-primary transition-colors">{follow.journalist_name || 'Unknown'}</div>
                           {follow.assigned_teams && follow.assigned_teams.length > 0 && (
                             <div className="flex items-center gap-1 mt-0.5">
                               {follow.assigned_teams.slice(0, 3).map((team) => (
                                 <img key={team.id} src={team.logo} alt={team.name} className="w-4 h-4" title={team.name} />
                               ))}
                               {follow.assigned_teams.length > 3 && (
-                                <span className="text-xs text-gray-400">+{follow.assigned_teams.length - 3}</span>
+                                <span className="text-xs text-muted-foreground/70">+{follow.assigned_teams.length - 3}</span>
                               )}
                             </div>
                           )}
                         </div>
                         <div className="flex items-center gap-2">
-                          <Badge variant="outline" className="bg-blue-50 text-blue-700 border-blue-200">Following</Badge>
-                          <ChevronRight className="h-4 w-4 text-gray-400 group-hover:text-blue-500 transition-colors" />
+                          <Badge variant="outline" className="bg-primary/5 text-primary border-primary/20">Following</Badge>
+                          <ChevronRight className="h-4 w-4 text-muted-foreground/70 group-hover:text-primary transition-colors" />
                         </div>
                       </Link>
                     ))}
                   </div>
-                  <p className="text-xs text-gray-500 mt-3">
+                  <p className="text-xs text-muted-foreground mt-3">
                     Click on a journalist to view their profile or unfollow.
                   </p>
                 </CardContent>
@@ -10401,18 +10401,18 @@ function SettingsPage() {
                   placeholder="Choose teams to follow…"
                 />
 
-                <div className="rounded-md border border-dashed bg-muted/40 p-4 text-sm text-gray-700">
+                <div className="rounded-md border border-dashed bg-muted/40 p-4 text-sm text-foreground/80">
                   {selectedTeamDetails.length === 0 ? (
                     <p>You are not subscribed to any team newsletters. Select teams above to start receiving updates.</p>
                   ) : (
                     <div className="space-y-2">
-                      <p className="font-medium text-gray-900">You will receive newsletters for:</p>
+                      <p className="font-medium text-foreground">You will receive newsletters for:</p>
                       <ul className="space-y-2">
                         {selectedTeamDetails.map((team) => (
-                          <li key={team.id} className="flex flex-col sm:flex-row sm:items-center sm:justify-between rounded border border-transparent bg-white/60 px-3 py-2">
+                          <li key={team.id} className="flex flex-col sm:flex-row sm:items-center sm:justify-between rounded border border-transparent bg-card/60 px-3 py-2">
                             <div>
-                              <div className="font-semibold text-gray-900">{team.name}</div>
-                              <div className="text-xs text-gray-500">
+                              <div className="font-semibold text-foreground">{team.name}</div>
+                              <div className="text-xs text-muted-foreground">
                                 {[team.league, team.loans != null ? `${team.loans} players tracked` : null]
                                   .filter(Boolean)
                                   .join(' · ')}
@@ -10499,12 +10499,12 @@ function ManagePage() {
     <div className="max-w-4xl mx-auto py-6 sm:px-6 lg:px-8">
       <div className="px-4 py-6 sm:px-0">
         <div className="text-center mb-8">
-          <h1 className="text-3xl font-bold text-gray-900 mb-4">Manage Subscriptions</h1>
-          <p className="text-lg text-gray-600">Use the secure link from your email to manage preferences.</p>
+          <h1 className="text-3xl font-bold text-foreground mb-4">Manage Subscriptions</h1>
+          <p className="text-lg text-muted-foreground">Use the secure link from your email to manage preferences.</p>
         </div>
 
         {message && (
-          <Alert className={`mb-6 ${message.type === 'error' ? 'border-red-500' : 'border-green-500'}`}>
+          <Alert className={`mb-6 ${message.type === 'error' ? 'border-rose-500' : 'border-emerald-500'}`}>
             <AlertCircle className="h-4 w-4" />
             <AlertDescription>{message.text}</AlertDescription>
           </Alert>
@@ -10512,8 +10512,8 @@ function ManagePage() {
 
         {status === 'loading' && (
           <div className="text-center py-12">
-            <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-blue-600 mx-auto"></div>
-            <p className="mt-4 text-gray-600">Loading…</p>
+            <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-primary mx-auto"></div>
+            <p className="mt-4 text-muted-foreground">Loading…</p>
           </div>
         )}
 
@@ -10525,7 +10525,7 @@ function ManagePage() {
             <CardContent className="space-y-4">
               <div>
                 <Label>Subscribed Teams</Label>
-                <p className="text-sm text-gray-500 mb-2">Toggle teams to stay subscribed. (Team list display simplified.)</p>
+                <p className="text-sm text-muted-foreground mb-2">Toggle teams to stay subscribed. (Team list display simplified.)</p>
                 <div className="grid grid-cols-1 gap-2">
                   {subs.map((s) => (
                     <div key={s.team_id} className="flex items-center justify-between border rounded p-2">
@@ -10547,7 +10547,7 @@ function ManagePage() {
 
         {status === 'error' && (
           <div className="text-center py-12">
-            <p className="text-gray-600">Your link is invalid or expired.</p>
+            <p className="text-muted-foreground">Your link is invalid or expired.</p>
           </div>
         )}
       </div>
@@ -10579,7 +10579,7 @@ function UnsubscribePage() {
   return (
     <div className="max-w-xl mx-auto py-20 text-center">
       {message && (
-        <Alert className={`inline-block ${message.type === 'error' ? 'border-red-500' : 'border-green-500'}`}>
+        <Alert className={`inline-block ${message.type === 'error' ? 'border-rose-500' : 'border-emerald-500'}`}>
           <AlertCircle className="h-4 w-4" />
           <AlertDescription>{message.text}</AlertDescription>
         </Alert>
@@ -10626,7 +10626,7 @@ function VerifyPage() {
   return (
     <div className="max-w-xl mx-auto py-20 text-center">
       {message && (
-        <Alert className={`inline-block ${message.type === 'error' ? 'border-red-500' : 'border-green-500'}`}>
+        <Alert className={`inline-block ${message.type === 'error' ? 'border-rose-500' : 'border-emerald-500'}`}>
           <AlertCircle className="h-4 w-4" />
           <AlertDescription>{message.text}</AlertDescription>
         </Alert>
@@ -10659,18 +10659,18 @@ function StatsPage() {
     <div className="max-w-7xl mx-auto py-6 sm:px-6 lg:px-8">
       <div className="px-4 py-6 sm:px-0">
         <div className="text-center mb-8">
-          <h1 className="text-3xl font-bold text-gray-900 mb-4">
+          <h1 className="text-3xl font-bold text-foreground mb-4">
             System Statistics
           </h1>
-          <p className="text-lg text-gray-600">
+          <p className="text-lg text-muted-foreground">
             Overview of the The Academy Watch platform
           </p>
         </div>
 
         {loading ? (
           <div className="text-center py-12">
-            <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-blue-600 mx-auto"></div>
-            <p className="mt-4 text-gray-600">Loading statistics...</p>
+            <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-primary mx-auto"></div>
+            <p className="mt-4 text-muted-foreground">Loading statistics...</p>
           </div>
         ) : stats ? (
           <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
@@ -10773,7 +10773,7 @@ function AppWithRouter() {
 
   return (
     <GlobalSearchContext.Provider value={globalSearch}>
-      <div className="min-h-screen bg-gray-50">
+      <div className="min-h-screen bg-secondary">
         <Navigation />
         <SyncBanner />
         <GlobalSearchDialog
@@ -10786,10 +10786,10 @@ function AppWithRouter() {
         <main>
           <AppRoutes />
         </main>
-        <footer className="bg-gray-100 border-t border-gray-200 py-8 mt-auto">
+        <footer className="bg-secondary border-t border-border py-8 mt-auto">
           <div className="max-w-6xl mx-auto px-4 text-center">
             <BuyMeCoffeeButton />
-            <p className="text-sm text-gray-500 mt-4">&copy; {new Date().getFullYear()} The Academy Watch. All rights reserved.</p>
+            <p className="text-sm text-muted-foreground mt-4">&copy; {new Date().getFullYear()} The Academy Watch. All rights reserved.</p>
           </div>
         </footer>
         <LoginModal />

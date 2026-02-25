@@ -13,7 +13,7 @@ function StatBadge({ icon: Icon, label, value, highlight = false }) {
   return (
     <div className={cn(
       'flex items-center gap-1 text-xs px-2 py-1 rounded-md',
-      highlight ? 'bg-green-100 text-green-800' : 'bg-gray-100 text-gray-700'
+      highlight ? 'bg-emerald-100 text-emerald-800' : 'bg-secondary text-foreground/80'
     )}>
       <Icon className="h-3 w-3" />
       <span className="font-medium">{value}</span>
@@ -31,7 +31,7 @@ function MatchCard({ fixture }) {
   return (
     <Card className={cn(
       'overflow-hidden border-l-4',
-      isWin ? 'border-l-green-500' : isDraw ? 'border-l-gray-400' : 'border-l-red-500'
+      isWin ? 'border-l-emerald-500' : isDraw ? 'border-l-stone-400' : 'border-l-rose-500'
     )}>
       <CardContent className="p-3">
         {/* Match header */}
@@ -78,7 +78,7 @@ function MatchCard({ fixture }) {
           </div>
           
           {/* Competition & date */}
-          <div className="text-right text-xs text-gray-500">
+          <div className="text-right text-xs text-muted-foreground">
             <div>{fixture.competition}</div>
             <div>{new Date(fixture.date).toLocaleDateString()}</div>
           </div>
@@ -113,7 +113,7 @@ function MatchCard({ fixture }) {
         </div>
         
         {/* Extended stats row */}
-        <div className="flex flex-wrap gap-2 mt-2 text-xs text-gray-600">
+        <div className="flex flex-wrap gap-2 mt-2 text-xs text-muted-foreground">
           {stats.shots?.total > 0 && (
             <span>Shots: {stats.shots.on_target}/{stats.shots.total}</span>
           )}
@@ -140,7 +140,7 @@ export function MatchPerformanceCards({ data }) {
   
   if (!fixtures.length) {
     return (
-      <div className="text-center text-gray-500 py-4 text-sm">
+      <div className="text-center text-muted-foreground py-4 text-sm">
         No matches found for this period
       </div>
     )
@@ -149,7 +149,7 @@ export function MatchPerformanceCards({ data }) {
   return (
     <div className="space-y-3">
       {data?.player?.name && (
-        <div className="text-sm font-medium text-gray-700 mb-2">
+        <div className="text-sm font-medium text-foreground/80 mb-2">
           {data.player.name} - {fixtures.length} match{fixtures.length !== 1 ? 'es' : ''}
         </div>
       )}

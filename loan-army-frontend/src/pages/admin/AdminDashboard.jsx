@@ -210,8 +210,8 @@ export function AdminDashboard() {
 
                 {confirmOpen && !rebuildRunning && (
                     <CardContent>
-                        <div className="border rounded-lg p-4 bg-white space-y-3">
-                            <p className="text-sm font-medium text-red-700">
+                        <div className="border rounded-lg p-4 bg-card space-y-3">
+                            <p className="text-sm font-medium text-rose-700">
                                 This will delete all TrackedPlayers, journeys, cohorts, loans, and locations, then rebuild everything from API-Football data.
                             </p>
                             <p className="text-sm text-muted-foreground">
@@ -243,12 +243,12 @@ export function AdminDashboard() {
 
                 {rebuildMessage && (
                     <CardContent>
-                        <Alert className={rebuildMessage.type === 'error' ? 'border-red-500 bg-red-50' : 'border-green-500 bg-green-50'}>
+                        <Alert className={rebuildMessage.type === 'error' ? 'border-rose-500 bg-rose-50' : 'border-emerald-500 bg-emerald-50'}>
                             {rebuildMessage.type === 'error'
-                                ? <AlertCircle className="h-4 w-4 text-red-600" />
-                                : <CheckCircle2 className="h-4 w-4 text-green-600" />
+                                ? <AlertCircle className="h-4 w-4 text-rose-600" />
+                                : <CheckCircle2 className="h-4 w-4 text-emerald-600" />
                             }
-                            <AlertDescription className={rebuildMessage.type === 'error' ? 'text-red-800' : 'text-green-800'}>
+                            <AlertDescription className={rebuildMessage.type === 'error' ? 'text-rose-800' : 'text-emerald-800'}>
                                 {rebuildMessage.text}
                             </AlertDescription>
                         </Alert>
@@ -287,13 +287,13 @@ export function AdminDashboard() {
                     <CardDescription>Common admin tasks and workflows</CardDescription>
                 </CardHeader>
                 <CardContent className="space-y-3">
-                    <div className="border-l-4 border-blue-500 pl-4 py-2">
+                    <div className="border-l-4 border-primary pl-4 py-2">
                         <h4 className="font-semibold text-sm">1. Track a Team</h4>
                         <p className="text-sm text-muted-foreground">
                             Go to Teams and enable tracking for the clubs whose academies you want to follow
                         </p>
                     </div>
-                    <div className="border-l-4 border-green-500 pl-4 py-2">
+                    <div className="border-l-4 border-emerald-500 pl-4 py-2">
                         <h4 className="font-semibold text-sm">2. Seed Players</h4>
                         <p className="text-sm text-muted-foreground">
                             Use the Players page to seed academy players from API data or add them manually

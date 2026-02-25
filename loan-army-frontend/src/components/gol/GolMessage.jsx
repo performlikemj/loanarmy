@@ -13,7 +13,7 @@ export function GolMessage({ message, expanded }) {
   return (
     <div className={`flex gap-3 ${isUser ? 'flex-row-reverse' : ''}`}>
       <Avatar className="h-8 w-8 shrink-0">
-        <AvatarFallback className={isUser ? 'bg-blue-600 text-white' : 'bg-green-600 text-white'}>
+        <AvatarFallback className={isUser ? 'bg-primary text-primary-foreground' : 'bg-emerald-600 text-white'}>
           {isUser ? 'U' : 'G'}
         </AvatarFallback>
       </Avatar>
@@ -21,7 +21,7 @@ export function GolMessage({ message, expanded }) {
       <div className={`flex-1 min-w-0 ${isUser ? 'text-right' : ''}`}>
         <div className={`inline-block max-w-[85%] rounded-lg px-3 py-2 text-sm ${
           isUser
-            ? 'bg-blue-600 text-white'
+            ? 'bg-primary text-primary-foreground'
             : 'bg-muted text-foreground'
         }`}>
           {message.content || (message.toolCall && (

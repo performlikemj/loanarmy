@@ -26,12 +26,12 @@ export function WriterToggleBar({
 
   return (
     <div className={cn(
-      'sticky top-0 z-30 bg-white border-b border-gray-200 shadow-sm',
+      'sticky top-0 z-30 bg-card border-b border-border shadow-sm',
       className
     )}>
       <div className="max-w-3xl mx-auto px-4 py-3">
         <div className="flex items-center justify-between mb-2">
-          <span className="text-xs font-semibold text-gray-500 uppercase tracking-wider">
+          <span className="text-xs font-semibold text-muted-foreground uppercase tracking-wider">
             Writers for this week
           </span>
           <Badge variant="secondary" className="text-xs px-1.5 py-0">
@@ -63,15 +63,15 @@ export function WriterToggleBar({
                   isActive 
                     ? cn('border-transparent shadow-md', colors.bg, 'text-white')
                     : canView
-                      ? 'border-gray-200 bg-white hover:border-gray-300 hover:bg-gray-50 text-gray-700'
-                      : 'border-gray-200 bg-gray-50 text-gray-400',
+                      ? 'border-border bg-card hover:border-border hover:bg-secondary text-foreground/80'
+                      : 'border-border bg-secondary text-muted-foreground/70',
                   isActive && 'ring-2 ring-offset-1',
                   isActive && colors.ring
                 )}
               >
                 <Avatar className={cn(
                   'h-6 w-6 border-2 flex-shrink-0',
-                  isActive ? 'border-white/30' : 'border-gray-100'
+                  isActive ? 'border-white/30' : 'border-secondary'
                 )}>
                   {journalist.profile_image_url ? (
                     <AvatarImage src={journalist.profile_image_url} alt={journalist.display_name} />
@@ -98,7 +98,7 @@ export function WriterToggleBar({
                     'text-[10px] px-1.5 py-0 min-w-[18px] justify-center',
                     isActive 
                       ? 'bg-white/20 text-white border-transparent' 
-                      : 'border-gray-200 text-gray-500'
+                      : 'border-border text-muted-foreground'
                   )}
                 >
                   {journalist.writeup_count}
@@ -108,14 +108,14 @@ export function WriterToggleBar({
                 {isActive ? (
                   <Check className="h-3.5 w-3.5 flex-shrink-0" />
                 ) : !canView ? (
-                  <Lock className="h-3 w-3 flex-shrink-0 text-gray-400" />
+                  <Lock className="h-3 w-3 flex-shrink-0 text-muted-foreground/70" />
                 ) : null}
               </button>
             )
           })}
         </div>
         
-        <p className="text-[11px] text-gray-400 mt-2 leading-tight">
+        <p className="text-[11px] text-muted-foreground/70 mt-2 leading-tight">
           Toggle writers to show their analysis with each player
         </p>
       </div>

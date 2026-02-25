@@ -169,13 +169,13 @@ export function PublicFormationBuilder() {
     return (
       <div className="max-w-5xl mx-auto px-4 py-8">
         <div className="text-center mb-8">
-          <h1 className="text-3xl font-bold text-gray-900 mb-2">Dream XI Builder</h1>
-          <p className="text-gray-500">Pick a club, then build your ideal lineup from their academy players</p>
+          <h1 className="text-3xl font-bold text-foreground mb-2">Dream XI Builder</h1>
+          <p className="text-muted-foreground">Pick a club, then build your ideal lineup from their academy players</p>
         </div>
 
         {/* Search */}
         <div className="relative max-w-md mx-auto mb-8">
-          <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-gray-400" />
+          <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground/70" />
           <Input
             type="text"
             placeholder="Search clubs..."
@@ -186,7 +186,7 @@ export function PublicFormationBuilder() {
           {teamSearch && (
             <button
               onClick={() => setTeamSearch('')}
-              className="absolute right-3 top-1/2 -translate-y-1/2 text-gray-400 hover:text-gray-600"
+              className="absolute right-3 top-1/2 -translate-y-1/2 text-muted-foreground/70 hover:text-muted-foreground"
             >
               <X className="h-4 w-4" />
             </button>
@@ -195,10 +195,10 @@ export function PublicFormationBuilder() {
 
         {teamsLoading ? (
           <div className="flex items-center justify-center py-16">
-            <Loader2 className="h-6 w-6 animate-spin text-gray-400" />
+            <Loader2 className="h-6 w-6 animate-spin text-muted-foreground/70" />
           </div>
         ) : filteredTeams.length === 0 ? (
-          <p className="text-center text-gray-500 py-12">
+          <p className="text-center text-muted-foreground py-12">
             {query ? 'No clubs match your search.' : 'No clubs available.'}
           </p>
         ) : (
@@ -207,19 +207,19 @@ export function PublicFormationBuilder() {
               <button
                 key={team.id}
                 onClick={() => selectTeam(team)}
-                className="flex flex-col items-center gap-2 p-4 rounded-xl border border-gray-200 bg-white hover:border-gray-300 hover:shadow-sm transition-all text-center"
+                className="flex flex-col items-center gap-2 p-4 rounded-xl border border-border bg-card hover:border-border hover:shadow-sm transition-all text-center"
               >
                 <Avatar className="h-12 w-12">
                   {team.logo ? (
                     <AvatarImage src={team.logo} alt={team.name} />
                   ) : null}
-                  <AvatarFallback className="text-xs bg-gray-100">
+                  <AvatarFallback className="text-xs bg-secondary">
                     {team.name.split(' ').map((n) => n[0]).join('').slice(0, 2).toUpperCase()}
                   </AvatarFallback>
                 </Avatar>
-                <span className="text-sm font-medium text-gray-900 leading-tight">{team.name}</span>
+                <span className="text-sm font-medium text-foreground leading-tight">{team.name}</span>
                 {team.league_name && (
-                  <span className="text-xs text-gray-400">{team.league_name}</span>
+                  <span className="text-xs text-muted-foreground/70">{team.league_name}</span>
                 )}
               </button>
             ))}
@@ -242,7 +242,7 @@ export function PublicFormationBuilder() {
           {selectedTeam?.logo && (
             <Avatar className="h-8 w-8">
               <AvatarImage src={selectedTeam.logo} alt={selectedTeam.name} />
-              <AvatarFallback className="text-xs bg-gray-100">
+              <AvatarFallback className="text-xs bg-secondary">
                 {selectedTeam.name?.split(' ').map((n) => n[0]).join('').slice(0, 2).toUpperCase()}
               </AvatarFallback>
             </Avatar>
@@ -256,10 +256,10 @@ export function PublicFormationBuilder() {
 
       {playersLoading ? (
         <div className="flex items-center justify-center py-20">
-          <Loader2 className="h-6 w-6 animate-spin text-gray-400" />
+          <Loader2 className="h-6 w-6 animate-spin text-muted-foreground/70" />
         </div>
       ) : allPlayers.length === 0 ? (
-        <div className="text-center py-16 text-gray-500">
+        <div className="text-center py-16 text-muted-foreground">
           <p className="mb-2">No academy players found for this team.</p>
           <Button variant="outline" size="sm" onClick={goBackToTeams}>
             Choose another team
@@ -305,7 +305,7 @@ export function PublicFormationBuilder() {
 
       {/* Toast */}
       {toast && (
-        <div className="fixed bottom-6 left-1/2 -translate-x-1/2 z-50 flex items-center gap-2 bg-gray-900 text-white text-sm px-4 py-2.5 rounded-lg shadow-lg">
+        <div className="fixed bottom-6 left-1/2 -translate-x-1/2 z-50 flex items-center gap-2 bg-foreground text-primary-foreground text-sm px-4 py-2.5 rounded-lg shadow-lg">
           <CheckCircle className="h-4 w-4 text-green-400" />
           {toast}
         </div>

@@ -36,8 +36,8 @@ export function AcademyConstellation({ teamApiId }) {
     if (loading) {
         return (
             <div className="flex items-center justify-center py-16">
-                <Loader2 className="h-6 w-6 animate-spin text-gray-400 mr-2" />
-                <span className="text-sm text-gray-500">Loading academy network...</span>
+                <Loader2 className="h-6 w-6 animate-spin text-muted-foreground/70 mr-2" />
+                <span className="text-sm text-muted-foreground">Loading academy network...</span>
             </div>
         )
     }
@@ -56,9 +56,9 @@ export function AcademyConstellation({ teamApiId }) {
         return (
             <Card>
                 <CardContent className="py-12 text-center">
-                    <TrendingUp className="h-12 w-12 mx-auto text-gray-300 mb-4" />
-                    <p className="text-gray-500">No academy network data available yet</p>
-                    <p className="text-sm text-gray-400 mt-1">
+                    <TrendingUp className="h-12 w-12 mx-auto text-muted-foreground/50 mb-4" />
+                    <p className="text-muted-foreground">No academy network data available yet</p>
+                    <p className="text-sm text-muted-foreground/70 mt-1">
                         Journey data needs to be synced for this team's academy players.
                     </p>
                 </CardContent>
@@ -73,10 +73,10 @@ export function AcademyConstellation({ teamApiId }) {
             {/* Header */}
             <div className="flex items-center justify-between">
                 <div>
-                    <h3 className="text-base font-semibold text-gray-900">
+                    <h3 className="text-base font-semibold text-foreground">
                         Academy Network
                     </h3>
-                    <p className="text-sm text-gray-500">
+                    <p className="text-sm text-muted-foreground">
                         {data.total_academy_players} academy player{data.total_academy_players !== 1 ? 's' : ''} tracked
                         {data.season_range && (
                             <span> · {data.season_range[0]}/{String(data.season_range[0] + 1).slice(-2)} – {data.season_range[1]}/{String(data.season_range[1] + 1).slice(-2)}</span>

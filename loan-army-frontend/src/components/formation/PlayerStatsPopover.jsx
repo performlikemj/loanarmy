@@ -27,7 +27,7 @@ export function PlayerStatsPopover({ player, slotLabel, onClose, onRemove }) {
         <div className="bg-gradient-to-r from-green-800 to-green-600 p-4 flex items-center gap-3">
           <Avatar className="h-14 w-14 border-2 border-white shadow-lg">
             <AvatarImage src={player.photo_url || player.photo} alt={name} />
-            <AvatarFallback className="text-lg bg-white text-gray-700 font-bold">
+            <AvatarFallback className="text-lg bg-white text-foreground/80 font-bold">
               {name.split(' ').pop().slice(0, 2).toUpperCase()}
             </AvatarFallback>
           </Avatar>

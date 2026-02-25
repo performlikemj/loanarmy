@@ -167,16 +167,16 @@ export function ContributorManager() {
 
     if (loading) {
         return (
-            <div className="min-h-screen flex items-center justify-center bg-gray-50">
-                <Loader2 className="h-8 w-8 animate-spin text-blue-600" />
+            <div className="min-h-screen flex items-center justify-center bg-background">
+                <Loader2 className="h-8 w-8 animate-spin text-primary" />
             </div>
         )
     }
 
     return (
-        <div className="min-h-screen bg-gray-50">
+        <div className="min-h-screen bg-background">
             {/* Header */}
-            <div className="bg-white border-b">
+            <div className="bg-card border-b">
                 <div className="max-w-4xl mx-auto px-4 py-4">
                     <div className="flex items-center justify-between">
                         <div className="flex items-center gap-4">
@@ -190,7 +190,7 @@ export function ContributorManager() {
                             </Button>
                             <div>
                                 <h1 className="text-xl font-semibold">Contributors</h1>
-                                <p className="text-sm text-gray-500">
+                                <p className="text-sm text-muted-foreground">
                                     Manage profiles for scouts and guest contributors
                                 </p>
                             </div>
@@ -206,7 +206,7 @@ export function ContributorManager() {
             {/* Content */}
             <div className="max-w-4xl mx-auto px-4 py-6">
                 {error && (
-                    <div className="bg-red-50 text-red-600 p-4 rounded-lg mb-6">
+                    <div className="bg-rose-50 text-rose-600 p-4 rounded-lg mb-6">
                         {error}
                     </div>
                 )}
@@ -215,11 +215,11 @@ export function ContributorManager() {
                     <Card>
                         <CardContent className="py-12">
                             <div className="text-center">
-                                <Users className="h-12 w-12 text-gray-400 mx-auto mb-4" />
-                                <h3 className="text-lg font-medium text-gray-900 mb-2">
+                                <Users className="h-12 w-12 text-muted-foreground/70 mx-auto mb-4" />
+                                <h3 className="text-lg font-medium text-foreground mb-2">
                                     No contributors yet
                                 </h3>
-                                <p className="text-gray-500 mb-6">
+                                <p className="text-muted-foreground mb-6">
                                     Create profiles for scouts and guest analysts who contribute content.
                                 </p>
                                 <Button onClick={openAddDialog}>
@@ -239,13 +239,13 @@ export function ContributorManager() {
                                             {contributor.photo_url ? (
                                                 <AvatarImage src={contributor.photo_url} alt={contributor.name} />
                                             ) : null}
-                                            <AvatarFallback className="text-lg bg-blue-100 text-blue-700">
+                                            <AvatarFallback className="text-lg bg-primary/10 text-primary">
                                                 {(contributor.name || 'C').substring(0, 2).toUpperCase()}
                                             </AvatarFallback>
                                         </Avatar>
                                         <div className="flex-1 min-w-0">
                                             <div className="flex items-center gap-2">
-                                                <h3 className="font-semibold text-gray-900">
+                                                <h3 className="font-semibold text-foreground">
                                                     {contributor.name}
                                                 </h3>
                                                 {contributor.attribution_url && (
@@ -253,7 +253,7 @@ export function ContributorManager() {
                                                         href={contributor.attribution_url}
                                                         target="_blank"
                                                         rel="noopener noreferrer"
-                                                        className="text-blue-600 hover:text-blue-800 flex items-center gap-1 text-sm"
+                                                        className="text-primary hover:text-primary/80 flex items-center gap-1 text-sm"
                                                     >
                                                         {contributor.attribution_name || 'Website'}
                                                         <ExternalLink className="h-3 w-3" />
@@ -261,7 +261,7 @@ export function ContributorManager() {
                                                 )}
                                             </div>
                                             {contributor.bio && (
-                                                <p className="text-sm text-gray-600 mt-1 line-clamp-2">
+                                                <p className="text-sm text-muted-foreground mt-1 line-clamp-2">
                                                     {contributor.bio}
                                                 </p>
                                             )}
@@ -277,7 +277,7 @@ export function ContributorManager() {
                                             <Button
                                                 variant="outline"
                                                 size="sm"
-                                                className="text-red-600 hover:text-red-700 hover:bg-red-50"
+                                                className="text-rose-600 hover:text-rose-700 hover:bg-rose-50"
                                                 onClick={() => confirmDelete(contributor.id)}
                                             >
                                                 <Trash2 className="h-4 w-4" />
@@ -307,7 +307,7 @@ export function ContributorManager() {
 
                     <div className="space-y-4 py-4">
                         {formError && (
-                            <div className="bg-red-50 text-red-600 p-3 rounded-lg text-sm">
+                            <div className="bg-rose-50 text-rose-600 p-3 rounded-lg text-sm">
                                 {formError}
                             </div>
                         )}
@@ -341,7 +341,7 @@ export function ContributorManager() {
                                 onChange={(e) => setFormData(prev => ({ ...prev, photo_url: e.target.value }))}
                                 placeholder="https://example.com/photo.jpg"
                             />
-                            <p className="text-xs text-gray-500">
+                            <p className="text-xs text-muted-foreground">
                                 URL to a photo or logo image
                             </p>
                         </div>
@@ -364,7 +364,7 @@ export function ContributorManager() {
                                 onChange={(e) => setFormData(prev => ({ ...prev, attribution_name: e.target.value }))}
                                 placeholder="Visit Website"
                             />
-                            <p className="text-xs text-gray-500">
+                            <p className="text-xs text-muted-foreground">
                                 Text displayed for the website link
                             </p>
                         </div>
@@ -396,7 +396,7 @@ export function ContributorManager() {
                         <AlertDialogCancel>Cancel</AlertDialogCancel>
                         <AlertDialogAction
                             onClick={handleDelete}
-                            className="bg-red-600 hover:bg-red-700"
+                            className="bg-rose-600 hover:bg-rose-700"
                         >
                             Delete
                         </AlertDialogAction>

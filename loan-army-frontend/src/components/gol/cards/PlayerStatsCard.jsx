@@ -45,8 +45,8 @@ export function PlayerStatsCard({ data, type }) {
               </div>
               <div className="flex gap-1">
                 <Badge variant="outline">{m.minutes}&prime;</Badge>
-                {m.goals > 0 && <Badge className="bg-green-100 text-green-800">{m.goals}G</Badge>}
-                {m.assists > 0 && <Badge className="bg-blue-100 text-blue-800">{m.assists}A</Badge>}
+                {m.goals > 0 && <Badge className="bg-emerald-100 text-emerald-800">{m.goals}G</Badge>}
+                {m.assists > 0 && <Badge className="bg-amber-100 text-amber-800">{m.assists}A</Badge>}
                 {m.rating && <Badge variant="secondary">{m.rating}</Badge>}
               </div>
             </div>

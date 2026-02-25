@@ -5,7 +5,7 @@ import { Button } from '@/components/ui/button'
 
 export function SubmitTake() {
     return (
-        <div className="min-h-screen bg-gray-50">
+        <div className="min-h-screen bg-background">
             <div className="container max-w-lg mx-auto py-8 px-4">
                 <Link to="/">
                     <Button variant="ghost" className="mb-6">

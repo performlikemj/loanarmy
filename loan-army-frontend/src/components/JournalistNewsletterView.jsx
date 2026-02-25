@@ -16,11 +16,11 @@ function PlayerCard({ player, commentaries = [], onSubscribe }) {
 
   return (
     <div className={cn(
-      'bg-white rounded-lg border overflow-hidden',
+      'bg-card rounded-lg border overflow-hidden',
       hasCommentaries ? 'ring-2 ring-violet-200 shadow-md' : 'shadow-sm'
     )}>
       {/* Player Header */}
-      <div className="p-4 sm:p-5 border-b bg-gradient-to-r from-gray-50 to-white">
+      <div className="p-4 sm:p-5 border-b bg-gradient-to-r from-secondary to-card">
         <div className="flex items-center gap-3 sm:gap-4">
           {player.player_photo ? (
             <img
@@ -29,12 +29,12 @@ function PlayerCard({ player, commentaries = [], onSubscribe }) {
               className="h-14 w-14 sm:h-16 sm:w-16 rounded-full object-cover border-2 border-white shadow"
             />
           ) : (
-            <div className="h-14 w-14 sm:h-16 sm:w-16 rounded-full bg-gray-200 flex items-center justify-center">
-              <User className="h-6 w-6 text-gray-400" />
+            <div className="h-14 w-14 sm:h-16 sm:w-16 rounded-full bg-muted flex items-center justify-center">
+              <User className="h-6 w-6 text-muted-foreground/70" />
             </div>
           )}
           <div className="flex-1 min-w-0">
-            <h3 className="font-bold text-gray-900 text-base sm:text-lg truncate">
+            <h3 className="font-bold text-foreground text-base sm:text-lg truncate">
               {player.player_name}
             </h3>
             <div className="flex items-center gap-2 mt-1">
@@ -45,7 +45,7 @@ function PlayerCard({ player, commentaries = [], onSubscribe }) {
                   className="h-4 w-4 object-contain"
                 />
               )}
-              <span className="text-sm text-gray-600 truncate">{player.loan_team}</span>
+              <span className="text-sm text-muted-foreground truncate">{player.loan_team}</span>
             </div>
           </div>
         </div>
@@ -62,7 +62,7 @@ function PlayerCard({ player, commentaries = [], onSubscribe }) {
               </Badge>
             )}
             {player.stats.assists > 0 && (
-              <Badge className="bg-blue-100 text-blue-800 text-xs">
+              <Badge className="bg-primary/10 text-primary text-xs">
                 {player.stats.assists} assist{player.stats.assists > 1 ? 's' : ''}
               </Badge>
             )}
@@ -76,7 +76,7 @@ function PlayerCard({ player, commentaries = [], onSubscribe }) {
 
         {/* Narrative summary if no commentary */}
         {!hasCommentaries && player.narrative && (
-          <p className="mt-3 text-sm text-gray-600 line-clamp-3">{player.narrative}</p>
+          <p className="mt-3 text-sm text-muted-foreground line-clamp-3">{player.narrative}</p>
         )}
       </div>
 
@@ -108,7 +108,7 @@ function PlayerCard({ player, commentaries = [], onSubscribe }) {
 function NewsletterSection({ section, playerCommentaries, onSubscribe }) {
   return (
     <div className="space-y-4">
-      <h2 className="text-lg sm:text-xl font-bold text-gray-900 px-1">{section.title}</h2>
+      <h2 className="text-lg sm:text-xl font-bold text-foreground px-1">{section.title}</h2>
       <div className="grid gap-4">
         {section.players.map(player => (
           <PlayerCard
@@ -227,7 +227,7 @@ export function JournalistNewsletterView() {
     return (
       <div className="flex flex-col items-center justify-center min-h-[50vh] px-4">
         <Loader2 className="h-8 w-8 animate-spin text-violet-500 mb-3" />
-        <p className="text-gray-500">Loading newsletter...</p>
+        <p className="text-muted-foreground">Loading newsletter...</p>
       </div>
     )
   }
@@ -235,8 +235,8 @@ export function JournalistNewsletterView() {
   if (error) {
     return (
       <div className="max-w-lg mx-auto py-12 px-4 text-center space-y-4">
-        <h2 className="text-xl font-semibold text-gray-900">Unable to load newsletter</h2>
-        <p className="text-gray-500">{error}</p>
+        <h2 className="text-xl font-semibold text-foreground">Unable to load newsletter</h2>
+        <p className="text-muted-foreground">{error}</p>
         <Button variant="ghost" onClick={() => navigate(-1)}>
           <ArrowLeft className="mr-2 h-4 w-4" /> Go back
         </Button>
@@ -249,9 +249,9 @@ export function JournalistNewsletterView() {
   const sections = data?.sections || []
 
   return (
-    <div className="min-h-screen bg-gray-100">
+    <div className="min-h-screen bg-secondary">
       {/* Header */}
-      <div className="bg-white border-b">
+      <div className="bg-card border-b">
         <div className="max-w-3xl mx-auto px-4 py-4">
           <Button
             variant="ghost"
@@ -272,10 +272,10 @@ export function JournalistNewsletterView() {
               />
             )}
             <div className="flex-1 min-w-0">
-              <h1 className="text-lg sm:text-xl font-bold text-gray-900 leading-tight">
+              <h1 className="text-lg sm:text-xl font-bold text-foreground leading-tight">
                 {newsletter?.title}
               </h1>
-              <div className="flex flex-wrap items-center gap-2 mt-1 text-sm text-gray-500">
+              <div className="flex flex-wrap items-center gap-2 mt-1 text-sm text-muted-foreground">
                 {newsletter?.team?.name && (
                   <span>{newsletter.team.name}</span>
                 )}
@@ -317,12 +317,12 @@ export function JournalistNewsletterView() {
 
         {/* Empty State */}
         {activeJournalistIds.size === 0 && (
-          <Card className="border-dashed bg-white/50">
+          <Card className="border-dashed bg-card/50">
             <CardContent className="py-8 sm:py-12 text-center">
-              <p className="text-gray-600 mb-2">
+              <p className="text-muted-foreground mb-2">
                 Select a writer above to see their analysis
               </p>
-              <p className="text-sm text-gray-400">
+              <p className="text-sm text-muted-foreground/70">
                 Analysis will appear inline with each player they've written about.
               </p>
             </CardContent>
@@ -357,12 +357,12 @@ export function JournalistNewsletterView() {
           /* Fallback: Show player commentaries with context if no sections */
           Object.keys(commentaries.player).length > 0 && (
             <div className="space-y-4">
-              <h2 className="text-lg font-bold text-gray-900 px-1">Player Analysis</h2>
+              <h2 className="text-lg font-bold text-foreground px-1">Player Analysis</h2>
               {Object.entries(commentaries.player).map(([playerId, data]) => (
-                <div key={playerId} className="bg-white rounded-lg border shadow-sm overflow-hidden">
+                <div key={playerId} className="bg-card rounded-lg border shadow-sm overflow-hidden">
                   {/* Player info header */}
                   {data.player_info && (
-                    <div className="p-4 border-b bg-gray-50 flex items-center gap-3">
+                    <div className="p-4 border-b bg-secondary flex items-center gap-3">
                       {data.player_info.photo ? (
                         <img
                           src={data.player_info.photo}
@@ -370,14 +370,14 @@ export function JournalistNewsletterView() {
                           className="h-12 w-12 rounded-full object-cover border-2 border-white shadow"
                         />
                       ) : (
-                        <div className="h-12 w-12 rounded-full bg-gray-200 flex items-center justify-center">
-                          <User className="h-5 w-5 text-gray-400" />
+                        <div className="h-12 w-12 rounded-full bg-muted flex items-center justify-center">
+                          <User className="h-5 w-5 text-muted-foreground/70" />
                         </div>
                       )}
                       <div>
-                        <h3 className="font-bold text-gray-900">{data.player_info.name || 'Player'}</h3>
+                        <h3 className="font-bold text-foreground">{data.player_info.name || 'Player'}</h3>
                         {data.player_info.loan_team && (
-                          <div className="flex items-center gap-1.5 text-sm text-gray-600">
+                          <div className="flex items-center gap-1.5 text-sm text-muted-foreground">
                             {data.player_info.loan_team_logo && (
                               <img src={data.player_info.loan_team_logo} alt="" className="h-4 w-4 object-contain" />
                             )}
@@ -422,7 +422,7 @@ export function JournalistNewsletterView() {
 
       {/* Loading overlay */}
       {loading && data && (
-        <div className="fixed inset-0 bg-white/60 backdrop-blur-sm flex items-center justify-center z-50">
+        <div className="fixed inset-0 bg-card/60 backdrop-blur-sm flex items-center justify-center z-50">
           <Loader2 className="h-8 w-8 animate-spin text-violet-500" />
         </div>
       )}

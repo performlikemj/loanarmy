@@ -305,14 +305,14 @@ export function WriteupEditor() {
 
     if (loading) {
         return (
-            <div className="min-h-screen flex items-center justify-center bg-gray-50">
-                <Loader2 className="h-8 w-8 animate-spin text-blue-600" />
+            <div className="min-h-screen flex items-center justify-center bg-background">
+                <Loader2 className="h-8 w-8 animate-spin text-primary" />
             </div>
         )
     }
 
     return (
-        <div className="min-h-screen bg-gray-50 py-8">
+        <div className="min-h-screen bg-background py-8">
             <div className="max-w-4xl mx-auto px-4 sm:px-6 lg:px-8">
                 <Button variant="ghost" onClick={() => navigate('/writer/dashboard')} className="mb-4">
                     <ArrowLeft className="mr-2 h-4 w-4" /> Back to Dashboard
@@ -337,7 +337,7 @@ export function WriteupEditor() {
                         </CardHeader>
                         <CardContent className="space-y-6">
                             {error && (
-                                <div className="p-3 text-sm text-red-500 bg-red-50 rounded border border-red-200">
+                                <div className="p-3 text-sm text-rose-600 bg-rose-50 rounded border border-rose-200">
                                     {error}
                                 </div>
                             )}
@@ -379,8 +379,8 @@ export function WriteupEditor() {
 
                             {/* Contributor attribution selector */}
                             {contributors.length > 0 && (
-                                <div className="space-y-2 p-4 bg-blue-50 rounded-lg border border-blue-200">
-                                    <Label htmlFor="contributor" className="text-blue-700">Attribute to contributor</Label>
+                                <div className="space-y-2 p-4 bg-primary/5 rounded-lg border border-primary/20">
+                                    <Label htmlFor="contributor" className="text-primary">Attribute to contributor</Label>
                                     <Select
                                         value={selectedContributorId ? String(selectedContributorId) : "self"}
                                         onValueChange={(val) => setSelectedContributorId(val === "self" ? null : parseInt(val, 10))}
@@ -406,7 +406,7 @@ export function WriteupEditor() {
                                             ))}
                                         </SelectContent>
                                     </Select>
-                                    <p className="text-xs text-blue-600">
+                                    <p className="text-xs text-primary">
                                         Optionally credit a scout or guest contributor for this content.
                                     </p>
                                 </div>
@@ -469,7 +469,7 @@ export function WriteupEditor() {
                             {(formData.commentary_type === 'player' || editorMode === 'blocks') && (
                                 <div className="space-y-2">
                                     <Label>
-                                        Player {formData.commentary_type !== 'player' && <span className="text-gray-400 font-normal">(Optional - for chart data)</span>}
+                                        Player {formData.commentary_type !== 'player' && <span className="text-muted-foreground/70 font-normal">(Optional - for chart data)</span>}
                                     </Label>
                                     <div className="flex gap-2">
                                         <Select
@@ -503,7 +503,7 @@ export function WriteupEditor() {
                                         </Button>
                                     </div>
                                     {editorMode === 'blocks' && formData.commentary_type !== 'player' && (
-                                        <p className="text-xs text-gray-500">
+                                        <p className="text-xs text-muted-foreground">
                                             Select a player to use their stats in chart blocks
                                         </p>
                                     )}
@@ -537,7 +537,7 @@ export function WriteupEditor() {
                                         ))}
                                     </SelectContent>
                                 </Select>
-                                <p className="text-xs text-gray-500">
+                                <p className="text-xs text-muted-foreground">
                                     Select the week this report belongs to.
                                 </p>
                             </div>
@@ -570,14 +570,14 @@ export function WriteupEditor() {
                                 </div>
 
                                 {editorMode === 'blocks' ? (
-                                    <div className="border rounded-lg p-4 bg-white">
+                                    <div className="border rounded-lg p-4 bg-card">
                                         <ContentBlockBuilder
                                             blocks={formData.structured_blocks || []}
                                             onChange={handleBlocksChange}
                                             playerId={formData.player_id || null}
                                             weekRange={weekRange}
                                         />
-                                        <p className="text-xs text-gray-500 mt-3">
+                                        <p className="text-xs text-muted-foreground mt-3">
                                             Build your article with text blocks, charts, and more. Each block can be marked as public or premium.
                                         </p>
                                     </div>
@@ -595,9 +595,9 @@ export function WriteupEditor() {
                                                 id="premium"
                                                 checked={formData.is_premium}
                                                 onChange={(e) => handleChange('is_premium', e.target.checked)}
-                                                className="h-4 w-4 rounded border-gray-300"
+                                                className="h-4 w-4 rounded border-border"
                                             />
-                                            <Label htmlFor="premium" className="text-sm text-gray-600">
+                                            <Label htmlFor="premium" className="text-sm text-muted-foreground">
                                                 Premium Content (Subscribers Only)
                                             </Label>
                                         </div>

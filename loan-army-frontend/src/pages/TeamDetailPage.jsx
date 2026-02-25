@@ -14,14 +14,7 @@ import { APIService } from '@/lib/api'
 import { AcademyConstellation } from '@/components/constellation/AcademyConstellation'
 import { getStatusLabel } from '@/components/constellation/constellation-utils'
 import { Tooltip, TooltipTrigger, TooltipContent } from '@/components/ui/tooltip'
-
-const STATUS_COLORS = {
-    first_team: 'bg-green-100 text-green-800 border-green-200',
-    on_loan: 'bg-blue-100 text-blue-800 border-blue-200',
-    academy: 'bg-yellow-100 text-yellow-800 border-yellow-200',
-    released: 'bg-gray-100 text-gray-800 border-gray-200',
-    sold: 'bg-orange-100 text-orange-800 border-orange-200',
-}
+import { STATUS_BADGE_CLASSES } from '../lib/theme-constants'
 
 const STATUS_ICONS = {
     first_team: Star,
@@ -33,7 +26,7 @@ const STATUS_ICONS = {
 
 function StatusIndicator({ status, teamName }) {
     const IconComponent = STATUS_ICONS[status]
-    const colorClass = STATUS_COLORS[status] || 'bg-gray-100 text-gray-600 border-gray-200'
+    const colorClass = STATUS_BADGE_CLASSES[status] || 'bg-secondary text-muted-foreground border-border'
     const label = getStatusLabel(status, teamName)
 
     if (!IconComponent) return null
@@ -200,10 +193,10 @@ export function TeamDetailPage() {
 
     if (loading) {
         return (
-            <div className="min-h-screen flex items-center justify-center bg-gradient-to-b from-slate-50 to-slate-100">
+            <div className="min-h-screen flex items-center justify-center bg-gradient-to-b from-secondary to-background">
                 <div className="text-center">
-                    <Loader2 className="h-12 w-12 animate-spin text-blue-500 mx-auto mb-4" />
-                    <p className="text-gray-500">Loading team...</p>
+                    <Loader2 className="h-12 w-12 animate-spin text-primary mx-auto mb-4" />
+                    <p className="text-muted-foreground">Loading team...</p>
                 </div>
             </div>
         )
@@ -211,10 +204,10 @@ export function TeamDetailPage() {
 
     if (error) {
         return (
-            <div className="min-h-screen flex items-center justify-center bg-gradient-to-b from-slate-50 to-slate-100">
+            <div className="min-h-screen flex items-center justify-center bg-gradient-to-b from-secondary to-background">
                 <Card className="max-w-md">
                     <CardContent className="pt-6 text-center">
-                        <p className="text-red-500 mb-4">{error}</p>
+                        <p className="text-destructive mb-4">{error}</p>
                         <Button variant="outline" onClick={handleBack}>
                             <ArrowLeft className="mr-2 h-4 w-4" />
                             Back to Teams
@@ -226,9 +219,9 @@ export function TeamDetailPage() {
     }
 
     return (
-        <div className="min-h-screen bg-gradient-to-b from-slate-50 to-slate-100">
+        <div className="min-h-screen bg-gradient-to-b from-secondary to-background">
             {/* Header */}
-            <div className="bg-white border-b sticky top-0 z-10">
+            <div className="bg-card border-b sticky top-0 z-10">
                 <div className="max-w-6xl mx-auto px-4 py-4">
                     <div className="flex items-center gap-4">
                         <Button variant="ghost" size="sm" onClick={handleBack}>
@@ -243,18 +236,18 @@ export function TeamDetailPage() {
                                     className="w-12 h-12 object-contain"
                                 />
                             ) : (
-                                <div className="w-12 h-12 rounded-full bg-gradient-to-br from-blue-500 to-blue-600 flex items-center justify-center shadow-md">
-                                    <Users className="h-6 w-6 text-white" />
+                                <div className="w-12 h-12 rounded-full bg-gradient-to-br from-primary to-primary/80 flex items-center justify-center shadow-md">
+                                    <Users className="h-6 w-6 text-primary-foreground" />
                                 </div>
                             )}
                             <div>
-                                <h1 className="text-2xl font-bold text-gray-900">{team?.name}</h1>
+                                <h1 className="text-2xl font-bold text-foreground">{team?.name}</h1>
                                 <div className="flex flex-wrap items-center gap-2 mt-1">
                                     {team?.league_name && (
                                         <Badge variant="secondary">{team.league_name}</Badge>
                                     )}
                                     {team?.country && (
-                                        <Badge variant="outline" className="text-gray-600">{team.country}</Badge>
+                                        <Badge variant="outline" className="text-muted-foreground">{team.country}</Badge>
                                     )}
                                 </div>
                             </div>
@@ -267,9 +260,9 @@ export function TeamDetailPage() {
             {message && (
                 <div className="max-w-6xl mx-auto px-4 mt-4">
                     <div className={`p-3 rounded-lg text-sm flex items-center justify-between ${
-                        message.type === 'error' ? 'bg-red-50 text-red-700 border border-red-200' :
-                        message.type === 'info' ? 'bg-blue-50 text-blue-700 border border-blue-200' :
-                        'bg-green-50 text-green-700 border border-green-200'
+                        message.type === 'error' ? 'bg-rose-50 text-rose-700 border border-rose-200' :
+                        message.type === 'info' ? 'bg-primary/5 text-primary border border-primary/20' :
+                        'bg-emerald-50 text-emerald-700 border border-emerald-200'
                     }`}>
                         <span>{message.text}</span>
                         <button onClick={() => setMessage(null)} className="ml-2 hover:opacity-70">
@@ -301,14 +294,14 @@ export function TeamDetailPage() {
                     <TabsContent value="squad" className="mt-4">
                         {playersLoading ? (
                             <div className="flex items-center justify-center py-16">
-                                <Loader2 className="h-6 w-6 animate-spin text-gray-400 mr-2" />
-                                <span className="text-sm text-gray-500">Loading players...</span>
+                                <Loader2 className="h-6 w-6 animate-spin text-muted-foreground/70 mr-2" />
+                                <span className="text-sm text-muted-foreground">Loading players...</span>
                             </div>
                         ) : players.length === 0 ? (
                             <Card>
                                 <CardContent className="py-12 text-center">
-                                    <Users className="h-12 w-12 mx-auto text-gray-300 mb-4" />
-                                    <p className="text-gray-500 mb-4">No tracked academy players yet</p>
+                                    <Users className="h-12 w-12 mx-auto text-muted-foreground/50 mb-4" />
+                                    <p className="text-muted-foreground mb-4">No tracked academy players yet</p>
                                     {team?.is_tracked === false && (
                                         <Button variant="outline" onClick={openRequestTracking}>
                                             Request Tracking
@@ -325,8 +318,8 @@ export function TeamDetailPage() {
                                             onClick={() => setStatusFilter('all')}
                                             className={`px-3 py-1.5 rounded-full text-xs font-medium transition-colors border ${
                                                 statusFilter === 'all'
-                                                    ? 'bg-gray-900 text-white border-gray-900'
-                                                    : 'bg-white border-gray-200 text-gray-600 hover:bg-gray-50'
+                                                    ? 'bg-foreground text-primary-foreground border-foreground'
+                                                    : 'bg-card border-border text-muted-foreground hover:bg-secondary'
                                             }`}
                                         >
                                             All ({players.length})
@@ -337,8 +330,8 @@ export function TeamDetailPage() {
                                                 onClick={() => setStatusFilter(status)}
                                                 className={`px-3 py-1.5 rounded-full text-xs font-medium transition-colors border ${
                                                     statusFilter === status
-                                                        ? 'bg-gray-900 text-white border-gray-900'
-                                                        : `${STATUS_COLORS[status] || 'bg-gray-100 text-gray-800 border-gray-200'} hover:opacity-80`
+                                                        ? 'bg-foreground text-primary-foreground border-foreground'
+                                                        : `${STATUS_BADGE_CLASSES[status] || 'bg-secondary text-foreground/80 border-border'} hover:opacity-80`
                                                 }`}
                                             >
                                                 {getStatusLabel(status, team?.name)} ({count})
@@ -363,17 +356,17 @@ export function TeamDetailPage() {
                                             <Link
                                                 key={`${playerId}-${idx}`}
                                                 to={`/players/${playerId}`}
-                                                className="flex items-center gap-3 p-3 rounded-lg hover:bg-white hover:shadow-sm transition-all group border border-transparent hover:border-gray-200"
+                                                className="flex items-center gap-3 p-3 rounded-lg hover:bg-card hover:shadow-sm transition-all group border border-transparent hover:border-border"
                                             >
                                                 <Avatar className="h-10 w-10 shrink-0">
                                                     {photo ? <AvatarImage src={photo} alt={name} /> : null}
-                                                    <AvatarFallback className="text-xs bg-blue-50 text-blue-700">
+                                                    <AvatarFallback className="text-xs bg-primary/5 text-primary">
                                                         {name?.split(' ').map(n => n[0]).join('').slice(0, 2).toUpperCase()}
                                                     </AvatarFallback>
                                                 </Avatar>
                                                 <div className="flex-1 min-w-0">
                                                     <div className="flex items-center gap-2">
-                                                        <span className="text-sm font-medium text-gray-900 group-hover:text-blue-600 transition-colors">
+                                                        <span className="text-sm font-medium text-foreground group-hover:text-primary transition-colors">
                                                             {name}
                                                         </span>
                                                         {status && (
@@ -381,23 +374,23 @@ export function TeamDetailPage() {
                                                         )}
                                                     </div>
                                                     {loanTeam && (
-                                                        <div className="flex items-center gap-1.5 text-xs text-gray-500 mt-0.5">
-                                                            {status === 'on_loan' && <span className="text-gray-400">at</span>}
+                                                        <div className="flex items-center gap-1.5 text-xs text-muted-foreground mt-0.5">
+                                                            {status === 'on_loan' && <span className="text-muted-foreground/70">at</span>}
                                                             {loanTeamLogo && (
                                                                 <img src={loanTeamLogo} alt="" className="w-4 h-4 rounded-full" />
                                                             )}
                                                             <span className="truncate">{loanTeam}</span>
-                                                            {player.is_active === false && <span className="text-gray-400">(ended)</span>}
+                                                            {player.is_active === false && <span className="text-muted-foreground/70">(ended)</span>}
                                                         </div>
                                                     )}
                                                     {player.international_team && !loanTeam && (
-                                                        <div className="flex items-center gap-1 text-xs text-gray-400 mt-0.5">
+                                                        <div className="flex items-center gap-1 text-xs text-muted-foreground/70 mt-0.5">
                                                             {player.international_logo && <img src={player.international_logo} alt="" className="w-3.5 h-3.5 rounded-sm" />}
                                                             <span>{player.international_team}</span>
                                                         </div>
                                                     )}
                                                 </div>
-                                                <div className="flex items-center gap-2 text-xs text-gray-500 shrink-0">
+                                                <div className="flex items-center gap-2 text-xs text-muted-foreground shrink-0">
                                                     {(() => {
                                                         const apps = status === 'first_team' ? (player.parent_club_appearances ?? player.appearances) : player.appearances
                                                         return apps > 0 ? <span>{apps} apps</span> : null
@@ -411,15 +404,15 @@ export function TeamDetailPage() {
                                                     ) : (
                                                         <>
                                                             {player.goals != null && player.goals > 0 && (
-                                                                <span className="text-green-600">{player.goals}G</span>
+                                                                <span className="text-emerald-600">{player.goals}G</span>
                                                             )}
                                                             {player.assists != null && player.assists > 0 && (
-                                                                <span className="text-blue-600">{player.assists}A</span>
+                                                                <span className="text-amber-600">{player.assists}A</span>
                                                             )}
                                                         </>
                                                     )}
                                                 </div>
-                                                <ChevronRight className="h-4 w-4 text-gray-300 group-hover:text-blue-400 shrink-0" />
+                                                <ChevronRight className="h-4 w-4 text-muted-foreground/50 group-hover:text-primary shrink-0" />
                                             </Link>
                                         )
                                     })}
@@ -437,14 +430,14 @@ export function TeamDetailPage() {
                     <TabsContent value="newsletters" className="mt-4">
                         {newslettersLoading ? (
                             <div className="flex items-center justify-center py-16">
-                                <Loader2 className="h-6 w-6 animate-spin text-gray-400 mr-2" />
-                                <span className="text-sm text-gray-500">Loading newsletters...</span>
+                                <Loader2 className="h-6 w-6 animate-spin text-muted-foreground/70 mr-2" />
+                                <span className="text-sm text-muted-foreground">Loading newsletters...</span>
                             </div>
                         ) : newsletters.length === 0 ? (
                             <Card>
                                 <CardContent className="py-12 text-center">
-                                    <FileText className="h-12 w-12 mx-auto text-gray-300 mb-4" />
-                                    <p className="text-gray-500 mb-4">No newsletters published yet</p>
+                                    <FileText className="h-12 w-12 mx-auto text-muted-foreground/50 mb-4" />
+                                    <p className="text-muted-foreground mb-4">No newsletters published yet</p>
                                     <Button variant="outline" asChild>
                                         <Link to="/newsletters">Browse all newsletters</Link>
                                     </Button>
@@ -462,21 +455,21 @@ export function TeamDetailPage() {
                                         <Link
                                             key={nl.id}
                                             to={`/newsletters/${nl.id}`}
-                                            className="block p-4 bg-white rounded-lg border border-gray-200 hover:border-blue-300 hover:shadow-sm transition-all group"
+                                            className="block p-4 bg-card rounded-lg border border-border hover:border-primary/20 hover:shadow-sm transition-all group"
                                         >
                                             <div className="flex items-start justify-between gap-3">
                                                 <div className="flex-1 min-w-0">
-                                                    <h3 className="text-sm font-medium text-gray-900 group-hover:text-blue-600 transition-colors">
+                                                    <h3 className="text-sm font-medium text-foreground group-hover:text-primary transition-colors">
                                                         {nl.title || nl.subject || `Newsletter #${nl.id}`}
                                                     </h3>
                                                     {nl.excerpt && (
-                                                        <p className="text-xs text-gray-500 mt-1 line-clamp-2">{nl.excerpt}</p>
+                                                        <p className="text-xs text-muted-foreground mt-1 line-clamp-2">{nl.excerpt}</p>
                                                     )}
                                                     {formattedDate && (
-                                                        <p className="text-xs text-gray-400 mt-1.5">{formattedDate}</p>
+                                                        <p className="text-xs text-muted-foreground/70 mt-1.5">{formattedDate}</p>
                                                     )}
                                                 </div>
-                                                <ChevronRight className="h-4 w-4 text-gray-300 group-hover:text-blue-400 shrink-0 mt-1" />
+                                                <ChevronRight className="h-4 w-4 text-muted-foreground/50 group-hover:text-primary shrink-0 mt-1" />
                                             </div>
                                         </Link>
                                     )
@@ -492,7 +485,7 @@ export function TeamDetailPage() {
                 <DialogContent className="sm:max-w-md">
                     <DialogHeader>
                         <DialogTitle className="flex items-center gap-2">
-                            <TrendingUp className="h-5 w-5 text-blue-600" />
+                            <TrendingUp className="h-5 w-5 text-primary" />
                             Request Team Tracking
                         </DialogTitle>
                         <DialogDescription>
@@ -506,7 +499,7 @@ export function TeamDetailPage() {
                             {team?.logo && (
                                 <Avatar className="h-12 w-12">
                                     <AvatarImage src={team.logo} alt={team.name} />
-                                    <AvatarFallback className="bg-gray-200 text-xs">
+                                    <AvatarFallback className="bg-muted text-xs">
                                         {team?.name?.split(' ').map(n => n[0]).join('').slice(0, 2).toUpperCase()}
                                     </AvatarFallback>
                                 </Avatar>

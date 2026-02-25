@@ -23,8 +23,8 @@ export function MatchDetailDrawer({ open, onOpenChange, match, playerName, posit
 
     const isGoalkeeper = position === 'Goalkeeper'
     const rating = parseFloat(match.rating)
-    const ratingColor = rating >= 7.5 ? 'text-green-600' : rating >= 6.0 ? 'text-gray-700' : 'text-red-600'
-    const ratingBg = rating >= 7.5 ? 'bg-green-100' : rating >= 6.0 ? 'bg-gray-100' : 'bg-red-50'
+    const ratingColor = rating >= 7.5 ? 'text-emerald-600' : rating >= 6.0 ? 'text-foreground/80' : 'text-rose-600'
+    const ratingBg = rating >= 7.5 ? 'bg-emerald-100' : rating >= 6.0 ? 'bg-secondary' : 'bg-rose-50'
 
     // Calculate match result for the player's team
     const teamScore = match.is_home ? match.home_goals : match.away_goals
@@ -33,8 +33,8 @@ export function MatchDetailDrawer({ open, onOpenChange, match, playerName, posit
     const matchResult = hasScore
         ? teamScore > opponentScore ? 'W' : teamScore < opponentScore ? 'L' : 'D'
         : null
-    const resultColor = matchResult === 'W' ? 'text-green-600 bg-green-50' 
-        : matchResult === 'L' ? 'text-red-600 bg-red-50' 
+    const resultColor = matchResult === 'W' ? 'text-emerald-600 bg-emerald-50'
+        : matchResult === 'L' ? 'text-rose-600 bg-rose-50'
         : 'text-amber-600 bg-amber-50'
 
     // Stat categories for display
@@ -84,22 +84,22 @@ export function MatchDetailDrawer({ open, onOpenChange, match, playerName, posit
         return (
             <div className="mb-5">
                 <div className="flex items-center gap-2 mb-3">
-                    <Icon className="h-4 w-4 text-gray-500" />
-                    <h3 className="font-semibold text-sm text-gray-700">{title}</h3>
+                    <Icon className="h-4 w-4 text-muted-foreground" />
+                    <h3 className="font-semibold text-sm text-foreground/80">{title}</h3>
                 </div>
                 <div className="grid grid-cols-2 gap-3">
                     {stats.map((stat, idx) => (
                         <div 
                             key={idx} 
-                            className={`p-3 rounded-lg ${stat.highlight ? 'bg-blue-50 border border-blue-200' : 'bg-gray-50'}`}
+                            className={`p-3 rounded-lg ${stat.highlight ? 'bg-primary/5 border border-primary/20' : 'bg-secondary'}`}
                         >
-                            <div className="text-xs text-gray-500 mb-1">{stat.label}</div>
-                            <div className={`text-lg font-bold ${stat.highlight ? 'text-blue-700' : 'text-gray-900'}`}>
+                            <div className="text-xs text-muted-foreground mb-1">{stat.label}</div>
+                            <div className={`text-lg font-bold ${stat.highlight ? 'text-primary' : 'text-foreground'}`}>
                                 {stat.icon && <span className="mr-1">{stat.icon}</span>}
                                 {stat.isBoolean ? stat.value : stat.value}
                             </div>
                             {stat.subValue && (
-                                <div className="text-xs text-gray-500 mt-0.5">{stat.subValue}</div>
+                                <div className="text-xs text-muted-foreground mt-0.5">{stat.subValue}</div>
                             )}
                         </div>
                     ))}
@@ -119,7 +119,7 @@ export function MatchDetailDrawer({ open, onOpenChange, match, playerName, posit
                                 <img 
                                     src={match.loan_team_logo} 
                                     alt={match.loan_team_name} 
-                                    className="w-10 h-10 rounded-full object-cover border-2 border-gray-200"
+                                    className="w-10 h-10 rounded-full object-cover border-2 border-border"
                                 />
                             )}
                             <div>
@@ -128,7 +128,7 @@ export function MatchDetailDrawer({ open, onOpenChange, match, playerName, posit
                                 </DrawerTitle>
                                 <DrawerDescription className="flex items-center gap-2 mt-1">
                                     <span>{match.fixture_date ? format(new Date(match.fixture_date), 'EEEE, MMM d, yyyy') : 'Unknown date'}</span>
-                                    <span className="text-gray-300">·</span>
+                                    <span className="text-muted-foreground/70">·</span>
                                     <span>{match.competition}</span>
                                 </DrawerDescription>
                             </div>
@@ -146,11 +146,11 @@ export function MatchDetailDrawer({ open, onOpenChange, match, playerName, posit
                     </div>
 
                     {/* Player Summary Bar */}
-                    <div className="flex items-center gap-4 p-3 bg-gradient-to-r from-slate-50 to-slate-100 rounded-lg">
+                    <div className="flex items-center gap-4 p-3 bg-gradient-to-r from-stone-50 to-stone-100 rounded-lg">
                         <div className="flex items-center gap-2">
-                            <Clock className="h-4 w-4 text-gray-500" />
+                            <Clock className="h-4 w-4 text-muted-foreground" />
                             <span className="font-semibold">{match.minutes}'</span>
-                            <span className="text-gray-500 text-sm">played</span>
+                            <span className="text-muted-foreground text-sm">played</span>
                             {match.substitute && (
                                 <Badge variant="outline" className="text-xs bg-orange-50 text-orange-600 border-orange-200 ml-1">
                                     Sub
@@ -164,9 +164,9 @@ export function MatchDetailDrawer({ open, onOpenChange, match, playerName, posit
                         )}
                         {match.rating && (
                             <div className={`flex items-center gap-1.5 px-3 py-1 rounded-full ${ratingBg}`}>
-                                <Star className="h-4 w-4" style={{ color: rating >= 7.5 ? '#16a34a' : rating >= 6.0 ? '#374151' : '#dc2626' }} />
+                                <Star className="h-4 w-4" style={{ color: rating >= 7.5 ? '#059669' : rating >= 6.0 ? '#57534e' : '#e11d48' }} />
                                 <span className={`font-bold ${ratingColor}`}>{match.rating}</span>
-                                <span className="text-gray-500 text-xs">rating</span>
+                                <span className="text-muted-foreground text-xs">rating</span>
                             </div>
                         )}
                         {(match.yellows > 0 || match.reds > 0) && (
@@ -186,27 +186,27 @@ export function MatchDetailDrawer({ open, onOpenChange, match, playerName, posit
                 <div className="p-4 overflow-y-auto max-h-[60vh]">
                     {/* Goals & Assists Highlight */}
                     {(match.goals > 0 || match.assists > 0) && (
-                        <div className="mb-5 p-4 bg-gradient-to-r from-blue-50 to-indigo-50 rounded-xl border border-blue-100">
+                        <div className="mb-5 p-4 bg-gradient-to-r from-primary/5 to-primary/10 rounded-xl border border-primary/20">
                             <div className="flex items-center justify-center gap-6">
                                 {match.goals > 0 && (
                                     <div className="text-center">
-                                        <div className="text-3xl font-bold text-blue-700">
+                                        <div className="text-3xl font-bold text-emerald-700">
                                             ⚽ {match.goals}
                                         </div>
-                                        <div className="text-xs text-blue-600 font-medium">
+                                        <div className="text-xs text-emerald-600 font-medium">
                                             {match.goals === 1 ? 'Goal' : 'Goals'}
                                         </div>
                                     </div>
                                 )}
                                 {match.goals > 0 && match.assists > 0 && (
-                                    <div className="w-px h-10 bg-blue-200" />
+                                    <div className="w-px h-10 bg-border" />
                                 )}
                                 {match.assists > 0 && (
                                     <div className="text-center">
-                                        <div className="text-3xl font-bold text-green-700">
+                                        <div className="text-3xl font-bold text-amber-700">
                                             🅰️ {match.assists}
                                         </div>
-                                        <div className="text-xs text-green-600 font-medium">
+                                        <div className="text-xs text-amber-600 font-medium">
                                             {match.assists === 1 ? 'Assist' : 'Assists'}
                                         </div>
                                     </div>
