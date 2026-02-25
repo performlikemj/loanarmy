@@ -2167,6 +2167,8 @@ def _build_template_context(news: dict, team_name: str | None, **kwargs) -> dict
         'sofascore_image_template': os.getenv('SOFASCORE_IMAGE_TEMPLATE') or '',
         'manage_url': _default_manage_url(),
         'meta': {},
+        # Passthrough for preview/web renders — no base64 embedding needed
+        'embed_image': lambda path: path,
     }
     ctx.update(kwargs)
     return ctx
@@ -2233,7 +2235,7 @@ def _render_variants_custom(news: dict, team_name: str | None, commentaries: lis
             return {'web_html': html}
             
     except Exception as e:
-        logging.getLogger(__name__).error(f"Render custom failed: {e}")
+        logging.getLogger(__name__).error(f"Render custom failed: {e}", exc_info=True)
         return {f'{render_mode}_html': ''}
 
 def _plain_text_from_news_only(news: dict) -> str:
