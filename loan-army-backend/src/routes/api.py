@@ -4682,7 +4682,7 @@ def _newsletter_render_context(n: Newsletter) -> dict[str, Any]:
         # Get players tracked for this team
         tracked_players = LoanedPlayer.query.filter(
             LoanedPlayer.is_active == True,
-            LoanedPlayer.parent_team_id == n.team_id,
+            LoanedPlayer.primary_team_id == n.team_id,
             LoanedPlayer.pathway_status == 'academy',
         ).all()
 
