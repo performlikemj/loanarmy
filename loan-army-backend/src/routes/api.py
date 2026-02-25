@@ -1,5 +1,6 @@
 from flask import Blueprint, request, jsonify, make_response, render_template, Response, current_app, g
 from src.models.league import db, League, Team, LoanedPlayer, Newsletter, UserSubscription, EmailToken, LoanFlag, AdminSetting, NewsletterComment, UserAccount, SupplementalLoan, NewsletterPlayerYoutubeLink, NewsletterCommentary, Player, JournalistTeamAssignment, CommentaryApplause, TeamTrackingRequest, StripeSubscription, NewsletterDigestQueue, JournalistSubscription, BackgroundJob, TeamSubreddit, RedditPost, TeamAlias, ManualPlayerSubmission, CommunityTake, AcademyAppearance, PlayerComment, PlayerLink, _as_utc, _dedupe_loans
+from src.models.tracked_player import TrackedPlayer
 from src.models.sponsor import Sponsor
 from src.api_football_client import APIFootballClient
 from src.admin.sandbox_tasks import (
@@ -4676,14 +4677,15 @@ def _newsletter_render_context(n: Newsletter) -> dict[str, Any]:
     # Submit take URL for footer
     submit_take_url = f"{public_base_url}/submit-take" if public_base_url else None
 
-    # Fetch academy appearances for players in this newsletter's date range
+    # Fetch academy appearances for players in this newsletter's date range.
+    # Uses TrackedPlayer (the current model) — status='academy' means they're
+    # playing in youth/academy competitions, not yet on loan or first team.
     academy_appearances = []
-    if n.week_start_date and n.week_end_date:
-        # Get players tracked for this team
-        tracked_players = LoanedPlayer.query.filter(
-            LoanedPlayer.is_active == True,
-            LoanedPlayer.parent_team_id == n.team_id,
-            LoanedPlayer.pathway_status == 'academy',
+    if n.week_start_date and n.week_end_date and n.team_id:
+        tracked_players = TrackedPlayer.query.filter(
+            TrackedPlayer.team_id == n.team_id,
+            TrackedPlayer.is_active.is_(True),
+            TrackedPlayer.status == 'academy',
         ).all()
 
         if tracked_players:
